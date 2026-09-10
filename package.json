@@ -1,0 +1,56 @@
+{
+  "name": "my-app",
+  "version": "1.0.0",
+  "description": "Electron 项目：左侧菜单 + 右侧内容区布局（五节点音视频创作流水线）",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node node_modules/electron/cli.js .",
+    "pack": "npx electron-builder --dir",
+    "dist": "npx electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.marvis.avpipeline",
+    "productName": "MarvisStudio",
+    "electronVersion": "31.7.7",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/main.js",
+      "src/preload.js",
+      "src/renderer.js",
+      "src/renderer.css",
+      "src/index.html",
+      "video-projects/**/*",
+      "README.md",
+      "!node_modules/**/*",
+      "!*.js.map"
+    ],
+    "asar": true,
+    "compression": "normal",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "."
+      }
+    ]
+  }
+}
