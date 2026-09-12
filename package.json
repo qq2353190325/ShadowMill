@@ -23,8 +23,9 @@
     },
     "files": [
       "src/main.js",
+      "src/main/**/*",
       "src/preload.js",
-      "src/renderer.js",
+      "src/renderer/**/*",
       "src/renderer.css",
       "src/index.html",
       "video-projects/**/*",
