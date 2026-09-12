@@ -9,8 +9,10 @@
     "dist": "npx electron-builder --win"
   },
   "devDependencies": {
+    "@types/node": "^22.20.2",
     "electron": "31.7.7",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "typescript": "^7.0.2"
   },
   "build": {
     "appId": "com.marvis.avpipeline",
@@ -28,6 +30,7 @@
       "video-projects/**/*",
       "README.md",
       "!node_modules/**/*",
+      "node_modules/openai/**/*",
       "!*.js.map"
     ],
     "asar": true,
@@ -36,7 +39,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -52,5 +57,8 @@
         "to": "."
       }
     ]
+  },
+  "dependencies": {
+    "openai": "^7.15.0"
   }
 }
