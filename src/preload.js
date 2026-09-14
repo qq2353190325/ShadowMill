@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('voiceTools', {
   getProfiles: () => ipcRenderer.invoke('voice:get-profiles'),
   saveProfile: (profile) => ipcRenderer.invoke('voice:save-profile', { profile }),
   deleteProfile: (key) => ipcRenderer.invoke('voice:delete-profile', { key }),
-  synth: (text, voice, projectName, saveDir, targetModel) => ipcRenderer.invoke('voice:synth', { text, voice, projectName, saveDir, targetModel })
+  synth: (text, voice, projectName, saveDir, targetModel, audioName) => ipcRenderer.invoke('voice:synth', { text, voice, projectName, saveDir, targetModel, audioName })
 });
 
 // 项目化流水线（字幕 → HTML → 预览/转视频）

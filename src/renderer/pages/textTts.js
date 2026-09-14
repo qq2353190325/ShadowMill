@@ -27,6 +27,11 @@
     <button class="hf-btn" id="tts-open-folder" disabled>打开目录</button>
   </div>
   <div class="hgen-row">
+    <label class="sel-label" title="选填。留空时自动命名：时间_前五个字_音色id">音频名字</label>
+    <input id="tts-audio-name" class="hgen-input" type="text" placeholder="选填；不填自动命名：时间_前五个字_音色id" style="flex:1" />
+    <span class="hgen-tip" style="margin:0;font-size:12px;white-space:nowrap">选填</span>
+  </div>
+  <div class="hgen-row">
     <label class="sel-label">保存位置</label>
     <select id="tts-save-mode" class="hgen-select" style="flex:1">
       <option value="default">默认（项目 audio/ 或音频输出目录）</option>
@@ -340,7 +345,8 @@
         btn.disabled = true;
         setStatus(status, '正在按所选音色（' + (voiceModel || '默认模型') + '）合成并下载语音…', '');
         try {
-          const res = await window.voiceTools.synth(text, voice, defaultProj(), saveModeSel.value === 'custom' ? cfgSaveDir : '', voiceModel);
+          const audioName = (document.getElementById('tts-audio-name').value || '').trim();
+          const res = await window.voiceTools.synth(text, voice, defaultProj(), saveModeSel.value === 'custom' ? cfgSaveDir : '', voiceModel, audioName);
           if (res && res.ok) {
             setStatus(status, '合成完成，已保存到项目：' + (res.projectName || '（音频输出目录）'), 'hf-ok');
             const wrap = document.getElementById('tts-result-wrap');

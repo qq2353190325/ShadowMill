@@ -439,9 +439,19 @@ function register(ctx) {
       const dirOverride = String((payload && payload.saveDir) || '').trim() || String(cfg.saveDir || '').trim();
       const destDir = resolveTtsDir(projectName, dirOverride);
       fs.mkdirSync(destDir, { recursive: true });
+      // 文件名：自定义 audioName（可选）优先；缺省用「时间_前五个字_音色id」
+      const NAME_BAD = /[\\/:*?"<>|]/g;
+      const customName = String((payload && payload.audioName) || '').trim().replace(NAME_BAD, ' ').replace(/\s+/g, ' ').trim();
       const stamp = nowStamp();
       const short = String(voice).replace(/[^a-zA-Z0-9_]/g, '').slice(-12) || 'voice';
-      const saveName = 'tts_' + stamp + '_' + short + '.' + ext;
+      let base;
+      if (customName) {
+        base = customName;
+      } else {
+        const head = Array.from(text).slice(0, 5).join('').replace(NAME_BAD, '').trim() || 'tts';
+        base = stamp + '_' + head + '_' + short;
+      }
+      const saveName = base + '.' + ext;
       const savePath = path.join(destDir, saveName);
       fs.writeFileSync(savePath, buf);
 
