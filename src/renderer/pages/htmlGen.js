@@ -37,7 +37,7 @@
     <button class="hf-btn" id="hg-open">打开项目目录</button>
   </div>
 </div>
-<div class="card hgen-panel">
+<div class="card hgen-panel" style="margin-top:16px">
   <div class="panel-title"><span class="dot"></span>背景音频（可选）</div>
   <div class="hgen-row">
     <button class="hf-btn" id="hg-pick-audio">选择音频文件</button>
@@ -61,7 +61,7 @@
   </div>
   <div class="hgen-tip">音频由 Agent 在生成/修改 HTML 时注入为音轨：预览即可听，转视频自动混入。下方还可直接选择已生成 TTS 音频复用为当前项目背景音频。</div>
 </div>
-<div class="card hgen-panel">
+<div class="card hgen-panel" style="margin-top:16px">
   <div class="panel-title"><span class="dot"></span>预览</div>
   <div class="hf-status" id="hg-status"></div>
   <div class="empty-hint" id="hg-empty">尚未生成 HTML。</div>
@@ -84,11 +84,16 @@
         const p = AppState.project || {};
         const hasH = hasHtml();
         const subCount = (p && p.subtitleCount) || 0;
+        const c = (p && p.content) || {};
+        const sceneN = Array.isArray(c.scenes)
+          ? c.scenes.filter((s) => s && typeof s.narration === 'string' && s.narration.trim()).length
+          : 0;
         const meta = document.getElementById('hg-meta');
         if (meta) {
           meta.innerHTML = AppState.isBuiltin
             ? '<div class="proj-stat"><b>内置示例（只读）</b>示例项目不可生成 / 修改，自带示例 HTML。请在「工作项目」下拉切换到「我的项目」。</div>'
             : '<div class="proj-stat ' + (hasH ? 'on' : '') + '"><b>HTML</b>' + (hasH ? '已生成' : '尚未生成') + '</div>' +
+              '<div class="proj-stat ' + (sceneN ? 'on' : '') + '"><b>内容脚本</b>' + (sceneN ? sceneN + ' 个场景（生成时自动附带）' : '无（可先到「内容脚本」页编写）') + '</div>' +
               '<div class="proj-stat ' + (subCount ? 'on' : '') + '"><b>素材</b>' + (subCount ? '字幕 ' + subCount + ' 条' + ((p && p.audioFile) ? ' · 已配背景音频' : '') : '无字幕（可先到「字幕生成」页添加）') + '</div>' +
               '<div class="proj-stat"><b>用法</b>' + (hasH ? '可「下载 HTML」；也可填写需求后「修改 HTML」' : '填写需求描述后点「生成 HTML」；字幕 / 背景音频在上方选配（均可选）') + '</div>';
         }
@@ -183,7 +188,17 @@
         const prompt = promptEl.value.trim();
         if (!prompt) { toast('请先填写需求描述（上方提示词输入框）'); promptEl.focus(); return; }
         agentRunning = true;
-        if (status) { status.textContent = '已提交给 Agent，处理中...'; status.classList.remove('hf-error', 'hf-ok'); }
+        if (status) {
+          const c = (AppState.project && AppState.project.content) || {};
+          const sceneN = Array.isArray(c.scenes)
+            ? c.scenes.filter((s) => s && typeof s.narration === 'string' && s.narration.trim()).length
+            : 0;
+          // 方案B：生成/修改前提示将附带当前项目内容脚本（脚本为 HTML 的整体内容源）
+          status.textContent = sceneN
+            ? '将附带当前项目内容脚本（' + sceneN + ' 个场景），已提交给 Agent，处理中...'
+            : '当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...';
+          status.classList.remove('hf-error', 'hf-ok');
+        }
         // 本次生成/修改所选素材（均可空：留空 = 不拼接对应素材；'' → 跳过）
         const materials = {
           subtitleProject: subList ? subList.value : '',

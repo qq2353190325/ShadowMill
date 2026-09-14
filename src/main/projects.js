@@ -52,8 +52,32 @@ function ensureProject(name) {
     htmlPath: '',
     videoPath: '',
     audioFile: '',
+    content: { style: '', scenes: [] },
     createdAt: new Date().toISOString()
   };
+}
+
+// 内容脚本数据规范化：基本类型校验 + 场景 id 自动补全（向后兼容：无/非法 content 视为空）
+function normalizeContent(raw) {
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  const style = typeof src.style === 'string' ? src.style : '';
+  const scenes = Array.isArray(src.scenes) ? src.scenes : [];
+  const now = Date.now().toString(36);
+  let seen = 0;
+  const out = scenes.map((s, i) => {
+    const item = (s && typeof s === 'object' && !Array.isArray(s)) ? s : {};
+    let id = (typeof item.id === 'string' && item.id.trim()) ? item.id.trim() : '';
+    if (!id) { seen++; id = 'scene-' + now + '-' + i + '-' + seen; }
+    const dur = item.durHint;
+    const durHint = (dur === undefined || dur === null || dur === '') ? '' : String(dur);
+    return {
+      id,
+      narration: typeof item.narration === 'string' ? item.narration : '',
+      visual: typeof item.visual === 'string' ? item.visual : '',
+      durHint
+    };
+  });
+  return { style, scenes: out };
 }
 
 // 扫描“我的项目”（可读写，供项目选择器使用）
@@ -131,6 +155,29 @@ function buildAgentPrompt(parts) {
   return parts.filter(Boolean).join('\n');
 }
 
+// 由项目 content 构造「内容脚本」块（方案B：脚本为 HTML 的整体内容源）。
+// 含全局 style 与逐场景 { 旁白, 画面分镜, 时长提示 }，指示模型据此设计页面视觉与动画节奏。
+// 无 content 或 scenes 为空（含全部无旁白）时返回 ''，老项目（无内容脚本）走原 prompt 流程。
+function buildContentBlock(content) {
+  const src = content || {};
+  const scenes = Array.isArray(src.scenes) ? src.scenes : [];
+  const valid = scenes.filter((s) => s && typeof s.narration === 'string' && s.narration.trim());
+  if (!valid.length) return '';
+  const style = typeof src.style === 'string' && src.style.trim() ? src.style.trim() : '';
+  const parts = ['【内容脚本 · 本项目的整体内容源，请据此设计页面视觉风格与动画节奏】'];
+  parts.push(style ? '全局视觉风格：' + style : '全局视觉风格：（未指定，可自行拟定）');
+  valid.forEach((s, i) => {
+    const dur = (s.durHint !== undefined && s.durHint !== null && String(s.durHint).trim() !== '')
+      ? String(s.durHint).trim() + ' 秒'
+      : '未指定';
+    const visual = (typeof s.visual === 'string' && s.visual.trim()) ? s.visual.trim() : '（未指定）';
+    parts.push('场景 ' + (i + 1) + '（时长提示：' + dur + '）：');
+    parts.push('- 旁白：' + s.narration.trim());
+    parts.push('- 画面分镜：' + visual);
+  });
+  return '\n' + parts.join('\n');
+}
+
 function register(ctx) {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
 
@@ -154,6 +201,17 @@ function register(ctx) {
     proj.subtitle = subtitle;
     if (title) proj.title = title;
     proj.subtitleCount = parseSubtitle(subtitle).length;
+    writeProject(proj);
+    return { ok: true, project: proj };
+  });
+
+  // 整体保存内容脚本（style + scenes）到当前项目
+  ipcMain.handle('project:save-content', (event, payload) => {
+    const name = payload && payload.name;
+    if (!name) return { ok: false, message: '缺少项目名' };
+    const content = normalizeContent(payload && payload.content);
+    const proj = ensureProject(name);
+    proj.content = content;
     writeProject(proj);
     return { ok: true, project: proj };
   });
@@ -185,6 +243,7 @@ function register(ctx) {
     else if (audSel && typeof audSel === 'string' && fs.existsSync(audSel)) audioRef = copyAudioIntoProject(name, audSel);
     const userPrompt = buildAgentPrompt([
       '用户需求：' + prompt.trim(),
+      buildContentBlock(proj.content),
       subtitleText ? '\n【项目字幕，请据此逐条设计动画】\n' + subtitleText : '',
       audioRef ? '\n【背景音乐】项目内音频文件：' + audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : ''
     ]);
@@ -245,6 +304,7 @@ function register(ctx) {
       '```',
       '',
       '用户需求（在此基础上改造后输出完整新 HTML）：' + prompt.trim(),
+      buildContentBlock(proj.content),
       subtitleText ? '\n【项目字幕，请据此逐条设计动画】\n' + subtitleText : '',
       audioRef ? '\n【背景音乐】项目内音频文件：' + audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : ''
     ]);
@@ -416,5 +476,6 @@ module.exports = {
   writeProject,
   ensureProject,
   parseSubtitle,
+  normalizeContent,
   copyAudioIntoProject
 };

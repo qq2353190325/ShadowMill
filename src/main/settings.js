@@ -10,7 +10,8 @@ const fs = require('fs');
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 const DEFAULT_SETTINGS = () => ({
   customModel: { baseUrl: '', modelId: '', apiKey: '', enabled: false },
-  voiceTTS: { apiKey: '', targetModel: 'qwen-audio-3.0-tts-flash', saveDir: '' }
+  voiceTTS: { apiKey: '', targetModel: 'qwen-audio-3.0-tts-flash', saveDir: '' },
+  voiceProfiles: {} // 本地音色映射：key 形如 "system:Cherry" / "custom:<voice_id>"，值为 { key, name, voice, targetModel, type }
 });
 
 function readSettings() {
@@ -19,7 +20,8 @@ function readSettings() {
     const base = DEFAULT_SETTINGS();
     return {
       customModel: Object.assign({}, base.customModel, (raw && raw.customModel) || {}),
-      voiceTTS: Object.assign({}, base.voiceTTS, (raw && raw.voiceTTS) || {})
+      voiceTTS: Object.assign({}, base.voiceTTS, (raw && raw.voiceTTS) || {}),
+      voiceProfiles: Object.assign({}, (raw && raw.voiceProfiles) || {})
     };
   } catch (e) {
     return DEFAULT_SETTINGS();
@@ -36,6 +38,25 @@ function getCustomModel() {
 function getVoiceConfig() {
   const s = readSettings();
   return Object.assign({}, DEFAULT_SETTINGS().voiceTTS, (s && s.voiceTTS) || {});
+}
+function getVoiceProfiles() {
+  const s = readSettings();
+  return Object.assign({}, (s && s.voiceProfiles) || {});
+}
+function saveVoiceProfile(key, profile) {
+  const s = readSettings();
+  s.voiceProfiles = s.voiceProfiles || {};
+  s.voiceProfiles[key] = profile;
+  writeSettings(s);
+  return getVoiceProfiles();
+}
+function deleteVoiceProfile(key) {
+  const s = readSettings();
+  if (s.voiceProfiles && Object.prototype.hasOwnProperty.call(s.voiceProfiles, key)) {
+    delete s.voiceProfiles[key];
+  }
+  writeSettings(s);
+  return getVoiceProfiles();
 }
 
 // 可选加载 openai SDK（未安装时降级 Node 22 原生 fetch）
@@ -105,6 +126,9 @@ module.exports = {
   writeSettings,
   getCustomModel,
   getVoiceConfig,
+  getVoiceProfiles,
+  saveVoiceProfile,
+  deleteVoiceProfile,
   DEFAULT_SETTINGS,
   requireOpenAI
 };

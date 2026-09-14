@@ -42,13 +42,20 @@ contextBridge.exposeInMainWorld('settingsTools', {
 // 千问语音：声音复制 + 文字生音频（Qwen-TTS 非实时 HTTP 方案）
 contextBridge.exposeInMainWorld('voiceTools', {
   getConfig: () => ipcRenderer.invoke('voice:get-config'),
+  getSaveDir: () => ipcRenderer.invoke('voice:get-save-dir'),
   saveConfig: (voiceTTS) => ipcRenderer.invoke('voice:save-config', { voiceTTS }),
   pickAudio: () => ipcRenderer.invoke('voice:pick-audio'),
   pickDir: () => ipcRenderer.invoke('voice:pick-dir'),
   listGenerated: () => ipcRenderer.invoke('voice:list-generated'),
-  create: (audioPath, preferredName) => ipcRenderer.invoke('voice:create', { audioPath, preferredName }),
+  create: (audioPath, preferredName, targetModel) => ipcRenderer.invoke('voice:create', { audioPath, preferredName, targetModel }),
   list: () => ipcRenderer.invoke('voice:list'),
-  synth: (text, voice, projectName, saveDir) => ipcRenderer.invoke('voice:synth', { text, voice, projectName, saveDir })
+  listSystemVoices: () => ipcRenderer.invoke('voice:list-system-voices'),
+  listAll: () => ipcRenderer.invoke('voice:list-all'),
+  listModels: () => ipcRenderer.invoke('voice:list-models'),
+  getProfiles: () => ipcRenderer.invoke('voice:get-profiles'),
+  saveProfile: (profile) => ipcRenderer.invoke('voice:save-profile', { profile }),
+  deleteProfile: (key) => ipcRenderer.invoke('voice:delete-profile', { key }),
+  synth: (text, voice, projectName, saveDir, targetModel) => ipcRenderer.invoke('voice:synth', { text, voice, projectName, saveDir, targetModel })
 });
 
 // 项目化流水线（字幕 → HTML → 预览/转视频）
@@ -56,6 +63,7 @@ contextBridge.exposeInMainWorld('projectTools', {
   list: () => ipcRenderer.invoke('project:list'),
   load: (name) => ipcRenderer.invoke('project:load', name),
   saveSubtitle: (name, subtitle, title) => ipcRenderer.invoke('project:save-subtitle', { name, subtitle, title }),
+  saveContent: (name, content) => ipcRenderer.invoke('project:save-content', { name, content }),
   generateHtml: (name, prompt, materials) => ipcRenderer.invoke('project:generate-html', { name, prompt, ...(materials || {}) }),
   modifyHtml: (name, prompt, materials) => ipcRenderer.invoke('project:modify-html', { name, prompt, ...(materials || {}) }),
   downloadHtml: (name) => ipcRenderer.invoke('project:download-html', name),

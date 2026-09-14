@@ -9,16 +9,24 @@ const path = require('path');
 const fs = require('fs');
 const settings = require('./settings.js');
 const projects = require('./projects.js');
+const { SYSTEM_VOICES, isSystemVoice } = require('./systemVoices.js');
 
 const VOICE_API_BASE = 'https://dashscope.aliyuncs.com/api/v1';
 const VOICE_ENROLL_MODEL = 'qwen-voice-enrollment'; // Qwen-TTS 系列克隆模型，请勿修改
 const VOICE_ENROLL_MODEL_AUDIO = 'voice-enrollment'; // Qwen-Audio-TTS 系列克隆模型
-const VOICE_TTS_MODELS = [
-  'qwen3-tts-vc-2026-01-22',
-  'qwen3-tts-vc-realtime-2026-01-15',
-  'qwen3-tts-vc-realtime-2025-11-27',
-  'qwen-audio-3.0-tts-flash'
+// 候选模型表（角色：clone=语音复刻/克隆音色合成，system=内置系统音色合成）
+const VOICE_MODELS = [
+  { id: 'qwen-audio-3.0-tts-flash', label: 'qwen-audio-3.0-tts-flash', role: 'clone', input: 'url', group: '语音复刻（克隆音色合成）', isDefault: true },
+  { id: 'qwen3-tts-vc-2026-01-22', label: 'qwen3-tts-vc-2026-01-22（非实时）', role: 'clone', input: 'file' },
+  { id: 'qwen3-tts-vc-realtime-2026-01-15', label: 'qwen3-tts-vc-realtime-2026-01-15（实时）', role: 'clone', input: 'file' },
+  { id: 'qwen3-tts-vc-realtime-2025-11-27', label: 'qwen3-tts-vc-realtime-2025-11-27（实时）', role: 'clone', input: 'file' },
+  { id: 'qwen3-tts-instruct-flash', label: '千问3-TTS-Instruct-Flash', role: 'system', series: 'instruct-flash', group: '系统音色合成' },
+  { id: 'qwen3-tts-flash', label: '千问3-TTS-Flash', role: 'system', series: 'flash' },
+  { id: 'qwen-tts', label: '千问-TTS', role: 'system', series: 'tts' }
 ];
+// 各系列系统音色默认合成模型
+const SYSTEM_SERIES_MODEL = { 'instruct-flash': 'qwen3-tts-instruct-flash', 'flash': 'qwen3-tts-flash', 'tts': 'qwen-tts' };
+const VOICE_TTS_MODELS = VOICE_MODELS.map((m) => m.id);
 const VOICE_MIME = { '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'audio/mp4' };
 // Qwen-Audio-TTS 系列模型名特征（如 qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus）
 function isAudioTtsModel(model) {
@@ -69,12 +77,75 @@ function resolveTtsDir(projectName, saveDir) {
   return path.join(app.getPath('userData'), 'tts-output');
 }
 
+// 系统音色默认合成模型：按 series 优先级取（instruct-flash > flash > tts）
+function systemVoiceDefaultModel(v) {
+  const s = v && v.series;
+  if (Array.isArray(s)) {
+    if (s.indexOf('instruct-flash') >= 0) return SYSTEM_SERIES_MODEL['instruct-flash'];
+    if (s.indexOf('flash') >= 0) return SYSTEM_SERIES_MODEL['flash'];
+    if (s.indexOf('tts') >= 0) return SYSTEM_SERIES_MODEL['tts'];
+  }
+  return 'qwen3-tts-flash';
+}
+
+// 统一「音色→模型」解析（voice:list-all 等共用单一入口）
+// 三级：① 本地映射 voiceProfiles[voiceKey].targetModel；② 系统音色按其 series 默认模型；③ 兜底全局默认 targetModel
+function resolveVoiceModel(voiceKey, ctx) {
+  const key = String(voiceKey || '').trim();
+  const bare = key.replace(/^(system|custom):/i, ''); // 兼容带前缀 key（system:Cherry / custom:<voice_id>）
+  const profiles = settings.getVoiceProfiles(ctx);
+  const prof = profiles[key] || profiles[bare];
+  if (prof && prof.targetModel) return prof.targetModel; // ① 本地映射命中
+  if (isSystemVoice(bare)) { // ② 系统音色：按系列取默认合成模型
+    const sys = SYSTEM_VOICES.find((v) => v.voice === bare);
+    return systemVoiceDefaultModel(sys || {});
+  }
+  // ③ 兜底：全局默认 targetModel
+  return getVoiceConfig(ctx).targetModel;
+}
+
+// 查询克隆音色列表（action=list，供 voice:list / voice:list-all 复用）
+async function fetchClonedVoices() {
+  const cfg = getVoiceConfig();
+  const noKey = getVoiceApiError(cfg);
+  if (noKey) return { ok: false, message: noKey };
+  try {
+    const resp = await fetch(VOICE_API_BASE + '/services/audio/tts/customization', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
+      body: JSON.stringify({
+        model: VOICE_ENROLL_MODEL,
+        input: { action: 'list', page_size: 100, page_index: 0 }
+      })
+    });
+    const raw = await resp.text();
+    const json = parseJsonLike(raw);
+    if (!resp.ok) {
+      throw new Error('HTTP ' + resp.status + ((json && json.message) ? '：' + json.message : ''));
+    }
+    const out = (json && json.output) || {};
+    const list = Array.isArray(out.voice_list) ? out.voice_list : [];
+    return { ok: true, voices: list, total: out.total || list.length };
+  } catch (e) {
+    return { ok: false, message: voiceFriendlyError(e, '查询音色失败') };
+  }
+}
+
 function register(ctx) {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
 
   ipcMain.handle('voice:get-config', () => {
     const c = getVoiceConfig();
     return { ok: true, apiKey: c.apiKey, targetModel: c.targetModel, saveDir: String(c.saveDir || '') };
+  });
+
+  // 返回当前生效的 TTS 保存目录绝对路径（配音页「打开目录」按钮用，无需合成）
+  // custom（已设置自定义 saveDir）→ 返回该目录；default → 返回默认音频输出目录
+  ipcMain.handle('voice:get-save-dir', () => {
+    const c = getVoiceConfig();
+    const saveDir = String(c.saveDir || '').trim();
+    if (saveDir) return { ok: true, mode: 'custom', saveDir: saveDir };
+    return { ok: true, mode: 'default', saveDir: path.join(app.getPath('userData'), 'tts-output') };
   });
 
   ipcMain.handle('voice:save-config', (event, payload) => {
@@ -107,7 +178,9 @@ function register(ctx) {
     const noKey = getVoiceApiError(cfg);
     if (noKey) return { ok: false, message: noKey };
     const audioPath = payload && payload.audioPath;
-    const isAudio = isAudioTtsModel(cfg.targetModel);
+    // 音色复制时可选目标模型（创建后合成须沿用该模型）
+    const useModel = String((payload && payload.targetModel) || '').trim() || cfg.targetModel;
+    const isAudio = isAudioTtsModel(useModel);
     // Qwen-Audio-TTS（如 qwen-audio-3.0-tts-flash）克隆仅接受可公开访问的音频 URL
     const isAudioUrl = isAudio && /^https?:\/\//i.test(String(audioPath || ''));
     if (!isAudioUrl && (!audioPath || !fs.existsSync(audioPath))) return { ok: false, message: '音频文件不存在：' + (audioPath || '') };
@@ -137,10 +210,10 @@ function register(ctx) {
       // - Qwen-Audio-TTS（qwen-audio-*-tts）URL 模式：model=voice-enrollment, action=create_voice, prefix, audio.url
       // - Qwen-Audio-TTS（qwen-audio-*-tts）文件模式：model=voice-enrollment, action=create_voice, prefix, audio.data（base64 可能不被接受）
       const input = isAudioUrl
-        ? { action: 'create_voice', target_model: cfg.targetModel, prefix: preferredName, audio: { url: audioPath } }
+        ? { action: 'create_voice', target_model: useModel, prefix: preferredName, audio: { url: audioPath } }
         : isAudio
-          ? { action: 'create_voice', target_model: cfg.targetModel, prefix: preferredName, audio: { data: dataUri } }
-          : { action: 'create', target_model: cfg.targetModel, preferred_name: preferredName, audio: { data: dataUri } };
+          ? { action: 'create_voice', target_model: useModel, prefix: preferredName, audio: { data: dataUri } }
+          : { action: 'create', target_model: useModel, preferred_name: preferredName, audio: { data: dataUri } };
       const resp = await fetch(VOICE_API_BASE + '/services/audio/tts/customization', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
@@ -177,31 +250,85 @@ function register(ctx) {
     }
   });
 
+  // 内置 Qwen-TTS 系统音色列表（无需 API Key，直接返回；每项附默认合成模型 model）
+  ipcMain.handle('voice:list-system-voices', () => {
+    const voices = SYSTEM_VOICES.map((v) => {
+      const prof = settings.getVoiceProfiles()['system:' + v.voice];
+      return {
+        voice: v.voice,
+        desc: v.desc,
+        langs: v.langs,
+        series: v.series,
+        model: prof && prof.targetModel ? prof.targetModel : systemVoiceDefaultModel(v)
+      };
+    });
+    return { ok: true, voices: voices, total: voices.length };
+  });
+
+  // 候选模型表（音色复制/合成可选模型）
+  ipcMain.handle('voice:list-models', () => ({ ok: true, models: VOICE_MODELS }));
+
+  // 本地音色映射：读取 / 保存 / 删除（key 形如 system:<voice> 或 custom:<voice_id>）
+  ipcMain.handle('voice:get-profiles', () => ({ ok: true, profiles: settings.getVoiceProfiles() }));
+  ipcMain.handle('voice:save-profile', (event, payload) => {
+    const p = (payload && payload.profile) || {};
+    const key = String(p.key || '').trim();
+    if (!key || !p.voice || !p.targetModel) return { ok: false, message: '映射信息不完整' };
+    settings.saveVoiceProfile(key, {
+      key: key,
+      name: String(p.name || p.voice || '').trim() || String(p.voice),
+      voice: String(p.voice).trim(),
+      targetModel: VOICE_TTS_MODELS.includes(p.targetModel) ? p.targetModel : VOICE_TTS_MODELS[0],
+      type: p.type === 'system' ? 'system' : 'custom'
+    });
+    return { ok: true, profiles: settings.getVoiceProfiles() };
+  });
+  ipcMain.handle('voice:delete-profile', (event, payload) => {
+    const key = String((payload && payload.key) || '').trim();
+    if (!key) return { ok: false, message: '缺少映射 key' };
+    settings.deleteVoiceProfile(key);
+    return { ok: true, profiles: settings.getVoiceProfiles() };
+  });
+
   // 查询克隆音色列表（action=list）
-  ipcMain.handle('voice:list', async () => {
-    const cfg = getVoiceConfig();
-    const noKey = getVoiceApiError(cfg);
-    if (noKey) return { ok: false, message: noKey };
-    try {
-      const resp = await fetch(VOICE_API_BASE + '/services/audio/tts/customization', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
-        body: JSON.stringify({
-          model: VOICE_ENROLL_MODEL,
-          input: { action: 'list', page_size: 100, page_index: 0 }
-        })
+  ipcMain.handle('voice:list', () => fetchClonedVoices());
+
+  // 合并音色列表：系统音色 + 克隆音色，统一 { key, type, name, voiceId, model }（「音色即模型」UI 入口）
+  ipcMain.handle('voice:list-all', async () => {
+    const profiles = settings.getVoiceProfiles(ctx);
+    const sysItems = SYSTEM_VOICES.map((v) => {
+      const key = 'system:' + v.voice;
+      const prof = profiles[key];
+      return {
+        key: key,
+        type: 'system',
+        name: (prof && prof.name) || v.desc,
+        voiceId: v.voice,
+        model: resolveVoiceModel(key, ctx)
+      };
+    });
+    const customItems = [];
+    const cloud = await fetchClonedVoices();
+    if (cloud.ok && Array.isArray(cloud.voices)) {
+      cloud.voices.forEach((v) => {
+        const voiceId = v.voice || v.voice_id || '';
+        if (!voiceId) return;
+        const key = 'custom:' + voiceId;
+        const prof = profiles[key];
+        // 克隆音色模型三级回退：本地映射 targetModel → 云端 target_model → 全局默认
+        const cloudModel = String(v.target_model || v.targetModel || '').trim();
+        const profModel = (prof && prof.targetModel) || '';
+        customItems.push({
+          key: key,
+          type: 'custom',
+          name: (prof && prof.name) || voiceId,
+          voiceId: voiceId,
+          model: profModel || cloudModel || resolveVoiceModel(key, ctx)
+        });
       });
-      const raw = await resp.text();
-      const json = parseJsonLike(raw);
-      if (!resp.ok) {
-        throw new Error('HTTP ' + resp.status + ((json && json.message) ? '：' + json.message : ''));
-      }
-      const out = (json && json.output) || {};
-      const list = Array.isArray(out.voice_list) ? out.voice_list : [];
-      return { ok: true, voices: list, total: out.total || list.length };
-    } catch (e) {
-      return { ok: false, message: voiceFriendlyError(e, '查询音色失败') };
     }
+    const voices = sysItems.concat(customItems);
+    return { ok: true, voices: voices, total: voices.length, cloudMessage: cloud.ok ? '' : (cloud.message || '') };
   });
 
   // 选择 TTS 保存的自定义目录（目录选择器）
@@ -263,7 +390,9 @@ function register(ctx) {
     if (!text) return { ok: false, message: '合成文本为空' };
     if (!voice) return { ok: false, message: '请先选择（或创建）音色' };
     try {
-      const isAudio = isAudioTtsModel(cfg.targetModel);
+      // 合成使用的模型：优先取「当前音色绑定/选定的模型」，无则回落全局默认（与克隆创建时的 target_model 保持一致）
+      const useModel = String((payload && payload.targetModel) || '').trim() || cfg.targetModel;
+      const isAudio = isAudioTtsModel(useModel);
       let buf;
       let ext;
       const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey };
@@ -273,7 +402,7 @@ function register(ctx) {
           method: 'POST',
           headers: headers,
           body: JSON.stringify({
-            model: cfg.targetModel,
+            model: useModel,
             input: { text: text, voice: voice, format: 'mp3', sample_rate: 24000 }
           })
         });
@@ -289,7 +418,7 @@ function register(ctx) {
         const resp = await fetch(VOICE_API_BASE + '/services/aigc/multimodal-generation/generation', {
           method: 'POST',
           headers: headers,
-          body: JSON.stringify({ model: cfg.targetModel, input: { text: text, voice: voice } })
+          body: JSON.stringify({ model: useModel, input: { text: text, voice: voice } })
         });
         const raw = await resp.text();
         const json = parseJsonLike(raw);
@@ -349,5 +478,7 @@ module.exports = {
   voiceFriendlyError,
   nowStamp,
   guessAudioExt,
-  resolveTtsDir
+  resolveTtsDir,
+  resolveVoiceModel,
+  fetchClonedVoices
 };

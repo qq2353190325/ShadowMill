@@ -14,6 +14,7 @@
     <input id="sub-title" class="hgen-input" style="flex:1" placeholder="字幕动画标题，如：我的第一个字幕动画"/>
   </div>
   <div class="hgen-actions">
+    <button class="hf-btn" id="sub-from-content" title="依据内容脚本的场景旁白与时长提示生成逐条字幕，覆盖当前编辑区内容">由脚本旁白生成字幕</button>
     <button class="hf-btn" id="sub-save">保存到项目</button>
     <button class="hf-btn hf-btn-primary" id="sub-tohtml">保存并生成 HTML</button>
   </div>
@@ -44,6 +45,34 @@
       };
       document.getElementById('sub-save').addEventListener('click', () => doSave(false));
       document.getElementById('sub-tohtml').addEventListener('click', () => doSave(true));
+      // 由脚本旁白生成字幕：依据 content.scenes 逐条生成（[分:秒] 前缀按序累积：前一条结束=后一条开始；durHint 缺失按 2.4s/条估时），填入编辑区并提示条数
+      document.getElementById('sub-from-content').addEventListener('click', () => {
+        const content = AppState.project && AppState.project.content;
+        const scenes = (content && Array.isArray(content.scenes)) ? content.scenes : [];
+        if (!scenes.length) { toast('当前项目无内容脚本，请先到「内容脚本」页编写'); return; }
+        let time = 0;
+        let usedDur = 0;
+        let estimated = 0;
+        const lines = [];
+        scenes.forEach((s) => {
+          const narr = (s && typeof s.narration === 'string' ? s.narration : '').trim();
+          if (!narr) return; // 空旁白场景跳过
+          const raw = s && s.durHint;
+          const rawN = Number(raw);
+          const hasDur = raw !== '' && raw !== null && raw !== undefined && isFinite(rawN) && rawN > 0;
+          const dur = hasDur ? rawN : 2.4;
+          if (hasDur) usedDur++; else estimated++;
+          const m = Math.floor(time / 60);
+          const sec = Math.floor(time % 60);
+          lines.push('[' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0') + '] ' + narr);
+          time += dur;
+        });
+        if (!lines.length) { toast('内容脚本中暂无有效的旁白文本，请先到「内容脚本」页填写旁白'); return; }
+        editor.value = lines.join('\n');
+        toast('已由脚本旁白生成 ' + lines.length + ' 条字幕，可保存到项目'
+          + (usedDur ? '（' + usedDur + ' 条按时长提示累计）' : '')
+          + (estimated ? '（' + estimated + ' 条按 2.4s 估时）' : ''));
+      });
     }
   };
 })();

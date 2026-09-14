@@ -181,7 +181,7 @@
   <span class="hf-file" id="proj-file">未选择</span>
   <button class="hf-btn" id="btn-openfolder" disabled>打开目录</button>
 </div>
-<div class="card hf-page">
+<div class="card hf-page" style="margin-top:16px">
   <div class="hf-toolbar">
     <button class="hf-btn" data-hf="open">选择 HTML 文件</button>
     <span class="hf-file" id="hf-file">未选择文件</span>
@@ -203,7 +203,7 @@
   <span class="hf-file" id="proj-file">未选择</span>
   <button class="hf-btn" id="btn-openfolder" disabled>打开目录</button>
 </div>
-<div class="card hf-page">
+<div class="card hf-page" style="margin-top:16px">
   <div class="hf-toolbar">
     <button class="hf-btn" data-hf="open">选择 HTML 文件</button>
     <span class="hf-file" id="hf-file">未选择文件</span>

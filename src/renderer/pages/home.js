@@ -3,7 +3,7 @@
   'use strict';
 
   const {
-    AppState, escTxt, goPage, hasSubtitle, hasHtml, hasVideo, switchProject
+    AppState, escTxt, goPage, hasSubtitle, hasHtml, hasVideo, hasContent, hasAudio, switchProject
   } = window.App;
 
   // ===== 首页模板 =====
@@ -11,13 +11,13 @@
     html: `<section class="hero">
   <span class="hero-tag">CYBER UI · 深空科技</span>
   <h1>一站式音视频创作流水线</h1>
-  <p>以“项目”为单位贯通：字幕 → HTML → 视频，一键生成。</p>
+  <p>以“项目”为单位贯通：内容脚本 → 配音 → 字幕 → HTML → 视频，一键生成。</p>
 </section>
 <div class="flow-pipeline" id="home-flow"></div>
 <div class="metric-grid">
   <div class="metric-card"><div class="metric-value">5+</div><div class="metric-label">支持音频格式</div></div>
   <div class="metric-card"><div class="metric-value">1080P</div><div class="metric-label">导出分辨率</div></div>
-  <div class="metric-card"><div class="metric-value">3</div><div class="metric-label">项目链路节点</div></div>
+  <div class="metric-card"><div class="metric-value">5</div><div class="metric-label">项目链路节点</div></div>
   <div class="metric-card"><div class="metric-value">MP4</div><div class="metric-label">视频输出格式</div></div>
 </div>`,
     // 首页：动态流水线（反映当前项目状态，可点击跳转）
@@ -26,10 +26,10 @@
       if (!flow) return;
       const p = AppState.project || {};
       const defs = [
-        { idx: '01', t: '声音复制', d: '导入音频，复制生成全新声音副本', page: 'sound-copy', done: false },
-        { idx: '02', t: '文字生音频', d: '输入文字，智能合成为自然语音', page: 'text-tts', done: false },
-        { idx: '03', t: '文字转字幕', d: '语音自动对齐，生成同步字幕', page: 'subtitle', done: hasSubtitle() },
-        { idx: '04', t: '字幕生成HTML', d: '将字幕渲染为精美的 HTML 页面', page: 'html-gen', done: hasHtml() },
+        { idx: '01', t: '内容脚本', d: '编写旁白与画面分镜，定义全局风格', page: 'content', done: hasContent() },
+        { idx: '02', t: '配音', d: '由脚本旁白合成为自然语音', page: 'text-tts', done: hasAudio() },
+        { idx: '03', t: '字幕', d: '由旁白派生对齐的同步字幕', page: 'subtitle', done: hasSubtitle() },
+        { idx: '04', t: 'HTML生成', d: '由脚本整体生成精美的 HTML 动画', page: 'html-gen', done: hasHtml() },
         { idx: '05', t: '转成视频', d: '合并素材，导出最终视频成品', page: 'video-gen', done: hasVideo() }
       ];
       flow.innerHTML = defs.map((n, i) =>
@@ -47,7 +47,7 @@
       if (!biHost) {
         biHost = document.createElement('div');
         biHost.id = 'builtin-section';
-        biHost.style.cssText = 'margin-top:24px;';
+        biHost.style.cssText = 'margin-top:var(--space-5);';
         flow.insertAdjacentElement('afterend', biHost);
       }
       if (!AppState.builtinProjects.length) {
@@ -59,7 +59,7 @@
           AppState.builtinProjects.map((b, i) =>
             '<div class="builtin-card" data-i="' + i + '" title="打开内置示例 ' + escTxt(b.name) + '" style="flex:1;min-width:200px;padding:14px 16px;border:1px solid rgba(0,212,255,.35);border-radius:10px;background:linear-gradient(105deg,rgba(0,212,255,.10),rgba(139,92,246,.10));cursor:pointer;transition:transform .15s ease, box-shadow .15s ease;">' +
             '<b style="color:#00D4FF;">' + escTxt(b.title) + '</b>' +
-            '<div style="margin-top:4px;font-size:12px;color:var(--text-secondary,#8CA3C7);">点击打开预览 / 转视频</div>' +
+            '<div style="margin-top:var(--space-1);font-size:12px;color:var(--text-secondary,#8CA3C7);">点击打开预览 / 转视频</div>' +
             '</div>'
           ).join('') + '</div>';
         biHost.querySelectorAll('.builtin-card').forEach((c) => {

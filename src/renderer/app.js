@@ -45,6 +45,10 @@
   // 仅当存在真实 HTML 路径且非内置示例时才视为“已生成”：内置示例的 HTML 属于只读示例资源，不算用户生成产物
   function hasHtml() { const p = AppState.project; return !AppState.isBuiltin && !!(p && p.htmlExists && p.htmlPath); }
   function hasVideo() { const p = AppState.project; return !!(p && p.videoExists); }
+  // 内容脚本是否具备：非内置且存在至少一条场景（向后兼容：无 content 字段视为空）
+  function hasContent() { const p = AppState.project; return !AppState.isBuiltin && !!(p && p.content && Array.isArray(p.content.scenes) && p.content.scenes.length); }
+  // 配音是否具备（本阶段近似判断）：项目内已有背景音频/生成语音即视为已产出声，后续可按实际配音产物细化
+  function hasAudio() { const p = AppState.project; return !AppState.isBuiltin && !!(p && p.audioFile); }
 
   function saveProjectCtx() {
     localStorage.setItem('myapp.projectCtx', JSON.stringify({ name: AppState.currentName, builtin: AppState.isBuiltin }));
@@ -92,7 +96,8 @@
       audioFile: loaded.audioFile || '',
       htmlExists: !!(entry && entry.hasHtml),
       videoExists: !!(entry && entry.hasVideo),
-      subtitleCount: loaded.subtitleCount || 0
+      subtitleCount: loaded.subtitleCount || 0,
+      content: loaded.content || { style: '', scenes: [] }
     };
   }
 
@@ -127,12 +132,18 @@
     }
     const p = AppState.project || {};
     const isPage = (pg) => page === pg;
+    const contentDone = hasContent();
+    const audioDone = hasAudio();
     const subDone = hasSubtitle();
     const htmlDone = hasHtml();
     const videoDone = hasVideo();
     const nameShown = AppState.isBuiltin ? ('内置 · ' + p.name) : p.name;
     let html = '<span class="proj-name ' + (AppState.isBuiltin ? '' : 'placeholder') + '" title="点击打开项目（HTML 预览 / 视频生成）">' + escTxt(nameShown) + '</span>';
     html += '<div class="step-chain">';
+    html += '<span class="step-node clickable ' + (isPage('content') ? 'active-now' : '') + ' ' + (contentDone ? 'done' : '') + '" data-goto="content"><span class="step-dot"></span>内容脚本</span>';
+    html += '<span class="step-arrow">→</span>';
+    html += '<span class="step-node clickable ' + (isPage('text-tts') ? 'active-now' : '') + ' ' + (audioDone ? 'done' : '') + '" data-goto="text-tts"><span class="step-dot"></span>配音</span>';
+    html += '<span class="step-arrow">→</span>';
     html += '<span class="step-node clickable ' + (isPage('subtitle') ? 'active-now' : '') + ' ' + (subDone ? 'done' : '') + '" data-goto="subtitle"><span class="step-dot"></span>字幕</span>';
     html += '<span class="step-arrow">→</span>';
     html += '<span class="step-node clickable ' + (isPage('html-gen') || isPage('html-preview') ? 'active-now' : '') + ' ' + (htmlDone ? 'done' : '') + '" data-goto="html-preview"><span class="step-dot"></span>HTML</span>';
@@ -169,7 +180,7 @@
     AppState,
     escTxt,
     rateClamp, applyRate, stepRate,
-    hasSubtitle, hasHtml, hasVideo,
+    hasSubtitle, hasHtml, hasVideo, hasContent, hasAudio,
     saveProjectCtx, refreshProject, switchProject,
     toast, renderStepBar,
     setActiveMenu, goPage,

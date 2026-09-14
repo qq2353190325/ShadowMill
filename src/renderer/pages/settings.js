@@ -37,12 +37,7 @@
   </div>
   <div class="hgen-row">
     <label class="sel-label">目标模型</label>
-    <select id="set-v-model" class="hgen-select" style="flex:1">
-      <option value="qwen-audio-3.0-tts-flash">qwen-audio-3.0-tts-flash（Qwen-Audio-TTS，默认）</option>
-      <option value="qwen3-tts-vc-2026-01-22">qwen3-tts-vc-2026-01-22（非实时）</option>
-      <option value="qwen3-tts-vc-realtime-2026-01-15">qwen3-tts-vc-realtime-2026-01-15（实时）</option>
-      <option value="qwen3-tts-vc-realtime-2025-11-27">qwen3-tts-vc-realtime-2025-11-27（实时）</option>
-    </select>
+    <select id="set-v-model" class="hgen-select" style="flex:1"></select>
   </div>
   <div class="hgen-actions">
     <button class="hf-btn hf-btn-primary" id="set-v-save">保存千问语音配置</button>
@@ -113,6 +108,12 @@
           if (kind) vStatusEl.classList.add(kind);
         };
         (async () => {
+          // 动态填充候选模型表（语音复刻 + 系统音色合成）
+          const mm = await window.voiceTools.listModels().catch(() => ({ models: [] }));
+          const models = (mm && mm.models) || [];
+          if (vModelEl && models.length) {
+            vModelEl.innerHTML = models.map((m) => '<option value="' + m.id + '"' + (m.isDefault ? ' selected' : '') + '>' + m.label + '</option>').join('');
+          }
           try {
             const s = await window.settingsTools.get();
             const v = (s && s.voiceTTS) || {};
