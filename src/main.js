@@ -18,6 +18,7 @@ require('./main/htmlAgent.js');
 const projects = require('./main/projects.js');
 const voice = require('./main/voice.js');
 const video = require('./main/video.js');
+require('./main/whisper.js');
 
 // 窗口引用：供 IPC 窗口控制回调使用
 let mainWindow = null;
@@ -82,6 +83,7 @@ app.whenReady().then(() => {
   projects.register(ctx);
   voice.register(ctx);
   video.register(ctx);
+  require('./main/whisper.js').register(ctx);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

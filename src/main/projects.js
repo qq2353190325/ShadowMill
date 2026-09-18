@@ -183,6 +183,17 @@ function register(ctx) {
 
   ipcMain.handle('project:list', () => scanProjects());
 
+  // 新建“我的项目”：名字校验 + 写 project.json（目录在写入时创建）
+  ipcMain.handle('project:create', (event, name) => {
+    const n = String(name || '').trim();
+    if (!n) return { ok: false, message: '项目名不能为空' };
+    if (/[\\/:*?"<>|]/.test(n)) return { ok: false, message: '项目名含非法字符（\\ / : * ? " < > |）' };
+    if (readProject(n)) return { ok: false, message: '项目「' + n + '」已存在' };
+    const proj = ensureProject(n);
+    writeProject(proj);
+    return { ok: true, project: proj };
+  });
+
   ipcMain.handle('project:load', (event, name) => {
     if (!name) return null;
     return readProject(name) || ensureProject(name);
@@ -249,7 +260,18 @@ function register(ctx) {
     ]);
 
     try {
-      const reply = await htmlAgent.chatWithCustomModel(userPrompt);
+      const sender = event.sender;
+      const onProgress = (info) => {
+        const stage = info && info.stage;
+        const text = stage === 'connecting' ? '正在连接模型…'
+          : stage === 'thinking' ? 'AI 正在推理中…（已思考 ' + (info.thinkChars || 0) + ' 字符）'
+          : stage === 'writing' ? 'AI 正在生成 HTML…（已输出 ' + (info.contentChars || 0) + ' 字符）'
+          : stage === 'retry' ? '本次输出为空，正在升档重试…'
+          : stage === 'done' ? '模型输出完成，正在写入文件…'
+          : '';
+        if (text && !sender.isDestroyed()) sender.send('project:html-progress', Object.assign({}, info, { text }));
+      };
+      const reply = await htmlAgent.chatWithCustomModel(userPrompt, { onProgress });
       const html = htmlAgent.extractHtmlFromReply(reply);
       if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
       const dir = projectDir(name);
@@ -310,7 +332,18 @@ function register(ctx) {
     ]);
 
     try {
-      const reply = await htmlAgent.chatWithCustomModel(userPrompt);
+      const sender = event.sender;
+      const onProgress = (info) => {
+        const stage = info && info.stage;
+        const text = stage === 'connecting' ? '正在连接模型…'
+          : stage === 'thinking' ? 'AI 正在推理中…（已思考 ' + (info.thinkChars || 0) + ' 字符）'
+          : stage === 'writing' ? 'AI 正在生成 HTML…（已输出 ' + (info.contentChars || 0) + ' 字符）'
+          : stage === 'retry' ? '本次输出为空，正在升档重试…'
+          : stage === 'done' ? '模型输出完成，正在写入文件…'
+          : '';
+        if (text && !sender.isDestroyed()) sender.send('project:html-progress', Object.assign({}, info, { text }));
+      };
+      const reply = await htmlAgent.chatWithCustomModel(userPrompt, { onProgress });
       const html = htmlAgent.extractHtmlFromReply(reply);
       if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
       fs.writeFileSync(htmlPath, html, 'utf8');
@@ -346,10 +379,12 @@ function register(ctx) {
   });
 
   // 打开项目所在目录
-  ipcMain.handle('project:open-folder', (event, name) => {
+  ipcMain.handle('project:open-folder', async (event, name) => {
     const dir = projectDir(name);
-    if (fs.existsSync(dir)) shell.openPath(dir);
-    return { ok: true };
+    if (!fs.existsSync(dir)) return { ok: false, message: '项目目录不存在（该内置示例/未保存项目无本地目录）' };
+    // shell.openPath 返回 Promise<string>：成功为空串，失败为错误信息，必须 await
+    const r = await shell.openPath(dir);
+    return { ok: r === '' ? true : false, message: r ? ('打开失败：' + r) : '' };
   });
 
   // 导出任意文件（内置示例项目 HTML 的只读导出入口）

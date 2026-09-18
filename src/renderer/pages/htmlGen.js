@@ -2,13 +2,15 @@
 (function () {
   'use strict';
 
-  const { AppState, escTxt, hasHtml, renderStepBar, toast, refreshProject } = window.App;
+  const { AppState, escTxt, hasHtml, renderStepBar, toast, refreshProject, switchProject, goPage } = window.App;
 
   App.pages['html-gen'] = {
     html: `<div class="project-bar" data-slot></div>
 <div class="project-selector">
   <span class="sel-label">工作项目</span>
   <select id="hg-proj-select" class="hf-select"></select>
+  <input id="hg-proj-new-name" class="hgen-input" placeholder="新项目名" style="display:none;flex:none;width:140px"/>
+  <button class="hf-btn" id="hg-proj-new" title="新建我的项目">新建项目</button>
   <button class="hf-btn" id="hg-proj-open" title="打开当前项目所在目录">打开目录</button>
 </div>
 <div class="card hgen-panel">
@@ -64,6 +66,10 @@
 <div class="card hgen-panel" style="margin-top:16px">
   <div class="panel-title"><span class="dot"></span>预览</div>
   <div class="hf-status" id="hg-status"></div>
+  <div id="hg-think-wrap" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid rgba(0,212,255,.22);border-radius:8px;background:rgba(0,212,255,.05)">
+    <div style="font-size:12px;color:#00D4FF;margin-bottom:6px">AI 思考过程（实时）</div>
+    <pre id="hg-think" style="margin:0;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;font-size:12px;line-height:1.7;color:rgba(255,255,255,.82)"></pre>
+  </div>
   <div class="empty-hint" id="hg-empty">尚未生成 HTML。</div>
   <iframe class="hgen-frame" id="hg-frame" style="display:none" sandbox="allow-scripts allow-same-origin"></iframe>
 </div>`,
@@ -76,6 +82,25 @@
       const status = document.getElementById('hg-status');
       // 进入页面即清空上一轮状态文案/样式，避免残留“已生成 / 失败”的旧信息
       if (status) { status.textContent = ''; status.classList.remove('hf-error', 'hf-ok'); }
+      // 思考过程展示区：进入页面即清空并隐藏，仅在生成/修改期间实时显示
+      const thinkWrap = document.getElementById('hg-think-wrap');
+      const thinkPre = document.getElementById('hg-think');
+      if (thinkWrap) thinkWrap.style.display = 'none';
+      if (thinkPre) thinkPre.textContent = '';
+      // —— 生成/修改过程实时显示：主进程流式推送 AI 推理/输出阶段 ——
+      window.projectTools.onHtmlProgress((info) => {
+        if (!info) return;
+        if (info.text && status) {
+          status.textContent = info.text;
+          status.classList.remove('hf-error', 'hf-ok');
+        }
+        // 实时显示 AI 思考过程原文（随字符计数同步更新，自动滚动到底部）
+        if (thinkPre) {
+          thinkPre.textContent = info.thinkText || '';
+          if (thinkWrap) thinkWrap.style.display = (info.thinkText && info.thinkText.length) ? '' : 'none';
+          thinkPre.scrollTop = thinkPre.scrollHeight;
+        }
+      });
       const subList = document.getElementById('hg-sub-list');
       const audioList = document.getElementById('hg-audio-list');
 
@@ -169,6 +194,77 @@
           if (it && it.path) addOpt(String(it.path), '已生成：' + (it.name || it.path) + (it.group ? '（' + it.group + '）' : ''));
         });
       };
+
+      // —— 工作项目下拉：填充「我的项目」+「内置示例」，切换后重进本页刷新全部状态 ——
+      const projSel = document.getElementById('hg-proj-select');
+      const projOpen = document.getElementById('hg-proj-open');
+      const fillProjSelect = () => {
+        if (!projSel) return;
+        projSel.innerHTML = '';
+        const my = document.createElement('optgroup');
+        my.label = '我的项目';
+        (AppState.myProjects || []).forEach((p) => {
+          const o = document.createElement('option');
+          o.value = 'my:' + p.name;
+          o.textContent = p.name + (p.hasHtml ? ' · HTML✓' : '') + (p.hasVideo ? ' · 视频✓' : '');
+          my.appendChild(o);
+        });
+        projSel.appendChild(my);
+        const bi = document.createElement('optgroup');
+        bi.label = '内置示例';
+        (AppState.builtinProjects || []).forEach((b) => {
+          const o = document.createElement('option');
+          o.value = 'builtin:' + b.name;
+          o.textContent = b.name + ' · 内置';
+          bi.appendChild(o);
+        });
+        projSel.appendChild(bi);
+        projSel.value = (AppState.isBuiltin ? 'builtin:' : 'my:') + AppState.currentName;
+      };
+      if (projSel) {
+        fillProjSelect();
+        projSel.addEventListener('change', async () => {
+          const v = projSel.value;
+          if (!v) return;
+          const isBuiltin = v.startsWith('builtin:');
+          const name = v.slice(isBuiltin ? 8 : 3);
+          await switchProject(name, isBuiltin);
+          await goPage('html-gen');
+        });
+      }
+      if (projOpen) {
+        projOpen.addEventListener('click', () => {
+          if (AppState.isBuiltin) {
+            if (AppState.project.htmlPath) window.projectTools.openFolderOf(AppState.project.htmlPath);
+            else toast('内置示例项目为只读；可在「工作项目」切换到「我的项目」');
+            return;
+          }
+          window.projectTools.openFolder(AppState.currentName);
+        });
+      }
+      // —— 新建我的项目：输入框回车或点按钮创建，创建后切换过去 ——
+      const projNewBtn = document.getElementById('hg-proj-new');
+      const projNewName = document.getElementById('hg-proj-new-name');
+      const doCreateProject = async () => {
+        const nm = projNewName.value.trim();
+        if (!nm) { toast('请输入项目名'); projNewName.focus(); return; }
+        const res = await window.projectTools.create(nm);
+        if (!res || !res.ok) { toast((res && res.message) || '创建失败'); return; }
+        projNewName.value = '';
+        projNewName.style.display = 'none';
+        await refreshProject();
+        await switchProject(nm, false);
+        await goPage('html-gen');
+        toast('已创建并切换到项目「' + nm + '」');
+      };
+      if (projNewBtn && projNewName) {
+        projNewBtn.addEventListener('click', () => {
+          const show = projNewName.style.display === 'none';
+          projNewName.style.display = show ? '' : 'none';
+          if (show) projNewName.focus();
+        });
+        projNewName.addEventListener('keydown', (e) => { if (e.key === 'Enter') doCreateProject(); });
+      }
 
       (async () => {
         fillSubList();

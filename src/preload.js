@@ -58,9 +58,33 @@ contextBridge.exposeInMainWorld('voiceTools', {
   synth: (text, voice, projectName, saveDir, targetModel, audioName) => ipcRenderer.invoke('voice:synth', { text, voice, projectName, saveDir, targetModel, audioName })
 });
 
+// whisper.cpp 字幕转录：模型状态/下载/删除/设为当前 + 自定义模型增删改 + 项目音频 + 音频选择 + 转录（进度经 whisper:progress 回推）
+contextBridge.exposeInMainWorld('whisperTools', {
+  status: () => ipcRenderer.invoke('whisper:status'),
+  download: (id) => ipcRenderer.invoke('whisper:download', { id }),
+  delete: (id) => ipcRenderer.invoke('whisper:delete', { id }),
+  setCurrent: (id) => ipcRenderer.invoke('whisper:set-current', { id }),
+  addModel: (payload) => ipcRenderer.invoke('whisper:add-model', payload),
+  updateModel: (payload) => ipcRenderer.invoke('whisper:update-model', payload),
+  removeModel: (payload) => ipcRenderer.invoke('whisper:remove-model', payload),
+  openDir: (which) => ipcRenderer.invoke('whisper:open-dir', { which }),
+  pickAudio: () => ipcRenderer.invoke('whisper:pick-audio'),
+  projectAudio: (name) => ipcRenderer.invoke('whisper:project-audio', { name }),
+  transcribe: (payload) => ipcRenderer.invoke('whisper:transcribe', payload),
+  // 单订阅：重复注册仅替换回调，避免页面切换叠加监听
+  onProgress: (callback) => {
+    _whisperProgressCb = callback;
+    if (!_whisperProgressBound) {
+      _whisperProgressBound = true;
+      ipcRenderer.on('whisper:progress', (_event, data) => { if (typeof _whisperProgressCb === 'function') _whisperProgressCb(data); });
+    }
+  }
+});
+
 // 项目化流水线（字幕 → HTML → 预览/转视频）
 contextBridge.exposeInMainWorld('projectTools', {
   list: () => ipcRenderer.invoke('project:list'),
+  create: (name) => ipcRenderer.invoke('project:create', name),
   load: (name) => ipcRenderer.invoke('project:load', name),
   saveSubtitle: (name, subtitle, title) => ipcRenderer.invoke('project:save-subtitle', { name, subtitle, title }),
   saveContent: (name, content) => ipcRenderer.invoke('project:save-content', { name, content }),
@@ -76,5 +100,17 @@ contextBridge.exposeInMainWorld('projectTools', {
   openFolder: (name) => ipcRenderer.invoke('project:open-folder', name),
   openFolderOf: (dirOrFile) => ipcRenderer.invoke('project:open-folder-of', dirOrFile),
   delete: (name) => ipcRenderer.invoke('project:delete', name),
-  saveVideo: (name, videoPath) => ipcRenderer.invoke('project:save-video', { name, videoPath })
+  saveVideo: (name, videoPath) => ipcRenderer.invoke('project:save-video', { name, videoPath }),
+  // HTML 生成/修改过程进度（单订阅：重复注册仅替换回调，避免页面切换叠加监听）
+  onHtmlProgress: (callback) => {
+    _htmlProgressCb = callback;
+    if (!_htmlProgressBound) {
+      _htmlProgressBound = true;
+      ipcRenderer.on('project:html-progress', (_event, data) => { if (typeof _htmlProgressCb === 'function') _htmlProgressCb(data); });
+    }
+  }
 });
+let _htmlProgressCb = null;
+let _htmlProgressBound = false;
+let _whisperProgressCb = null;
+let _whisperProgressBound = false;

@@ -842,3 +842,367 @@ body {
   accent-color: var(--color-primary);
   cursor: pointer;
 }
+
+/* ===== 字幕生成（whisper.cpp）：模型档位卡片 ===== */
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.model-card {
+  position: relative;
+  padding: var(--space-3);
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(0, 212, 255, 0.06), rgba(0, 212, 255, 0.015));
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.model-card:hover {
+  border-color: rgba(0, 212, 255, 0.5);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.12);
+}
+.model-card.downloaded {
+  border-color: rgba(0, 229, 160, 0.45);
+  background: linear-gradient(180deg, rgba(0, 229, 160, 0.08), rgba(0, 229, 160, 0.02));
+}
+.model-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.model-name {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-primary);
+  letter-spacing: .5px;
+}
+.model-card.downloaded .model-name {
+  color: var(--color-success);
+}
+.model-badge {
+  flex: none;
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+  color: rgba(230, 241, 255, 0.7);
+  border: 1px solid rgba(230, 241, 255, 0.25);
+  white-space: nowrap;
+}
+.model-badge.ok {
+  color: var(--color-success);
+  border-color: rgba(0, 229, 160, 0.5);
+}
+.model-meta {
+  font-size: 12px;
+  color: rgba(230, 241, 255, 0.75);
+  margin-bottom: 4px;
+}
+.model-url {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: rgba(0, 212, 255, 0.55);
+  word-break: break-all;
+  margin-bottom: 4px;
+  user-select: text;
+}
+.model-url:hover {
+  color: rgba(0, 212, 255, 0.85);
+}
+.model-desc {
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(230, 241, 255, 0.5);
+  margin-bottom: var(--space-2);
+}
+.model-actions {
+  display: flex;
+  gap: 8px;
+}
+.model-actions .hf-btn {
+  padding: 5px 14px;
+  font-size: 12px;
+}
+
+/* ===== 字幕生成（whisper.cpp）：下载进度条 ===== */
+.whisper-bar-wrap {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(11, 18, 32, 0.6);
+}
+.whisper-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(230, 241, 255, 0.08);
+  overflow: hidden;
+}
+.whisper-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.6), var(--color-primary));
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+  transition: width .15s ease;
+}
+.whisper-bar-fill.error {
+  background: linear-gradient(90deg, rgba(255, 82, 82, 0.6), #FF5252);
+  box-shadow: 0 0 10px rgba(255, 82, 82, 0.5);
+}
+.whisper-bar-fill.done {
+  background: linear-gradient(90deg, rgba(0, 229, 160, 0.6), var(--color-success));
+  box-shadow: 0 0 10px rgba(0, 229, 160, 0.5);
+}
+.whisper-bar-text {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(230, 241, 255, 0.75);
+  word-break: break-all;
+}
+
+/* ===== 字幕生成（whisper.cpp）：转录状态 ===== */
+.whisper-tip {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(230, 241, 255, 0.55);
+}
+.whisper-tip code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: var(--color-primary);
+  background: rgba(0, 212, 255, 0.1);
+}
+
+/* 选中态：当前转录所用模型档位 */
+.model-card.selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary), 0 0 16px rgba(0, 212, 255, 0.25);
+}
+.model-card.selected::after {
+  content: '转录使用';
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  padding: 1px 8px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #06121F;
+  background: var(--color-primary);
+  border-radius: 0 10px 0 8px;
+}
+
+/* ===== 设置页：语音识别模型 ===== */
+.model-card.current {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.5), 0 0 16px rgba(0, 212, 255, 0.18);
+}
+.model-card.current .model-name {
+  color: var(--color-primary);
+}
+.model-badge.current {
+  color: #06121F;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* ===== 字幕编辑器：条目列表 ===== */
+.sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: var(--space-3);
+}
+.sub-empty {
+  padding: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
+  color: var(--text-secondary);
+  border: 1px dashed rgba(0, 212, 255, 0.3);
+  border-radius: 10px;
+}
+.sub-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(0, 212, 255, 0.03);
+}
+.sub-row:hover {
+  border-color: rgba(0, 212, 255, 0.4);
+}
+.sub-idx {
+  flex: none;
+  width: 26px;
+  padding-top: 10px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  text-align: center;
+  color: var(--color-primary);
+}
+.sub-time {
+  flex: none;
+  width: 78px;
+  padding: 9px 6px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  text-align: center;
+  color: var(--text-primary);
+  background: rgba(10, 17, 32, 0.9);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  border-radius: 8px;
+  outline: none;
+}
+.sub-time:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+}
+.sub-arrow {
+  flex: none;
+  padding-top: 11px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.sub-text {
+  flex: 1;
+  min-height: 38px;
+  max-height: 140px;
+  padding: 9px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: rgba(10, 17, 32, 0.9);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  border-radius: 8px;
+  outline: none;
+  resize: vertical;
+}
+.sub-text:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+}
+.sub-del {
+  flex: none;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--color-danger);
+  background: transparent;
+  border: 1px solid rgba(255, 82, 82, 0.45);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sub-del:hover {
+  background: rgba(255, 82, 82, 0.12);
+}
+.sub-count {
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.sub-note {
+  margin-top: var(--space-3);
+  font-size: 12px;
+  line-height: 1.8;
+  color: rgba(230, 241, 255, 0.55);
+}
+.sub-note code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: var(--color-primary);
+  background: rgba(0, 212, 255, 0.1);
+}
+
+/* ===== 通用弹窗（转录弹窗） ===== */
+.hf-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 10, 20, 0.72);
+}
+.hf-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 92vw);
+  max-height: 86vh;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.18);
+}
+.hf-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+  background: linear-gradient(180deg, rgba(0, 212, 255, 0.08), transparent);
+}
+.hf-modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--color-primary);
+}
+.hf-modal-close {
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid rgba(230, 241, 255, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.hf-modal-close:hover {
+  color: var(--text-primary);
+  border-color: var(--color-primary);
+}
+.hf-modal-body {
+  padding: 18px;
+  overflow: auto;
+}
+.hf-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: 14px 18px;
+  border-top: 1px solid rgba(0, 212, 255, 0.2);
+}
+.tw-model {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  color: var(--color-primary);
+}
+.tw-link {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* 转录无百分比进度：不确定态条纹滑动 */
+.whisper-bar.indeterminate .whisper-bar-fill {
+  width: 38% !important;
+  animation: whisper-slide 1.1s ease-in-out infinite;
+}
+@keyframes whisper-slide {
+  0% { margin-left: 0; }
+  50% { margin-left: 62%; }
+  100% { margin-left: 0; }
+}

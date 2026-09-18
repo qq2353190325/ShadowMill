@@ -42,13 +42,62 @@
         el.addEventListener('click', () => goPage(el.dataset.page));
       });
 
+      // 我的项目入口：列表 + 新建（第一步：创建 / 选择自己的项目）
+      let myHost = document.getElementById('my-section');
+      if (!myHost) {
+        myHost = document.createElement('div');
+        myHost.id = 'my-section';
+        myHost.style.cssText = 'margin-top:var(--space-5);';
+        flow.insertAdjacentElement('afterend', myHost);
+      }
+      myHost.innerHTML =
+        '<div class="panel-title"><span class="dot"></span>我的项目</div>' +
+        '<div style="display:flex;gap:8px;margin-top:12px;">' +
+        '<input id="my-new-name" class="hgen-input" style="flex:1" placeholder="新项目名，回车或点新建"/>' +
+        '<button class="hf-btn hf-btn-primary" id="my-new-btn" style="flex:none">新建项目</button>' +
+        '</div>' +
+        (AppState.myProjects.length
+          ? '<div class="builtin-grid" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;">' +
+            AppState.myProjects.map((p, i) =>
+              '<div class="my-card" data-i="' + i + '" title="打开项目 ' + escTxt(p.name) + '" style="flex:1;min-width:200px;padding:14px 16px;border:1px solid rgba(0,212,255,.35);border-radius:10px;background:linear-gradient(105deg,rgba(0,212,255,.10),rgba(139,92,246,.10));cursor:pointer;">' +
+              '<b style="color:#00D4FF;">' + escTxt(p.title || p.name) + '</b>' +
+              '<div style="margin-top:var(--space-1);font-size:12px;color:var(--text-secondary,#8CA3C7);">' +
+              (p.hasHtml ? 'HTML✓ ' : '') + (p.hasVideo ? '视频✓ ' : '') + (p.hasSubtitle ? '字幕✓' : '') +
+              '</div></div>'
+            ).join('') + '</div>'
+          : '<div class="builtin-empty" style="color:var(--text-secondary,#8CA3C7);font-size:13px;margin-top:12px;">暂无项目，在上方输入名称新建一个（也可先点下方内置示例体验流程）。</div>');
+      myHost.querySelectorAll('.my-card').forEach((c) => {
+        c.addEventListener('click', () => {
+          const p = AppState.myProjects[Number(c.getAttribute('data-i'))];
+          if (!p) return;
+          switchProject(p.name, false).then(() => goPage('html-preview'));
+        });
+      });
+      const myNameEl = document.getElementById('my-new-name');
+      const myBtn = document.getElementById('my-new-btn');
+      const doCreateMy = async () => {
+        const nm = myNameEl.value.trim();
+        if (!nm) { toast('请输入项目名'); myNameEl.focus(); return; }
+        const res = await window.projectTools.create(nm);
+        if (!res || !res.ok) { toast((res && res.message) || '创建失败'); return; }
+        myNameEl.value = '';
+        await refreshProject();
+        await switchProject(nm, false);
+        await goPage('home');
+        toast('已创建并切换到项目「' + nm + '」');
+      };
+      if (myBtn && myNameEl) {
+        myBtn.addEventListener('click', doCreateMy);
+        myNameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doCreateMy(); });
+      }
+
       // 内置示例快捷入口：点击即选中该内置项目并进入「HTML 预览」页（可预览 / 转视频，产物不回写项目目录）
       let biHost = document.getElementById('builtin-section');
       if (!biHost) {
         biHost = document.createElement('div');
         biHost.id = 'builtin-section';
         biHost.style.cssText = 'margin-top:var(--space-5);';
-        flow.insertAdjacentElement('afterend', biHost);
+        myHost.insertAdjacentElement('afterend', biHost);
       }
       if (!AppState.builtinProjects.length) {
         biHost.innerHTML = '<div class="builtin-empty" style="color:var(--text-secondary,#8CA3C7);font-size:13px;">暂无内置示例项目</div>';

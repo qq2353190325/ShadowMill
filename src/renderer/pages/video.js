@@ -101,7 +101,38 @@
         await goPage(page);
       });
     }
+    // 新建我的项目（页面模板含 #proj-new / #proj-new-name，统一绑定）
+    const projNewBtns = content.querySelectorAll('#proj-new');
+    const projNewNames = content.querySelectorAll('#proj-new-name');
+    const doCreateProject = async (btn) => {
+      const idx = Array.prototype.indexOf.call(projNewBtns, btn);
+      const nameEl = projNewNames[idx];
+      if (!nameEl) return;
+      const nm = nameEl.value.trim();
+      if (!nm) { toast('请输入项目名'); nameEl.focus(); return; }
+      const res = await window.projectTools.create(nm);
+      if (!res || !res.ok) { toast((res && res.message) || '创建失败'); return; }
+      nameEl.value = '';
+      nameEl.style.display = 'none';
+      await refreshProject();
+      await switchProject(nm, false);
+      await goPage(page);
+      toast('已创建并切换到项目「' + nm + '」');
+    };
+    projNewBtns.forEach((btn, i) => {
+      btn.addEventListener('click', () => {
+        const nameEl = projNewNames[i];
+        if (!nameEl) return;
+        const show = nameEl.style.display === 'none';
+        nameEl.style.display = show ? '' : 'none';
+        if (show) nameEl.focus();
+      });
+    });
+    projNewNames.forEach((nameEl, i) => {
+      nameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doCreateProject(projNewBtns[i]); });
+    });
     if (btnOpenFolder) {
+      btnOpenFolder.disabled = false;
       btnOpenFolder.addEventListener('click', () => {
         if (AppState.isBuiltin) {
           if (AppState.project.htmlPath) {
@@ -178,6 +209,8 @@
 <div class="project-selector">
   <span class="sel-label">工作项目</span>
   <select id="proj-select" class="hf-select"></select>
+  <input id="proj-new-name" class="hgen-input" placeholder="新项目名" style="display:none;flex:none;width:140px"/>
+  <button class="hf-btn" id="proj-new" title="新建我的项目">新建项目</button>
   <span class="hf-file" id="proj-file">未选择</span>
   <button class="hf-btn" id="btn-openfolder" disabled>打开目录</button>
 </div>
@@ -200,6 +233,8 @@
 <div class="project-selector">
   <span class="sel-label">工作项目</span>
   <select id="proj-select" class="hf-select"></select>
+  <input id="proj-new-name" class="hgen-input" placeholder="新项目名" style="display:none;flex:none;width:140px"/>
+  <button class="hf-btn" id="proj-new" title="新建我的项目">新建项目</button>
   <span class="hf-file" id="proj-file">未选择</span>
   <button class="hf-btn" id="btn-openfolder" disabled>打开目录</button>
 </div>

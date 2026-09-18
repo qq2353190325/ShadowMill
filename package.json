@@ -56,6 +56,10 @@
       {
         "from": "resources",
         "to": "."
+      },
+      {
+        "from": "resources/whisper",
+        "to": "whisper"
       }
     ]
   },
