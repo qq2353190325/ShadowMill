@@ -1,5 +1,5 @@
 // src/main/video.js
-// HTML 预览 / HyperFrames 转视频（内置项目列表 + 自定义 HTML 渲染）
+// 预览 / HyperFrames 转视频（内置项目列表 + 自定义 HTML 渲染）
 // 提供：dialog:open-html / video:list-projects / video:preview-shell /
 //       video:show-in-folder / video:render（含 video:progress 推送）
 // 依赖：hfEnv(BUILTIN_RESOURCES / findHyperframesCli / findNode / findFfmpegBin /

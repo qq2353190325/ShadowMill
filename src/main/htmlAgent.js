@@ -2,6 +2,9 @@
 // HTML 生成/修改：自定义模型 Agent 实现（生成/修改共用）
 // 提供：HTML_AGENT_SYSTEM / extractHtmlFromReply / chatWithCustomModel
 // 依赖：settings(settings.getCustomModel / settings.requireOpenAI)
+const { app } = require('electron');
+const path = require('path');
+const fs = require('fs');
 const settings = require('./settings.js');
 
 const HTML_AGENT_SYSTEM = [
@@ -31,26 +34,62 @@ function extractHtmlFromReply(text) {
 // 8192/16384 实测会被 thinking 阶段耗尽（reasoning_tokens=16384 仍无输出），故直接 32768 起步
 const MAX_TOKEN_TRIES = [32768, 65536];
 
+// 对话记录落盘：每次生成/修改写一行 jsonl，含完整会话与全过程记录——
+//   messages：system + user 完整输入；attempts：每档 max_tokens 尝试的完整思考原文（reasoning_content 全文）、
+//   完整输出、finish_reason、usage 与各阶段耗时（首 token / 思考 / 输出），供事后分析每次生成的优化空间。
+// 路径：userData/html-agent/chat.jsonl（记录失败静默忽略，不影响主流程）
+function logConversation(entry) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'html-agent');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'chat.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+  } catch (e) { /* ignore */ }
+}
+
 // 调用自定义模型（OpenAI 兼容协议），流式接收并通过 opts.onProgress 上报阶段
 // onProgress({ stage:'connecting'|'thinking'|'writing'|'retry'|'done', thinkChars, contentChars })
+// opts.meta：{ project, action } 附加到对话记录行
 // content 为空且 finish_reason=length 时自动升档重试；升档后仍无内容则抛出带 usage 的诊断错误
 async function chatWithCustomModel(userPrompt, opts) {
   const m = settings.getCustomModel();
   if (!m.enabled) throw new Error('自定义模型未启用：请先到「设置」开启并配置 Base URL / Model ID / API Key');
   if (!m.baseUrl || !m.modelId || !m.apiKey) throw new Error('自定义模型配置不完整：Base URL / Model ID / API Key 均需填写');
+  const meta = (opts && opts.meta) || {};
   const messages = [
     { role: 'system', content: HTML_AGENT_SYSTEM },
     { role: 'user', content: userPrompt }
   ];
+  const attempts = []; // 每档 max_tokens 尝试的完整记录，随流式过程逐次填充
+  const logEntry = (extra) => Object.assign({
+    ts: new Date().toISOString(),
+    project: meta.project || '',
+    action: meta.action || '',
+    model: m.modelId,
+    baseUrl: m.baseUrl,
+    messages,
+    attempts
+  }, extra);
   const tries = (opts && opts.maxTokenTries) || MAX_TOKEN_TRIES;
   const onProgress = (opts && opts.onProgress) || null;
-  let finishReason = '';
-  let usage = null;
   for (const maxTokens of tries) {
     let content = '';
     let thinkText = '';
+    let finishReason = '';
+    let usage = null;
+    let attemptErr = null;
     let lastStage = '';
     let lastEmitAt = 0;
+    const reqStart = Date.now();
+    let firstTokenAt = 0;
+    let firstThinkAt = 0;
+    let firstWriteAt = 0;
+    // 记录首 token / 首思考 / 首输出时间点，供阶段耗时分析
+    const noteToken = (kind) => {
+      const now = Date.now();
+      if (!firstTokenAt) firstTokenAt = now;
+      if (kind === 'think' && !firstThinkAt) firstThinkAt = now;
+      if (kind === 'write' && !firstWriteAt) firstWriteAt = now;
+    };
     const emit = (stage, force) => {
       const now = Date.now();
       if (!force && now - lastEmitAt < 300) return;
@@ -64,7 +103,8 @@ async function chatWithCustomModel(userPrompt, opts) {
       if (OpenAI) {
         const client = new OpenAI({ apiKey: m.apiKey, baseURL: m.baseUrl });
         const stream = await client.chat.completions.create({
-          model: m.modelId, messages, max_tokens: maxTokens, stream: true
+          model: m.modelId, messages, max_tokens: maxTokens, stream: true,
+          stream_options: { include_usage: true } // 末块回传 usage（prompt/completion/reasoning tokens），供分析
         });
         for await (const chunk of stream) {
           if (chunk && chunk.usage) usage = chunk.usage;
@@ -73,11 +113,13 @@ async function chatWithCustomModel(userPrompt, opts) {
           const d = (ch && ch.delta) || {};
           if (d.reasoning_content) {
             thinkText += String(d.reasoning_content);
+            noteToken('think');
             if (lastStage !== 'thinking') { lastStage = 'thinking'; emit('thinking', true); }
             else emit('thinking');
           }
           if (d.content) {
             content += d.content;
+            noteToken('write');
             if (lastStage !== 'writing') { lastStage = 'writing'; emit('writing', true); }
             else emit('writing');
           }
@@ -88,7 +130,7 @@ async function chatWithCustomModel(userPrompt, opts) {
         const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + m.apiKey },
-          body: JSON.stringify({ model: m.modelId, messages, max_tokens: maxTokens, stream: true })
+          body: JSON.stringify({ model: m.modelId, messages, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true } })
         });
         if (!resp.ok) {
           const errData = await resp.json().catch(() => ({}));
@@ -116,11 +158,13 @@ async function chatWithCustomModel(userPrompt, opts) {
             const d = (ch && ch.delta) || {};
             if (d.reasoning_content) {
               thinkText += String(d.reasoning_content);
+              noteToken('think');
               if (lastStage !== 'thinking') { lastStage = 'thinking'; emit('thinking', true); }
               else emit('thinking');
             }
             if (d.content) {
               content += d.content;
+              noteToken('write');
               if (lastStage !== 'writing') { lastStage = 'writing'; emit('writing', true); }
               else emit('writing');
             }
@@ -128,10 +172,32 @@ async function chatWithCustomModel(userPrompt, opts) {
         }
       }
     } catch (e) {
-      throw new Error(String(e && e.message ? e.message : e));
+      attemptErr = String(e && e.message ? e.message : e);
+    }
+    attempts.push({
+      maxTokens,
+      startTs: new Date(reqStart).toISOString(),
+      thinkText,          // 完整思考原文（reasoning_content 全文，供分析推理质量）
+      thinkChars: thinkText.length,
+      content,            // 本次尝试完整输出（成功时即最终 HTML 源码）
+      contentChars: content.length,
+      finishReason,
+      usage: usage || null,
+      error: attemptErr,
+      timing: {
+        totalMs: Date.now() - reqStart,
+        firstTokenMs: firstTokenAt ? firstTokenAt - reqStart : null, // 首 token 等待时长
+        thinkMs: firstThinkAt ? ((firstWriteAt || Date.now()) - firstThinkAt) : 0, // 纯思考时长
+        writeMs: firstWriteAt ? Date.now() - firstWriteAt : 0 // 输出时长
+      }
+    });
+    if (attemptErr) {
+      logConversation(logEntry({ ok: false, reply: '', error: attemptErr }));
+      throw new Error(attemptErr);
     }
     if (content.trim()) {
       emit('done', true);
+      logConversation(logEntry({ ok: true, reply: content, error: null }));
       return content;
     }
     // content 为空：若因 max_tokens 截断（配额耗在 reasoning）则升档重试，否则也再试一档兜底
@@ -141,13 +207,15 @@ async function chatWithCustomModel(userPrompt, opts) {
     }
     break;
   }
-  const usageInfo = usage ? '（usage: ' + JSON.stringify(usage) + '）' : '';
-  throw new Error(
-    '模型未返回内容' +
-      (finishReason === 'length'
-        ? '：max_tokens 已用完但未产出 HTML，可能是推理模型将配额耗在思考阶段，已自动升档重试仍失败' + usageInfo
-        : '：模型响应为空' + usageInfo)
-  );
+  const last = attempts.length ? attempts[attempts.length - 1] : null;
+  const lastFinish = last ? last.finishReason : '';
+  const usageInfo = last && last.usage ? '（usage: ' + JSON.stringify(last.usage) + '）' : '';
+  const errMsg = '模型未返回内容' +
+    (lastFinish === 'length'
+      ? '：max_tokens 已用完但未产出 HTML，可能是推理模型将配额耗在思考阶段，已自动升档重试仍失败' + usageInfo
+      : '：模型响应为空' + usageInfo);
+  logConversation(logEntry({ ok: false, reply: '', error: errMsg }));
+  throw new Error(errMsg);
 }
 
 module.exports = {

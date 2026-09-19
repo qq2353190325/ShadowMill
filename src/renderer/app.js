@@ -94,6 +94,7 @@
       htmlPath: loaded.htmlPath || '',
       videoPath: loaded.videoPath || '',
       audioFile: loaded.audioFile || '',
+      videoMaterial: loaded.videoMaterial || '',
       htmlExists: !!(entry && entry.hasHtml),
       videoExists: !!(entry && entry.hasVideo),
       subtitleCount: loaded.subtitleCount || 0,
@@ -137,29 +138,84 @@
     const subDone = hasSubtitle();
     const htmlDone = hasHtml();
     const videoDone = hasVideo();
-    const nameShown = AppState.isBuiltin ? ('内置 · ' + p.name) : p.name;
-    let html = '<span class="proj-name ' + (AppState.isBuiltin ? '' : 'placeholder') + '" title="点击打开项目（HTML 预览 / 视频生成）">' + escTxt(nameShown) + '</span>';
+    let html = '<span class="sel-label" style="font-size:12px;color:var(--text-secondary);letter-spacing:1px;flex:none">工作项目</span>';
+    html += '<select id="proj-select" class="hf-select" style="width:210px;flex:none" title="切换工作项目（我的项目 / 内置示例只读）"></select>';
+    html += '<input id="proj-new-name" class="hgen-input" placeholder="新项目名" style="display:none;flex:none;width:140px"/>';
+    html += '<button class="hf-btn" id="proj-new" title="新建我的项目" style="padding:4px 10px;font-size:12px;flex:none">新建项目</button>';
+    html += '<button class="hf-btn" id="proj-open" title="打开当前项目所在目录" style="padding:4px 10px;font-size:12px;flex:none">打开目录</button>';
     html += '<div class="step-chain">';
     html += '<span class="step-node clickable ' + (isPage('content') ? 'active-now' : '') + ' ' + (contentDone ? 'done' : '') + '" data-goto="content"><span class="step-dot"></span>内容脚本</span>';
     html += '<span class="step-arrow">→</span>';
-    html += '<span class="step-node clickable ' + (isPage('text-tts') ? 'active-now' : '') + ' ' + (audioDone ? 'done' : '') + '" data-goto="text-tts"><span class="step-dot"></span>配音</span>';
+    html += '<span class="step-node clickable ' + ((isPage('text-tts') || isPage('sound-copy')) ? 'active-now' : '') + ' ' + (audioDone ? 'done' : '') + '" data-goto="text-tts"><span class="step-dot"></span>配音</span>'; // sound-copy（音色管理）为配音附属页，高亮同一节点
     html += '<span class="step-arrow">→</span>';
     html += '<span class="step-node clickable ' + (isPage('subtitle') ? 'active-now' : '') + ' ' + (subDone ? 'done' : '') + '" data-goto="subtitle"><span class="step-dot"></span>字幕</span>';
     html += '<span class="step-arrow">→</span>';
-    html += '<span class="step-node clickable ' + (isPage('html-gen') || isPage('html-preview') ? 'active-now' : '') + ' ' + (htmlDone ? 'done' : '') + '" data-goto="html-preview"><span class="step-dot"></span>HTML</span>';
+    html += '<span class="step-node clickable ' + (isPage('html-gen') ? 'active-now' : '') + ' ' + (htmlDone ? 'done' : '') + '" data-goto="html-gen"><span class="step-dot"></span>HTML</span>';
     html += '<span class="step-arrow">→</span>';
     html += '<span class="step-node clickable ' + (isPage('video-gen') ? 'active-now' : '') + ' ' + (videoDone ? 'done' : '') + '" data-goto="video-gen"><span class="step-dot"></span>视频</span>';
     html += '</div>';
-    if (!AppState.isBuiltin) {
-      html += '<button class="hf-btn" data-goto="html-gen" style="padding:6px 14px;font-size:12px">转到 HTML 生成</button>';
-    }
     bar.innerHTML = html;
     bar.querySelectorAll('[data-goto]').forEach((n) => n.addEventListener('click', () => goPage(n.dataset.goto)));
-    // 项目名点击入口：当前项目（含内置）均可点击，直达「HTML 预览」页进行预览 / 转视频
-    const nameEl = bar.querySelector('.proj-name');
-    if (nameEl) {
-      nameEl.addEventListener('click', () => goPage((page === 'html-preview' || page === 'video-gen') ? page : 'html-preview'));
-    }
+
+    // —— 工作项目切换器（所有节点页共用的全局入口）：填充 / 切换 / 新建 / 打开目录 ——
+    const sel = bar.querySelector('#proj-select');
+    const my = document.createElement('optgroup');
+    my.label = '我的项目';
+    AppState.myProjects.forEach((mp) => {
+      const o = document.createElement('option');
+      o.value = 'my:' + mp.name;
+      o.textContent = mp.name + (mp.hasHtml ? ' · HTML✓' : '') + (mp.hasVideo ? ' · 视频✓' : '');
+      my.appendChild(o);
+    });
+    sel.appendChild(my);
+    const bi = document.createElement('optgroup');
+    bi.label = '内置示例';
+    AppState.builtinProjects.forEach((b) => {
+      const o = document.createElement('option');
+      o.value = 'builtin:' + b.name;
+      o.textContent = b.name + ' · 内置';
+      bi.appendChild(o);
+    });
+    sel.appendChild(bi);
+    sel.value = (AppState.isBuiltin ? 'builtin:' : 'my:') + AppState.currentName;
+    sel.addEventListener('change', async () => {
+      const v = sel.value;
+      if (!v) return;
+      const isBuiltin = v.startsWith('builtin:');
+      const name = v.slice(isBuiltin ? 8 : 3);
+      await switchProject(name, isBuiltin);
+      await goPage(page); // 切换后重进当前页，刷新全部状态
+    });
+
+    const newBtn = bar.querySelector('#proj-new');
+    const newName = bar.querySelector('#proj-new-name');
+    const createProject = async () => {
+      const nm = newName.value.trim();
+      if (!nm) { toast('请输入项目名'); newName.focus(); return; }
+      const res = await window.projectTools.create(nm);
+      if (!res || !res.ok) { toast((res && res.message) || '创建失败'); return; }
+      newName.value = '';
+      newName.style.display = 'none';
+      await refreshProject();
+      await switchProject(nm, false);
+      await goPage(page);
+      toast('已创建并切换到项目「' + nm + '」');
+    };
+    newBtn.addEventListener('click', () => {
+      const show = newName.style.display === 'none';
+      newName.style.display = show ? '' : 'none';
+      if (show) newName.focus();
+    });
+    newName.addEventListener('keydown', (e) => { if (e.key === 'Enter') createProject(); });
+
+    bar.querySelector('#proj-open').addEventListener('click', () => {
+      if (AppState.isBuiltin) {
+        if (p.htmlPath) window.projectTools.openFolderOf(p.htmlPath);
+        else toast('内置示例项目为只读；可在「工作项目」切换到「我的项目」');
+        return;
+      }
+      window.projectTools.openFolder(AppState.currentName);
+    });
   }
 
   // ===== 页面路由 =====

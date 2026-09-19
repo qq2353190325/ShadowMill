@@ -1,5 +1,5 @@
 // src/main/voice.js
-// 千问语音：声音复制 + 文字生音频（Qwen-TTS / Qwen-Audio-TTS 双系列 HTTP 方案）
+// 千问语音：音色管理 + 文字生音频（Qwen-TTS / Qwen-Audio-TTS 双系列 HTTP 方案）
 // 提供：isAudioTtsModel / getVoiceApiError / parseJsonLike / voiceFriendlyError /
 //       nowStamp / guessAudioExt / resolveTtsDir + 全部 voice:* IPC
 // 依赖：settings(getVoiceConfig / readSettings / writeSettings / DEFAULT_SETTINGS) /
@@ -131,6 +131,50 @@ async function fetchClonedVoices() {
   }
 }
 
+// 单次文字合成（不落盘）：Qwen-Audio-TTS 直写音频流 / Qwen-TTS 取 output.audio.url 下载
+// 返回 { buf, ext }；失败抛错（由调用方 voiceFriendlyError 包装）。供 voice:synth 与 ttsAlign 逐句合成共用
+async function synthOne(text, voice, useModel) {
+  const cfg = getVoiceConfig();
+  const noKey = getVoiceApiError(cfg);
+  if (noKey) throw new Error(noKey);
+  const isAudio = isAudioTtsModel(useModel);
+  const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey };
+  if (isAudio) {
+    // Qwen-Audio-TTS 系列：POST /services/audio/tts/SpeechSynthesizer，响应体直接为音频流
+    const resp = await fetch(VOICE_API_BASE + '/services/audio/tts/SpeechSynthesizer', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        model: useModel,
+        input: { text: text, voice: voice, format: 'mp3', sample_rate: 24000 }
+      })
+    });
+    if (!resp.ok) {
+      const json = parseJsonLike(await resp.text());
+      const extra = (json && json.code ? '[' + json.code + '] ' : '') + ((json && json.message) ? json.message : '');
+      throw new Error('HTTP ' + resp.status + (extra ? '：' + extra : ''));
+    }
+    return { buf: Buffer.from(await resp.arrayBuffer()), ext: 'mp3' };
+  }
+  // Qwen-TTS 系列：generation 接口取 output.audio.url 再下载
+  const resp = await fetch(VOICE_API_BASE + '/services/aigc/multimodal-generation/generation', {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify({ model: useModel, input: { text: text, voice: voice } })
+  });
+  const raw = await resp.text();
+  const json = parseJsonLike(raw);
+  if (!resp.ok) {
+    throw new Error('HTTP ' + resp.status + ((json && json.message) ? '：' + json.message : ''));
+  }
+  const audio = (json && json.output && json.output.audio) || {};
+  const audioUrl = audio.url;
+  if (!audioUrl) throw new Error('接口未返回音频地址（output.audio.url）');
+  const audioResp = await fetch(audioUrl);
+  if (!audioResp.ok) throw new Error('下载音频失败：HTTP ' + audioResp.status);
+  return { buf: Buffer.from(await audioResp.arrayBuffer()), ext: guessAudioExt(audioUrl) };
+}
+
 function register(ctx) {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
 
@@ -139,23 +183,30 @@ function register(ctx) {
     return { ok: true, apiKey: c.apiKey, targetModel: c.targetModel, saveDir: String(c.saveDir || '') };
   });
 
-  // 返回当前生效的 TTS 保存目录绝对路径（配音页「打开目录」按钮用，无需合成）
-  // custom（已设置自定义 saveDir）→ 返回该目录；default → 返回默认音频输出目录
-  ipcMain.handle('voice:get-save-dir', () => {
-    const c = getVoiceConfig();
-    const saveDir = String(c.saveDir || '').trim();
-    if (saveDir) return { ok: true, mode: 'custom', saveDir: saveDir };
-    return { ok: true, mode: 'default', saveDir: path.join(app.getPath('userData'), 'tts-output') };
+  // 返回当前选择的 TTS 保存目录绝对路径（配音页「打开目录」按钮用，无需合成）
+  // 与 voice:synth 相同优先级解析：自定义目录 > 音频输出目录 > 所选项目 audio/ > 兜底
+  ipcMain.handle('voice:get-save-dir', (event, payload) => {
+    const saveDir = String((payload && payload.saveDir) || '').trim();
+    const defaultOut = !!(payload && payload.defaultOut);
+    const projectName = String((payload && payload.projectName) || '').trim();
+    const dir = defaultOut
+      ? path.join(app.getPath('userData'), 'tts-output')
+      : resolveTtsDir(projectName, saveDir);
+    try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { /* 目录不可用时由打开动作报错 */ }
+    const mode = defaultOut ? 'output' : saveDir ? 'custom' : projectName ? 'project' : 'default';
+    return { ok: true, mode: mode, saveDir: dir };
   });
 
   ipcMain.handle('voice:save-config', (event, payload) => {
     const raw = settings.readSettings();
     const incoming = (payload && payload.voiceTTS) || payload || {};
-    const t = typeof incoming.targetModel === 'string' ? incoming.targetModel : 'qwen-audio-3.0-tts-flash';
+    // 与既有配置合并：未传入的字段保留原值（避免「只存 saveDir」时误清空 API Key，也避免设置页保存时覆盖 saveDir）
+    const prev = raw.voiceTTS || {};
+    const t = typeof incoming.targetModel === 'string' ? incoming.targetModel : String(prev.targetModel || '');
     raw.voiceTTS = {
-      apiKey: typeof incoming.apiKey === 'string' ? incoming.apiKey.trim() : '',
+      apiKey: typeof incoming.apiKey === 'string' ? incoming.apiKey.trim() : String(prev.apiKey || ''),
       targetModel: VOICE_TTS_MODELS.includes(t) ? t : 'qwen-audio-3.0-tts-flash',
-      saveDir: typeof incoming.saveDir === 'string' ? incoming.saveDir.trim() : ''
+      saveDir: typeof incoming.saveDir === 'string' ? incoming.saveDir.trim() : String(prev.saveDir || '')
     };
     settings.writeSettings(raw);
     return { ok: true, settings: raw };
@@ -392,52 +443,18 @@ function register(ctx) {
     try {
       // 合成使用的模型：优先取「当前音色绑定/选定的模型」，无则回落全局默认（与克隆创建时的 target_model 保持一致）
       const useModel = String((payload && payload.targetModel) || '').trim() || cfg.targetModel;
-      const isAudio = isAudioTtsModel(useModel);
-      let buf;
-      let ext;
-      const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey };
-      if (isAudio) {
-        // Qwen-Audio-TTS 系列：POST /services/audio/tts/SpeechSynthesizer，响应体直接为音频流
-        const resp = await fetch(VOICE_API_BASE + '/services/audio/tts/SpeechSynthesizer', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({
-            model: useModel,
-            input: { text: text, voice: voice, format: 'mp3', sample_rate: 24000 }
-          })
-        });
-        if (!resp.ok) {
-          const json = parseJsonLike(await resp.text());
-          const extra = (json && json.code ? '[' + json.code + '] ' : '') + ((json && json.message) ? json.message : '');
-          throw new Error('HTTP ' + resp.status + (extra ? '：' + extra : ''));
-        }
-        buf = Buffer.from(await resp.arrayBuffer());
-        ext = 'mp3';
-      } else {
-        // Qwen-TTS 系列：generation 接口取 output.audio.url 再下载
-        const resp = await fetch(VOICE_API_BASE + '/services/aigc/multimodal-generation/generation', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ model: useModel, input: { text: text, voice: voice } })
-        });
-        const raw = await resp.text();
-        const json = parseJsonLike(raw);
-        if (!resp.ok) {
-          throw new Error('HTTP ' + resp.status + ((json && json.message) ? '：' + json.message : ''));
-        }
-        const audio = (json && json.output && json.output.audio) || {};
-        const audioUrl = audio.url;
-        if (!audioUrl) throw new Error('接口未返回音频地址（output.audio.url）');
-        const audioResp = await fetch(audioUrl);
-        if (!audioResp.ok) throw new Error('下载音频失败：HTTP ' + audioResp.status);
-        buf = Buffer.from(await audioResp.arrayBuffer());
-        ext = guessAudioExt(audioUrl);
-      }
+      const { buf, ext } = await synthOne(text, voice, useModel);
 
       const projectName = String((payload && payload.projectName) || '').trim();
-      // 保存位置：payload.saveDir 透传优先，缺省回落已持久化的自定义 saveDir；为空则走默认三级降级
-      const dirOverride = String((payload && payload.saveDir) || '').trim() || String(cfg.saveDir || '').trim();
-      const destDir = resolveTtsDir(projectName, dirOverride);
+      const saveDir = String((payload && payload.saveDir) || '').trim();
+      const defaultOut = !!(payload && payload.defaultOut);
+      // 保存位置三选一（前端显式传入，不再回落持久化 saveDir，避免「保存到项目」被静默忽略）：
+      // 自定义目录 > 音频输出目录 > 所选项目 audio/
+      const destDir = saveDir
+        ? resolveTtsDir('', saveDir)
+        : defaultOut
+          ? path.join(app.getPath('userData'), 'tts-output')
+          : resolveTtsDir(projectName, '');
       fs.mkdirSync(destDir, { recursive: true });
       // 文件名：自定义 audioName（可选）优先；缺省用「时间_前五个字_音色id」
       const NAME_BAD = /[\\/:*?"<>|]/g;
@@ -455,10 +472,12 @@ function register(ctx) {
       const savePath = path.join(destDir, saveName);
       fs.writeFileSync(savePath, buf);
 
-      // 仅当落盘到项目 audio/（未用自定义目录且显式指定项目）时，回写 project.json 的 ttsAudio（与背景音频 audioFile 语义区分）
+      // 落盘位置回执：仅实际写入项目 audio/ 时才回写 project.json 并返回项目名，
+      // 存到自定义目录 / 音频输出目录时不再冒充「已保存到项目」
+      let savedTo = saveDir ? 'custom' : defaultOut ? 'output' : 'default';
       let targetName = projectName || '';
       const projectsRoot = projects.projectsRoot;
-      if (!dirOverride && projectName) {
+      if (!saveDir && !defaultOut && projectName) {
         const projDir = path.join(projectsRoot, projectName);
         const pf = path.join(projDir, 'project.json');
         if (fs.existsSync(pf)) {
@@ -468,12 +487,14 @@ function register(ctx) {
             fs.writeFileSync(pf, JSON.stringify(proj, null, 2), 'utf8');
           } catch (e) { /* 不阻断主流程 */ }
         }
-      } else if (!dirOverride) {
+        savedTo = 'project';
+      } else if (!saveDir && !defaultOut) {
         const projs = projects.scanProjects();
-        if (projs && projs.length) targetName = projs[0].name;
+        if (projs && projs.length) { targetName = projs[0].name; savedTo = 'project'; }
+        else savedTo = 'output';
       }
 
-      return { ok: true, savePath: savePath, projectName: targetName, size: buf.length };
+      return { ok: true, savePath: savePath, projectName: targetName, savedTo: savedTo, size: buf.length };
     } catch (e) {
       return { ok: false, message: voiceFriendlyError(e, '合成语音失败') };
     }
@@ -481,6 +502,7 @@ function register(ctx) {
 }
 
 module.exports = {
+  synthOne,
   register,
   isAudioTtsModel,
   getVoiceApiError,

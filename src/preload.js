@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }
 });
 
+// 应用级小工具：剪贴板复制（sandbox 下渲染层无 clipboard 模块，经主进程写入）
+contextBridge.exposeInMainWorld('appTools', {
+  copyText: (text) => ipcRenderer.invoke('app:copy-text', text)
+});
+
 // 自绘标题栏：窗口控制 API
 contextBridge.exposeInMainWorld('windowControls', {
   minimize: () => ipcRenderer.send('window:minimize'),
@@ -20,7 +25,7 @@ contextBridge.exposeInMainWorld('windowControls', {
   }
 });
 
-// HTML 预览 & HyperFrames 转视频 API
+// 预览 & HyperFrames 转视频 API
 contextBridge.exposeInMainWorld('hfTools', {
   openHtml: () => ipcRenderer.invoke('dialog:open-html'),
   listProjects: () => ipcRenderer.invoke('video:list-projects'),
@@ -39,10 +44,10 @@ contextBridge.exposeInMainWorld('settingsTools', {
   test: (customModel) => ipcRenderer.invoke('settings:test', { customModel })
 });
 
-// 千问语音：声音复制 + 文字生音频（Qwen-TTS 非实时 HTTP 方案）
+// 千问语音：音色管理 + 文字生音频（Qwen-TTS 非实时 HTTP 方案）
 contextBridge.exposeInMainWorld('voiceTools', {
   getConfig: () => ipcRenderer.invoke('voice:get-config'),
-  getSaveDir: () => ipcRenderer.invoke('voice:get-save-dir'),
+  getSaveDir: (payload) => ipcRenderer.invoke('voice:get-save-dir', payload),
   saveConfig: (voiceTTS) => ipcRenderer.invoke('voice:save-config', { voiceTTS }),
   pickAudio: () => ipcRenderer.invoke('voice:pick-audio'),
   pickDir: () => ipcRenderer.invoke('voice:pick-dir'),
@@ -55,7 +60,18 @@ contextBridge.exposeInMainWorld('voiceTools', {
   getProfiles: () => ipcRenderer.invoke('voice:get-profiles'),
   saveProfile: (profile) => ipcRenderer.invoke('voice:save-profile', { profile }),
   deleteProfile: (key) => ipcRenderer.invoke('voice:delete-profile', { key }),
-  synth: (text, voice, projectName, saveDir, targetModel, audioName) => ipcRenderer.invoke('voice:synth', { text, voice, projectName, saveDir, targetModel, audioName })
+  synth: (text, voice, projectName, saveDir, targetModel, audioName, defaultOut) => ipcRenderer.invoke('voice:synth', { text, voice, projectName, saveDir, targetModel, audioName, defaultOut }),
+  // 字幕配音（逐句对齐）：逐句合成 + 对齐/重排；进度经 voice:align-progress 回推
+  synthAligned: (payload) => ipcRenderer.invoke('voice:synth-aligned', payload),
+  cancelAlign: () => ipcRenderer.send('voice:align-cancel'),
+  // 单订阅：重复注册仅替换回调，避免页面切换叠加监听
+  onAlignProgress: (callback) => {
+    _alignProgressCb = callback;
+    if (!_alignProgressBound) {
+      _alignProgressBound = true;
+      ipcRenderer.on('voice:align-progress', (_event, data) => { if (typeof _alignProgressCb === 'function') _alignProgressCb(data); });
+    }
+  }
 });
 
 // whisper.cpp 字幕转录：模型状态/下载/删除/设为当前 + 自定义模型增删改 + 项目音频 + 音频选择 + 转录（进度经 whisper:progress 回推）
@@ -92,11 +108,15 @@ contextBridge.exposeInMainWorld('projectTools', {
   modifyHtml: (name, prompt, materials) => ipcRenderer.invoke('project:modify-html', { name, prompt, ...(materials || {}) }),
   downloadHtml: (name) => ipcRenderer.invoke('project:download-html', name),
   downloadFile: (srcPath, defaultName) => ipcRenderer.invoke('project:download-file', { srcPath, defaultName }),
+  exportSrt: (name, srt) => ipcRenderer.invoke('project:export-srt', { name, srt }),
   readHtml: (name) => ipcRenderer.invoke('project:read-html', name),
   saveHtml: (name, html) => ipcRenderer.invoke('project:save-html', { name, html }),
   pickAudio: () => ipcRenderer.invoke('project:pick-audio'),
   setAudio: (name, audioPath) => ipcRenderer.invoke('project:set-audio', { name, audioPath }),
   clearAudio: (name) => ipcRenderer.invoke('project:clear-audio', { name }),
+  pickVideo: () => ipcRenderer.invoke('project:pick-video'),
+  setVideo: (name, videoPath) => ipcRenderer.invoke('project:set-video', { name, videoPath }),
+  clearVideo: (name) => ipcRenderer.invoke('project:clear-video', { name }),
   openFolder: (name) => ipcRenderer.invoke('project:open-folder', name),
   openFolderOf: (dirOrFile) => ipcRenderer.invoke('project:open-folder-of', dirOrFile),
   delete: (name) => ipcRenderer.invoke('project:delete', name),
@@ -114,3 +134,5 @@ let _htmlProgressCb = null;
 let _htmlProgressBound = false;
 let _whisperProgressCb = null;
 let _whisperProgressBound = false;
+let _alignProgressCb = null;
+let _alignProgressBound = false;

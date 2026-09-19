@@ -18,6 +18,9 @@
     "appId": "com.marvis.avpipeline",
     "productName": "MarvisStudio",
     "electronVersion": "31.7.7",
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
     "directories": {
       "output": "dist"
     },
@@ -32,6 +35,7 @@
       "README.md",
       "!node_modules/**/*",
       "node_modules/openai/**/*",
+      "node_modules/opencc-js/**/*",
       "!*.js.map"
     ],
     "asar": true,
@@ -56,14 +60,11 @@
       {
         "from": "resources",
         "to": "."
-      },
-      {
-        "from": "resources/whisper",
-        "to": "whisper"
       }
     ]
   },
   "dependencies": {
-    "openai": "^7.15.0"
+    "openai": "^7.15.0",
+    "opencc-js": "^1.4.2"
   }
 }

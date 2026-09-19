@@ -1,45 +1,19 @@
-// renderer/pages/video.js —— HTML 预览 / 视频生成（两页共用预览与转视频逻辑）
+// renderer/pages/video.js —— 视频生成页（预览 + HyperFrames 转视频；原「HTML 预览」页已并入）
 (function () {
   'use strict';
 
-  const { AppState, goPage, refreshProject, renderStepBar, switchProject, toast } = window.App;
+  const { AppState, refreshProject, renderStepBar, toast } = window.App;
   const content = document.getElementById('content');
 
   // 当前预览的 HTML 路径与最近渲染出的视频（页面级共享状态）
   let hfHtmlPath = null;
   let lastVideoPath = null;
 
-  function fillProjSelect(sel) {
-    sel.innerHTML = '';
-    const my = document.createElement('optgroup');
-    my.label = '我的项目';
-    AppState.myProjects.forEach((p) => {
-      const o = document.createElement('option');
-      o.value = 'my:' + p.name;
-      o.textContent = p.name + (p.hasHtml ? ' · HTML✓' : '') + (p.hasVideo ? ' · 视频✓' : '');
-      my.appendChild(o);
-    });
-    sel.appendChild(my);
-    const bi = document.createElement('optgroup');
-    bi.label = '内置示例';
-    AppState.builtinProjects.forEach((b) => {
-      const o = document.createElement('option');
-      o.value = 'builtin:' + b.name;
-      o.textContent = b.name + ' · 内置';
-      bi.appendChild(o);
-    });
-    sel.appendChild(bi);
-    sel.value = (AppState.isBuiltin ? 'builtin:' : 'my:') + AppState.currentName;
-  }
-
   function initHfPage(page) {
     renderStepBar(page);
     const el = content.querySelector('.hf-page');
     if (!el) return;
-    // 修复：项目选择器（#proj-select / #proj-file / #btn-openfolder）位于 .project-selector 中，
-    // 它是 .card.hf-page 的兄弟节点而非子节点，必须从 content 作用域查询；否则为 null 会中断本页初始化。
     const fileEl = el.querySelector('#hf-file');
-    const projFileEl = content.querySelector('#proj-file');
     const statusEl = el.querySelector('#hf-status');
     const btnOpen = el.querySelector('[data-hf="open"]');
     const btnRender = el.querySelector('[data-hf="render"]');
@@ -48,15 +22,12 @@
     const videoWrap = el.querySelector('#hf-video-wrap');
     const videoEl = el.querySelector('#hf-video');
     const btnShowFolder = el.querySelector('[data-hf="show-folder"]');
-    const sel = content.querySelector('#proj-select');
-    const btnOpenFolder = content.querySelector('#btn-openfolder');
     hfHtmlPath = null;
     lastVideoPath = null;
 
     statusEl.textContent = '';
     statusEl.classList.remove('hf-error', 'hf-ok');
     fileEl.textContent = '未选择文件';
-    if (projFileEl) projFileEl.textContent = AppState.project.name || '未选择';
     btnRender.disabled = true;
     if (btnRefresh) btnRefresh.disabled = true;
     if (videoWrap && videoEl) {
@@ -88,63 +59,6 @@
       btnRender.disabled = false;
       if (btnRefresh) btnRefresh.disabled = false;
     };
-
-    // 项目选择
-    if (sel) {
-      fillProjSelect(sel);
-      sel.addEventListener('change', async () => {
-        const v = sel.value;
-        if (!v) return;
-        const isBuiltin = v.startsWith('builtin:');
-        const name = v.slice(isBuiltin ? 8 : 3);
-        await switchProject(name, isBuiltin);
-        await goPage(page);
-      });
-    }
-    // 新建我的项目（页面模板含 #proj-new / #proj-new-name，统一绑定）
-    const projNewBtns = content.querySelectorAll('#proj-new');
-    const projNewNames = content.querySelectorAll('#proj-new-name');
-    const doCreateProject = async (btn) => {
-      const idx = Array.prototype.indexOf.call(projNewBtns, btn);
-      const nameEl = projNewNames[idx];
-      if (!nameEl) return;
-      const nm = nameEl.value.trim();
-      if (!nm) { toast('请输入项目名'); nameEl.focus(); return; }
-      const res = await window.projectTools.create(nm);
-      if (!res || !res.ok) { toast((res && res.message) || '创建失败'); return; }
-      nameEl.value = '';
-      nameEl.style.display = 'none';
-      await refreshProject();
-      await switchProject(nm, false);
-      await goPage(page);
-      toast('已创建并切换到项目「' + nm + '」');
-    };
-    projNewBtns.forEach((btn, i) => {
-      btn.addEventListener('click', () => {
-        const nameEl = projNewNames[i];
-        if (!nameEl) return;
-        const show = nameEl.style.display === 'none';
-        nameEl.style.display = show ? '' : 'none';
-        if (show) nameEl.focus();
-      });
-    });
-    projNewNames.forEach((nameEl, i) => {
-      nameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doCreateProject(projNewBtns[i]); });
-    });
-    if (btnOpenFolder) {
-      btnOpenFolder.disabled = false;
-      btnOpenFolder.addEventListener('click', () => {
-        if (AppState.isBuiltin) {
-          if (AppState.project.htmlPath) {
-            window.projectTools.openFolderOf(AppState.project.htmlPath);
-          } else {
-            toast('内置示例项目为只读；可在「HTML 生成」页切换到「我的项目」');
-          }
-          return;
-        }
-        window.projectTools.openFolder(AppState.currentName);
-      });
-    }
 
     // 联动“已生成”状态：未生成 HTML 时给出引导提示，但仍保留手动预览能力
     if (!AppState.project.htmlExists) {
@@ -203,41 +117,9 @@
     });
   }
 
-  // ===== HTML 预览页模板 =====
-  App.pages['html-preview'] = {
-    html: `<div class="project-bar" data-slot></div>
-<div class="project-selector">
-  <span class="sel-label">工作项目</span>
-  <select id="proj-select" class="hf-select"></select>
-  <input id="proj-new-name" class="hgen-input" placeholder="新项目名" style="display:none;flex:none;width:140px"/>
-  <button class="hf-btn" id="proj-new" title="新建我的项目">新建项目</button>
-  <span class="hf-file" id="proj-file">未选择</span>
-  <button class="hf-btn" id="btn-openfolder" disabled>打开目录</button>
-</div>
-<div class="card hf-page" style="margin-top:16px">
-  <div class="hf-toolbar">
-    <button class="hf-btn" data-hf="open">选择 HTML 文件</button>
-    <span class="hf-file" id="hf-file">未选择文件</span>
-    <button class="hf-btn" data-hf="refresh" disabled>刷新</button>
-    <button class="hf-btn hf-btn-primary" data-hf="render" disabled>转为视频</button>
-  </div>
-  <div class="hf-status" id="hf-status"></div>
-  <iframe class="hf-frame" id="hf-frame" sandbox="allow-scripts allow-same-origin"></iframe>
-</div>`,
-    init: function () { initHfPage('html-preview'); }
-  };
-
-  // ===== 视频生成页模板 =====
+  // ===== 视频生成页模板（含 HTML 预览 + 转视频；原「HTML 预览」页已并入本页） =====
   App.pages['video-gen'] = {
     html: `<div class="project-bar" data-slot></div>
-<div class="project-selector">
-  <span class="sel-label">工作项目</span>
-  <select id="proj-select" class="hf-select"></select>
-  <input id="proj-new-name" class="hgen-input" placeholder="新项目名" style="display:none;flex:none;width:140px"/>
-  <button class="hf-btn" id="proj-new" title="新建我的项目">新建项目</button>
-  <span class="hf-file" id="proj-file">未选择</span>
-  <button class="hf-btn" id="btn-openfolder" disabled>打开目录</button>
-</div>
 <div class="card hf-page" style="margin-top:16px">
   <div class="hf-toolbar">
     <button class="hf-btn" data-hf="open">选择 HTML 文件</button>

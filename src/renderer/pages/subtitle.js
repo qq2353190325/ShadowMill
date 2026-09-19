@@ -124,6 +124,131 @@
     updateCount();
   }
 
+  // ===== 写入方式：逐条编辑（条目列表）/ SRT（单文本域，SRT 字幕格式） =====
+  let textMode = false;
+
+  // 条目 → 纯文本（每行一条，无时间线，供「复制字幕」使用）
+  function plainText() {
+    return items
+      .filter((it) => String(it.text || '').trim())
+      .map((it) => String(it.text).replace(/\s+/g, ' ').trim())
+      .join('\n');
+  }
+
+  // 秒 → SRT 时间戳（时:分:秒,毫秒）
+  function fmtSrt(sec) {
+    const t = Math.max(0, Number(sec) || 0);
+    const h = Math.floor(t / 3600);
+    const m = Math.floor(t / 60) % 60;
+    const s = Math.floor(t) % 60;
+    const ms = Math.round((t - Math.floor(t)) * 1000);
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + ',' + String(ms).padStart(3, '0');
+  }
+
+  // 条目 → SRT 文本（序号 / 时间轴 / 文本，块间空行）
+  function itemsToSrt(list) {
+    return list
+      .filter((it) => String(it.text || '').trim())
+      .map((it, i) => {
+        const start = Number(it.start) || 0;
+        let end = Number(it.end);
+        if (!isFinite(end) || end <= start) end = start + estDur(String(it.text || ''));
+        return (i + 1) + '\n' + fmtSrt(start) + ' --> ' + fmtSrt(end) + '\n' + String(it.text).replace(/\s+/g, ' ').trim();
+      })
+      .join('\n\n');
+  }
+
+  // 条目 → 文本域（SRT 格式）
+  function fillTextArea() {
+    if (dom.textArea) dom.textArea.value = itemsToSrt(items);
+  }
+
+  // SRT 文本 → 条目：按空行分块解析 序号/时间轴/文本；
+  // 块内带时间轴 → 其后各行合并为该条文本；块内无时间轴 → 纯文本兜底，每行一条自动估时
+  function parseSrtText(text) {
+    const blocks = String(text || '').replace(/\r\n?/g, '\n').split(/\n{2,}/);
+    const list = [];
+    let autoT = 0.4;
+    for (const b of blocks) {
+      const lines = b.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (!lines.length) continue;
+      let i = 0;
+      if (/^\d+$/.test(lines[0])) i = 1; // 跳过序号行
+      let start = null;
+      let end = null;
+      const tm = i < lines.length ? lines[i].match(/^(\d{1,2}):(\d{1,2}):(\d{1,2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{1,2}):(\d{1,2})[,.](\d{1,3})$/) : null;
+      if (tm) {
+        start = (+tm[1]) * 3600 + (+tm[2]) * 60 + (+tm[3]) + (+tm[4]) / 1000;
+        end = (+tm[5]) * 3600 + (+tm[6]) * 60 + (+tm[7]) + (+tm[8]) / 1000;
+        i += 1;
+        const txt = lines.slice(i).join(' ').replace(/\s+/g, ' ').trim();
+        if (!txt) continue;
+        if (!isFinite(end) || end <= start) end = start + estDur(txt);
+        autoT = Math.max(autoT, end);
+        list.push({ start, end, text: txt });
+      } else {
+        // 纯文本兜底：无时间轴的块，每行一条字幕，自动估时
+        for (const ln of lines.slice(i)) {
+          const txt = ln.replace(/\s+/g, ' ').trim();
+          if (!txt) continue;
+          const s = autoT;
+          const e = s + estDur(txt);
+          autoT = e;
+          list.push({ start: s, end: e, text: txt });
+        }
+      }
+    }
+    // 注意：不经过 fillEnds——每条块的结束时间已显式给出或已估时，fillEnds 会按下一条起始覆盖显式结束时间
+    return list;
+  }
+
+  // 文本域（SRT）→ 条目
+  function applyTextMode() {
+    items = parseSrtText(dom.textArea.value);
+    renderList();
+  }
+
+  // 切换写入方式；离开 SRT 模式时先把文本域内容写回条目
+  function setMode(tm) {
+    if (tm === textMode || !dom.textArea) return;
+    if (textMode) applyTextMode();
+    textMode = tm;
+    dom.list.style.display = tm ? 'none' : '';
+    dom.textArea.style.display = tm ? '' : 'none';
+    dom.add.style.display = tm ? 'none' : '';
+    dom.count.style.display = tm ? 'none' : '';
+    dom.top.style.display = tm ? 'none' : '';
+    dom.bottom.style.display = tm ? 'none' : '';
+    dom.modeRows.classList.toggle('active', !tm);
+    dom.modeText.classList.toggle('active', tm);
+    if (tm) fillTextArea();
+    setStatus(tm ? 'SRT 模式：单文本域按 SRT 字幕格式编辑（序号 / 时间轴 / 文本），切回「逐条编辑」或保存时解析回条目；「复制字幕」仍复制不含时间线的纯文本' : '', '');
+  }
+
+  // 复制字幕文本（不含时间线）
+  async function copySubtitles() {
+    if (textMode) applyTextMode();
+    const txt = plainText();
+    if (!txt) { toast('字幕内容为空，没有可复制的文本'); return; }
+    let ok = false;
+    try {
+      ok = !!(window.appTools && window.appTools.copyText && (await window.appTools.copyText(txt)));
+    } catch (e) { ok = false; }
+    if (ok) toast('已复制 ' + items.length + ' 条字幕文本（不含时间线）');
+    else setStatus('复制失败，请重试', 'var(--color-danger)');
+  }
+
+  // 导出 SRT：把当前条目导出为 .srt 字幕文件（含时间轴）
+  async function exportSrtFile() {
+    if (textMode) applyTextMode();
+    const srt = itemsToSrt(items);
+    if (!srt) { toast('字幕内容为空，没有可导出的内容'); return; }
+    const res = await window.projectTools.exportSrt(AppState.currentName, srt).catch(() => null);
+    if (!res) return;
+    if (res.ok) toast('已导出：' + res.savedPath);
+    else if (!res.canceled) toast(res.message || '导出失败');
+  }
+
   // ===== 保存到项目 =====
   async function saveToProject(options) {
     const silent = !!(options && options.silent);
@@ -131,6 +256,7 @@
       if (!silent) toast('内置示例项目只读，请先切换到自己的项目');
       return false;
     }
+    if (textMode) applyTextMode(); // SRT 模式：先把文本域写回条目再保存
     const text = serializeItems(items);
     if (!text.trim()) {
       if (!silent) toast('字幕内容为空，请先添加条目或生成字幕');
@@ -154,12 +280,15 @@
     dom.twStatus.classList.remove('hf-error', 'hf-ok');
     if (kind) dom.twStatus.classList.add(kind);
   }
-  function showTwBar(msg, indeterminate) {
+  // percent：null/省略为不确定态；done/error 固定填满
+  function showTwBar(msg, indeterminate, percent) {
     if (!dom.twBarWrap) return;
     const info = msg || {};
     dom.twBarWrap.style.display = '';
     dom.twBar.className = 'whisper-bar' + (indeterminate ? ' indeterminate' : '');
     dom.twFill.className = 'whisper-bar-fill' + (info.kind === 'done' ? ' done' : info.kind === 'error' ? ' error' : '');
+    const p = (typeof percent === 'number' && percent >= 0) ? percent : (info.kind === 'done' || info.kind === 'error' ? 100 : 0);
+    dom.twFill.style.width = p + '%';
     dom.twBarText.textContent = info.text || '';
   }
   function hideTwBar() {
@@ -216,10 +345,28 @@
     const res = await window.whisperTools.projectAudio(name).catch(() => null);
     if (res && res.ok) {
       dom.twAudioInput.value = res.path;
+      updateTwAudioHint();
       return { ok: true, path: res.path };
     }
     dom.twAudioInput.value = '';
+    updateTwAudioHint();
     return { ok: false, message: (res && res.message) || '读取项目音频失败' };
+  }
+
+  // 音频格式提示：whisper-cli 自带解码器仅支持 wav/mp3/flac/ogg，
+  // 其余格式（mp4/m4a/aac 等）主进程会在转录前用内置 ffmpeg 自动转换，这里提前告知用户
+  const TW_DIRECT_EXTS = ['wav', 'mp3', 'flac', 'ogg'];
+  function updateTwAudioHint() {
+    if (!dom.twAudioHint) return;
+    const p = (dom.twAudioInput && dom.twAudioInput.value) || '';
+    const ext = p.lastIndexOf('.') >= 0 ? p.slice(p.lastIndexOf('.') + 1).toLowerCase() : '';
+    if (!ext || TW_DIRECT_EXTS.indexOf(ext) >= 0) {
+      dom.twAudioHint.style.display = 'none';
+      dom.twAudioHint.textContent = '';
+      return;
+    }
+    dom.twAudioHint.textContent = '「' + ext.toUpperCase() + '」格式不支持直接转录，开始后会先自动提取音频并转为 16kHz WAV 再识别（多花几秒，原文件不受影响）。';
+    dom.twAudioHint.style.display = '';
   }
 
   async function openTw() {
@@ -236,6 +383,7 @@
     dom.twPick.disabled = true;
     pendingResult = null;
     syncTwStart();
+    updateTwAudioHint();
     await loadTwModel();
     const a = await loadProjectAudio();
     if (a.ok) setTwStatus('已载入项目音频：' + a.path, '');
@@ -264,8 +412,8 @@
     dom.twFootStart.style.display = '';
     dom.twFootApply.style.display = 'none';
     syncTwStart();
-    setTwStatus('正在启动 whisper-cli（' + twModel.label + '）…', '');
-    showTwBar({ text: '正在启动转录…' }, true);
+    setTwStatus('正在加载模型（' + twModel.label + '）…', '');
+    showTwBar({ text: '正在加载模型（' + twModel.label + '）…' }, true);
     try {
       const res = await window.whisperTools.transcribe({
         id: twModel.id,
@@ -319,6 +467,7 @@
       it.end = Math.max(it.start, Number(it.end) || 0) || it.start + estDur(it.text);
     });
     renderList();
+    if (textMode) fillTextArea();
     closeTw();
     toast(mode === 'replace' ? '已用转录结果替换字幕：共 ' + segs.length + ' 条' : '已在字幕末尾追加 ' + segs.length + ' 条');
     // 回填即落盘，避免用户忘记保存（保存失败时给出提示，条目仍保留在编辑器中）
@@ -351,6 +500,7 @@
     if (!list.length) { toast('内容脚本中暂无有效的旁白文本，请先到「内容脚本」页填写旁白'); return; }
     items = list;
     renderList();
+    if (textMode) fillTextArea();
     toast('已由脚本旁白生成 ' + list.length + ' 条字幕，可保存到项目'
       + (usedDur ? '（' + usedDur + ' 条按时长提示累计）' : '')
       + (estimated ? '（' + estimated + ' 条按估时）' : ''));
@@ -361,7 +511,7 @@
 
 <div class="card hgen-panel">
   <div class="panel-title"><span class="dot"></span>字幕编辑器</div>
-  <div class="hgen-tip">逐条编辑字幕：序号 / 起始时间 / 结束时间 / 文本，可删除与新增，编辑完点「保存到项目」。也可由音频自动识别，或由内容脚本旁白生成初稿。字幕时间轴以下方的「起始时间」为准。</div>
+  <div class="hgen-tip">逐条编辑字幕：序号 / 起始时间 / 结束时间 / 文本，可删除与新增；也可切「SRT」模式用单个文本域按标准 SRT 格式编辑（序号 / 时间轴 / 文本）。还可由音频自动识别，或由内容脚本旁白生成初稿。字幕时间轴以下方的「起始时间」为准。</div>
   <div class="hgen-actions" style="margin-top:var(--space-4)">
     <button class="hf-btn hf-btn-primary" id="sub-open-tw">从音频生成字幕</button>
     <button class="hf-btn" id="sub-from-content" title="依据内容脚本的场景旁白与时长提示生成逐条字幕，覆盖当前条目">由脚本旁白生成</button>
@@ -370,9 +520,26 @@
 
 <div class="card hgen-panel" style="margin-top:16px">
   <div class="panel-title"><span class="dot"></span>字幕条目</div>
+  <div class="hgen-row" style="margin-top:var(--space-3)">
+    <span class="sel-label">写入方式</span>
+    <button class="hf-btn sub-mode-btn active" id="sub-mode-rows" title="按条目逐条编辑：序号 / 时间 / 文本">逐条编辑</button>
+    <button class="hf-btn sub-mode-btn" id="sub-mode-text" title="单文本域：SRT 字幕格式（序号 / 时间轴 / 文本）">SRT</button>
+  </div>
   <div class="sub-list" id="sub-list"></div>
+  <textarea id="sub-textarea" class="sub-textarea" style="display:none" rows="14" spellcheck="false" placeholder="SRT 模式：单文本域按 SRT 字幕格式编辑，块间用空行分隔，例如：
+1
+00:00:00,400 --> 00:00:02,000
+第一行字幕
+
+2
+00:00:02,000 --> 00:00:04,000
+第二行字幕
+
+也可直接粘贴纯文本，每行一条，自动估时。"></textarea>
   <div class="hgen-actions" style="margin-top:var(--space-3)">
     <button class="hf-btn" id="sub-add">新增条目</button>
+    <button class="hf-btn" id="sub-top" title="滚动到第一条字幕">↑ 到顶部</button>
+    <button class="hf-btn" id="sub-bottom" title="滚动到最后一条字幕">↓ 到底部</button>
     <span class="sub-count" id="sub-count"></span>
   </div>
   <div class="hgen-row" style="margin-top:var(--space-4)">
@@ -380,10 +547,12 @@
     <input id="sub-title" class="hgen-input" style="flex:1" placeholder="字幕动画标题，如：我的第一个字幕动画"/>
   </div>
   <div class="hgen-actions">
+    <button class="hf-btn" id="sub-copy" title="复制全部字幕文本（不含时间线）">复制字幕</button>
+    <button class="hf-btn" id="sub-export-srt" title="把当前字幕导出为 .srt 字幕文件（含时间轴）">导出 SRT 文件</button>
     <button class="hf-btn hf-btn-primary" id="sub-save">保存到项目</button>
   </div>
   <div class="hf-status" id="sub-status"></div>
-  <div class="sub-note">时间格式：<code>分:秒</code>（如 <code>00:05</code>），也可填 <code>00:05.500</code> 精确到毫秒；保存时以起始时间写入 <code>[分:秒] 文本</code>，供 HTML / 视频阶段对齐时间轴。</div>
+  <div class="sub-note">时间格式：<code>分:秒</code>（如 <code>00:05</code>），也可填 <code>00:05.500</code> 精确到毫秒；保存时以起始时间写入 <code>[分:秒] 文本</code>，供 HTML / 视频阶段对齐时间轴。「导出 SRT 文件」可生成标准 <code>.srt</code> 字幕（含时间轴）供外部播放器 / 剪辑软件使用。</div>
 </div>
 
 <div class="hf-modal-mask" id="tw-mask" style="display:none">
@@ -402,6 +571,7 @@
         <input id="tw-audio" class="hgen-input" style="flex:1" readonly placeholder="项目音频（可在「配音」页生成 / 选择）"/>
         <button class="hf-btn" id="tw-pick" disabled>选择音频</button>
       </div>
+      <div class="whisper-tip" id="tw-audio-hint" style="display:none"></div>
 
       <div class="panel-title-sm">② 识别模型</div>
       <div class="hgen-row">
@@ -414,7 +584,8 @@
         <label class="sel-label">识别语言</label>
         <select id="tw-lang" class="hgen-select" style="flex:1">
           <option value="auto">自动检测</option>
-          <option value="zh">中文</option>
+          <option value="zh">中文（简体）</option>
+          <option value="zh-hant">中文（繁体）</option>
           <option value="en">English</option>
         </select>
       </div>
@@ -441,9 +612,16 @@
         list: document.getElementById('sub-list'),
         count: document.getElementById('sub-count'),
         add: document.getElementById('sub-add'),
+        top: document.getElementById('sub-top'),
+        bottom: document.getElementById('sub-bottom'),
         title: document.getElementById('sub-title'),
         save: document.getElementById('sub-save'),
         status: document.getElementById('sub-status'),
+        modeRows: document.getElementById('sub-mode-rows'),
+        modeText: document.getElementById('sub-mode-text'),
+        textArea: document.getElementById('sub-textarea'),
+        copy: document.getElementById('sub-copy'),
+        exportSrt: document.getElementById('sub-export-srt'),
         openTw: document.getElementById('sub-open-tw'),
         fromContent: document.getElementById('sub-from-content'),
         twMask: document.getElementById('tw-mask'),
@@ -452,6 +630,7 @@
         twSrcProject: document.getElementById('tw-src-project'),
         twSrcFile: document.getElementById('tw-src-file'),
         twAudioInput: document.getElementById('tw-audio'),
+        twAudioHint: document.getElementById('tw-audio-hint'),
         twPick: document.getElementById('tw-pick'),
         twModel: document.getElementById('tw-model'),
         twModelHint: document.getElementById('tw-model-hint'),
@@ -475,6 +654,7 @@
       setStatus('', '');
       dom.title.value = (proj.title && proj.title !== '字幕动画') ? proj.title : '';
       items = parseSubtitleText(proj.subtitle || '');
+      textMode = false; // 页面重建后回到「逐条编辑」默认模式
       renderList();
       if (AppState.isBuiltin) toast('当前是内置示例项目（只读），请切换到自己的项目来编辑字幕');
 
@@ -535,6 +715,10 @@
         if (el) el.focus();
       });
 
+      // —— 条目区域滚动跳转（列表限定高度后内部滚动） ——
+      dom.top.addEventListener('click', () => { dom.list.scrollTop = 0; });
+      dom.bottom.addEventListener('click', () => { dom.list.scrollTop = dom.list.scrollHeight; });
+
       function itemStartAfter(last) {
         if (!last) return 0;
         const end = Number(last.end);
@@ -545,6 +729,12 @@
       dom.save.addEventListener('click', () => { saveToProject({}); });
 
       dom.fromContent.addEventListener('click', fromContent);
+
+      // —— 写入方式切换与复制字幕 ——
+      dom.modeRows.addEventListener('click', () => setMode(false));
+      dom.modeText.addEventListener('click', () => setMode(true));
+      dom.copy.addEventListener('click', copySubtitles);
+      dom.exportSrt.addEventListener('click', exportSrtFile);
 
       // —— 转录弹窗 ——
       dom.openTw.addEventListener('click', openTw);
@@ -573,6 +763,7 @@
         hideTwBar();
         setTwStatus('请选择要转录的本地音频文件', '');
         dom.twAudioInput.value = '';
+        updateTwAudioHint();
         syncTwStart();
       });
       dom.twPick.addEventListener('click', async () => {
@@ -580,6 +771,7 @@
         if (!p) return;
         dom.twAudioInput.value = p;
         dom.twAudioInput.title = p;
+        updateTwAudioHint();
         setTwStatus('已选择音频：' + p, '');
         syncTwStart();
       });
@@ -594,8 +786,14 @@
       // 转录进度（preload 为单订阅，重复注册仅替换回调；切页后本页回调不再触发）
       window.whisperTools.onProgress((payload) => {
         if (!payload || !dom.twMask || dom.twMask.style.display === 'none') return;
-        if (payload.stage === 'starting' || payload.stage === 'transcribing') {
-          showTwBar({ text: payload.message || '转录中…' }, true);
+        if (payload.stage === 'loading') {
+          // 模型加载阶段：不确定态进度条
+          showTwBar({ text: payload.message || '正在加载模型…' }, true);
+          setTwStatus(payload.message || '正在加载模型…', '');
+        } else if (payload.stage === 'transcribing') {
+          // 转录阶段：按 whisper-cli 回推的百分比填充进度条
+          const pct = (typeof payload.percent === 'number' && payload.percent >= 0) ? payload.percent : null;
+          showTwBar({ text: payload.message || '转录中…' }, pct === null, pct === null ? 0 : pct);
           setTwStatus(payload.message || '转录中…', '');
         }
       });

@@ -150,6 +150,30 @@ function copyAudioIntoProject(name, audioPath) {
   }
 }
 
+// 将外部视频复制进项目 video/ 目录，返回相对引用（video/xxx）；复制失败返回 ''
+function copyVideoIntoProject(name, videoPath) {
+  if (!name || !videoPath || !fs.existsSync(videoPath)) return '';
+  try {
+    const videoDir = path.join(projectDir(name), 'video');
+    fs.mkdirSync(videoDir, { recursive: true });
+    const basename = path.basename(videoPath).replace(/[\\/:*?"<>|]/g, '_');
+    const extIndex = basename.lastIndexOf('.');
+    const stem = extIndex > 0 ? basename.slice(0, extIndex) : basename;
+    const ext = extIndex > 0 ? basename.slice(extIndex) : '';
+    let saveName = basename;
+    let i = 1;
+    while (fs.existsSync(path.join(videoDir, saveName))) {
+      saveName = stem + '_' + i + ext;
+      i++;
+      if (i > 1000) break;
+    }
+    fs.copyFileSync(videoPath, path.join(videoDir, saveName));
+    return 'video/' + saveName;
+  } catch (e) {
+    return '';
+  }
+}
+
 // 拼接生成/修改 HTML 时的用户提示（字幕 + 背景音频素材，均可选）
 function buildAgentPrompt(parts) {
   return parts.filter(Boolean).join('\n');
@@ -252,11 +276,17 @@ function register(ctx) {
     const audSel = payload && payload.audioPath;
     if (audSel === '__current__') audioRef = proj.audioFile || '';
     else if (audSel && typeof audSel === 'string' && fs.existsSync(audSel)) audioRef = copyAudioIntoProject(name, audSel);
+    // 视频素材：语义同音频（复制进本项目 video/ 后按相对引用），供 Agent 作为页面内容片段嵌入
+    let videoRef = '';
+    const vidSel = payload && payload.videoPath;
+    if (vidSel === '__current__') videoRef = proj.videoMaterial || '';
+    else if (vidSel && typeof vidSel === 'string' && fs.existsSync(vidSel)) videoRef = copyVideoIntoProject(name, vidSel);
     const userPrompt = buildAgentPrompt([
       '用户需求：' + prompt.trim(),
       buildContentBlock(proj.content),
       subtitleText ? '\n【项目字幕，请据此逐条设计动画】\n' + subtitleText : '',
-      audioRef ? '\n【背景音乐】项目内音频文件：' + audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : ''
+      audioRef ? '\n【背景音乐】项目内音频文件：' + audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : '',
+      videoRef ? '\n【视频素材】项目内视频文件：' + videoRef + '，请将该视频作为页面内容的一部分嵌入（<video src="' + videoRef + '" autoplay muted loop playsinline>），并用 GSAP 时间轴编排其入场/出场与播放时段。' : ''
     ]);
 
     try {
@@ -271,7 +301,7 @@ function register(ctx) {
           : '';
         if (text && !sender.isDestroyed()) sender.send('project:html-progress', Object.assign({}, info, { text }));
       };
-      const reply = await htmlAgent.chatWithCustomModel(userPrompt, { onProgress });
+      const reply = await htmlAgent.chatWithCustomModel(userPrompt, { onProgress, meta: { project: name, action: 'generate' } });
       const html = htmlAgent.extractHtmlFromReply(reply);
       if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
       const dir = projectDir(name);
@@ -319,6 +349,11 @@ function register(ctx) {
     const audSel = payload && payload.audioPath;
     if (audSel === '__current__') audioRef = proj.audioFile || '';
     else if (audSel && typeof audSel === 'string' && fs.existsSync(audSel)) audioRef = copyAudioIntoProject(name, audSel);
+    // 视频素材：语义同音频（复制进本项目 video/ 后按相对引用），供 Agent 作为页面内容片段嵌入
+    let videoRef = '';
+    const vidSel = payload && payload.videoPath;
+    if (vidSel === '__current__') videoRef = proj.videoMaterial || '';
+    else if (vidSel && typeof vidSel === 'string' && fs.existsSync(vidSel)) videoRef = copyVideoIntoProject(name, vidSel);
     const userPrompt = buildAgentPrompt([
       '当前项目的 index.html 源码如下：',
       '```html',
@@ -328,7 +363,8 @@ function register(ctx) {
       '用户需求（在此基础上改造后输出完整新 HTML）：' + prompt.trim(),
       buildContentBlock(proj.content),
       subtitleText ? '\n【项目字幕，请据此逐条设计动画】\n' + subtitleText : '',
-      audioRef ? '\n【背景音乐】项目内音频文件：' + audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : ''
+      audioRef ? '\n【背景音乐】项目内音频文件：' + audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : '',
+      videoRef ? '\n【视频素材】项目内视频文件：' + videoRef + '，请将该视频作为页面内容的一部分嵌入（<video src="' + videoRef + '" autoplay muted loop playsinline>），并用 GSAP 时间轴编排其入场/出场与播放时段。' : ''
     ]);
 
     try {
@@ -343,7 +379,7 @@ function register(ctx) {
           : '';
         if (text && !sender.isDestroyed()) sender.send('project:html-progress', Object.assign({}, info, { text }));
       };
-      const reply = await htmlAgent.chatWithCustomModel(userPrompt, { onProgress });
+      const reply = await htmlAgent.chatWithCustomModel(userPrompt, { onProgress, meta: { project: name, action: 'modify' } });
       const html = htmlAgent.extractHtmlFromReply(reply);
       if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
       fs.writeFileSync(htmlPath, html, 'utf8');
@@ -375,6 +411,21 @@ function register(ctx) {
     });
     if (!save) return { ok: false, canceled: true };
     fs.copyFileSync(htmlPath, save);
+    return { ok: true, savedPath: save };
+  });
+
+  // 导出字幕为 .srt 文件（含时间轴，供外部播放器/剪辑软件使用）
+  ipcMain.handle('project:export-srt', (event, payload) => {
+    const name = payload && payload.name;
+    const srt = payload && typeof payload.srt === 'string' ? payload.srt : '';
+    if (!String(srt).trim()) return { ok: false, message: 'SRT 内容为空' };
+    const save = dialog.showSaveDialogSync(getWindow(), {
+      title: '导出 SRT 字幕',
+      defaultPath: (name || 'subtitle') + '.srt',
+      filters: [{ name: 'SRT 字幕文件', extensions: ['srt'] }]
+    });
+    if (!save) return { ok: false, canceled: true };
+    fs.writeFileSync(save, srt, 'utf8');
     return { ok: true, savedPath: save };
   });
 
@@ -475,6 +526,43 @@ function register(ctx) {
     return { ok: true };
   });
 
+  // ===== 项目视频素材：让生成的 HTML 可嵌入视频片段（作为页面内容的一部分） =====
+  ipcMain.handle('project:pick-video', async () => {
+    if (!getWindow()) return null;
+    const r = await dialog.showOpenDialog(getWindow(), {
+      title: '选择视频文件（将复制进项目，作为页面素材嵌入 HTML）',
+      filters: [{ name: '视频文件', extensions: ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'] }],
+      properties: ['openFile']
+    });
+    if (r.canceled || !r.filePaths.length) return null;
+    return r.filePaths[0];
+  });
+
+  // 把视频复制进项目目录 video/ 并记录相对引用（videoMaterial 与成品 videoPath 字段区分）
+  ipcMain.handle('project:set-video', (event, payload) => {
+    const name = payload && payload.name;
+    const videoPath = payload && payload.videoPath;
+    if (!name) return { ok: false, message: '缺少项目名' };
+    if (!videoPath || !fs.existsSync(videoPath)) return { ok: false, message: '视频文件不存在' };
+    const videoFile = copyVideoIntoProject(name, videoPath);
+    if (!videoFile) return { ok: false, message: '视频复制到项目失败' };
+    const proj = ensureProject(name);
+    proj.videoMaterial = videoFile;
+    writeProject(proj);
+    // abs：项目内绝对路径，供渲染层预览
+    return { ok: true, videoFile: proj.videoMaterial, abs: path.join(projectDir(name), videoFile) };
+  });
+
+  // 移除当前项目视频素材引用（保留视频文件，避免误删资源）
+  ipcMain.handle('project:clear-video', (event, payload) => {
+    const name = payload && payload.name;
+    if (!name) return { ok: false, message: '缺少项目名' };
+    const proj = ensureProject(name);
+    proj.videoMaterial = '';
+    writeProject(proj);
+    return { ok: true };
+  });
+
   // 读取项目当前 HTML 源码（供编辑器载入）
   ipcMain.handle('project:read-html', (event, name) => {
     const htmlPath = projectFilePath(name, 'index.html');
@@ -512,5 +600,6 @@ module.exports = {
   ensureProject,
   parseSubtitle,
   normalizeContent,
-  copyAudioIntoProject
+  copyAudioIntoProject,
+  copyVideoIntoProject
 };

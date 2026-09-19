@@ -29,8 +29,8 @@
   <div class="hf-status" id="set-status"></div>
 </div>
 <div class="card hgen-panel" style="margin-top:16px">
-  <div class="panel-title"><span class="dot"></span>千问语音（声音复制 & 文字生音频）</div>
-  <div class="hgen-tip">配置千问AI平台 API Key 与目标语音合成模型，供「声音复制」和「文字生音频」使用。API Key 仅保存在本机 userData/settings.json。创建音色时的 target_model 必须与合成模型一致。</div>
+  <div class="panel-title"><span class="dot"></span>千问语音（音色管理 & 文字生音频）</div>
+  <div class="hgen-tip">配置千问AI平台 API Key 与目标语音合成模型，供「音色管理」和「文字生音频」使用。API Key 仅保存在本机 userData/settings.json。创建音色时的 target_model 必须与合成模型一致。</div>
   <div class="hgen-row">
     <label class="sel-label">API Key</label>
     <input id="set-v-api-key" type="password" class="hgen-input" style="flex:1" placeholder="sk-...（DASHSCOPE_API_KEY）"/>
@@ -141,7 +141,7 @@
         setStatus(res && res.ok ? res.message : ((res && res.message) || '测试失败'), res && res.ok ? 'hf-ok' : 'hf-error');
       });
 
-      // —— 千问语音配置（声音复制 & 文字生音频）——
+      // —— 千问语音配置（音色管理 & 文字生音频）——
       const vKeyEl = document.getElementById('set-v-api-key');
       const vModelEl = document.getElementById('set-v-model');
       const vStatusEl = document.getElementById('set-v-status');
@@ -169,7 +169,7 @@
         })();
         document.getElementById('set-v-save').addEventListener('click', async () => {
           const res = await window.voiceTools.saveConfig({ apiKey: vKeyEl.value.trim(), targetModel: vModelEl.value });
-          setVStatus(res && res.ok ? '千问语音配置已保存，可在「声音复制」「文字生音频」中使用' : ((res && res.message) || '保存失败'), res && res.ok ? 'hf-ok' : 'hf-error');
+          setVStatus(res && res.ok ? '千问语音配置已保存，可在「音色管理」「文字生音频」中使用' : ((res && res.message) || '保存失败'), res && res.ok ? 'hf-ok' : 'hf-error');
         });
       }
 

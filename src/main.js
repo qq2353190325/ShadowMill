@@ -5,10 +5,11 @@
 //   settings.js  设置存储（settings.json）+ settings:* IPC
 //   htmlAgent.js HTML 生成/修改的自定义模型 Agent（chatWithCustomModel）
 //   projects.js  项目化流水线 + project:* IPC（含 copyAudioIntoProject，供 voice 引用）
-//   voice.js     千问语音（声音复制/文字生音频）+ voice:* IPC
-//   video.js     HTML 预览 / HyperFrames 转视频 + dialog:open-html / video:* IPC
-// 依赖图：settings ← htmlAgent ← projects ← voice；hfEnv ← video；无环。
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+//   voice.js     千问语音（音色管理/文字生音频）+ voice:* IPC
+//   ttsAlign.js  字幕配音逐句合成与时间对齐 + voice:synth-aligned / voice:align-cancel IPC
+//   video.js     预览 / HyperFrames 转视频 + dialog:open-html / video:* IPC
+// 依赖图：settings ← htmlAgent ← projects ← voice ← ttsAlign；hfEnv ← video；无环。
+const { app, BrowserWindow, Menu, ipcMain, clipboard } = require('electron');
 const path = require('path');
 
 // 业务域模块（顶层 require 即可装配纯逻辑；含 IPC 的模块经 register 在窗口就绪后注册）
@@ -17,6 +18,7 @@ require('./main/settings.js');
 require('./main/htmlAgent.js');
 const projects = require('./main/projects.js');
 const voice = require('./main/voice.js');
+const ttsAlign = require('./main/ttsAlign.js');
 const video = require('./main/video.js');
 require('./main/whisper.js');
 
@@ -40,6 +42,12 @@ ipcMain.on('window:toggle-maximize', () => {
 
 ipcMain.on('window:close', () => {
   if (mainWindow) mainWindow.close();
+});
+
+// ===== 剪贴板 IPC（渲染层 sandbox 无 clipboard 模块，复制经主进程写入） =====
+ipcMain.handle('app:copy-text', (event, text) => {
+  clipboard.writeText(String(text == null ? '' : text));
+  return true;
 });
 
 function createWindow() {
@@ -82,6 +90,7 @@ app.whenReady().then(() => {
   require('./main/settings.js').register(ctx);
   projects.register(ctx);
   voice.register(ctx);
+  ttsAlign.register(ctx);
   video.register(ctx);
   require('./main/whisper.js').register(ctx);
 

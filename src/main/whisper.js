@@ -2,8 +2,9 @@
 // whisper.cpp 字幕转录：本地模型管理（检查/列表/下载/删除/当前模型）+ 转录（child_process 调 whisper-cli.exe）
 // 模型文件单独下载（不打包进应用），存放于 userData/whisper/models/；
 // whisper-cli.exe 由打包 extraResources 携带，位于 resources/whisper/whisper-cli.exe。
+// whisper-cli 自带解码器仅支持 flac/mp3/ogg/wav，其余格式（mp4/m4a/aac 等）转录前先用内置 ffmpeg 提取为 16kHz 单声道 wav。
 // 提供：WHISPER_MODELS（内置枚举）/ 自定义模型 / resolveCliPath + 全部 whisper:* IPC
-// 依赖：app / ipcMain / dialog / shell / https / child_process / settings(getWhisperModel/saveWhisperModel/getWhisperCustomModels/saveWhisperCustomModels) / projects(ensureProject/projectDir)
+// 依赖：app / ipcMain / dialog / shell / https / child_process / settings(getWhisperModel/saveWhisperModel/getWhisperCustomModels/saveWhisperCustomModels) / projects(ensureProject/projectDir) / hfEnv(BUILTIN_RESOURCES.ffmpeg)
 const { app, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -11,6 +12,7 @@ const https = require('https');
 const { spawn } = require('child_process');
 const projects = require('./projects.js');
 const settings = require('./settings.js');
+const hfEnv = require('./hfEnv.js');
 
 // ===== whisper.cpp 模型档位枚举（ggml 格式）=====
 // 枚举规则：id ↔ 文件名严格一一对应登记，只认各自登记的文件名，不做前缀/模糊归属推断，
@@ -27,9 +29,11 @@ const MODEL_BASE_URL = 'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main
 // 未知模型统一提示前缀（id 不在枚举内：内置与自定义都没有该 id）
 const UNKNOWN_MODEL_MSG = '未知模型：';
 // 转录允许的语言（-l 参数；auto 由 whisper 自动检测）
+// zh 与 zh-hant 共用 whisper-cli 的 -l zh（whisper 无繁体语言码），仅区别是否做繁→简转换
 const WHISPER_LANGS = [
   { id: 'auto', label: '自动检测' },
-  { id: 'zh',   label: '中文' },
+  { id: 'zh',   label: '中文（简体）' },
+  { id: 'zh-hant', label: '中文（繁体）' },
   { id: 'en',   label: 'English' }
 ];
 
@@ -200,34 +204,49 @@ async function downloadFile(url, destPath, onProgress) {
   });
 }
 
-// 调 whisper-cli：-m 模型 -f 音频 -oj 输出 JSON -of 前缀 -l 语言；--no-prints 抑制控制台
+// 调 whisper-cli：-m 模型 -f 音频 -oj 输出 JSON -of 前缀 -l 语言；
+// --no-prints 抑制系统信息横幅；-pp 使转录进度输出到 stderr（行格式：whisper_print_progress_callback: progress = N%）
+// 阶段划分：spawn 后为模型加载阶段（由调用方 emit 'loading'），收到首个进度行后进入转录阶段并回推百分比
 function runCli(cliPath, modelPath, audioPath, outPrefix, language, emit, id) {
   return new Promise((resolve, reject) => {
-    const args = ['-m', modelPath, '-f', audioPath, '-oj', '-of', outPrefix, '--no-prints'];
+    const args = ['-m', modelPath, '-f', audioPath, '-oj', '-of', outPrefix, '--no-prints', '-pp'];
     if (language && language !== 'auto') args.push('-l', language);
     const child = spawn(cliPath, args, { windowsHide: true });
     let stderr = '';
-    let logEmitted = false;
+    // 滚动缓冲 stderr 尾部：进度行可能被 chunk 截断，扫最近 300 字符取最后一个百分比；百分比单调递增，仅变化时回推
+    let tail = '';
+    let lastPct = -1;
     child.stderr.on('data', (d) => {
-      stderr += d.toString();
-      if (!logEmitted) {
-        logEmitted = true;
-        emit({ id, stage: 'transcribing', message: 'whisper-cli 正在加载模型并转录…' });
+      const chunk = d.toString();
+      stderr += chunk;
+      tail = (tail + chunk).slice(-300);
+      const re = /progress\s*=\s*(\d{1,3})\s*%/g;
+      let m = null;
+      let pct = -1;
+      while ((m = re.exec(tail)) !== null) pct = parseInt(m[1], 10);
+      if (pct >= 0 && pct !== lastPct) {
+        lastPct = pct;
+        emit({ id, stage: 'transcribing', percent: pct, message: '转录中 ' + pct + '%' });
       }
     });
     child.on('error', (err) => reject(new Error('无法启动 whisper-cli：' + err.message)));
     child.on('close', (code) => {
+      // 剔除进度行，只保留有效错误信息（成功时一并回传，供调用方诊断「退出码 0 但未产出 JSON」的读取/解码失败）
+      const errTail = stderr.trim().split(/\r?\n/).filter((l) => !/progress\s*=\s*\d{1,3}\s*%/.test(l)).slice(-8).join('\n');
       if (code === 0) {
-        resolve();
+        resolve(errTail);
       } else {
-        const tail = stderr.trim().split(/\r?\n/).slice(-8).join('\n');
-        reject(new Error('whisper-cli 退出码 ' + code + (tail ? '：' + tail : '')));
+        reject(new Error('whisper-cli 退出码 ' + code + (errTail ? '：' + errTail : '')));
       }
     });
   });
 }
 
-// 解析 whisper -oj 输出的 JSON：兼容 transcription.segments 与顶层 segments
+// 解析 whisper -oj 输出的 JSON：兼容两种格式——
+// 新版（whisper.cpp ≥ 1.7）：transcription 为段落数组，时间在 offsets.from/to（毫秒）；
+// 旧版：transcription.segments，start/end（秒）；兜底顶层 segments
+// 返回 { lang, segs }（lang 为 whisper 检测到的语言，供自动检测命中 zh 时决定是否繁转简）；
+// 文件缺失或 JSON 解析失败返回 null；识别为空时 segs 为空数组
 function parseWhisperJson(jsonPath) {
   if (!jsonPath || !fs.existsSync(jsonPath)) return null;
   let raw;
@@ -236,18 +255,85 @@ function parseWhisperJson(jsonPath) {
   } catch (e) {
     return null;
   }
-  const tr = (raw && raw.transcription) || raw || {};
-  const segs = (tr && tr.segments) || [];
+  const lang = (raw && raw.result && raw.result.language) || '';
+  const tr = raw && raw.transcription;
+  const segs = Array.isArray(tr) ? tr : ((tr && tr.segments) || (raw && raw.segments) || []);
   const out = segs
-    .map((s) => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || '').trim() }))
+    .map((s) => {
+      const o = (s && s.offsets) || {};
+      const start = typeof s.start === 'number' ? s.start : (typeof o.from === 'number' ? o.from / 1000 : 0);
+      const end = typeof s.end === 'number' ? s.end : (typeof o.to === 'number' ? o.to / 1000 : 0);
+      return { start, end, text: String((s && s.text) || '').trim() };
+    })
     .filter((s) => s.text);
-  return out.length ? out : null;
+  return { lang, segs: out };
 }
 
 // 秒 → [分:秒]（项目字幕格式，parseSubtitle 兼容）
 function fmtTs(sec) {
   const s = Math.max(0, Math.floor(Number(sec) || 0));
   return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+
+// ===== 转录前音频预处理 =====
+// whisper-cli 自带解码器仅支持 flac/mp3/ogg/wav（见其 usage 中 supported audio formats）；
+// mp4/m4a/aac/mov 等其余格式直接喂给 whisper-cli 会解码失败（且该版本以退出码 0 结束，不报错），
+// 因此先用内置 ffmpeg 提取音轨并转为 16kHz 单声道 PCM wav，临时文件由调用方清理。
+const WHISPER_AUDIO_EXTS = ['wav', 'flac', 'mp3', 'ogg'];
+
+function cleanupTmp(p) {
+  try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { /* ignore */ }
+}
+
+// 返回 { path, tmp }：受支持格式原样直传（tmp=false）；其余格式经 ffmpeg 转换（tmp=true）。
+// 失败 reject（ffmpeg 缺失 / 转换失败），由调用方 catch 后返回用户可读错误。
+function prepareAudio(audioPath, onConvert) {
+  const ext = path.extname(String(audioPath)).slice(1).toLowerCase();
+  if (WHISPER_AUDIO_EXTS.indexOf(ext) >= 0) return Promise.resolve({ path: audioPath, tmp: false });
+  const ffmpeg = hfEnv.BUILTIN_RESOURCES.ffmpeg;
+  if (!fs.existsSync(ffmpeg)) {
+    return Promise.reject(new Error('音频格式 ' + (ext || '未知') + ' 不受 whisper-cli 支持，且未找到内置 ffmpeg（resources/ffmpeg/bin/ffmpeg.exe）用于转换'));
+  }
+  const outPath = path.join(app.getPath('userData'), 'whisper', 'conv_' + Date.now() + '.wav');
+  try { fs.mkdirSync(path.dirname(outPath), { recursive: true }); } catch (e) { /* ignore */ }
+  if (onConvert) onConvert();
+  return new Promise((resolve, reject) => {
+    const child = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', audioPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', outPath], { windowsHide: true });
+    child.on('error', (err) => {
+      cleanupTmp(outPath);
+      reject(new Error('无法启动 ffmpeg：' + err.message));
+    });
+    child.on('close', (code) => {
+      let ok = false;
+      if (code === 0) {
+        try { ok = fs.existsSync(outPath) && fs.statSync(outPath).size > 0; } catch (e) { /* ignore */ }
+      }
+      if (!ok) {
+        cleanupTmp(outPath);
+        reject(new Error('ffmpeg 提取音频失败（退出码 ' + code + '），请确认文件包含可解码的音轨'));
+        return;
+      }
+      resolve({ path: outPath, tmp: true });
+    });
+  });
+}
+
+// ===== 繁→简转换（opencc-js / OpenCC）=====
+// whisper 中文训练语料繁简混杂，同一模型对不同音频可能输出繁体或简体；
+// 语言选「中文（简体）」（或自动检测命中 zh）时统一转简体，「中文（繁体）」保留原样。
+// 惰性加载 + 失败降级：依赖缺失/转换失败时保留原始识别文本，不阻断转录
+let t2sConverter = null;
+let t2sFailed = false;
+function loadT2s() {
+  if (t2sConverter) return t2sConverter;
+  if (t2sFailed) return null;
+  try {
+    const OpenCC = require('opencc-js');
+    t2sConverter = OpenCC.Converter({ from: 'tw', to: 'cn' });
+  } catch (e) {
+    t2sFailed = true;
+  }
+  return t2sConverter;
 }
 
 function register(ctx) {
@@ -470,11 +556,36 @@ function register(ctx) {
     transcribing = true;
     const outPrefix = path.join(app.getPath('userData'), 'whisper', 'out_' + Date.now());
     const jsonPath = outPrefix + '.json';
+    let tmpAudio = '';
     try {
-      emit({ id, stage: 'starting', message: '正在启动 whisper-cli（' + meta.label + '）…' });
-      await runCli(cliPath, modelPath, audioPath, outPrefix, language, emit, id);
-      const segs = parseWhisperJson(jsonPath);
-      if (!segs || !segs.length) return { ok: false, message: '转录完成但没有识别到文本（可能音频过短或无人声）' };
+      const prepared = await prepareAudio(audioPath, () => {
+        emit({ id, stage: 'loading', message: '正在提取音频（ffmpeg 转换为 16kHz WAV）…' });
+      });
+      if (prepared.tmp) tmpAudio = prepared.path;
+      emit({ id, stage: 'loading', message: '正在加载模型（' + meta.label + '）…' });
+      // zh-hant 仅控制是否繁转简：whisper-cli 本身只有 zh 语言码
+      const whisperLang = language === 'zh-hant' ? 'zh' : language;
+      const stderrTail = await runCli(cliPath, modelPath, prepared.path, outPrefix, whisperLang, emit, id);
+      const parsed = parseWhisperJson(jsonPath);
+      if (!parsed) {
+        // whisper-cli 读取/解码失败时会以退出码 0 结束且不产出 JSON，需与「识别为空」区分，避免误导
+        if (!fs.existsSync(jsonPath)) {
+          return { ok: false, message: '转录失败：whisper-cli 未输出结果（音频读取或解码失败' + (stderrTail ? '：' + stderrTail : '') + '）' };
+        }
+        return { ok: false, message: '转录完成但没有识别到文本（可能音频过短或无人声）' };
+      }
+      const segs = parsed.segs;
+      if (!segs.length) return { ok: false, message: '转录完成但没有识别到文本（可能音频过短或无人声）' };
+      // 中文统一转简体（自动检测命中 zh 时同样转换；选「中文（繁体）」不转）
+      const wantT2s = language === 'zh' || (language === 'auto' && parsed.lang === 'zh');
+      if (wantT2s) {
+        const conv = loadT2s();
+        if (conv) {
+          for (const s of segs) {
+            try { const t = conv(s.text); if (t) s.text = t; } catch (e) { /* 转换失败保留原文 */ }
+          }
+        }
+      }
       const text = segs.map((s) => s.text).filter(Boolean).join('\n');
       const subtitleText = segs.map((s) => '[' + fmtTs(s.start) + '] ' + s.text).filter(Boolean).join('\n');
       emit({ id, stage: 'done', message: '转录完成：' + segs.length + ' 条字幕' });
@@ -485,6 +596,7 @@ function register(ctx) {
       return { ok: false, message: msg };
     } finally {
       transcribing = false;
+      cleanupTmp(tmpAudio);
       try { if (fs.existsSync(jsonPath)) fs.unlinkSync(jsonPath); } catch (e) { /* ignore */ }
     }
   });

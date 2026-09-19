@@ -1,4 +1,4 @@
-// renderer/pages/soundCopy.js —— 声音复制页（千问 Qwen-TTS 克隆音色 + 本地音色映射管理）
+// renderer/pages/soundCopy.js —— 音色管理页（千问 Qwen-TTS 克隆音色 + 本地音色映射管理）
 (function () {
   'use strict';
 
@@ -14,8 +14,9 @@
   };
 
   App.pages['sound-copy'] = {
-    html: `<div class="card hgen-panel">
-  <div class="panel-title"><span class="dot"></span>声音复制（创建克隆音色）</div>
+    html: `<div class="project-bar" data-slot></div>
+<div class="card hgen-panel">
+  <div class="panel-title"><span class="dot"></span>音色管理 · 创建克隆音色</div>
   <div class="hgen-tip">选择目标模型并上传/粘贴人声音频，即可创建克隆音色。创建时选定的模型会绑定到该音色，后续用该音色合成时自动沿用同一模型（创建计费 0.01 元/个）：<br/>· Qwen-Audio-TTS（qwen-audio-3.0-tts-flash）：粘贴一段 10~20 秒清晰人声的<b>可公开访问音频 URL</b>（该模型克隆不接受本地文件直传）；<br/>· qwen3-tts-vc-* 系列：上传本地音频文件（.wav / .mp3 / .m4a，Base64 后需小于 10 MB）。</div>
   <div class="hgen-row">
     <label class="sel-label">显示名称</label>
@@ -40,7 +41,7 @@
   <div class="hf-status" id="vc-status"></div>
 </div>
 <div class="card hgen-panel" style="margin-top:16px">
-  <div class="panel-title"><span class="dot"></span>我的音色（voice 列表）</div>
+  <div class="panel-title"><span class="dot"></span>我的音色</div>
   <div class="hf-status" id="vc-list-status"></div>
   <div id="vc-list" class="hgen-tip">点击「刷新音色列表」从千问AI平台拉取已创建的克隆音色。</div>
   <div class="hgen-actions">
@@ -68,7 +69,7 @@
   </div>
   <div class="hf-status" id="vc-map-status"></div>
 </div>`,
-    // ===== 声音复制页（千问 Qwen-TTS 克隆音色 + 本地映射） =====
+    // ===== 音色管理页（千问 Qwen-TTS 克隆音色 + 本地映射） =====
     init: function () {
       renderStepBar('sound-copy');
       const status = document.getElementById('vc-status');
@@ -180,7 +181,7 @@
             type: 'custom'
           });
         });
-        if (!all.length) { listHost.innerHTML = '暂无音色。可在上方「声音复制」创建克隆音色，或到「文字生音频」使用内置系统音色。'; return; }
+        if (!all.length) { listHost.innerHTML = '暂无音色。可在上方「创建克隆音色」区创建，或到「配音」页使用内置系统音色。'; return; }
         const head = '<div style="display:grid;grid-template-columns:1.5fr 1.2fr 1fr;gap:8px 12px;font-size:12px;color:var(--text-secondary);padding:6px 2px;"><span>显示名称</span><span>音色 ID（合成模型）</span><span>创建时间 / 参数</span></div>';
         const rows = all.map((it) => {
           const extra = it.type === 'system' ? '系统音色' : (((cloudVoices.find((cv) => cv.voice === it.voice)) || {}).gmt_create || '');
