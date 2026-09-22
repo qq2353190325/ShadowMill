@@ -275,6 +275,132 @@ function fmtTs(sec) {
   return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 }
 
+// 秒 → [分:秒.毫秒]（3 位毫秒，向下取整到毫秒；字幕落盘毫秒精度格式）
+function fmtTsMs(sec) {
+  const t = Math.max(0, Number(sec) || 0);
+  const s = Math.floor(t);
+  const ms = Math.floor((t - s) * 1000);
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0') + '.' + String(ms).padStart(3, '0');
+}
+
+// ===== 起止静音裁剪（VAD） =====
+// whisper 段落的起止常含静音（例：首段标 0-28s，实际 18s 才开始读；段尾标到 10s，实际 7s 已读完），
+// 导致字幕列表 / SRT 的起止时间不准。用能量检测找出段内语音实际边界，双向收敛：
+//   start：段首连续 ≥0.4s 低于阈值才前移（起点会进入保存的时间轴，阈值更保守），
+//          新 start = 第一个有效语音窗口 - 0.1s 提前量；
+//   end：段尾连续 ≥0.15s 低于阈值才前移（连续朗读的句间微停顿也能裁出），
+//        新 end = 最后有效语音窗口结束 + 0.1s 尾垫；
+// 有背景音乐等无静音场景不生效（保持原时间），失败也静默跳过不阻断转录。
+
+// 读取 WAV 的 16bit PCM 样本（最小解析 fmt/data 两个 chunk；格式不符返回 null）
+function readWavSamples(p) {
+  let buf;
+  try { buf = fs.readFileSync(p); } catch (e) { return null; }
+  if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return null;
+  const channels = buf.readUInt16LE(22);
+  const rate = buf.readUInt32LE(24);
+  const bits = buf.readUInt16LE(34);
+  if (bits !== 16) return null;
+  let off = 12;
+  let dataOff = -1;
+  let dataLen = 0;
+  while (off + 8 <= buf.length) {
+    const id = buf.toString('ascii', off, off + 4);
+    const sz = buf.readUInt32LE(off + 4);
+    if (id === 'data') { dataOff = off + 8; dataLen = Math.min(sz, buf.length - dataOff); break; }
+    off += 8 + sz + (sz & 1);
+  }
+  if (dataOff < 0) return null;
+  const n = Math.floor(dataLen / 2);
+  const samples = new Int16Array(n);
+  for (let i = 0; i < n; i++) samples[i] = buf.readInt16LE(dataOff + i * 2);
+  return { rate, channels, samples };
+}
+
+// 取 16k 单声道 PCM 样本：原文件已是该格式直接读，否则经 ffmpeg 转临时 wav 再读；失败返回 null
+async function toVadSamples(src) {
+  try {
+    const direct = readWavSamples(src);
+    if (direct && direct.rate === 16000 && direct.channels === 1) return direct.samples;
+  } catch (e) { /* 继续走转换 */ }
+  const ffmpeg = hfEnv.BUILTIN_RESOURCES.ffmpeg;
+  if (!fs.existsSync(ffmpeg)) return null;
+  const tmp = path.join(app.getPath('userData'), 'whisper', 'vad_' + Date.now() + '.wav');
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', tmp], { windowsHide: true });
+      child.on('error', (err) => reject(err));
+      child.on('close', (code) => (code === 0 ? resolve() : reject(new Error('ffmpeg 退出码 ' + code))));
+    });
+    const r = readWavSamples(tmp);
+    if (r && r.rate === 16000) return r.samples;
+  } catch (e) { /* ignore */ } finally {
+    cleanupTmp(tmp);
+  }
+  return null;
+}
+
+// 能量 VAD 裁剪：20ms 窗口 RMS；噪声底取 10% 分位，阈值 = max(噪声底×3, 绝对兜底)。
+// 起止双向裁剪（规则见上方说明）：start 前导静音 ≥0.4s 才前移，end 尾随静音 ≥0.15s 才前移；
+// 新起点不早于上一段 end + 0.05s，新终点不晚于下一段 start - 0.05s；
+// 裁后段长不足 0.25s 或全段无有效语音时放弃（保持原时间）。
+function vadTrimSegments(samples, rate, segs) {
+  const winN = Math.max(1, Math.round(rate * 0.02));
+  const nWin = Math.floor(samples.length / winN);
+  if (nWin < 2 || !segs.length) return segs;
+  const rms = new Float64Array(nWin);
+  for (let i = 0; i < nWin; i++) {
+    let sum = 0;
+    const off = i * winN;
+    for (let j = 0; j < winN; j++) sum += Math.abs(samples[off + j]);
+    rms[i] = sum / winN;
+  }
+  const sorted = Array.from(rms).sort((a, b) => a - b);
+  const noiseFloor = sorted[Math.max(0, Math.floor(sorted.length * 0.1) - 1)] || 0;
+  const thr = Math.max(noiseFloor * 3, 200); // 200 ≈ -44dBFS 均值幅度，绝对兜底
+  const tailSilWin = Math.ceil((0.15 * rate) / winN); // 尾随静音最少 0.15s
+  const leadSilWin = Math.ceil((0.4 * rate) / winN);  // 前导静音最少 0.4s
+  const padSec = 0.1;  // 提前量 / 尾垫
+  const minDur = 0.25;
+
+  return segs.map((s, i) => {
+    const start = Math.max(0, Number(s.start) || 0);
+    const end = Math.max(start, Number(s.end) || 0);
+    const sWin = Math.floor((start * rate) / winN);
+    const eWin = Math.min(nWin - 1, Math.ceil((end * rate) / winN));
+    if (eWin - sWin < 2) return s; // 段过短，无裁剪意义
+
+    // 段内第一个 / 最后一个高于阈值的窗口（起点终点共用）
+    let firstVoice = -1;
+    for (let w = sWin; w <= eWin; w++) { if (rms[w] > thr) { firstVoice = w; break; } }
+    let lastVoice = -1;
+    for (let w = eWin; w >= sWin; w--) { if (rms[w] > thr) { lastVoice = w; break; } }
+    if (firstVoice < 0 || lastVoice < 0) return s; // 全段低能量：维持原时间
+
+    // 起点裁剪：段首连续静音 ≥0.4s 时前移到语音开始 - 0.1s 提前量
+    let newStart = start;
+    if (firstVoice - sWin >= leadSilWin) {
+      newStart = (firstVoice * winN) / rate - padSec;
+      const prevEnd = i > 0 ? Number(segs[i - 1].end) || 0 : 0;
+      newStart = Math.min(end - minDur, Math.max(newStart, start, prevEnd + 0.05));
+    }
+
+    // 终点裁剪：段尾连续静音 ≥0.15s 时前移到语音结束 + 0.1s 尾垫
+    let newEnd = end;
+    if (eWin - lastVoice >= tailSilWin) {
+      newEnd = ((lastVoice + 1) * winN) / rate + padSec;
+      newEnd = Math.min(newEnd, end);
+      const nextStart = segs[i + 1] ? Number(segs[i + 1].start) : Infinity;
+      newEnd = Math.min(newEnd, isFinite(nextStart) ? nextStart - 0.05 : Infinity);
+    }
+    if (newEnd - newStart < minDur) return s; // 裁后过短：放弃本次裁剪
+    if (newStart === start && newEnd === end) return s;
+    s.start = newStart;
+    s.end = newEnd;
+    return s;
+  });
+}
+
 // ===== 转录前音频预处理 =====
 // whisper-cli 自带解码器仅支持 flac/mp3/ogg/wav（见其 usage 中 supported audio formats）；
 // mp4/m4a/aac/mov 等其余格式直接喂给 whisper-cli 会解码失败（且该版本以退出码 0 结束，不报错），
@@ -586,8 +712,19 @@ function register(ctx) {
           }
         }
       }
+      // 段尾静音裁剪（VAD）：end 收敛到实际语音结束（见 vadTrimSegments 说明），失败静默跳过
+      try {
+        const vadSamples = await toVadSamples(prepared.path);
+        if (vadSamples) vadTrimSegments(vadSamples, 16000, segs);
+      } catch (e) { /* 裁剪失败不影响转录结果 */ }
+
       const text = segs.map((s) => s.text).filter(Boolean).join('\n');
-      const subtitleText = segs.map((s) => '[' + fmtTs(s.start) + '] ' + s.text).filter(Boolean).join('\n');
+      // [开始-结束] 毫秒精度：结束时间为 VAD 裁剪后的真实语音结束，供 HTML 生成按毫秒窗口显示
+      const subtitleText = segs.map((s) => {
+        const stN = Math.max(0, Number(s.start) || 0);
+        const etN = Math.max(0, Number(s.end) || 0);
+        return '[' + fmtTsMs(stN) + (etN > stN ? '-' + fmtTsMs(etN) : '') + '] ' + s.text;
+      }).filter(Boolean).join('\n');
       emit({ id, stage: 'done', message: '转录完成：' + segs.length + ' 条字幕' });
       return { ok: true, id, text, subtitleText, segments: segs, model: meta.label };
     } catch (err) {
@@ -612,5 +749,9 @@ module.exports = {
   findModel,
   resolveModelFile,
   unknownModelFiles,
-  register
+  register,
+  // VAD 工具（供本地测试脚本 test/vad-test.js 复用，非 IPC 接口）
+  readWavSamples,
+  toVadSamples,
+  vadTrimSegments
 };

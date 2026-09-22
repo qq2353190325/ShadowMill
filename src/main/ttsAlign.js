@@ -273,9 +273,10 @@ function register(ctx) {
       const safeName = projectName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) || 'aligned';
       const outPath = path.join(taskDir, safeName + '_aligned_' + Date.now() + '.wav');
       const totalDur = await buildTrack(taskDir, segs, outPath);
-      // 终验：整轨时长 ≈ 末句终点（±0.1s，超出说明装配异常）
+      // 终验：整轨时长 ≈ 末句终点（±0.3s；装配由数百段静音+句子拼接，静音按帧粒度取整会累积毫秒级漂移，
+      // 270s 级整轨常见 0.1~0.2s 偏差，真缺失段落会差出数秒，0.3s 不影响异常防护）
       const expected = segs.length ? segs[segs.length - 1].audioStart + segs[segs.length - 1].audioDur : 0;
-      if (Math.abs(totalDur - expected) > 0.1) {
+      if (Math.abs(totalDur - expected) > 0.3) {
         return { ok: false, message: '音轨装配时长校验失败（期望 ' + expected.toFixed(2) + 's，实际 ' + totalDur.toFixed(2) + 's）' };
       }
       const details = segs.map((s) => ({

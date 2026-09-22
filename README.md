@@ -51,7 +51,7 @@ AIGC:
   - `whisperTools` —— whisper.cpp 字幕转录（status / download / delete / setCurrent / addModel / updateModel / removeModel / openDir / pickAudio / projectAudio / transcribe / onProgress）。
   - `settingsTools` —— 自定义模型（OpenAI 兼容）设置（get / save / test）。
   - `windowControls` —— 自绘标题栏的窗口控制。
-- 渲染进程 `src/renderer/`：`app.js` 承担状态、路由与顶部链路状态条（renderStepBar）；`entry.js` 承担左侧菜单导航与窗口控制；`pages/*.js` 为各页面模块；`renderer.css` 承担深空科技风格视觉。
+- 渲染进程 `src/renderer/`：`app.js` 承担状态、路由与顶部链路状态条（renderStepBar）；`entry.js` 承担左侧菜单导航与窗口控制；`pages/<页面>/` 每个页面一个文件夹（`template.js` DOM 模板 → `App.templates`，`index.js` 逻辑，大页面再拆逻辑模块）；`renderer.css` 承担深空科技风格视觉。
 
 ### 2.2 项目目录结构
 
@@ -119,16 +119,16 @@ userData/whisper/models/  # whisper.cpp 识别模型（ggml-*.bin，按需下载
 ### 已完成
 
 - **五节点流水线全链路贯通**：内容脚本（辅助数据源）→ 音色管理 → 文字生音频 → 文字转字幕 → 字幕生成 HTML → 转成视频；链路状态条 step-bar 实时反馈各节点完成状态，点击可跳转对应页面。
-- **① 音色管理（已完整）**：接入千问AI平台 Qwen-TTS 克隆音色（soundCopy.js / voice.js）。按目标模型自动联动输入方式：`qwen-audio-*`（Qwen-Audio-TTS）显示「粘贴音频 URL」行、`qwen3-tts-vc-*` 系列显示「上传本地音频文件」行（applyInputMode 正则切换）；可创建克隆音色、拉取云端音色列表，并为任意音色维护本地中文显示名与绑定合成模型（映射仅存本机 settings.json）。
-- **② 文字生音频（已完整）**：按所选音色绑定的模型调用千问 TTS 合成语音（textTts.js / voice.js）。「保存到」下拉合并项目 `audio/`、自定义目录（持久化记忆）、音频输出目录三选一，旁常驻「打开目录」按钮（`voice:get-save-dir` IPC，无需等合成完成即可打开当前选择的保存目录）；合成成功提示按实际落盘位置回报（项目 / 自定义目录 / 音频输出目录）；「已生成音频」区按来源分组列出历史 TTS 音频，可试听、可一键设为当前项目背景音频；「合成结果」卡紧邻合成区展示产物路径并可打开所在目录；支持「载入脚本旁白」与带语速调节的双区域试听（仅改播放速率，不改磁盘音频）。
-- **③ 文字转字幕（已完整）**：条目列表式字幕编辑器（增删改、时间轴自动接续、字数统计），支持纯文本自动估时与 `[分:秒]` 精确定时、两种格式混用；可「由脚本旁白生成」按场景旁白与时长提示逐条生成；保存后链路「字幕」节点点亮（subtitle.js / projects.js）。
-- **③+ 从音频生成字幕（已完整）**：内置 whisper.cpp 本地转录（whisper.js / subtitle.js）。转录弹窗可选「使用项目音频」或「浏览本地文件」、选识别语言（自动检测 / 中文 / English），带进度条与阶段状态；完成后「替换现有」或「追加到末尾」回填条目并自动保存。转录在本机 CPU 完成、不消耗 API 额度。
-- **语音识别模型管理（已完整）**：设置页「语音识别模型」区块（settings.js / whisper.js）。四档内置模型（tiny-q8_0 / base / base-q5_1 / small-q8_0）下载 / 删除 / 设为当前使用 / 本地占用统计，走国内镜像下载并实时回推进度；支持添加、编辑、移除自定义模型，并可一键打开模型目录或 whisper-cli 所在目录。
-- **④ 字幕生成 HTML（已完整）**：HTML 由自定义模型 Agent 流式生成/修改（htmlGen.js / htmlAgent.js / projects.js），不再依赖内置模板；生成期间实时显示阶段进度（连接 / 推理 / 生成 / 重试）与 AI 思考过程原文，输出为空时自动升档重试；可选用字幕素材（当前项目/其他项目）与背景音频（自动复制进项目 `audio/`）；生成后刷新预览、点亮链路节点；可下载 HTML 到本地；修改后旧视频产物自动置空。
+- **① 音色管理（已完整）**：接入千问AI平台 Qwen-TTS 克隆音色（pages/soundCopy/ / voice.js）。按目标模型自动联动输入方式：`qwen-audio-*`（Qwen-Audio-TTS）显示「粘贴音频 URL」行、`qwen3-tts-vc-*` 系列显示「上传本地音频文件」行（applyInputMode 正则切换）；可创建克隆音色、拉取云端音色列表，并为任意音色维护本地中文显示名与绑定合成模型（映射仅存本机 settings.json）。
+- **② 文字生音频（已完整）**：按所选音色绑定的模型调用千问 TTS 合成语音（pages/textTts/ / voice.js）。「保存到」下拉合并项目 `audio/`、自定义目录（持久化记忆）、音频输出目录三选一，旁常驻「打开目录」按钮（`voice:get-save-dir` IPC，无需等合成完成即可打开当前选择的保存目录）；合成成功提示按实际落盘位置回报（项目 / 自定义目录 / 音频输出目录）；「已生成音频」区按来源分组列出历史 TTS 音频，可试听、可一键设为当前项目背景音频；「合成结果」卡紧邻合成区展示产物路径并可打开所在目录；支持「载入脚本旁白」与带语速调节的双区域试听（仅改播放速率，不改磁盘音频）。
+- **③ 文字转字幕（已完整）**：条目列表式字幕编辑器（增删改、时间轴自动接续、字数统计），支持纯文本自动估时与 `[分:秒]` 精确定时、两种格式混用；可「由脚本旁白生成」按场景旁白与时长提示逐条生成；保存后链路「字幕」节点点亮（pages/subtitle/ / projects.js）。
+- **③+ 从音频生成字幕（已完整）**：内置 whisper.cpp 本地转录（whisper.js / pages/subtitle/transcribe.js）。转录弹窗可选「使用项目音频」或「浏览本地文件」、选识别语言（自动检测 / 中文 / English），带进度条与阶段状态；完成后「替换现有」或「追加到末尾」回填条目并自动保存。转录在本机 CPU 完成、不消耗 API 额度。
+- **语音识别模型管理（已完整）**：设置页「语音识别模型」区块（pages/settings/whisper.js / whisper.js）。四档内置模型（tiny-q8_0 / base / base-q5_1 / small-q8_0）下载 / 删除 / 设为当前使用 / 本地占用统计，走国内镜像下载并实时回推进度；支持添加、编辑、移除自定义模型，并可一键打开模型目录或 whisper-cli 所在目录。
+- **④ 字幕生成 HTML（已完整）**：HTML 由自定义模型 Agent 流式生成/修改（pages/htmlGen/ / htmlAgent.js / projects.js），不再依赖内置模板；生成期间实时显示阶段进度（连接 / 推理 / 生成 / 重试）与 AI 思考过程原文，输出为空时自动升档重试；可选用字幕素材（当前项目/其他项目）与背景音频（自动复制进项目 `audio/`）；生成后刷新预览、点亮链路节点；可下载 HTML 到本地；修改后旧视频产物自动置空。
 - **⑤ 转成视频（已完整）**：预览外壳 + HyperFrames 后台渲染（video.js / projects.js / hfEnv.js），Node 绝对路径启动 CLI、FFmpeg PATH 注入，渲染进度实时推送；完成后内嵌播放 + 「在文件夹中显示」，产物路径回写项目并点亮「视频」节点。
-- **内容脚本（已完整）**：全局视觉风格 + 场景分镜（旁白 / 画面分镜 / 时长提示）编辑保存（content.js），作为配音、字幕与 HTML 生成共用的内容源。
-- **项目创建与切换（已完整）**：新增 `project:create` IPC（项目名校验 + 写 `project.json`）；首页「我的项目」卡片区按 `HTML✓ / 视频✓ / 字幕✓` 标注进度，首页与 HTML 生成页、视频页均可直接新建并切换项目（home.js / htmlGen.js / video.js / projects.js）。
-- **设置与配置（已完整）**：设置页支持自定义模型（OpenAI 兼容，Base URL / 模型 ID / API Key / 启用 + 测试连接）、千问语音（API Key / 目标模型 / 自定义保存目录）与语音识别模型（whisper.cpp 模型档位管理）三块配置（settings.js）。
+- **内容脚本（已完整）**：全局视觉风格 + 场景分镜（旁白 / 画面分镜 / 时长提示）编辑保存（pages/content/），作为配音、字幕与 HTML 生成共用的内容源。
+- **项目创建与切换（已完整）**：新增 `project:create` IPC（项目名校验 + 写 `project.json`）；顶部步骤条内置全局「工作项目」切换器（我的项目 / 内置示例）+ 新建项目，所有节点页均可直接切换（app.js renderStepBar）；首页「我的项目」卡片区按 `HTML✓ / 视频✓ / 字幕✓` 标注进度（pages/home/ / projects.js）。
+- **设置与配置（已完整）**：设置页支持自定义模型（OpenAI 兼容，Base URL / 模型 ID / API Key / 启用 + 测试连接）、千问语音（API Key / 目标模型 / 自定义保存目录）与语音识别模型（whisper.cpp 模型档位管理）三块配置（pages/settings/）。
 - **内置示例与打包**：`video-projects` 内置示例项目（只读，可预览 / 转视频）；electron-builder 打包配置完备，`resources/` 下的 node / ffmpeg / whisper-cli 及依赖 DLL 经 `extraResources` 随应用携带（识别模型体积大，改为首次使用时按需下载）；git 仓库已多次提交，README 与代码保持同步。
 
 ### 说明

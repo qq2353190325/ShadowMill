@@ -11,6 +11,7 @@
 const { app, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const htmlAgent = require('./htmlAgent.js');
 const hfEnv = require('./hfEnv.js');
 
@@ -101,26 +102,34 @@ function scanProjects() {
   return list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
-// 解析字幕文本：支持 [分:秒] 文本 或 纯文本（自动估算时间）
+// 解析字幕文本：支持 [分:秒] 文本、[分:秒-分:秒] 文本（真实起止，秒可带小数=毫秒精度）或纯文本（自动估算时间）
+// 返回 { n, text, time（秒，开始）, end（秒，结束；无结束时间为 null）}
 function parseSubtitle(text) {
+  // 小数部分按位数解释：.9 = 0.9s、.900 = 0.9s（3 位=毫秒），与落盘 fmtTsMs 对齐
+  const frac = (digits) => (digits === undefined ? 0 : (+digits) / Math.pow(10, digits.length));
   const lines = String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const items = [];
   let autoT = 0.4;
   let lineNo = 1;
   for (const line of lines) {
-    const m = line.match(/^\[(\d{1,2}):(\d{1,2})(?:[:.](\d{1,3}))?\]\s*(.*)$/);
+    const m = line.match(/^\[(\d{1,2}):(\d{1,2})(?:[:.](\d{1,3}))?(?:\s*-\s*(\d{1,2}):(\d{1,2})(?:[:.](\d{1,3}))?)?\]\s*(.*)$/);
     let txt = line;
     let time = null;
+    let end = null;
     if (m) {
-      txt = m[4].trim();
-      time = (+m[1]) * 60 + (+m[2]) + ((+(m[3] || 0)) / 1000);
+      txt = m[7].trim();
+      time = (+m[1]) * 60 + (+m[2]) + frac(m[3]);
+      if (m[4] !== undefined) {
+        const e = (+m[4]) * 60 + (+m[5]) + frac(m[6]);
+        if (e > time) end = e;
+      }
     }
     if (!txt) { lineNo++; continue; }
     if (time === null) {
       time = autoT;
       autoT += Math.max(2.4, 1.6 + txt.length * 0.15);
     }
-    items.push({ n: lineNo, text: txt, time });
+    items.push({ n: lineNo, text: txt, time, end });
     lineNo++;
   }
   return items;
@@ -201,6 +210,50 @@ function buildContentBlock(content) {
   });
   return '\n' + parts.join('\n');
 }
+
+// ===== 预览播放控制脚本（注入到 index.preview.html 副本） =====
+// 生成的 HTML 由模型产出、结构不可控，且 file:// iframe 与父页跨源无法直接操作 DOM，
+// 故预览时在项目目录内写一份副本并注入本脚本：响应父窗口 postMessage（pause/play/restart），
+// 每 300ms 上报 { time, dur } 供父页进度条；副本独立打开时脚本不产生任何可见影响。
+const HG_PREVIEW_CTRL = [
+  '(function () {',
+  '  if (window.__hgPreviewCtrl) return;',
+  '  window.__hgPreviewCtrl = true;',
+  '  var timelines = function () {',
+  '    try { if (window.__timelines && window.__timelines.length) return window.__timelines.slice(); } catch (e) {}',
+  '    try { if (window.gsap) return [window.gsap.globalTimeline]; } catch (e) {}',
+  '    return [];',
+  '  };',
+  '  var setPaused = function (p) {',
+  '    timelines().forEach(function (t) { try { if (p) t.pause(); else t.resume(); } catch (e) {} });',
+  '    var ms = document.querySelectorAll("audio, video");',
+  '    for (var i = 0; i < ms.length; i++) {',
+  '      try { if (p) ms[i].pause(); else ms[i].play().catch(function () {}); } catch (e) {}',
+  '    }',
+  '    if (document.getAnimations) {',
+  '      document.getAnimations().forEach(function (a) { try { if (p) a.pause(); else a.play(); } catch (e) {} });',
+  '    }',
+  '  };',
+  '  var clock = function () {',
+  '    var time = 0, dur = 0;',
+  '    var m = document.querySelector("audio, video");',
+  '    if (m && isFinite(m.duration) && m.duration > 0) { dur = m.duration; time = m.currentTime; }',
+  '    try { if (window.gsap) { var gt = window.gsap.globalTimeline; dur = Math.max(dur, gt.duration()); time = Math.max(time, gt.time()); } } catch (e) {}',
+  '    return { time: time, dur: dur };',
+  '  };',
+  '  window.addEventListener("message", function (ev) {',
+  '    var d = ev.data || {};',
+  '    if (!d.__hg) return;',
+  '    if (d.type === "pause") setPaused(true);',
+  '    else if (d.type === "play") setPaused(false);',
+  '    else if (d.type === "restart") location.reload();',
+  '  });',
+  '  setInterval(function () {',
+  '    var c = clock();',
+  '    try { parent.postMessage({ __hg: true, type: "progress", time: c.time, dur: c.dur }, "*"); } catch (e) {}',
+  '  }, 300);',
+  '})();'
+].join('\n');
 
 function register(ctx) {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
@@ -284,7 +337,7 @@ function register(ctx) {
     const userPrompt = buildAgentPrompt([
       '用户需求：' + prompt.trim(),
       buildContentBlock(proj.content),
-      subtitleText ? '\n【项目字幕，请据此逐条设计动画】\n' + subtitleText : '',
+      subtitleText ? '\n【项目字幕】每行格式为 [开始-结束] 文本，时间为秒、可带小数（毫秒精度，如 17.920）：该条字幕必须在开始时间出现、在结束时间前完成淡出，严格按此窗口显示，不得挂到下一条开始；GSAP 时间轴直接用这些小数秒定位（如 tl.to(el,{...},17.920)）；仅 [开始] 无结束时间的行自行按语义安排节奏。\n' + subtitleText : '',
       audioRef ? '\n【背景音乐】项目内音频文件：' + audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : '',
       videoRef ? '\n【视频素材】项目内视频文件：' + videoRef + '，请将该视频作为页面内容的一部分嵌入（<video src="' + videoRef + '" autoplay muted loop playsinline>），并用 GSAP 时间轴编排其入场/出场与播放时段。' : ''
     ]);
@@ -362,7 +415,7 @@ function register(ctx) {
       '',
       '用户需求（在此基础上改造后输出完整新 HTML）：' + prompt.trim(),
       buildContentBlock(proj.content),
-      subtitleText ? '\n【项目字幕，请据此逐条设计动画】\n' + subtitleText : '',
+      subtitleText ? '\n【项目字幕】每行格式为 [开始-结束] 文本，时间为秒、可带小数（毫秒精度，如 17.920）：该条字幕必须在开始时间出现、在结束时间前完成淡出，严格按此窗口显示，不得挂到下一条开始；GSAP 时间轴直接用这些小数秒定位（如 tl.to(el,{...},17.920)）；仅 [开始] 无结束时间的行自行按语义安排节奏。\n' + subtitleText : '',
       audioRef ? '\n【背景音乐】项目内音频文件：' + audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : '',
       videoRef ? '\n【视频素材】项目内视频文件：' + videoRef + '，请将该视频作为页面内容的一部分嵌入（<video src="' + videoRef + '" autoplay muted loop playsinline>），并用 GSAP 时间轴编排其入场/出场与播放时段。' : ''
     ]);
@@ -563,11 +616,61 @@ function register(ctx) {
     return { ok: true };
   });
 
+  // 从项目视频素材提取原声音轨 → audio/ 下 .m4a（AAC 192k，同名前缀），设为背景音频
+  ipcMain.handle('project:extract-video-audio', async (event, name) => {
+    const proj = ensureProject(name);
+    const videoRef = proj.videoMaterial || '';
+    if (!videoRef) return { ok: false, message: '该项目没有视频素材，请先在下方「选择视频文件」' };
+    const videoPath = path.join(projectDir(name), videoRef);
+    if (!fs.existsSync(videoPath)) return { ok: false, message: '视频素材文件不存在：' + videoRef };
+    const ffmpeg = hfEnv.BUILTIN_RESOURCES.ffmpeg;
+    if (!fs.existsSync(ffmpeg)) return { ok: false, message: '未找到内置 ffmpeg（resources/ffmpeg/bin）' };
+    const stem = path.basename(videoPath).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_');
+    const outName = stem + '.m4a';
+    const audioDir = path.join(projectDir(name), 'audio');
+    fs.mkdirSync(audioDir, { recursive: true });
+    const outPath = path.join(audioDir, outName);
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoPath, '-vn', '-ac', '2', '-c:a', 'aac', '-b:a', '192k', outPath], { windowsHide: true });
+        child.on('error', (err) => reject(new Error('无法启动 ffmpeg：' + err.message)));
+        child.on('close', (code) => (code === 0 ? resolve() : reject(new Error('提取失败（ffmpeg 退出码 ' + code + '）'))));
+      });
+    } catch (e) {
+      try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (e2) { /* ignore */ }
+      return { ok: false, message: String((e && e.message) || e) };
+    }
+    if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
+      try { fs.unlinkSync(outPath); } catch (e) { /* ignore */ }
+      return { ok: false, message: '提取失败：输出音频为空（该视频可能没有音轨）' };
+    }
+    proj.audioFile = 'audio/' + outName;
+    writeProject(proj);
+    return { ok: true, audioFile: proj.audioFile };
+  });
+
   // 读取项目当前 HTML 源码（供编辑器载入）
   ipcMain.handle('project:read-html', (event, name) => {
     const htmlPath = projectFilePath(name, 'index.html');
     if (!fs.existsSync(htmlPath)) return { ok: false, message: '该项目还没有 HTML' };
     return { ok: true, html: fs.readFileSync(htmlPath, 'utf8') };
+  });
+
+  // 预览副本：index.html + 注入播放控制脚本 → 同目录 index.preview.html
+  // （与原件同目录保证相对引用素材可用；预览副本仅用于应用内预览，下载/转视频始终用原件）
+  ipcMain.handle('project:preview-html', (event, name) => {
+    const htmlPath = projectFilePath(name, 'index.html');
+    if (!fs.existsSync(htmlPath)) return { ok: false, message: '该项目还没有 HTML' };
+    let html = fs.readFileSync(htmlPath, 'utf8');
+    // 预览副本去除 CSP 限制（仅副本），保证注入的控制脚本可执行
+    html = html.replace(/<meta[^>]*content-security-policy[^>]*>/gi, '');
+    const ctrl = '<script>' + HG_PREVIEW_CTRL + '</scr' + 'ipt>';
+    const bodyEnd = html.lastIndexOf('</body>');
+    if (bodyEnd >= 0) html = html.slice(0, bodyEnd) + ctrl + html.slice(bodyEnd);
+    else html += ctrl;
+    const previewPath = htmlPath.replace(/\.html$/i, '.preview.html');
+    fs.writeFileSync(previewPath, html, 'utf8');
+    return { ok: true, previewPath };
   });
 
   // 直接保存（覆盖）项目 HTML 源码，支持"不满意再改"

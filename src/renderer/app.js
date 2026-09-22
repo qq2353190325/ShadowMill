@@ -138,11 +138,8 @@
     const subDone = hasSubtitle();
     const htmlDone = hasHtml();
     const videoDone = hasVideo();
-    let html = '<span class="sel-label" style="font-size:12px;color:var(--text-secondary);letter-spacing:1px;flex:none">工作项目</span>';
-    html += '<select id="proj-select" class="hf-select" style="width:210px;flex:none" title="切换工作项目（我的项目 / 内置示例只读）"></select>';
-    html += '<input id="proj-new-name" class="hgen-input" placeholder="新项目名" style="display:none;flex:none;width:140px"/>';
-    html += '<button class="hf-btn" id="proj-new" title="新建我的项目" style="padding:4px 10px;font-size:12px;flex:none">新建项目</button>';
-    html += '<button class="hf-btn" id="proj-open" title="打开当前项目所在目录" style="padding:4px 10px;font-size:12px;flex:none">打开目录</button>';
+    // 第一行：五节点流水线（内容脚本 → 配音 → 字幕 → HTML → 视频）
+    let html = '<div class="project-bar-row">';
     html += '<div class="step-chain">';
     html += '<span class="step-node clickable ' + (isPage('content') ? 'active-now' : '') + ' ' + (contentDone ? 'done' : '') + '" data-goto="content"><span class="step-dot"></span>内容脚本</span>';
     html += '<span class="step-arrow">→</span>';
@@ -153,6 +150,15 @@
     html += '<span class="step-node clickable ' + (isPage('html-gen') ? 'active-now' : '') + ' ' + (htmlDone ? 'done' : '') + '" data-goto="html-gen"><span class="step-dot"></span>HTML</span>';
     html += '<span class="step-arrow">→</span>';
     html += '<span class="step-node clickable ' + (isPage('video-gen') ? 'active-now' : '') + ' ' + (videoDone ? 'done' : '') + '" data-goto="video-gen"><span class="step-dot"></span>视频</span>';
+    html += '</div>';
+    html += '</div>';
+    // 第二行：工作项目切换 / 新建 / 打开目录
+    html += '<div class="project-bar-row">';
+    html += '<span class="sel-label" style="font-size:12px;color:var(--text-secondary);letter-spacing:1px;flex:none">工作项目</span>';
+    html += '<select id="proj-select" class="hf-select" style="width:210px;flex:none" title="切换工作项目（我的项目 / 内置示例只读）"></select>';
+    html += '<input id="proj-new-name" class="hgen-input" placeholder="新项目名" style="display:none;flex:none;width:140px"/>';
+    html += '<button class="hf-btn" id="proj-new" title="新建我的项目" style="padding:4px 10px;font-size:12px;flex:none">新建项目</button>';
+    html += '<button class="hf-btn" id="proj-open" title="打开当前项目所在目录" style="padding:4px 10px;font-size:12px;flex:none">打开目录</button>';
     html += '</div>';
     bar.innerHTML = html;
     bar.querySelectorAll('[data-goto]').forEach((n) => n.addEventListener('click', () => goPage(n.dataset.goto)));
@@ -241,6 +247,7 @@
     toast, renderStepBar,
     setActiveMenu, goPage,
     pages: {},
+    templates: {}, // 各页面 DOM 模板（pages/<name>/template.js 注册，逻辑在 index.js 引用）
     // 应用启动初始化：恢复上次项目上下文 → 刷新项目 → 进入首页
     init: async function () {
       try {

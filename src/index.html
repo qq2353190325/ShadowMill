@@ -62,14 +62,27 @@
   </div>
 
   <script src="renderer/app.js"></script>
-  <script src="renderer/pages/home.js"></script>
-  <script src="renderer/pages/settings.js"></script>
-  <script src="renderer/pages/soundCopy.js"></script>
-  <script src="renderer/pages/textTts.js"></script>
-  <script src="renderer/pages/content.js"></script>
-  <script src="renderer/pages/subtitle.js"></script>
-  <script src="renderer/pages/htmlGen.js"></script>
-  <script src="renderer/pages/video.js"></script>
+  <!-- 每个页面一个文件夹：template.js（DOM 模板 → App.templates）+ index.js（逻辑） -->
+  <script src="renderer/pages/home/template.js"></script>
+  <script src="renderer/pages/content/template.js"></script>
+  <script src="renderer/pages/textTts/template.js"></script>
+  <script src="renderer/pages/subtitle/template.js"></script>
+  <script src="renderer/pages/soundCopy/template.js"></script>
+  <script src="renderer/pages/htmlGen/template.js"></script>
+  <script src="renderer/pages/video/template.js"></script>
+  <script src="renderer/pages/settings/template.js"></script>
+  <script src="renderer/pages/home/index.js"></script>
+  <script src="renderer/pages/content/index.js"></script>
+  <script src="renderer/pages/textTts/index.js"></script>
+  <script src="renderer/pages/textTts/synth.js"></script>
+  <script src="renderer/pages/textTts/align.js"></script>
+  <script src="renderer/pages/subtitle/index.js"></script>
+  <script src="renderer/pages/subtitle/transcribe.js"></script>
+  <script src="renderer/pages/soundCopy/index.js"></script>
+  <script src="renderer/pages/htmlGen/index.js"></script>
+  <script src="renderer/pages/video/index.js"></script>
+  <script src="renderer/pages/settings/index.js"></script>
+  <script src="renderer/pages/settings/whisper.js"></script>
   <script src="renderer/entry.js"></script>
 </body>
 </html>
