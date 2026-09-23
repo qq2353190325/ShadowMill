@@ -9,6 +9,9 @@ resources/
 # electron-builder 输出（安装包 / 便携版 / 缓存）
 dist/
 
+# electron-vite 构建输出
+out/
+
 # ---------- 日志 ----------
 *.log
 npm-debug.log*
