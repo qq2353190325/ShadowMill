@@ -2,17 +2,23 @@
   "name": "my-app",
   "version": "1.0.0",
   "description": "Electron 项目：左侧菜单 + 右侧内容区布局（五节点音视频创作流水线）",
-  "main": "src/main.js",
+  "main": "out/main/index.js",
   "scripts": {
-    "start": "node node_modules/electron/cli.js .",
-    "pack": "npx electron-builder --dir",
-    "dist": "npx electron-builder --win"
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.agent.json",
+    "pack": "npm run build && npx electron-builder --dir",
+    "dist": "npm run build && npx electron-builder --win"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
+    "@vitejs/plugin-vue": "^6.0.9",
     "electron": "31.7.7",
     "electron-builder": "^26.15.3",
-    "typescript": "^7.0.2"
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
   },
   "build": {
     "appId": "com.marvis.avpipeline",
@@ -25,12 +31,7 @@
       "output": "dist"
     },
     "files": [
-      "src/main.js",
-      "src/main/**/*",
-      "src/preload.js",
-      "src/renderer/**/*",
-      "src/renderer.css",
-      "src/index.html",
+      "out/**/*",
       "video-projects/**/*",
       "README.md",
       "!node_modules/**/*",
@@ -65,6 +66,7 @@
   },
   "dependencies": {
     "openai": "^7.15.0",
-    "opencc-js": "^1.4.2"
+    "opencc-js": "^1.4.2",
+    "vue": "^3.5.43"
   }
 }
