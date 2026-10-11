@@ -100,11 +100,19 @@ const bytesText = (n: number): string => {
   return (v / 1024 / 1024).toFixed(1) + ' MB'
 }
 // 把 electron-updater 的报错翻译成用户看得懂的话（HTTP 错误码优先）
-// 注意：更新源上没有 latest.yml 时，electron-updater 抛的是 `Cannot find channel "latest.yml" ...`，
-// 未必带 404，故「文件缺失」两种文案都要判，否则会落到兜底的「更新失败：…」。
+// 把 electron-updater 的报错翻译成用户看得懂的话。
+// 判断顺序很重要：403 的报错文本里**必然包含请求 URL**（末尾就是 latest.yml），
+// 若先判 `latest\.yml` 就会把「权限被拒」误报成「文件没上传」，会把人带偏到错误方向。
 function humanError(raw: string): string {
   const s = String(raw || '')
-  if (/404|not found|cannot find|latest\.yml/i.test(s)) return '更新源上没有找到 latest.yml，请确认已把安装包与 latest.yml 上传到更新源'
+  // ① 先判权限：403 与各类「拒绝访问」文案（OSS/S3/GitHub 私有库都会出现）
+  if (/403|forbidden|accessdenied|access denied|no right to access|bucket acl|unauthorized|401/i.test(s)) {
+    return '更新源拒绝访问（403）：文件在，但没有匿名读取权限。请把存储桶/对象设为「公共读」后重试（generic 更新源必须能被匿名下载）'
+  }
+  // ② 再判缺失：404，或 electron-updater 的 `Cannot find channel "latest.yml"`
+  if (/404|not found|cannot find/i.test(s)) {
+    return '更新源上没有找到 latest.yml，请确认已把安装包与 latest.yml 上传到更新源'
+  }
   if (/ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED|ECONNRESET|net::/i.test(s)) return '无法连接更新源，请检查网络或更新源地址'
   if (/sha512|checksum/i.test(s)) return '安装包校验失败（文件不完整或与服务端不一致），请重试'
   if (/app-update\.yml|ENOENT/i.test(s)) return '本机缺少更新配置（app-update.yml），当前可能不是安装版'

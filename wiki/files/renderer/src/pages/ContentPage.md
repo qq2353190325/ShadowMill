@@ -2,10 +2,10 @@
 
 > 内容脚本编辑器：全局视觉风格 + 场景分镜的增删改排序与保存。
 
-- **覆盖文件**：`ContentPage/index.vue`（本目录唯一文件，110 行）
+- **覆盖文件**：`ContentPage/index.vue`（本目录唯一文件，106 行）
 - **所在目录**：`src/renderer/src/pages/ContentPage/`
 - **类型**：页面组件（SFC）
-- **规模**：110 行
+- **规模**：106 行
 - **对外导出**：默认导出组件（无 props）
 
 ## 1. 作用与职责
@@ -72,14 +72,13 @@
 
 ### 4.1 页面挂载加载数据（`load`）
 
-1. 若 `appState.isBuiltin` 为真，`toast('当前是内置示例项目（只读），请切换到自己的项目来编辑内容脚本')`——仅提示，不阻断加载。
-2. 取 `const content = (appState.project && appState.project.content) || { style: '', scenes: [] }`。
-3. `style.value = content.style || ''`。
-4. `scenes.value = (Array.isArray(content.scenes) ? content.scenes : []).map(...)`，逐字段做类型守卫：
+1. 取 `const content = (appState.project && appState.project.content) || { style: '', scenes: [] }`。
+2. `style.value = content.style || ''`。
+3. `scenes.value = (Array.isArray(content.scenes) ? content.scenes : []).map(...)`，逐字段做类型守卫：
    - `id`：非空字符串则 `trim()` 后保留，否则新生成一个 `scene-...` 形式的 id；
    - `narration` / `visual`：仅接受字符串，否则 `''`；
    - `durHint`：`undefined` / `null` 转为 `''`，其余用 `String(...)` 转换。
-5. 若 `!scenes.value.length`，推入一个 `emptyScene()`——即「已有项目无内容脚本时默认展示一个空场景」。
+4. 若 `!scenes.value.length`，推入一个 `emptyScene()`——即「已有项目无内容脚本时默认展示一个空场景」。
 
 ### 4.2 用户交互
 
@@ -89,16 +88,15 @@
 
 ### 4.3 落盘持久化（`save`）
 
-1. **只读守卫**：`if (appState.isBuiltin) { toast('内置项目只读，请先切换到自己的项目'); return; }`——内置示例项目直接拒绝保存。
-2. 组装载荷：
+1. 组装载荷：
    ```ts
    const content = {
      style: style.value.trim(),
      scenes: scenes.value.map((s) => ({ id: s.id, narration: s.narration, visual: s.visual, durHint: s.durHint }))
    }
    ```
-3. `const res = await window.projectTools.saveContent(appState.currentName, content)`。
-4. 失败处理：`if (!res || !res.ok) { toast(res?.message || '保存失败'); return; }`。
+2. `const res = await window.projectTools.saveContent(appState.currentName, content)`。
+3. 失败处理：`if (!res || !res.ok) { toast(res?.message || '保存失败'); return; }`。
 
 ### 4.4 状态刷新
 
@@ -127,7 +125,7 @@
 
 ## 6. 注意事项与实现要点
 
-- **内置示例只读的双重守卫**：`load()` 只在进入时给一次提示，不修改数据；真正的拦截点在 `save()` 里 `return`，确保只读项目绝不会被写入。
+- **保存没有前置拦截**：`save()` 只做「组装载荷 → 调 `project:save-content` → 失败 toast」三步，不检查项目形态；每个项目都是可读可写的普通目录。
 - **空数组自动补位**：`load()` 与 `remove()` 都会在 `scenes` 为空时补一个 `emptyScene()`，因此「空态提示」实际上只在极短暂的初始渲染阶段可能出现（`scenes` 初始为 `[]`，`onMounted` 后即被填充）。
 - **`v-model` 直接改对象**：`s.narration` / `s.visual` / `s.durHint` 都是对 `scenes.value[i]` 属性的直接绑定，没有 `collect()` 收集步骤；`save()` 时再做一次显式字段挑选（只提交 `id` / `narration` / `visual` / `durHint`）。
 - **`durHint` 以字符串保存**：`Scene.durHint` 类型为 `string`，`load()` 用 `String(item.durHint)` 归一化，输入框 placeholder 为「可空」。

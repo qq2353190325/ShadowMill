@@ -1,10 +1,12 @@
 // pages/TextTtsPage/helpers.ts —— 文字生音频页共享工具（原 window.__tts 命名空间）
-// requireCfg / cfgSaveDir / 音色下拉加载（listAll 优先，回退组装）/ 结果卡可见标记。
+// requireCfg / cfgSaveDir / 音色下拉加载（listAll 优先，回退组装）/ 结果卡可见标记 / 「管理音色」Tab 信号。
 import { ref } from 'vue'
 import { goPage } from '@renderer/pages'
 
+// 音色下拉的选项类型。字段名是 `value`（不是 `voiceId`）：全局下拉组件 HfSelect 只认 `value` / `label`，
+// 因此这里的结构刻意与 `HfSelectOption` 对齐（结构兼容即可，无需再套一层 computed 转换）。
 export interface VoiceOption {
-  voiceId: string
+  value: string
   label: string
   model: string
 }
@@ -17,6 +19,17 @@ export const cfgSaveDir = ref('');
 export const voiceGroups = ref<VoiceOptionGroup[]>([]);
 export const modelTag = ref('qwen-audio-3.0-tts-flash');
 export const ttsResultShown = ref(false);
+
+// 「音色管理」Tab 信号：音色管理已并入本页第三个 Tab（原独立「音色管理」页 sound-copy 已下线）。
+// 由合成卡片的「管理音色」按钮置位，TextTtsPage 的 watch 消费它（切 Tab 后立刻复位为 false）：
+//  - 同页点击：走 watch，只切 Tab，不 goPage 换页（换页会重挂载整个配音页，清空合成文本等已填内容）；
+//  - 跨页点击：先置位再 goPage('text-tts')，本页重挂载时在 onMounted 里消费一次。
+// 之所以是布尔而不是计数器：复位 true→false 不会再次触发 watch（计数器复位 1→0 会二次触发）。
+export const voiceTabRequest = ref(false);
+
+export function requestVoiceTab(): void {
+  voiceTabRequest.value = true;
+}
 
 export function setCfgSaveDir(v: string): void {
   cfgSaveDir.value = v;
@@ -46,20 +59,20 @@ async function loadVoicesFallback(onStatus: (text: string, kind: string) => void
 
   const sysList = (sys && sys.ok && sys.voices) || [];
   const sysOpts: VoiceOption[] = sysList.map((v: any) => ({
-    voiceId: v.voice,
+    value: v.voice,
     label: pName('system:' + v.voice, v.desc) + ' — ' + v.voice + '（' + pModel('system:' + v.voice, v.model || '') + '）',
     model: pModel('system:' + v.voice, v.model || '')
   }));
   const customOpts: VoiceOption[] = (res && res.ok && Array.isArray(res.voices))
     ? res.voices.map((v: any) => ({
-      voiceId: v.voice,
+      value: v.voice,
       label: pName('custom:' + v.voice, v.voice) + '（' + pModel('custom:' + v.voice, v.target_model || '') + '）',
       model: pModel('custom:' + v.voice, v.target_model || '')
     }))
     : [];
   voiceGroups.value = [
-    { label: '系统音色（内置）', options: sysOpts.length ? sysOpts : [{ voiceId: '', label: '（系统音色加载失败）', model: '' }] },
-    { label: '自定义音色（我的克隆）', options: customOpts.length ? customOpts : [{ voiceId: '', label: (res && res.message) || '拉取自定义音色失败', model: '' }] }
+    { label: '系统音色（内置）', options: sysOpts.length ? sysOpts : [{ value: '', label: '（系统音色加载失败）', model: '' }] },
+    { label: '自定义音色（我的克隆）', options: customOpts.length ? customOpts : [{ value: '', label: (res && res.message) || '拉取自定义音色失败', model: '' }] }
   ];
   const parts: string[] = [];
   if (sysOpts.length) parts.push('系统音色 ' + sysOpts.length + ' 个');
@@ -79,7 +92,7 @@ export async function loadVoices(onStatus: (text: string, kind: string) => void)
   const sysOpts: VoiceOption[] = [];
   const customOpts: VoiceOption[] = [];
   items.forEach((it: any) => {
-    const o: VoiceOption = { voiceId: it.voiceId || '', label: '', model: it.model || '' };
+    const o: VoiceOption = { value: it.voiceId || '', label: '', model: it.model || '' };
     if (it.type === 'custom') {
       o.label = it.name + '（' + (it.model || '') + '）';
       customOpts.push(o);
@@ -101,7 +114,7 @@ export async function loadVoices(onStatus: (text: string, kind: string) => void)
 // 选中音色绑定的模型（无绑定返回 ''，由调用方回落全局默认）
 export function voiceModelOf(voiceId: string): string {
   for (const g of voiceGroups.value) {
-    const o = g.options.find((x) => x.voiceId === voiceId);
+    const o = g.options.find((x) => x.value === voiceId);
     if (o) return o.model;
   }
   return '';
@@ -110,7 +123,7 @@ export function voiceModelOf(voiceId: string): string {
 // 首个可选音色（加载完成后选中第一项，与原 sel.selectedIndex = 0 语义一致）
 export function firstVoiceId(): string {
   for (const g of voiceGroups.value) {
-    if (g.options.length && g.options[0].voiceId) return g.options[0].voiceId;
+    if (g.options.length && g.options[0].value) return g.options[0].value;
   }
   return '';
 }

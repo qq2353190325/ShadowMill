@@ -1,6 +1,19 @@
 <template>
-  <div>
-    <div class="card hgen-panel">
+  <div class="settings-layout">
+    <!-- 设置分类导航：5 类平级，右侧只渲染当前分类（下方区块用 v-if，未选中的不挂载） -->
+    <nav class="settings-nav">
+      <button type="button" class="settings-nav-item" :class="{ active: activeSection === 'model' }" @click="activeSection = 'model'">模型配置</button>
+      <button type="button" class="settings-nav-item" :class="{ active: activeSection === 'voice' }" @click="activeSection = 'voice'">语音服务</button>
+      <button type="button" class="settings-nav-item" :class="{ active: activeSection === 'render' }" @click="activeSection = 'render'">渲染档位</button>
+    
+      <button type="button" class="settings-nav-item" :class="{ active: activeSection === 'whisper' }" @click="activeSection = 'whisper'">语音识别模型</button>
+        <button type="button" class="settings-nav-item" :class="{ active: activeSection === 'update' }" @click="activeSection = 'update'">
+        应用更新<span v-if="updateStage === 'available'" class="settings-nav-dot"></span>
+      </button>
+    </nav>
+
+    <div class="settings-content">
+      <div v-if="activeSection === 'model'" class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>自定义模型（OpenAI 兼容）</div>
       <div class="hgen-tip">配置用于「HTML 生成 / 修改」的自定义模型 Agent。填写 Base URL、模型 ID 与 API Key 并开启后，HTML 生成页即使用该模型工作。API Key 仅保存在本机 userData/settings.json。</div>
       <div class="hgen-row">
@@ -25,8 +38,8 @@
       </div>
       <div class="hf-status" :class="statusClass">{{ status }}</div>
     </div>
-    <div class="card hgen-panel" style="margin-top:16px">
-      <div class="panel-title"><span class="dot"></span>千问语音（音色管理 & 文字生音频）</div>
+    <div v-if="activeSection === 'voice'" class="card hgen-panel">
+      <div class="panel-title"><span class="dot"></span>千问语音（音色管理 &amp; 文字生音频）</div>
       <div class="hgen-tip">配置千问AI平台 API Key 与目标语音合成模型，供「音色管理」和「文字生音频」使用。API Key 仅保存在本机 userData/settings.json。创建音色时的 target_model 必须与合成模型一致。</div>
       <div class="hgen-row">
         <label class="sel-label">API Key</label>
@@ -34,29 +47,23 @@
       </div>
       <div class="hgen-row">
         <label class="sel-label">目标模型</label>
-        <select v-model="vModel" class="hgen-select" style="flex:1">
-          <option v-for="m in voiceModels" :key="m.id" :value="m.id">{{ m.label }}</option>
-        </select>
+        <HfSelect v-model="vModel" :groups="voiceModelGroups" />
       </div>
       <div class="hgen-actions">
         <button class="hf-btn hf-btn-primary" @click="onSaveVoice">保存千问语音配置</button>
       </div>
       <div class="hf-status" :class="vStatusClass">{{ vStatus }}</div>
     </div>
-    <div class="card hgen-panel" style="margin-top:16px">
+    <div v-if="activeSection === 'render'" class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>视频渲染默认档位</div>
       <div class="hgen-tip">「HTML生成」页点「转视频」时的默认档位，普通使用只需在这两项中选择。单个项目可在「HTML生成」页的「渲染档位」单独覆盖（项目覆盖优先于这里的默认）。质量 draft 编码最快但文字边缘可能有压缩痕迹，仅用于快速确认内容；降低帧率不会缩短成片时长，只是采样更稀、渲染更快。</div>
       <div class="hgen-row">
         <label class="sel-label">质量</label>
-        <select v-model="rQuality" class="hgen-select" style="flex:1">
-          <option v-for="o in qualityOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
+        <HfSelect v-model="rQuality" :groups="qualityGroups" />
       </div>
       <div class="hgen-row">
         <label class="sel-label">帧率</label>
-        <select v-model="rFps" class="hgen-select" style="flex:1">
-          <option v-for="o in fpsOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
+        <HfSelect v-model="rFps" :groups="fpsGroups" />
       </div>
       <div class="hgen-actions">
         <button class="hf-btn hf-btn-primary" @click="onSaveRender">保存渲染默认档位</button>
@@ -64,32 +71,27 @@
       <div class="hf-status" :class="rStatusClass">{{ rStatus }}</div>
       <div class="hgen-tip" style="margin-top:8px">{{ qualityHint }}</div>
     </div>
-    <div class="card hgen-panel" style="margin-top:16px">
+    <div v-if="activeSection === 'whisper'" class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>语音识别模型（whisper.cpp 字幕转录）</div>
       <div class="hgen-tip">供字幕页「从音频生成字幕」在本机离线识别使用（不消耗 API 额度）。模型按「id ↔ 文件名」一一枚举登记：只识别登记在枚举内的文件名，枚举外的文件视为未知模型。模型文件不随应用打包，首次使用需在此下载（下载源为 HuggingFace 国内镜像 hf-mirror.com，规避 GitHub 直链超时）。点「设为当前使用」后，字幕转录弹窗即使用该档位；其他 ggml 模型可用「添加自定义模型」起名登记。</div>
       <WhisperSection />
     </div>
-    <div class="card hgen-panel" style="margin-top:16px">
+    <div v-if="activeSection === 'update'" class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>应用更新</div>
-      <div class="hgen-tip">
-        当前版本 <b>{{ updateVersion || '—' }}</b>。应用从你自建的更新源（静态服务器）检查新版本：检查与下载由你手动触发，安装包下载完成后点「立即重启安装」，或直接关闭应用时自动完成安装。
-      </div>
       <div class="hgen-row">
-        <label class="sel-label">更新源</label>
-        <input v-model="feedUrl" class="hgen-input" style="flex:1" placeholder="留空 = 使用打包时内置的更新地址；如 http://192.168.1.10:8099/" />
-      </div>
-      <div class="hgen-row">
-        <label class="sel-label">启动检查</label>
-        <label class="hgen-check"><input v-model="autoCheck" type="checkbox" /> 启动后静默检查一次更新（仅在设置页显示状态，不弹窗打扰）</label>
+        <label class="sel-label">当前版本</label>
+        <span class="hf-file" style="flex:1">{{ updateVersion || '—' }}</span>
       </div>
       <div class="hgen-actions">
-        <button class="hf-btn hf-btn-primary" @click="onSaveUpdater">保存更新设置</button>
-        <button class="hf-btn" :disabled="updateBusy" @click="onCheckUpdate">检查更新</button>
+        <button class="hf-btn hf-btn-primary" :disabled="updateBusy" @click="onCheckUpdate">检查更新</button>
+        <button class="hf-btn" @click="openFeedDialog">自定义更新源</button>
         <button v-if="updateStage === 'available' || updateStage === 'skipped'" class="hf-btn" @click="onDownloadUpdate">下载更新</button>
         <button v-if="updateStage === 'downloading'" class="hf-btn" @click="onCancelUpdate">取消下载</button>
         <button v-if="updateStage === 'downloaded'" class="hf-btn hf-btn-primary" @click="onInstallUpdate">立即重启安装</button>
       </div>
       <div class="hf-status" :class="updateStatusClass">{{ updateMessage }}</div>
+      <!-- 保存 / 重置的反馈独立成行：与检查更新共行会被随后的进度文案盖掉，看起来像「没保存」-->
+      <div v-if="updaterStatus" class="hf-status" :class="updaterStatusClass">{{ updaterStatus }}</div>
       <div v-if="updateStage === 'available'" class="hgen-actions" style="margin-top:8px">
         <button class="hf-btn" @click="onSkipVersion(true)">跳过版本 {{ updateVersion }}</button>
       </div>
@@ -97,13 +99,40 @@
         <button class="hf-btn" @click="onSkipVersion(false)">恢复提示版本 {{ updateVersion }}</button>
       </div>
     </div>
+
+    <!-- 自定义更新源弹窗：保存 / 重置均即时落盘（settings.json 的 updater 段）-->
+    <div class="hf-modal-mask" v-show="feedDialogVisible" @click.self="closeFeedDialog">
+      <div class="hf-modal" style="width:min(520px,92vw)">
+        <div class="hf-modal-head">
+          <span class="hf-modal-title">自定义更新源</span>
+          <button class="hf-modal-close" title="关闭" @click="closeFeedDialog">×</button>
+        </div>
+        <div class="hf-modal-body">
+          <div class="hgen-row">
+            <label class="sel-label" style="flex:none;width:56px">更新源</label>
+            <input v-model="feedDraft" class="hgen-input" style="flex:1" placeholder="如 https://my-bucket.oss-cn-beijing.aliyuncs.com/MarvisStudio/" />
+          </div>
+          <div class="hgen-row">
+            <label class="sel-label" style="flex:none;width:56px">启动检查</label>
+            <label class="hgen-check"><input v-model="autoCheckDraft" type="checkbox" /> 启动后静默检查一次更新</label>
+          </div>
+          <div class="hgen-tip" style="margin-bottom:0">留空即重置为应用内置的更新地址。地址需指向存放 <b>latest.yml</b> 的目录，并以 <b>/</b> 结尾。</div>
+        </div>
+        <div class="hf-modal-foot">
+          <button class="hf-btn" @click="onResetFeed">重置</button>
+          <button class="hf-btn" @click="closeFeedDialog">取消</button>
+          <button class="hf-btn hf-btn-primary" @click="onSaveFeed">保存</button>
+        </div>
+      </div>
+    </div>
+    </div><!-- /settings-content -->
   </div>
 </template>
 
 <script setup lang="ts">
 // pages/SettingsPage/index.vue —— 设置页（原 JS 版 settings 模块 {template,index}.js 移植）
 // 自定义模型 + 千问语音配置 + 视频渲染默认档位；语音识别模型区块为子组件 WhisperSection（原 window.__settings.initWhisper）。
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { RenderFps, RenderQuality, UpdateProgressPayload, UpdateStage } from '@shared/types'
 import {
   FALLBACK_RENDER,
@@ -112,6 +141,7 @@ import {
   renderQualityLabel
 } from '@renderer/utils/render'
 import { saveRenderDefaults } from '@renderer/composables/useRenderOptions'
+import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import WhisperSection from './WhisperSection.vue'
 
 // ===== 自定义模型（OpenAI 兼容） =====
@@ -121,6 +151,27 @@ const apiKey = ref('');
 const enabled = ref(false);
 const status = ref('');
 const statusClass = ref('');
+
+// ===== 设置分类（左侧导航 → 右侧内容）=====
+// 5 类平级：模型配置 / 语音服务 / 渲染档位 / 应用更新 / 语音识别模型。
+// 选择记忆在 localStorage（键名沿用项目 myapp.* 前缀），下次进设置页回到上次的分类。
+type SettingsSection = 'model' | 'voice' | 'render' | 'update' | 'whisper';
+const SETTINGS_SECTION_KEY = 'myapp.settingsSection';
+const SECTIONS: SettingsSection[] = ['model', 'voice', 'render', 'update', 'whisper'];
+function readSection(): SettingsSection {
+  try {
+    const v = localStorage.getItem(SETTINGS_SECTION_KEY) as SettingsSection | null;
+    return v && SECTIONS.indexOf(v) >= 0 ? v : 'model';
+  } catch (e) {
+    return 'model';
+  }
+}
+const activeSection = ref<SettingsSection>(readSection());
+watch(activeSection, (v) => {
+  try {
+    localStorage.setItem(SETTINGS_SECTION_KEY, v);
+  } catch (e) { /* 隐私模式等场景静默忽略 */ }
+});
 
 function setStatus(text: string, kind: string): void {
   status.value = text || '';
@@ -160,6 +211,12 @@ const voiceModels = ref<VoiceModelView[]>([]);
 const vStatus = ref('');
 const vStatusClass = ref('');
 
+// HfSelect 选项（原为 <option v-for>）
+const voiceModelGroups = computed<HfSelectGroup[]>(() => [{
+  label: '',
+  options: voiceModels.value.map((m) => ({ value: m.id, label: m.label }))
+}]);
+
 function setVStatus(text: string, kind: string): void {
   vStatus.value = text || '';
   vStatusClass.value = kind;
@@ -174,6 +231,9 @@ async function onSaveVoice(): Promise<void> {
 // 普通用户只有两项：质量（draft / standard / high）与帧率（24 / 30）。
 const qualityOptions = RENDER_QUALITY_OPTIONS;
 const fpsOptions = RENDER_FPS_OPTIONS;
+// HfSelect 选项（原为 <option v-for>）
+const qualityGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: qualityOptions.map((o) => ({ value: o.value, label: o.label })) }]);
+const fpsGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: fpsOptions.map((o) => ({ value: o.value, label: o.label })) }]);
 const rQuality = ref<RenderQuality>(FALLBACK_RENDER.quality);
 const rFps = ref<RenderFps>(FALLBACK_RENDER.fps);
 const rStatus = ref('');
@@ -214,10 +274,30 @@ const updateMessage = ref('');
 const updateStatusClass = ref('');
 // 有网络动作在跑时禁用重复点击（检查中的重复点击是最常见的误操作）
 const updateBusy = computed(() => updateStage.value === 'checking' || updateStage.value === 'downloading');
+// 已保存的更新设置（回填自 settings.json，也是卡片文案的来源）
 const feedUrl = ref('');
 const autoCheck = ref(true);
 const updaterStatus = ref('');
 const updaterStatusClass = ref('');
+// 自定义更新源弹窗：draft 为编辑中的副本，只有点「保存」才落盘，取消不影响已存值
+const feedDialogVisible = ref(false);
+const feedDraft = ref('');
+const autoCheckDraft = ref(true);
+
+function openFeedDialog(): void {
+  feedDraft.value = feedUrl.value;
+  autoCheckDraft.value = autoCheck.value;
+  feedDialogVisible.value = true;
+}
+
+function closeFeedDialog(): void {
+  feedDialogVisible.value = false;
+}
+
+// 弹窗 ESC 关闭（与 TranscribeSection 的成对注册惯例一致）
+function onFeedDialogKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && feedDialogVisible.value) closeFeedDialog();
+}
 
 function applyUpdateProgress(d: UpdateProgressPayload): void {
   if (!d) return;
@@ -234,19 +314,69 @@ function setUpdaterStatus(text: string, kind: string): void {
   updaterStatusClass.value = kind;
 }
 
-async function onSaveUpdater(): Promise<void> {
-  const res = await window.settingsTools.saveUpdater({
-    feedUrl: feedUrl.value.trim(),
-    autoCheck: autoCheck.value
-  });
-  setUpdaterStatus(res && res.ok ? '更新设置已保存（下次启动按新设置检查）' : ((res as { message?: string })?.message || '保存失败'), res && res.ok ? 'hf-ok' : 'hf-error');
+// 保存更新源：写入 settings.json 的 updater 段后关闭弹窗（反馈留在卡片的状态行上）
+async function onSaveFeed(): Promise<void> {
+  try {
+    const res = await window.settingsTools.saveUpdater({
+      feedUrl: feedDraft.value.trim(),
+      autoCheck: autoCheckDraft.value
+    });
+    if (res && res.ok) {
+      feedUrl.value = feedDraft.value.trim();
+      autoCheck.value = autoCheckDraft.value;
+      const s = (res as { settings?: { updater?: { feedUrl?: string } } }).settings;
+      if (s && s.updater && typeof s.updater.feedUrl === 'string') feedUrl.value = s.updater.feedUrl;
+      setUpdaterStatus('更新源已保存', 'hf-ok');
+      feedDialogVisible.value = false;
+    } else {
+      setUpdaterStatus((res as { message?: string })?.message || '保存失败', 'hf-error');
+    }
+  } catch (e) {
+    setUpdaterStatus('保存失败：' + ((e as Error)?.message || String(e)), 'hf-error');
+  }
+}
+
+// 重置：清空更新源回到「内置地址」，同时清掉跳过的版本，让所有版本重新可提示
+async function onResetFeed(): Promise<void> {
+  try {
+    const res = await window.settingsTools.saveUpdater({ feedUrl: '', skippedVersion: '' });
+    if (res && res.ok) {
+      feedUrl.value = '';
+      feedDraft.value = '';
+      setUpdaterStatus('已重置为内置更新源', 'hf-ok');
+    } else {
+      setUpdaterStatus((res as { message?: string })?.message || '重置失败', 'hf-error');
+    }
+  } catch (e) {
+    setUpdaterStatus('重置失败：' + ((e as Error)?.message || String(e)), 'hf-error');
+  }
+}
+
+// 更新动作的统一异常兜底：IPC 一旦 reject（handler 抛错、频道未注册等），
+// 不加 try/catch 就会让界面「点了没反应」——必须落到状态行上。
+function handleUpdateError(what: string, e: unknown): void {
+  const detail = (e as Error)?.message || String(e);
+  if (what === '安装') {
+    updateMessage.value = '启动安装失败：' + detail;
+    updateStatusClass.value = 'hf-error';
+  } else {
+    updateStage.value = 'error';
+    updateMessage.value = what + '失败：' + detail;
+    updateStatusClass.value = 'hf-error';
+  }
 }
 
 async function onCheckUpdate(): Promise<void> {
   updateStage.value = 'checking';
   updateMessage.value = '正在检查更新…';
   updateStatusClass.value = '';
-  const res = (await window.updateTools.check()) as UpdateCheckReply;
+  let res: UpdateCheckReply;
+  try {
+    res = (await window.updateTools.check()) as UpdateCheckReply;
+  } catch (e) {
+    handleUpdateError('检查更新', e);
+    return;
+  }
   if (!res || !res.ok) {
     updateStage.value = 'error';
     updateMessage.value = (res && res.message) || '检查更新失败';
@@ -264,33 +394,52 @@ async function onCheckUpdate(): Promise<void> {
 }
 
 async function onDownloadUpdate(): Promise<void> {
-  const res = await window.updateTools.download();
-  if (!res || !res.ok) {
-    updateStage.value = 'error';
-    updateMessage.value = (res && res.message) || '下载失败';
-    updateStatusClass.value = 'hf-error';
+  try {
+    const res = await window.updateTools.download();
+    if (!res || !res.ok) {
+      updateStage.value = 'error';
+      updateMessage.value = (res && res.message) || '下载失败';
+      updateStatusClass.value = 'hf-error';
+    }
+  } catch (e) {
+    handleUpdateError('下载', e);
   }
 }
 
 async function onCancelUpdate(): Promise<void> {
-  await window.updateTools.cancel();
+  try {
+    await window.updateTools.cancel();
+  } catch (e) {
+    handleUpdateError('取消下载', e);
+  }
 }
 
 async function onInstallUpdate(): Promise<void> {
-  const res = await window.updateTools.install();
-  // 成功时主进程会退出并运行安装器，这里只处理被拒绝的情况（如本机有转录 / 渲染任务在跑）
-  if (!res || !res.ok) {
-    updateMessage.value = (res && res.message) || '安装失败';
-    updateStatusClass.value = 'hf-error';
+  try {
+    const res = await window.updateTools.install();
+    // 成功时主进程会退出并运行安装器，这里只处理被拒绝的情况（如本机有转录 / 渲染任务在跑）
+    if (!res || !res.ok) {
+      updateMessage.value = (res && res.message) || '安装失败';
+      updateStatusClass.value = 'hf-error';
+    }
+  } catch (e) {
+    handleUpdateError('安装', e);
   }
 }
 
 // 撤销「跳过该版本」：清掉 settings.json 里的 skippedVersion，让新版本重新提示
 async function onSkipVersion(skip: boolean): Promise<void> {
-  const res = await window.settingsTools.saveUpdater({ skippedVersion: skip ? updateVersion.value : '' });
-  if (res && res.ok) {
-    updateMessage.value = skip ? ('已跳过版本 ' + updateVersion.value) : ('已恢复提示版本 ' + updateVersion.value);
-    updateStatusClass.value = '';
+  try {
+    const res = await window.settingsTools.saveUpdater({ skippedVersion: skip ? updateVersion.value : '' });
+    if (res && res.ok) {
+      updateMessage.value = skip ? ('已跳过版本 ' + updateVersion.value) : ('已恢复提示版本 ' + updateVersion.value);
+      updateStatusClass.value = '';
+    } else {
+      updateMessage.value = (res as { message?: string })?.message || '操作失败';
+      updateStatusClass.value = 'hf-error';
+    }
+  } catch (e) {
+    handleUpdateError(skip ? '跳过版本' : '恢复提示', e);
   }
 }
 
@@ -350,5 +499,11 @@ onMounted(async () => {
   } catch (e) {
     setUpdaterStatus('读取更新设置失败', 'hf-error');
   }
+  window.addEventListener('keydown', onFeedDialogKey);
+});
+
+// 与 onMounted 成对注册，避免离开设置页后监听器残留（项目既有惯例）
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onFeedDialogKey);
 });
 </script>

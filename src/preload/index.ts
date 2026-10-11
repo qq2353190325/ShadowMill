@@ -46,8 +46,6 @@ contextBridge.exposeInMainWorld('windowControls', windowControls);
 // 预览 & HyperFrames 转视频 API
 const hfTools: PreloadApi['hfTools'] = {
   openHtml: (): Promise<string | null> => ipcRenderer.invoke(IPC.Video.OpenHtml),
-  listProjects: () => ipcRenderer.invoke(IPC.Video.ListProjects),
-  previewShell: (htmlPath: string) => ipcRenderer.invoke(IPC.Video.PreviewShell, { htmlPath }),
   // 渲染档位（质量 / 帧率）随载荷下发；缺省项不下发，由主进程交给 CLI 默认（standard / 30）
   renderVideo: (htmlPath: string, options?: RenderOverride) => ipcRenderer.invoke(IPC.Video.Render, Object.assign({ htmlPath }, options || {})),
   showInFolder: (filePath: string): Promise<void> => ipcRenderer.invoke(IPC.Video.ShowInFolder, filePath),
@@ -135,7 +133,6 @@ const projectTools: PreloadApi['projectTools'] = {
   generateHtml: (name: string, prompt: string, materials) => ipcRenderer.invoke(IPC.Project.GenerateHtml, { name, prompt, ...(materials || {}) }),
   modifyHtml: (name: string, prompt: string, materials) => ipcRenderer.invoke(IPC.Project.ModifyHtml, { name, prompt, ...(materials || {}) }),
   downloadHtml: (name: string) => ipcRenderer.invoke(IPC.Project.DownloadHtml, name),
-  downloadFile: (srcPath: string, defaultName: string) => ipcRenderer.invoke(IPC.Project.DownloadFile, { srcPath, defaultName }),
   exportSrt: (name: string, srt: string) => ipcRenderer.invoke(IPC.Project.ExportSrt, { name, srt }),
   readHtml: (name: string) => ipcRenderer.invoke(IPC.Project.ReadHtml, name),
   saveHtml: (name: string, html: string) => ipcRenderer.invoke(IPC.Project.SaveHtml, { name, html }),

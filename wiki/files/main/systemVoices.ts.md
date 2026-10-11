@@ -94,7 +94,7 @@ function isSystemVoice(voice: string): boolean {
 ### 4.2 与「音色管理」页面的配合
 
 - 渲染层通过 preload 暴露的 `window.voiceTools.listSystemVoices()`（对应 `voice:list-system-voices`）与 `window.voiceTools.listAll()`（对应 `voice:list-all`）取到本表数据。
-- 「音色管理」页 `src/renderer/src/pages/SoundCopyPage/index.vue` 在加载时并行调用 `listSystemVoices()`、`list()`、`getProfiles()`，把系统音色与克隆音色合并成同一列表展示；用户可为某个系统音色保存映射（key 为 `system:<voice>`），保存后 `name` / `targetModel` 覆盖默认值。
+- 「音色管理」卡组 `src/renderer/src/pages/TextTtsPage/VoiceSection.vue`（配音页第三个 Tab；原独立页 `SoundCopyPage/index.vue` 已并入）在加载时并行调用 `listSystemVoices()`、`list()`、`getProfiles()`，把系统音色与克隆音色合并成同一列表展示；用户可为某个系统音色保存映射（key 为 `system:<voice>`），保存后 `name` / `targetModel` 覆盖默认值。
 - 文字转语音页的音色下拉（`src/renderer/src/pages/TextTtsPage/helpers.ts`）优先用 `listAll()`；若 `voice:list-all` 不可用，则回退为 `listSystemVoices()` + `list()` + `getProfiles()` 组装，因此本表的 `voice` / `desc` / `langs` / `series` 字段即回退路径的展示依据。
 
 ## 5. 注意事项与实现要点

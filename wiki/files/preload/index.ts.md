@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
-- **规模**：164 行
+- **规模**：191 行
 - **对外导出**：本文件不产生模块导出；其作用是把 9 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、`updateTools`
 - **类型契约**：9 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
@@ -24,7 +24,7 @@
 
 ### 2.0 类型标注方式（`PreloadApi['<命名空间>']`）
 
-8 个对象都写成「契约标注 + 字面量实现」的形式：
+9 个对象都写成「契约标注 + 字面量实现」的形式：
 
 ```ts
 import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, WhisperProgressPayload } from '../shared/types'
@@ -53,9 +53,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `windowControls` | `toggleMaximize` | `window:toggle-maximize` | `send` 单向，最大化/还原切换 |
 | `windowControls` | `close` | `window:close` | `send` 单向，关闭窗口 |
 | `windowControls` | `onMaximizedChange` | `window:maximized-change` | 监听主进程回推的最大化状态，回调参数 `isMaximized: boolean` |
-| `hfTools` | `openHtml` | `dialog:open-html` | 选择 HTML 文件，返回 `Promise<string \| null>` |
-| `hfTools` | `listProjects` | `video:list-projects` | 列出可渲染项目，`{ name, html }[]` |
-| `hfTools` | `previewShell` | `video:preview-shell` | 传 `{ htmlPath }`，生成预览壳 |
+| `hfTools` | `openHtml` | `dialog:open-html` | 选择 HTML 文件，返回 `Promise<string \| null>`；**保留但渲染层当前无调用方** |
 | `hfTools` | `renderVideo` | `video:render` | 传 `{ htmlPath, ...档位 }`（`quality` / `fps` 可缺省），HyperFrames 转视频 |
 | `hfTools` | `showInFolder` | `video:show-in-folder` | 在文件管理器中定位产物 |
 | `hfTools` | `onProgress` | `video:progress` | 渲染进度订阅，数据形如 `{ text }` |
@@ -102,7 +100,6 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `projectTools` | `generateHtml` | `project:generate-html` | `{ name, prompt, ...materials }` 展开合并（`materials` = `ProjectHtmlMaterials`：`subtitleProject` / `videoPath`，**已无 `audioPath`**；音轨由主进程注入 HTML） |
 | `projectTools` | `modifyHtml` | `project:modify-html` | `{ name, prompt, ...materials }` 展开合并（同上） |
 | `projectTools` | `downloadHtml` | `project:download-html` | 参数为裸字符串 `name` |
-| `projectTools` | `downloadFile` | `project:download-file` | `{ srcPath, defaultName }` |
 | `projectTools` | `exportSrt` | `project:export-srt` | `{ name, srt }` |
 | `projectTools` | `readHtml` | `project:read-html` | 参数为裸字符串 `name` |
 | `projectTools` | `saveHtml` | `project:save-html` | `{ name, html }`；**目前渲染层没有调用方（预留接口）** |

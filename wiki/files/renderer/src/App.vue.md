@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/renderer/src/`
 - **类型**：根组件（单文件组件，`<script setup lang="ts">` + `<style scoped>`）
-- **规模**：154 行（模板 59 行 / 脚本 55 行 / 样式 38 行，另含 2 行空行分隔）
+- **规模**：约 155 行（模板约 59 行 / 脚本约 56 行 / 样式 38 行，另含空行分隔；文件仍在迭代，行数以工作区源码为准）
 - **对外导出**：默认导出组件对象（经 `env.d.ts` 的 `*.vue` 声明被 `main.ts` 导入）；**无 props、无 emits**，全部状态来自 composables 与 preload 桥
 
 ## 1. 作用与职责
@@ -47,7 +47,7 @@
 | 7 | `about` | 关于 | 关于 |
 | 8 | `settings` | 设置 | 设置 |
 
-> `PageKey` 中另有 `sound-copy`（音色复刻），它**不在侧边栏菜单里**，只通过 `pages` 注册表与其他页面跳转抵达；`StepBar` 中「配音」节点同时把 `sound-copy` 视为当前态。菜单只有上表 8 项。
+> `PageKey` 现在恰好就是上表 8 项：原 `sound-copy`（音色复刻）页已并入「配音」页（`text-tts`）的第三个 Tab，页面键随之删除，不再有“菜单里没有的页面键”。
 
 ### 2.3 脚本成员
 
@@ -60,7 +60,7 @@
 | `winMinimize()` | `function(): void` | 调 `window.windowControls.minimize()` |
 | `winToggleMaximize()` | `function(): void` | 调 `window.windowControls.toggleMaximize()` |
 | `winClose()` | `function(): void` | 调 `window.windowControls.close()` |
-| `initApp()` | `async function(): Promise<void>` | 恢复项目上下文 → `Promise.all([refreshProject(), loadRenderDefaults()])` → `goPage('home')` |
+| `initApp()` | `async function(): Promise<void>` | 恢复项目上下文 → `Promise.all([refreshProject(), loadRenderDefaults()])`（**不再调 `goPage('home')`**，见 3.1 第 5 点） |
 | `watch(currentPage, ...)` | 侦听器 | 页面切换后 `contentEl.value.scrollTop = 0` |
 | `onMounted(...)` | 生命周期钩子 | 订阅最大化状态、`initRenderProgress()`、`void initApp()` |
 
@@ -70,9 +70,9 @@
 
 1. **订阅窗口状态**：`window.windowControls.onMaximizedChange((v: boolean) => { isMaximized.value = v; })`——主进程在窗口 `maximize`/`unmaximize` 事件中推送布尔值，用于切换最大化按钮图标。
 2. **初始化渲染进度**：`initRenderProgress()` 注册 `window.hfTools.onProgress` 回调（HyperFrames 渲染进度解析，结果写入 `renderProgress.text`，供视频页展示）。预加载层为单订阅语义，重复注册只替换回调。
-3. **恢复项目上下文**：`localStorage.getItem('myapp.projectCtx')`，`JSON.parse` 后若存在且含 `name`，则写回 `appState.currentName = saved.name`、`appState.isBuiltin = !!saved.builtin`。整段包在 `try/catch` 中，解析失败（脏数据/非 JSON）静默忽略（`catch (e) { /* ignore */ }`）。
-4. **刷新项目 + 载入渲染默认档位**：`await Promise.all([refreshProject(), loadRenderDefaults()])`——前者拉取「我的项目」(`projectTools.list`) 与内置示例 (`hfTools.listProjects`) 并加载当前项目详情，后者读 `settingsTools.get()` 的 `render` 段写入 `composables/useRenderOptions.ts` 的 `renderDefaults`（源码注释：项目列表与渲染默认档位并行载入，档位读取失败不影响启动，落回内置默认 `standard` / `30`）。
-5. **进入首页**：`goPage('home')` 设置 `activeMenu`、再次 `refreshProject()`、切换 `currentPage`、递增 `pageNavKey`。
+3. **恢复项目上下文**：`localStorage.getItem('myapp.projectCtx')`，`JSON.parse` 后若存在且含 `name`，则只写回 `appState.currentName = saved.name`（历史值里可能残留的 `builtin` 字段被**忽略**）。整段包在 `try/catch` 中，解析失败（脏数据/非 JSON）静默忽略（`catch (e) { /* ignore */ }`）。
+4. **刷新项目 + 载入渲染默认档位**：`await Promise.all([refreshProject(), loadRenderDefaults()])`——前者拉取「我的项目」(`projectTools.list`) 并加载当前项目详情，后者读 `settingsTools.get()` 的 `render` 段写入 `composables/useRenderOptions.ts` 的 `renderDefaults`（源码注释：项目列表与渲染默认档位并行载入，档位读取失败不影响启动，落回内置默认 `standard` / `30`）。
+5. **不再进入首页**：`initApp()` **刻意不调 `goPage('home')`**。首页本就是初始页（`pages/index.ts` 里 `currentPage` 初值 = `pages.home`，`useAppStore` 里 `activeMenu` 初值 = `'home'`），再走一遍 `goPage` 只会：① 多跑一轮 `refreshProject()`（`project:list` + `project:load` 两次 IPC）；② 递增 `pageNavKey` 把已经挂好的首页整页重挂一次。首页内容由第 4 步的 `refreshProject()` 直接驱动渲染，因此这里删掉该调用后行为不变、启动更快。
 6. 调用处使用 `void initApp();`：显式丢弃 Promise，避免未捕获 rejection 警告，同时让 `onMounted` 保持同步返回。
 
 ### 3.2 菜单跳转与页面渲染
@@ -112,6 +112,6 @@
 - **scoped 样式与 TransitionGroup**：`<style scoped>` 中的 `.toast-enter-active` / `.toast-leave-active` / `.toast-enter-from` / `.toast-leave-to` 由 Vue 过渡机制附加在 Toast 元素上，与 scoped 属性共同匹配，故直接生效；过渡仅使用 `opacity 0.25s ease`。
 - **`.toast-item` 自身 `position: fixed`**：虽然外层 `.toast-host` 也是 `fixed`，但条目用 `left:50%` + `bottom:28px` + `translateX(-50%)` 独立定位到底部居中；宿主 `pointer-events: none`、条目 `pointer-events: auto`，避免遮挡交互。
 - **颜色为字面量而非变量**：`.toast-item` 中写死 `#E6F1FF`、`rgba(11, 18, 32, .95)`、`rgba(0, 212, 255, .5)`，与主题变量同值但未引用变量，改主题时需同步此处。
-- **启动逻辑幂等性**：`onMounted` 只执行一次，但 `goPage('home')` 会再次 `refreshProject()`，即首次启动会有两次项目列表拉取（`initApp` 内一次 + `goPage` 内一次），属于现有实现，非缺陷但需知晓。
+- **启动只拉一次项目数据**（2026-10 修正）：`initApp()` 现在只做一次 `refreshProject()`，不再紧跟 `goPage('home')`。此前每次启动都会多拉一遍项目列表与当前项目详情，并把首页整页重挂一次（`pageNavKey` 递增）——首屏慢的问题排查中发现该冗余，已删除。**改动此处的判断依据**：只要 `pages/index.ts` 的 `currentPage` 初值仍是 `pages.home`、`useAppStore` 的 `activeMenu` 初值仍是 `'home'`，就不需要显式 `goPage`。
 - **删除项目的兜底在 store 层**：若 localStorage 记的项目已不存在，由 `refreshProject()` 回退到 `myProjects[0]` 或 `'demo-project'`，本组件不做校验。
 - **渲染默认档位只在这里读一次**：`loadRenderDefaults()` 把 `settings.json` 的 `render` 段写入模块级 `renderDefaults`（`useRenderOptions.ts`）；页面只读该单例与 `effectiveRenderOptions()`，不各自读设置。设置页保存后由 `saveRenderDefaults()` 就地更新，因此无需重启或刷新本组件。

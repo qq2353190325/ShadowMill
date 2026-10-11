@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：业务域模块（`register(ctx)` 装配模式，唯一使用**同步 IPC** 的模块）
-- **规模**：378 行
+- **规模**：373 行
 - **对外导出**：`register`、`checkNow`、`downloadUpdate`、`cancelDownload`、`installNow`、`isBusy`、`quitForUpdate`、`updaterLoadError`
 - **IPC 域**：`update:check` / `update:download` / `update:cancel` / `update:install`（`handle`）、`update:version`（`on` + `event.returnValue`）、`update:progress`（推送）
 
@@ -15,6 +15,7 @@
 - **退出安装**：`quitAndInstall(true, true)` 静默安装并重启；安装前检查本机是否有长任务在跑。
 - **启动静默检查**：`register()` 末尾延时 3 秒做一次检查（受 `updater.autoCheck` 控制），只更新状态与设置页文案，不弹窗打扰。
 - **忙碌态判定**：不改动任何业务模块，靠监听 4 路进度通道的起止推导「本机是否有转录 / 渲染 / 配音任务在跑」。
+- **electron-updater 懒加载**：`electron-updater` 的 `require` **不在启动路径上**——`register()` 只挂 IPC 与忙碌推导，模块加载推迟到 `ensureUpdater()`（首次真正要检查更新时，最早是启动 3s 后的静默检查）。目的是不把这份模块加载成本压在建窗 / 首屏之前。
 
 ## 2. 导出与关键实现
 
@@ -29,7 +30,9 @@
 | `quitForUpdate()` | `() => boolean` | 是否正在退出安装（供 `index.ts` 的 `window-all-closed` 判断） |
 | `updaterLoadError` | `string` | `require('electron-updater')` 失败时的原因文本（缺依赖时所有调用回 `{ ok: false, message }`） |
 
-内部辅助：`toStage()`（把放宽的 `state.stage` 收口成 `UpdateStage`）、`humanError()`（错误中文化）、`applyFeedUrl()`、`bindEvents()`、`bindBusyTracking()`、`writeLog()`、`bytesText()`。
+内部辅助：`toStage()`（把放宽的 `state.stage` 收口成 `UpdateStage`）、`humanError()`（错误中文化）、`applyFeedUrl()`、`bindEvents()`、`bindBusyTracking()`、`ensureUpdater()`（懒加载 electron-updater，成功时顺带设开关 + 绑事件，只尝试一次）、`writeLog()`、`bytesText()`。
+
+各动作入口都先过 `ensureUpdater()`：返回 null（依赖不可用）即回 `notReady()` 的 `{ ok: false, message: updaterLoadError }`。
 
 ## 3. 关键流程
 
@@ -46,13 +49,22 @@ settings.json 的 updater.feedUrl（非空）
 
 ```yaml
 provider: generic
-url: https://updates.example.com/marvisstudio/
+url: https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/MarvisStudio/
 updaterCacheDirName: my-app-updater
 ```
+
+> 本项目实际使用**阿里云 OSS**（bucket `chaoming-zhaoling`，北京 region）作为更新源。注意三点：
+> ① `oss://bucket/path/` 是 OSS 内部协议标识，**不能**填进 `publish.url` —— electron-updater 只认 HTTP(S)，必须写成 `https://<bucket>.oss-cn-<region>.aliyuncs.com/<路径>/`；
+> ② bucket 必须是**公共读**（generic provider 匿名 GET，无法签名），对象需支持 `Range` 请求（OSS 默认支持，差分下载依赖它）；
+> ③ 路径**必须带尾斜杠**，否则会拼成 `.../MarvisStudiolatest.yml`。
+> 另外 electron-builder 的内置 provider 列表（Keygen / Generic / GitHub / S3 / Spaces / R2 / Snap）**不含阿里云 OSS**，generic 源不会自动上传，发版后需用 `ossutil cp` 手工上传三件套。
 
 ### 3.2 检查 → 下载 → 安装
 
 ```
+任一入口（IPC / 启动静默检查）→ ensureUpdater()   ← 首次调用才 require electron-updater
+  ├─ 成功：autoDownload=false、autoInstallOnAppQuit=true、bindEvents() 各一次
+  └─ 失败：记 updaterLoadError + 写 userData/updater.log，动作回 notReady() 文案
 update:check → checkNow('manual')
   → applyFeedUrl() → autoUpdater.checkForUpdates()
   → 事件：checking-for-update / update-available / update-not-available / error
@@ -86,7 +98,7 @@ update:install → installNow()
 | `../shared/ipc` | `IPC`（含 `IPC.Update` 组） |
 | `../shared/types` | `RegisterCtx`、`UpdateCheckResult`、`UpdateProgressPayload`、`UpdateStage` |
 | `./settings` | `getUpdaterSettings`、`saveUpdaterSettings` |
-| `electron-updater` | 运行时 `require()` 取 `autoUpdater`（**不 import**，见 §5） |
+| `electron-updater` | `ensureUpdater()` 内运行时 `require()` 取 `autoUpdater`（**不 import、也不在模块顶层 require**，见 §5） |
 
 **被谁引用 / 影响谁**
 
@@ -100,9 +112,15 @@ update:install → installNow()
 ## 5. 注意事项与实现要点
 
 - **`electron-updater` 是运行时 `require`，不是 `import`**：它是 CJS 包（`main: out/main.js`，无 ESM 具名导出），`import { autoUpdater }` 会失败。整段 `require` 包在 `try` 里，失败只记 `updaterLoadError`，**不会让主进程启动崩掉**。
-- **依赖必须同时进 `build.files` 白名单**：`package.json` 的 `build.files` 有 `"!node_modules/**/*"`，electron-updater 及其 13 个传递依赖（`builder-util-runtime`、`js-yaml`、`semver`、`fs-extra`、`lazy-val`、`lodash.isequal`、`lodash.escaperegexp`、`tiny-typed-emitter`、`argparse`、`graceful-fs`、`jsonfile`、`universalify`、`sax`）都要显式列出。漏了的表现是 **dev 下正常、安装版功能静默不可用**；验证方式：
+- **懒加载是首屏优化的一部分**（2026-10 加入）：原先顶层 `require('electron-updater')` 会在**建窗之前**付出它的模块图加载成本（实测 ~70ms，冷启动 / 杀软扫描时更久），直接推迟首屏。现在 `register()` 完全不碰它，`ensureUpdater()` 在首次真正要用时才加载并完成一次 `bindEvents`；`autoCheck=false` 的用户更是整个会话都不会加载它。**注意**：`ensureUpdater()` 有 `updaterLoadTried` 一次性标志，失败后不会反复重试（避免每次都卡在坏依赖上）。
+- **依赖由 electron-builder 自动收集**（2026-10 修正）：`build.files` 里**不再**有 `"!node_modules/**/*"` 与逐包白名单，`electron-updater` 及其传递依赖（`builder-util-runtime`、`debug`、`ms`、`sax`、`js-yaml`、`semver`、`fs-extra`、`lazy-val`、`lodash.*`、`tiny-typed-emitter` 等）由打包器按 `dependencies` 闭包自动纳入。
+  **曾经的故障**：手写白名单时漏掉 `debug`（`builder-util-runtime/out/httpExecutor.js` 里 `require('debug')`）及其依赖 `ms`，安装版启动即 `Cannot find module 'debug'`，**自动更新整条功能不可用，而 dev 下永远正常**。漏依赖的表现是「dev 正常、安装版功能静默不可用」（因为本节第一点的 `try` 把加载失败降级成了文案）。
+  复核方式（只需确认关键包存在，不必再维护清单）：
   ```powershell
-  npx asar list dist\win-unpacked\resources\app.asar | Select-String "electron-updater|js-yaml"
+  npm run pack
+  npx asar list dist\win-unpacked\resources\app.asar > list.txt
+  findstr /C:"node_modules\debug\" list.txt      # 7 个文件
+  findstr /C:"node_modules\ms\" list.txt         # 3 个文件
   ```
 - **`npm run pack` 不生成 `app-update.yml`**：`--dir`（免安装目录）模式下不写更新配置，只有全量 `npm run dist` 才产出 `app-update.yml` 与 `latest.yml`。因此**验证更新功能必须用 `dist` 并安装后再试**。
 - **`stage` 刻意放宽为 `string`**：阶段由 electron-updater 的事件回调跨函数写入，若标注成 `UpdateStage` 联合类型，TS 的控制流分析会把函数内最后一次赋值当成当前类型，导致后续比较全被判成「不可能分支」（实测 9 处 `TS2367`）。交出前由 `toStage()` 白名单收口。

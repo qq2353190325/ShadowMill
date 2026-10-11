@@ -17,9 +17,9 @@ export async function loadRenderDefaults(): Promise<void> {
   } catch (e) { /* 读取失败：沿用内置默认，不打断启动 */ }
 }
 
-// 当前生效档位：内置示例项目只读、无项目时不看覆盖
+// 当前生效档位：无项目时不看覆盖
 export function effectiveRenderOptions(): RenderOptions {
-  const override = appState.isBuiltin ? null : (appState.project && appState.project.render);
+  const override = appState.project && appState.project.render;
   return resolveRenderOptions(renderDefaults, override);
 }
 
@@ -32,7 +32,7 @@ export async function saveRenderDefaults(next: RenderOptions): Promise<{ ok: boo
 
 // 保存项目级覆盖（视频页档位变化时调用）；render 传 null 表示清除覆盖、回到跟随全局默认
 export async function saveProjectRenderOverride(render: RenderOverride | null): Promise<{ ok: boolean; message?: string }> {
-  if (appState.isBuiltin || !appState.currentName) return { ok: true }; // 内置示例只读：选择只在本次会话生效
+  if (!appState.currentName) return { ok: true }; // 无当前项目：档位选择只在本次会话生效
   const res = await window.projectTools.setRender(appState.currentName, render);
   if (res && res.ok && appState.project) {
     appState.project.render = pickRenderOverride(res.project && res.project.render);

@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（项目化流水线 + project:* IPC）
-- **规模**：828 行
+- **规模**：804 行
 - **对外导出**：
   - 函数/常量：`register`、`scanProjects`、`projectsRoot`、`projectDir`、`projectFilePath`、`readProject`、`writeProject`、`ensureProject`、`parseSubtitle`、`normalizeContent`、`copyAudioIntoProject`、`copyVideoIntoProject`
   - 类型（**再导出**，定义在 `src/shared/types.ts`）：`Scene`、`ContentScript`、`Project`、`SubtitleLine` —— 本文件用 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'` 转发，因此 `projects.Project` / `from './projects'` 的既有引用面不变
@@ -168,7 +168,7 @@
 
 ## 4. IPC 频道一览
 
-`register()` 共注册 **25 个 `ipcMain.handle` 频道**，并额外使用 1 个主→渲染推送频道。返回统一为 `{ ok, ... }` 结构。下表的「参数载荷」列在括号内给出源码中的标注类型（均来自 `src/shared/types.ts` ⑥ 节），handler 形参一律写作 `payload?: <类型>`。
+`register()` 共注册 **24 个 `ipcMain.handle` 频道**，并额外使用 1 个主→渲染推送频道。返回统一为 `{ ok, ... }` 结构。下表的「参数载荷」列在括号内给出源码中的标注类型（均来自 `src/shared/types.ts` ⑥ 节），handler 形参一律写作 `payload?: <类型>`。
 
 | 频道名 | 参数载荷 | 返回结果 | 行为说明 |
 | --- | --- | --- | --- |
@@ -180,10 +180,9 @@
 | `project:generate-html` | `ProjectAgentPayload`（`{ name, prompt, subtitleProject?, videoPath? }`，**已无 `audioPath`**） | `{ ok, htmlPath, compatible, message }` | 解析素材（字幕 / 视频）→ 装配提示词 → `chatWithCustomModel` → `extractHtmlFromReply` → `hfEnv.localizeGsapHtml` 本地化 → 引用本地时 `copyGsapIntoProject`，**复制失败则 `externalizeGsapHtml` 退回 CDN** → 写 `index.html` → **`applyBgmToHtml` 补注入音轨**；置空 `videoPath` |
 | `project:modify-html` | 同 `project:generate-html`（同一 `ProjectAgentPayload`） | `{ ok, htmlPath, compatible, message }` | 需已有 `index.html`；把当前源码作为 `extra` 前置，Agent 输出完整新 HTML 后**同样先本地化、再按复制结果决定是否退回 CDN**，覆盖写盘后**再 `applyBgmToHtml` 补回音轨**（模型重写时可能整段丢掉注入标签） |
 | `project:download-html` | `name?: string`（裸字符串） | `{ ok, savedPath }` / `{ ok:false, canceled:true }` | 「另存为」导出项目 `index.html`（默认文件名 `<name>.html`）：读原文 → `hfEnv.externalizeGsapHtml` 把 `./gsap.min.js` 换回固定版本 CDN → **文本写出**（不再 `copyFileSync`），理由见 5.9 |
-| `project:download-file` | `ProjectDownloadFilePayload`（`{ srcPath?, defaultName? }`） | `{ ok, savedPath }` / `{ ok:false, canceled:true }` | 导出任意存在文件（内置示例 HTML 的**只读导出**入口）；源文件扩展名匹配 `/\.html?$/i` 时同样走「读取 → `externalizeGsapHtml` → 文本写出」，其它扩展名保持 `fs.copyFileSync` 字节复制；`defaultName` 非法字符会被替换 |
 | `project:export-srt` | `ProjectExportSrtPayload`（`{ name?, srt? }`） | `{ ok, savedPath }` | 内容为空则拒绝；否则写 `.srt` 文件（utf8） |
-| `project:open-folder` | `name?: string`（裸字符串） | `{ ok, message }` | `await shell.openPath(projectDir)`；目录不存在提示「该项目/内置示例无本地目录」 |
-| `project:open-folder-of` | `p?: string`（裸字符串） | `{ ok, dir }` | 传入文件则取其所在目录，再 `shell.openPath` |
+| `project:open-folder` | `name?: string`（裸字符串） | `{ ok, message }` | `await shell.openPath(projectDir)`；目录不存在提示「项目目录不存在（项目尚未保存）」 |
+| `project:open-folder-of` | `p?: string`（裸字符串） | `{ ok, dir }` | 入参可以是文件或目录：是文件则取其所在目录；目录存在才 `shell.openPath`。源码注释：「打开指定文件所在目录 / 指定目录（配音、对齐、音色等页面的「打开目录」入口）」 |
 | `project:delete` | `name?: string`（裸字符串） | `{ ok }` / `{ ok:false, message }` | 仅允许删除 `projectsRoot` 下的目录（`startsWith(projectsRoot)` 校验），`rmSync(..., { recursive: true, force: true })` |
 | `project:save-video` | `ProjectSetVideoPayload`（`{ name?, videoPath? }`，与 `set-video` 同形复用一个类型） | `{ ok, project }` | 视频渲染完成后回写产物路径（点亮链路「视频」节点） |
 | `project:set-render` | `ProjectSetRenderPayload`（`{ name?, render?: RenderOverride \| null }`） | `{ ok, project }` | 写 / 清除**项目级渲染档位覆盖**：`render` 传 `null`（或字段全非法）即删除 `proj.render`，回到跟随 `settings.json` 的全局默认 |
@@ -285,14 +284,15 @@
 - 渲染路径上还有第五处本地化（`src/main/video.ts` 对渲染工作目录里的副本再做一次），不属本文件，且**仍忽略复制返回值**。
 - 反向的一步（导出时换回 CDN）见 5.9。
 
-### 5.9 导出外部化（`project:download-html` / `project:download-file`）
+### 5.9 导出外部化（`project:download-html`）
 
-导出物是**单个 HTML 文件**，目标位置同目录不会有 `gsap.min.js`；若原样导出项目内的 `./gsap.min.js` 相对引用，导出后动画会完全不跑（这是本地化引入的回归）。两个导出频道因此改为「文本读出 → `hfEnv.externalizeGsapHtml` 换回固定版本 CDN（`GSAP_CDN_PINNED`）→ 文本写出」。
+导出物是**单个 HTML 文件**，目标位置同目录不会有 `gsap.min.js`；若原样导出项目内的 `./gsap.min.js` 相对引用，导出后动画会完全不跑（这是本地化引入的回归）。因此导出频道改为「文本读出 → `hfEnv.externalizeGsapHtml` 换回固定版本 CDN（`GSAP_CDN_PINNED`）→ 文本写出」。
 
 | 频道 | 写出方式 |
 | --- | --- |
 | `project:download-html` | 一律 `fs.writeFileSync(save, hfEnv.externalizeGsapHtml(fs.readFileSync(htmlPath, 'utf8')), 'utf8')`（原先是 `fs.copyFileSync`） |
-| `project:download-file` | `srcPath` 扩展名匹配 `/\.html?$/i` → 同上的读取+外部化+文本写出；其它扩展名仍 `fs.copyFileSync(src, save)`，保持字节复制以免破坏二进制导出 |
+
+> 导出频道只有 `project:download-html` 一个；`project:export-srt` 是纯文本写出，不涉及 GSAP 改写。
 
 - `externalizeGsapHtml` 不依赖 `findLocalGsap()`：随包文件缺失时照样能把本地引用换回 CDN。
 - 只换回**带引号**的 `./gsap.min.js` / `gsap.min.js` / `/gsap.min.js`；无引号写法的提及不改写。
@@ -338,7 +338,7 @@
 | `./hfEnv` | **命名空间导入** `import * as hfEnv from './hfEnv'`：`hfEnv.BUILTIN_RESOURCES`（取 `ffmpeg`）、`hfEnv.isHyperframesComposition`、`hfEnv.localizeGsapHtml`、`hfEnv.referencesLocalGsap`、`hfEnv.copyGsapIntoProject`、`hfEnv.externalizeGsapHtml` | 内置 ffmpeg 路径、HyperFrames composition 合规校验、生成 / 修改 / 保存 / 预览四个写盘环节的 GSAP 本地化，以及两个导出频道的反向外部化 |
 | `../shared/ipc` | `IPC` | 频道常量（`IPC.Project.*`） |
 | `./settings` | `pickRenderOverride` | `project:set-render` 的项目级档位覆盖白名单过滤（与 `settings.ts` / `video.ts` 复用同一实现） |
-| `../shared/types` | `type RegisterCtx`、`type ProjectAgentPayload`、`type ProjectDownloadFilePayload`、`type ProjectExportSrtPayload`、`type ProjectNamePayload`、`type ProjectSaveContentPayload`、`type ProjectSaveHtmlPayload`、`type ProjectSaveSubtitlePayload`、`type ProjectSetAudioPayload`、`type ProjectSetVideoPayload`、`type ProjectSetRenderPayload`，以及 `type ContentScript` / `type Project` / `type Scene` / `type SubtitleLine`（后者四个在 import 后立即 `export type { … } from '../shared/types'` 再导出） | `register(ctx)` 的窗口上下文类型 + 全部 `project:*` handler 的载荷类型 + 项目结构（单一真源，本文件不再自行声明 interface） |
+| `../shared/types` | `type RegisterCtx`、`type ProjectAgentPayload`、`type ProjectExportSrtPayload`、`type ProjectNamePayload`、`type ProjectSaveContentPayload`、`type ProjectSaveHtmlPayload`、`type ProjectSaveSubtitlePayload`、`type ProjectSetAudioPayload`、`type ProjectSetVideoPayload`、`type ProjectSetRenderPayload`，以及 `type ContentScript` / `type Project` / `type Scene` / `type SubtitleLine`（后者四个在 import 后立即 `export type { … } from '../shared/types'` 再导出） | `register(ctx)` 的窗口上下文类型 + 全部 `project:*` handler 的载荷类型 + 项目结构（单一真源，本文件不再自行声明 interface） |
 
 **被谁使用：**
 
@@ -352,7 +352,7 @@
 
 ## 7. 注意事项与实现要点
 
-1. **内置示例项目只读**：内置示例没有 `userData\projects` 下的真实目录，`project:open-folder` 会返回「项目目录不存在（该内置示例/未保存项目无本地目录）」；导出请走 `project:download-file`（读出后写到用户选定位置，不改原目录）。
+1. **项目一律是 `userData\projects` 下的真实目录**：每个项目都有对应的本地目录，不存在「无本地目录的项目」。`project:open-folder` 的目录不存在分支只剩一种情形——项目尚未保存（`ensureProject` 只在内存里构造对象、不落盘），文案为「项目目录不存在（项目尚未保存）」。
 2. **路径校验**：`projectDir` 做项目名字符净化，`project:create` 前置拦截非法字符，`project:delete` 用 `startsWith(projectsRoot)` 兜底，禁止越界读写与删除。
 3. **`ensureProject` 不落盘**：它只构造内存对象，因此 `project:load` 打开不存在/未保存的项目不会产生目录；真正落盘发生在 `writeProject`。
 4. **编码统一 utf8**：`project.json`、`subtitle.txt`、`index.html`、`.srt` 均以 `'utf8'` 读写。
@@ -367,8 +367,7 @@
 13. **结构类型只在 `shared/types.ts` 定义一处**：本文件已删掉本地的 `Scene` / `ContentScript` / `Project` / `SubtitleLine` interface，改为第 38 行的 `export type { … } from '../shared/types'`；因此 `from './projects'` 取到这些类型的既有代码（如 `ttsAlign.ts` 的 `type SubtitleLine`、`projects.Project` 形式的引用）字段完全同源。修改字段请改共享层，不要在本文件重建 interface（否则又会出现两份会漂移的定义）。
 14. **handler 载荷全部有契约类型**：原先多处写作 `Record<string, unknown>` 或省略类型，现统一为 `Project*Payload`。注意 `ProjectNamePayload.name` 是**必填** `string`（用于 `clear-audio` / `clear-video`），而 `ProjectSaveSubtitlePayload` / `ProjectSetAudioPayload` / `ProjectSetVideoPayload` 等字段全部可选，运行时依旧保留 `payload && payload.name` 式的判空写法。
 15. **GSAP 本地化的兜底语义**：改写只在「随包 `vendor/gsap/gsap.min.js` 存在」时发生，否则 `localizeGsapHtml` 原样返回（继续走 CDN，在线可用），因此这是**能力增强而非硬依赖**。`copyGsapIntoProject` 的返回值在本文件**只剩 `project:preview-html` 一处被忽略**：generate / modify / save-html 三处现在都用它做兜底——复制失败即 `externalizeGsapHtml` 退回 CDN，保证落盘的 HTML 不会引用一个不存在的 `gsap.min.js`。`video.ts` 的渲染副本仍忽略返回值。
-16. **导出时换回 CDN、项目内保持本地引用**：`project:download-html` 与 `project:download-file` 的 `.html/.htm` 分支都是「读出 → `hfEnv.externalizeGsapHtml` → 文本写出」，导出物里的 GSAP 引用是指定版本的 CDN 地址（`https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js`），因此导出的单个 HTML 放到别处联网即可独立打开；项目目录内的 `index.html` 仍是 `./gsap.min.js` 本地引用（离线预览/渲染不受影响）。注意：导出物从此依赖网络（不再自带 GSAP），而导出的 `gsap.min.js` 副本本身不会被带上——原先「导出后缺 gsap.min.js 导致动画不跑」的问题已由这次改动修掉。
+16. **导出时换回 CDN、项目内保持本地引用**：`project:download-html` 是「读出 → `hfEnv.externalizeGsapHtml` → 文本写出」，导出物里的 GSAP 引用是指定版本的 CDN 地址（`https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js`），因此导出的单个 HTML 放到别处联网即可独立打开；项目目录内的 `index.html` 仍是 `./gsap.min.js` 本地引用（离线预览/渲染不受影响）。注意：导出物从此依赖网络（不再自带 GSAP），而导出的 `gsap.min.js` 副本本身不会被带上——原先「导出后缺 gsap.min.js 导致动画不跑」的问题已由这次改动修掉。
 17. **预览只在副本上改写**：`project:preview-html` 的 CSP 剥离与 GSAP 改写都作用于 `index.preview.html`，原件 `index.html` 保持原貌；但 `gsap.min.js` 是落在**项目目录**（原件与副本共用），所以原件的相对引用也成立。该处**不参与作者态的复制失败兜底**（返回值被忽略）：若出现「`gsap.min.js` 复制失败、但 HTML 本身写得进去」的偏门情形，作者态三处会把原件退回 CDN，而预览副本在 `localizeGsapHtml` 之后又会引 `./gsap.min.js`（复制同样失败），此时预览可能取不到该文件。
 18. **`./hfEnv` 已改为命名空间导入**：`import * as hfEnv from './hfEnv'`，全文以 `hfEnv.` 前缀引用（如 `hfEnv.BUILTIN_RESOURCES.ffmpeg`、`hfEnv.isHyperframesComposition(...)`、`hfEnv.localizeGsapHtml(...)`），原解构导入已取消。
-19. **内置示例并非完全离线**：`video-projects/*/index.html` 除 GSAP 外仍从 CDN 引 `@hyperframes/core` 与 `@hyperframes/shader-transitions`，本轮只本地化了 GSAP；示例仅在渲染路径由 HyperFrames CLI 自带运行时兜底，预览/独立打开仍需网络。
-20. **音轨注入的三条不变量**：① 标签 id 固定为 `myv-bgm`，注入前先 `stripInjectedBgm`，重复设置不会叠出多条音轨；② 引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入）由 `stripAudioOfFile` 摘掉，避免双份播放；③ 没有 `index.html` 时 `applyBgmToHtml` 静默返回 `false`——因此「先生成音频、后生成 HTML」的顺序不会报错，音频会在下次生成 / 修改时随 HTML 一起补上。三个音频频道改写 HTML 后渲染层需重载预览才能听到（`HtmlGenPage` 已按 `htmlUpdated` 语义统一重载）。
+19. **音轨注入的三条不变量**：① 标签 id 固定为 `myv-bgm`，注入前先 `stripInjectedBgm`，重复设置不会叠出多条音轨；② 引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入）由 `stripAudioOfFile` 摘掉，避免双份播放；③ 没有 `index.html` 时 `applyBgmToHtml` 静默返回 `false`——因此「先生成音频、后生成 HTML」的顺序不会报错，音频会在下次生成 / 修改时随 HTML 一起补上。三个音频频道改写 HTML 后渲染层需重载预览才能听到（`HtmlGenPage` 已按 `htmlUpdated` 语义统一重载）。

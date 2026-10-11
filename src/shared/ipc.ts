@@ -77,7 +77,6 @@ export const IPC = {
     GenerateHtml: 'project:generate-html',
     ModifyHtml: 'project:modify-html',
     DownloadHtml: 'project:download-html',
-    DownloadFile: 'project:download-file',
     ExportSrt: 'project:export-srt',
     OpenFolder: 'project:open-folder',
     OpenFolderOf: 'project:open-folder-of',
@@ -99,8 +98,6 @@ export const IPC = {
   // 预览 / HyperFrames 转视频（video.js）
   Video: {
     OpenHtml: 'dialog:open-html',
-    ListProjects: 'video:list-projects',
-    PreviewShell: 'video:preview-shell',
     ShowInFolder: 'video:show-in-folder',
     Render: 'video:render',
     Progress: 'video:progress'

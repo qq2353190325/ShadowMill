@@ -11,13 +11,13 @@
 | # | 文档 | 内容 | 适合谁 |
 |---|---|---|---|
 | 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构、`src/` 完整目录树、构建与打包、运行时数据目录、全局约定 | 第一次接触项目的人 |
-| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（78 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
+| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（75 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
 | 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程 12 个模块的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
 | 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：9 个命名空间、5 路进度通道的「单订阅」语义、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
 | 4 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) | Vue 渲染层：启动链路、无 router 的注册表导航、状态与通信约定、组件分层、页面↔主进程域对照、样式策略 | 改界面 / 加页面 |
-| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（8 组 78 个）与跨进程载荷类型、消费方与编译期归属、维护约定 | 动契约前必读 |
+| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（8 组 75 个）与跨进程载荷类型、消费方与编译期归属、维护约定 | 动契约前必读 |
 | 6 | [06-目录架构-src-agent](./06-目录架构-src-agent.md) | 独立实验脚本：为什么不进构建图、5 个工具、工作区防护、运行方式 | 想跑 Agent 样例 |
-| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，共 46 篇） | 需要具体实现细节时查阅 |
+| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，共 46 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue` 与 `HfSelect.vue` 三个组件） | 需要具体实现细节时查阅 |
 
 ---
 
@@ -66,16 +66,15 @@
 | `src/env.d.ts` | [renderer/src/env.d.ts.md](./files/renderer/src/env.d.ts.md) |
 | `src/App.vue`（外壳） | [renderer/src/App.vue.md](./files/renderer/src/App.vue.md) |
 | `src/assets/`（设计系统：`main.css`） | [renderer/src/assets.md](./files/renderer/src/assets.md) |
-| `src/components/`（通用组件：`StepBar.vue`） | [renderer/src/components.md](./files/renderer/src/components.md) |
+| `src/components/`（通用组件：`StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue`） | [renderer/src/components.md](./files/renderer/src/components.md) |
 | **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress,useRenderOptions}.ts`、`src/utils/{escape,rate,time,render}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
 | `src/pages/HomePage/index.vue` | [renderer/src/pages/HomePage.md](./files/renderer/src/pages/HomePage.md) |
 | `src/pages/AboutPage/index.vue` | [renderer/src/pages/AboutPage.md](./files/renderer/src/pages/AboutPage.md) |
 | `src/pages/ContentPage/index.vue` | [renderer/src/pages/ContentPage.md](./files/renderer/src/pages/ContentPage.md) |
-| `src/pages/TextTtsPage/`（入口 `index.vue` **+** `SynthSection.vue` / `AlignSection.vue` / `helpers.ts`） | [renderer/src/pages/TextTtsPage.md](./files/renderer/src/pages/TextTtsPage.md) |
+| `src/pages/TextTtsPage/`（入口 `index.vue` **+** `SynthSection.vue` / `AlignSection.vue` / `VoiceSection.vue` / `helpers.ts`） | [renderer/src/pages/TextTtsPage.md](./files/renderer/src/pages/TextTtsPage.md) |
 | `src/pages/SubtitlePage/`（入口 `index.vue` **+** `TranscribeSection.vue` / `helpers.ts`） | [renderer/src/pages/SubtitlePage.md](./files/renderer/src/pages/SubtitlePage.md) |
 | `src/pages/HtmlGenPage/index.vue` | [renderer/src/pages/HtmlGenPage.md](./files/renderer/src/pages/HtmlGenPage.md) |
 | `src/pages/VideoPreviewPage/index.vue` | [renderer/src/pages/VideoPreviewPage.md](./files/renderer/src/pages/VideoPreviewPage.md) |
-| `src/pages/SoundCopyPage/index.vue` | [renderer/src/pages/SoundCopyPage.md](./files/renderer/src/pages/SoundCopyPage.md) |
 | `src/pages/SettingsPage/`（入口 `index.vue` **+** `WhisperSection.vue`） | [renderer/src/pages/SettingsPage.md](./files/renderer/src/pages/SettingsPage.md) |
 
 > 页面按「**一个页面一个文件夹**」组织，入口统一为 `index.vue`，该页面自己的子组件与助手（如 `TextTtsPage/SynthSection.vue`、`SubtitlePage/helpers.ts`）并入同一篇说明文档；`src/renderer/src/pages/index.ts` 是**页面注册表**，不随页面目录拆分，归属上面的「**公共方法与工具**」一篇（[`common.md`](./files/renderer/src/common.md)）。

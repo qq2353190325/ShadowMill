@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量（含派生类型）
-- **规模**：110 行
+- **规模**：107 行
 - **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video 八个分组）、`IpcChannel`（频道字面量联合类型）
 
 ## 1. 作用与职责
@@ -112,9 +112,8 @@
 | `Project.GenerateHtml` | `project:generate-html` | 调模型生成 HTML（带素材） |
 | `Project.ModifyHtml` | `project:modify-html` | 调模型修改既有 HTML |
 | `Project.DownloadHtml` | `project:download-html` | 导出 HTML 到用户选定位置 |
-| `Project.DownloadFile` | `project:download-file` | 通用文件导出（`srcPath` + `defaultName`） |
 | `Project.ExportSrt` | `project:export-srt` | 导出 SRT 字幕文件 |
-| `Project.OpenFolder` | `project:open-folder` | 打开项目目录 |
+| `Project.OpenFolder` | `project:open-folder` | 打开项目目录（项目尚未落盘时提示「项目目录不存在（项目尚未保存）」） |
 | `Project.OpenFolderOf` | `project:open-folder-of` | 打开某个绝对路径（文件或目录）所在目录 |
 | `Project.Delete` | `project:delete` | 删除项目 |
 | `Project.SaveVideo` | `project:save-video` | 把渲染产物视频路径写回项目 |
@@ -135,10 +134,8 @@
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
-| `Video.OpenHtml` | `dialog:open-html` | 打开文件框选择 HTML（注意前缀是 `dialog:`，不属于 `video:` 命名空间） |
-| `Video.ListProjects` | `video:list-projects` | 列出可渲染项目 `{ name, html }[]` |
-| `Video.PreviewShell` | `video:preview-shell` | 生成预览壳页面 |
-| `Video.ShowInFolder` | `video:show-in-folder` | 在资源管理器中定位产物文件 |
+| `Video.OpenHtml` | `dialog:open-html` | 打开文件框选择 HTML（注意前缀是 `dialog:`，不属于 `video:` 命名空间）；**保留但渲染层当前无调用方** |
+| `Video.ShowInFolder` | `video:show-in-folder` | 在资源管理器中定位产物文件（「视频预览」页「在文件夹中显示」） |
 | `Video.Render` | `video:render` | HyperFrames 渲染为视频 |
 | `Video.Progress` | `video:progress` | main → renderer，推送渲染进度 `{ text }` |
 
@@ -170,7 +167,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 ### 3.2 `as const` 与 `IpcChannel`
 
 - `export const IPC = { ... } as const` 使每个属性成为**只读的字面量类型**（如 `'window:minimize'` 而非 `string`），赋值给其他变量时不会意外放宽。
-- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video'` 八个键，取 `[keyof ...]` 后得到的是**八个分组对象类型**的并集，而不是 78 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
+- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video'` 八个键，取 `[keyof ...]` 后得到的是**八个分组对象类型**的并集，而不是 75 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
 
 ### 3.3 三种通道方向约定
 

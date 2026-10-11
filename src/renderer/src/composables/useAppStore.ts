@@ -6,7 +6,8 @@ import { pickRenderOverride } from '@renderer/utils/render'
 
 // ===== 页面键（与菜单 data-page 一致）======
 // 视频环节的页面键是 video-preview（页名「视频预览」）：转视频动作已并入「HTML生成」页，本页只做预览。
-export type PageKey = 'home' | 'about' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'video-preview' | 'sound-copy' | 'settings'
+// 原「音色管理」独立页（sound-copy）已并入「配音」页的第三个 Tab，页面键随之下线。
+export type PageKey = 'home' | 'about' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'video-preview' | 'settings'
 
 // ===== 项目状态结构（与主进程 project.json 字段对应） =====
 export interface ProjectState {
@@ -24,23 +25,13 @@ export interface ProjectState {
   // 视频渲染档位的项目级覆盖（字段缺省 = 跟随全局默认；见 composables/useRenderOptions.ts）
   render?: RenderOverride
 }
-export interface BuiltinProject {
-  name: string
-  title: string
-  htmlPath: string
-  htmlExists: boolean
-  videoExists: boolean
-  subtitle: string
-}
 // project:list 的条目结构来自跨进程契约（shared/types.ts），此处只做再导出，避免两处漂移
 export type { ProjectMeta };
 
 export const appState = reactive({
   currentName: 'demo-project',
-  isBuiltin: false,
   project: null as ProjectState | null, // 当前项目详情
-  myProjects: [] as ProjectMeta[],      // 我的项目列表
-  builtinProjects: [] as BuiltinProject[] // 内置示例项目
+  myProjects: [] as ProjectMeta[]       // 我的项目列表（项目选择器 / 首页项目卡片）
 });
 
 export const activeMenu = ref<PageKey>('home');
@@ -48,58 +39,35 @@ export const activeMenu = ref<PageKey>('home');
 // ===== 链路状态判定（原 has* 函数 → computed） =====
 export const hasSubtitle = computed(() => {
   const p = appState.project;
-  return !appState.isBuiltin && !!(p && p.subtitle);
+  return !!(p && p.subtitle);
 });
-// 仅当存在真实 HTML 路径且非内置示例时才视为“已生成”：内置示例的 HTML 属于只读示例资源，不算用户生成产物
+// 仅当存在真实 HTML 路径时才视为“已生成”：避免只有路径、文件已被删除时误判
 export const hasHtml = computed(() => {
   const p = appState.project;
-  return !appState.isBuiltin && !!(p && p.htmlExists && p.htmlPath);
+  return !!(p && p.htmlExists && p.htmlPath);
 });
 export const hasVideo = computed(() => {
   const p = appState.project;
   return !!(p && p.videoExists);
 });
-// 内容脚本是否具备：非内置且存在至少一条场景（向后兼容：无 content 字段视为空）
+// 内容脚本是否具备：存在至少一条场景（向后兼容：无 content 字段视为空）
 export const hasContent = computed(() => {
   const p = appState.project;
-  return !appState.isBuiltin && !!(p && p.content && Array.isArray(p.content.scenes) && p.content.scenes.length);
+  return !!(p && p.content && Array.isArray(p.content.scenes) && p.content.scenes.length);
 });
 // 配音是否具备（本阶段近似判断）：项目内已有背景音频/生成语音即视为已产出声，后续可按实际配音产物细化
 export const hasAudio = computed(() => {
   const p = appState.project;
-  return !appState.isBuiltin && !!(p && p.audioFile);
+  return !!(p && p.audioFile);
 });
 
 export function saveProjectCtx(): void {
-  localStorage.setItem('myapp.projectCtx', JSON.stringify({ name: appState.currentName, builtin: appState.isBuiltin }));
+  localStorage.setItem('myapp.projectCtx', JSON.stringify({ name: appState.currentName }));
 }
 
 export async function refreshProject(): Promise<void> {
-  const [projs, built] = await Promise.all([
-    window.projectTools.list().catch(() => []),
-    window.hfTools.listProjects().catch(() => [])
-  ]);
+  const projs = await window.projectTools.list().catch(() => []);
   appState.myProjects = projs;
-  appState.builtinProjects = built.map((b) => ({
-    name: b.name,
-    title: b.name,
-    htmlPath: b.html,
-    htmlExists: !!b.html, // 存在性来源显式化：主进程 list 已按 index.html 是否存在过滤；b.html 为空时绝不标 true
-    videoExists: false,
-    subtitle: ''
-  }));
-
-  if (appState.isBuiltin) {
-    const entry = appState.builtinProjects.find((b) => b.name === appState.currentName);
-    if (!entry) {
-      appState.currentName = (appState.myProjects[0] && appState.myProjects[0].name) || 'demo-project';
-      appState.isBuiltin = false;
-      saveProjectCtx();
-    } else {
-      appState.project = Object.assign({}, entry) as ProjectState;
-      return;
-    }
-  }
 
   let entry = appState.myProjects.find((p) => p.name === appState.currentName);
   if (!entry) {
@@ -130,9 +98,8 @@ export async function refreshProject(): Promise<void> {
   };
 }
 
-export async function switchProject(name: string, isBuiltin: boolean): Promise<void> {
+export async function switchProject(name: string): Promise<void> {
   appState.currentName = name;
-  appState.isBuiltin = isBuiltin;
   saveProjectCtx();
   await refreshProject();
 }

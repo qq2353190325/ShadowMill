@@ -15,7 +15,7 @@ Agent 生成 HTML 时会引入 GSAP 来做动画时间轴。若用 CDN 地址（
 - 来源：`https://registry.npmjs.org/gsap/-/gsap-3.14.2.tgz` 内的 `package/dist/gsap.min.js`
 - tarball 完整性（npm `dist.integrity`，sha512）：`sha512-P8/mMxVLU7o4+55+1TCnQrPmgjPKnwkzkXOK1asnR9Jg2lna4tEY5qBJjMmAaOBDDZWtlRjBXjLa0w53G/uBLA==`
 - 本文件 SHA256：`C174BFCE53A729418D57A8AD8625E7247C793A22FEF8E2851E3CFA3DE9CD8280`
-- 版本选择：与内置示例（`video-projects/*/index.html`）以及 HyperFrames 自带文档（`resources/hyperframes/node_modules/hyperframes/dist/docs/gsap.md`）保持一致
+- 版本选择：与 HyperFrames 自带文档（`resources/hyperframes/node_modules/hyperframes/dist/docs/gsap.md`）保持一致
 
 ## 许可
 

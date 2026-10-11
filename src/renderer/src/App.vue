@@ -99,7 +99,6 @@ async function initApp(): Promise<void> {
     const saved = JSON.parse(localStorage.getItem('myapp.projectCtx') || 'null');
     if (saved && saved.name) {
       appState.currentName = saved.name;
-      appState.isBuiltin = !!saved.builtin;
     }
   } catch (e) { /* ignore */ }
   // 项目列表与渲染默认档位并行载入（档位读取失败不影响启动，落回内置默认）

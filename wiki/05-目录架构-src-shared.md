@@ -8,8 +8,8 @@
 
 | 文件 | 行数 | 角色 |
 |---|---|---|
-| [ipc.ts](./files/shared/ipc.ts.md) | 110 | IPC 频道名常量（8 个分组、78 个频道）+ `IpcChannel` 类型 |
-| [types.ts](./files/shared/types.ts.md) | 712 | 跨进程载荷类型（10 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`、`RegisterCtx`、设置（含渲染档位与更新设置）、音色与配音、语音识别、项目与字幕、预览/转视频、应用自更新、进度推送，以及 `PreloadApi`（`window.*` 契约唯一真源）；其中 `ProjectHtmlMaterials` 已删 `audioPath`（背景音轨由主进程注入 HTML），`ProjectSetAudioResult` 增加可选 `htmlUpdated` |
+| [ipc.ts](./files/shared/ipc.ts.md) | 107 | IPC 频道名常量（8 个分组、75 个频道）+ `IpcChannel` 类型 |
+| [types.ts](./files/shared/types.ts.md) | 692 | 跨进程载荷类型（10 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`、`RegisterCtx`、设置（含渲染档位与更新设置）、音色与配音、语音识别、项目与字幕、预览/转视频、应用自更新、进度推送，以及 `PreloadApi`（`window.*` 契约唯一真源）；其中 `ProjectHtmlMaterials` 已删 `audioPath`（背景音轨由主进程注入 HTML），`ProjectSetAudioResult` 增加可选 `htmlUpdated` |
 
 ---
 
@@ -25,8 +25,10 @@
 | `Settings` | 5 | `settings:get`、`settings:save`、`settings:save-render`、`settings:save-updater`、`settings:test` |
 | `Voice` | 18 | `voice:get-config`、`voice:get-save-dir`、`voice:save-config`、`voice:pick-audio`、`voice:create`、`voice:list-system-voices`、`voice:list-models`、`voice:get-profiles`、`voice:save-profile`、`voice:delete-profile`、`voice:list`、`voice:list-all`、`voice:pick-dir`、`voice:list-generated`、`voice:synth`、`voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | `Whisper` | 12 | `whisper:status`、`whisper:download`、`whisper:delete`、`whisper:set-current`、`whisper:add-model`、`whisper:update-model`、`whisper:remove-model`、`whisper:open-dir`、`whisper:project-audio`、`whisper:pick-audio`、`whisper:transcribe`、`whisper:progress` |
-| `Project` | 26 | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:download-file`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-video`、`project:set-video`、`project:clear-video`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、`project:html-progress` |
-| `Video` | 6 | `dialog:open-html`、`video:list-projects`、`video:preview-shell`、`video:show-in-folder`、`video:render`、`video:progress` |
+| `Project` | 25 | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-video`、`project:set-video`、`project:clear-video`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、`project:html-progress` |
+| `Video` | 4 | `dialog:open-html`、`video:show-in-folder`、`video:render`、`video:progress` |
+
+合计 **75** 个频道（Window 4 + App 1 + Update 6 + Settings 5 + Voice 18 + Whisper 12 + Project 25 + Video 4）。
 
 两个容易踩的点：
 
@@ -50,7 +52,7 @@
 | ④ 音色与配音 | 系统/克隆音色、映射、合成与逐句对齐 | `SystemVoice`、`SystemVoiceItem`、`VoiceModel`、`VoiceListItem`、`VoiceCreateResult`、`VoiceSynthResult`、`VoiceAlignPayload`、`VoiceAlignResult` |
 | ⑤ 语音识别 | whisper 模型状态与转录 | `WhisperModelItem`、`WhisperStatusResult`、`WhisperTranscribePayload`、`WhisperTranscribeResult` |
 | ⑥ 项目与字幕 | `project.json`、字幕行、HTML 生成载荷 | `Scene`、`ContentScript`、`Project`、`SubtitleLine`、`ProjectMeta`、`ProjectAgentPayload`、`ProjectHtmlResult` |
-| ⑦ 预览 / 转视频 | 内置示例与渲染载荷/结果 | `BuiltinProjectEntry`、`VideoPreviewShellResult`、`VideoRenderResult` |
+| ⑦ 预览 / 转视频 | 渲染载荷与结果、进度 | `VideoRenderPayload`、`VideoRenderResult`、`VideoProgressPayload` |
 | ⑧ 进度推送 | 5 路 main → renderer 推送载荷 | `HtmlProgressPayload`、`WhisperProgressPayload`、`AlignProgressPayload`、`VideoProgressPayload`、`UpdateProgressPayload` |
 | ⑨ `window.*` 契约 | 9 个命名空间的完整方法签名 | `PreloadApi`（preload 实现与渲染层消费的唯一真源） |
 

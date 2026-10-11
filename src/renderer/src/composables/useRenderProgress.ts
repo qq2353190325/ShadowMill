@@ -5,9 +5,9 @@
 //   ② 事件消息只认 HF_MESSAGE_LABELS 白名单（心跳 "stage still running"、内部 "resolved" 等全部丢弃），
 //      唯一例外是 status=error：失败原因原样展示（截断），方便定位问题；
 //   ③ 普通日志行（[initSession:screenshot] …、[Browser:…]、进度条等）完全不参与更新，文案保持上一条；
-//      首次渲染的空白期由页面自己的占位文案兜着（「已提交渲染（…，约 30 秒）...」/「试渲染中，请稍候…」）。
+//      首次渲染的空白期由页面自己的占位文案兜着（「已提交渲染（…，约 30 秒）...」）。
 // 最终文案形如「渲染中 · 逐帧捕获（已用 45s · 帧 320/900）：快速捕获未通过校验…」；
-// 展示方：pages/HtmlGenPage/index.vue（发起渲染）与 pages/VideoPreviewPage/index.vue（预览侧）。
+// 展示方：pages/HtmlGenPage/index.vue（发起渲染，唯一的渲染入口）。
 import { reactive } from 'vue'
 
 // 对用户有意义的长阶段；capture_* 三种共用「逐帧捕获」（底层捕获策略与用户无关）

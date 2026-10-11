@@ -4,8 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：712 行
-- **对外导出**：按 10 个小节组织（源码编号 ①～⑨，其中更新一节编号为 ③.5）—— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置 21 个（新增 `UpdaterSettings`、`SettingsSaveUpdaterPayload`）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）④ 音色与配音 26 个 ⑤ 语音识别 13 个 ⑥ 项目与字幕 24 个 ⑦ 预览 / 转视频 5 个 ⑧ 进度推送 8 个 ⑨ `PreloadApi` 1 个
+- **规模**：692 行
+- **对外导出**：按 10 个小节组织（源码编号 ①～⑨，其中更新一节编号为 ③.5）—— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个
 
 ## 1. 作用与职责
 
@@ -15,7 +15,7 @@
 2. **统一 IPC 结果形状**：`IpcFail` / `IpcResult<T>` 是全部 `{ ok, ... }` 结果类型的唯一来源 —— 它们原先只在 `src/preload/index.d.ts` 内部以 `OkResult` / `FailResult` / `IpcResult` 三个未导出类型存在，现在上移到共享层并被主进程、preload、渲染层共同引用。
 3. **描述持久化结构**：`CustomModelConfig` / `VoiceTTSConfig` / `VoiceProfile` / `WhisperCustomModel` / `WhisperSettings` / `AppSettings` 共同构成 `userData/settings.json` 的完整 schema。
 4. **定义 `window.*` 契约**：⑨ 节的 `PreloadApi` 用 9 个命名空间的完整方法签名描述「preload 实现 ↔ 渲染层消费」的唯一真源 —— `src/preload/index.ts` 用它标注各 `contextBridge` 对象，`src/preload/index.d.ts` 用它给 `Window` 补类型，因此两端不会再各自漂移。
-5. **收敛主进程的本地类型**：`whisper.ts` / `ttsAlign.ts` / `video.ts` / `htmlAgent.ts` / `voice.ts` / `projects.ts` 原先各自声明过 `WhisperProgressPayload`、`AlignProgressInfo`、`RenderPayload` / `PreviewShellPayload` / `RenderResult`、`AgentProgress`、`VoiceModel`、`Scene` / `ContentScript` / `Project` / `SubtitleLine`，现在全部改为从本文件导入（`htmlAgent.ts` 保留 `AgentProgress` 这一导出名，但它已是 `HtmlAgentProgress` 的类型别名；`projects.ts` 用 `export type { … } from '../shared/types'` 再导出，保持 `projects.Project` / `from './projects'` 的既有引用面）。**`src/main/` 下已不存在任何本地声明的 payload / result / progress 接口**，各 IPC handler 的 `payload` 参数也一律用本文件的 `*Payload` 类型标注（此前多为 `Record<string, unknown>` 或内联字面量）。
+5. **收敛主进程的本地类型**：`whisper.ts` / `ttsAlign.ts` / `video.ts` / `htmlAgent.ts` / `voice.ts` / `projects.ts` 原先各自声明过 `WhisperProgressPayload`、`AlignProgressInfo`、`RenderPayload` / `RenderResult`、`AgentProgress`、`VoiceModel`、`Scene` / `ContentScript` / `Project` / `SubtitleLine`，现在全部改为从本文件导入（`htmlAgent.ts` 保留 `AgentProgress` 这一导出名，但它已是 `HtmlAgentProgress` 的类型别名；`projects.ts` 用 `export type { … } from '../shared/types'` 再导出，保持 `projects.Project` / `from './projects'` 的既有引用面）。**`src/main/` 下已不存在任何本地声明的 payload / result / progress 接口**，各 IPC handler 的 `payload` 参数也一律用本文件的 `*Payload` 类型标注（此前多为 `Record<string, unknown>` 或内联字面量）。
 6. **约束主进程装配模式**：`RegisterCtx` 把 `src/main/*.ts` 各模块 `register(ctx)` 所依赖的能力（拿主窗口）显式化。
 
 文件按 10 个小节组织，首行注释给出两条硬约束：**载荷格式必须与现行实现逐字段一致，禁止改结构**；**新增/修改 IPC 接口须三处齐改 —— 主进程 `register()` 回调、本文件类型、preload 桥接方法**。文件为纯类型模块，编译后不产生任何运行时代码，仅 1 个 `import type`（引自 `electron`，用于 `BrowserWindow`）。
@@ -29,7 +29,7 @@
 | ④ 音色与配音 | 系统音色、克隆音色、音色映射、合成/对齐载荷与结果 | `src/main/voice.ts`、`src/main/ttsAlign.ts` |
 | ⑤ 语音识别 | whisper 模型状态、转录载荷与结果 | `src/main/whisper.ts` |
 | ⑥ 项目与字幕 | `project.json`（含渲染档位覆盖 `render`）、字幕行、项目列表项、HTML 生成载荷 | `src/main/projects.ts` |
-| ⑦ 预览 / 转视频 | 内置示例项目项、预览外壳与渲染载荷/结果 | `src/main/video.ts` |
+| ⑦ 预览 / 转视频 | 渲染载荷与渲染结果 | `src/main/video.ts` |
 | ⑧ 进度推送 | 5 路 main → renderer 推送的载荷 | `src/main/*.ts` 推送方 + `src/preload/index.ts` 订阅方 |
 | ⑨ `window.*` API 契约 | `PreloadApi`（9 个命名空间） | `src/preload/index.ts`、`src/preload/index.d.ts`、渲染层全部 `window.*` 调用 |
 
@@ -189,8 +189,7 @@
 | `ProjectSaveContentPayload` | `interface` | `{ name?, content? }`（`content` 为 `unknown`） |
 | `ProjectSaveResult` | `interface` | `{ project: Project }`（`create` / `saveSubtitle` / `saveContent` / `saveVideo` 共用） |
 | `ProjectExportSrtPayload` | `interface` | `{ name?, srt? }` |
-| `ProjectDownloadFilePayload` | `interface` | `{ srcPath?, defaultName? }` |
-| `ProjectDownloadResult` | `interface` | `{ savedPath }`（下载 HTML / 下载文件 / 导出 SRT 共用） |
+| `ProjectDownloadResult` | `interface` | `{ savedPath }`（下载 HTML / 导出 SRT 共用） |
 | `ProjectSetAudioPayload` / `ProjectSetVideoPayload` | `interface` | `{ name?, audioPath? }` / `{ name?, videoPath? }` |
 | `ProjectSetAudioResult` | `interface` | `{ audioFile, htmlUpdated? }`（`setAudio` / `extractVideoAudio` 共用）；`htmlUpdated` 为「设置 / 移除背景音频时 `index.html` 的注入音轨是否被同步改写」，可选（未改写 / 主进程未上报时为 `undefined`） |
 | `ProjectSetVideoResult` | `interface` | `{ videoFile, abs }` |
@@ -228,11 +227,10 @@
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `BuiltinProjectEntry` | `interface` | `video:list-projects` 结果项（内置只读示例）：`name` + `html`（`index.html` 绝对路径） |
-| `VideoPreviewShellPayload` | `interface` | `{ htmlPath? }` |
-| `VideoPreviewShellResult` | `interface` | `{ shellPath }` |
 | `VideoRenderPayload` | `interface` | `extends RenderOverride`，即 `{ htmlPath?: string; quality?: RenderQuality; fps?: RenderFps }`——档位字段缺省/非法时主进程不拼对应 CLI 参数 |
 | `VideoRenderResult` | `type` | 渲染结果联合：成功 `{ ok: true; outputVideo: string; projectDir: string }`，失败 `{ ok: false; message: string; compatible?: boolean }` |
+
+> ⑦ 节只有上面两个类型：渲染载荷与渲染结果。渲染进度载荷 `VideoProgressPayload` 归 ⑧ 节（进度推送）。
 
 `VideoRenderResult` **不是** `IpcResult<T>` 的实例：它的失败分支 `message` 必填，且成功分支不复用 `IpcFail` 联合；失败分支的 `compatible: false` 表示 HTML 未通过 HyperFrames 合规校验（渲染层据此区分「环境错误」与「HTML 不合规」）。
 
@@ -268,11 +266,11 @@
 | `electronAPI` | 2 | `platform`、`versions` | 非方法属性：`string` 与 `{ node; chrome; electron }` |
 | `appTools` | 1 | `copyText` | `Promise<boolean>`（不走 `IpcResult`） |
 | `windowControls` | 4 | `minimize`、`toggleMaximize`、`close`、`onMaximizedChange` | 前三者 `void`（`send` 单向）；`onMaximizedChange(cb: (isMaximized: boolean) => void)` |
-| `hfTools` | 6 | `openHtml`、`listProjects`、`previewShell`、`renderVideo`、`showInFolder`、`onProgress` | `openHtml` → `Promise<string \| null>`；`listProjects` → `Promise<BuiltinProjectEntry[]>`；`previewShell` → `Promise<IpcResult<VideoPreviewShellResult>>`；`renderVideo` → `Promise<VideoRenderResult>`；`showInFolder` → `Promise<void>`；`onProgress(cb: (data: VideoProgressPayload) => void)` |
+| `hfTools` | 4 | `openHtml`、`renderVideo`、`showInFolder`、`onProgress` | `openHtml` → `Promise<string \| null>`（**保留但渲染层当前无调用方**）；`renderVideo` → `Promise<VideoRenderResult>`；`showInFolder` → `Promise<void>`；`onProgress(cb: (data: VideoProgressPayload) => void)` |
 | `settingsTools` | 4 | `get`、`save`、`saveRender`、`test` | `get` → `Promise<AppSettings>`（**不经 `ok` 包裹**）；`save(customModel)` → `Promise<IpcResult<SettingsSaveResult>>`；`saveRender(render)` → `Promise<IpcResult<SettingsSaveResult>>`（preload 包装为 `{ render }`）；`test(customModel)` → `Promise<IpcResult>` |
 | `voiceTools` | 18 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` | 见下 |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` | 见下 |
-| `projectTools` | 26 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`downloadFile`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下 |
+| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下 |
 
 `voiceTools` 逐个签名（含未单独命名的内联载荷）：
 
@@ -313,7 +311,7 @@
 | `projectTools` | `create` / `saveSubtitle` / `saveContent` / `saveVideo` / `setRender` | `Promise<IpcResult<ProjectSaveResult>>`（`setRender(name, render \| null)` 传 `null` 即清除项目级渲染档位覆盖） |
 | `projectTools` | `load(name)` | `Promise<Project \| null>`（**不走 `IpcResult`**；项目名为空时主进程返回 `null`，见 §5） |
 | `projectTools` | `generateHtml` / `modifyHtml(name, prompt, materials?: ProjectHtmlMaterials)` | `Promise<IpcResult<ProjectHtmlResult>>` |
-| `projectTools` | `downloadHtml` / `downloadFile` / `exportSrt` | `Promise<IpcResult<ProjectDownloadResult>>` |
+| `projectTools` | `downloadHtml` / `exportSrt` | `Promise<IpcResult<ProjectDownloadResult>>` |
 | `projectTools` | `readHtml` / `saveHtml` / `previewHtml` | `IpcResult<ProjectReadHtmlResult>` / `IpcResult<ProjectHtmlResult>` / `IpcResult<ProjectPreviewHtmlResult>` |
 | `projectTools` | `pickAudio()` / `pickVideo()` | `Promise<string \| null>` |
 | `projectTools` | `setAudio` / `extractVideoAudio` / `setVideo` | `IpcResult<ProjectSetAudioResult>`（含可选 `htmlUpdated`，表示注入音轨改写了 `index.html`） / `IpcResult<ProjectSetAudioResult>` / `IpcResult<ProjectSetVideoResult>` |
@@ -369,12 +367,12 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | --- | --- | --- |
 | 依赖（仅类型） | `electron` | 仅引入 `BrowserWindow` 类型 |
 | 被 import | `src/main/settings.ts` | `AppSettings`、`CustomModelConfig`、`RegisterCtx`、`VoiceProfile`、`VoiceTTSConfig`、`WhisperCustomModel` |
-| 被 import（+ 再导出） | `src/main/projects.ts` | `RegisterCtx`、`ProjectAgentPayload`、`ProjectDownloadFilePayload`、`ProjectExportSrtPayload`、`ProjectNamePayload`、`ProjectSaveContentPayload`、`ProjectSaveHtmlPayload`、`ProjectSaveSubtitlePayload`、`ProjectSetAudioPayload`、`ProjectSetVideoPayload`；并 `export type { ContentScript, Project, Scene, SubtitleLine }` 再导出四个项目结构 |
+| 被 import（+ 再导出） | `src/main/projects.ts` | `RegisterCtx`、`ProjectAgentPayload`、`ProjectExportSrtPayload`、`ProjectNamePayload`、`ProjectSaveContentPayload`、`ProjectSaveHtmlPayload`、`ProjectSaveSubtitlePayload`、`ProjectSetAudioPayload`、`ProjectSetVideoPayload`；并 `export type { ContentScript, Project, Scene, SubtitleLine }` 再导出四个项目结构 |
 | 被 import | `src/main/index.ts` | `RegisterCtx` |
 | 被 import | `src/main/whisper.ts` | `RegisterCtx`、`WhisperCustomModel` 与全部 `Whisper*Payload`（含 `WhisperProgressPayload`） |
 | 被 import | `src/main/voice.ts` | `RegisterCtx`、`SystemVoice`、`VoiceModel`、`VoiceProfile`、`VoiceTTSConfig`、`VoiceCreatePayload`、`VoiceProfileKeyPayload`、`VoiceProfilePayload`、`VoiceSaveConfigPayload`、`VoiceSaveDirPayload`、`VoiceSynthPayload` |
 | 被 import | `src/main/ttsAlign.ts` | `RegisterCtx`、`AlignProgressPayload`（取代原本地 `AlignProgressInfo`）、`VoiceAlignPayload` |
-| 被 import | `src/main/video.ts` | `RegisterCtx`、`VideoPreviewShellPayload`、`VideoRenderPayload`、`VideoRenderResult`（取代原本地 `PreviewShellPayload` / `RenderPayload` / `RenderResult`） |
+| 被 import | `src/main/video.ts` | `RegisterCtx`、`VideoRenderPayload`、`VideoRenderResult`（取代原本地声明的 `RenderPayload` / `RenderResult`） |
 | 被 import | `src/main/htmlAgent.ts` | `HtmlAgentProgress`（以 `export type AgentProgress = HtmlAgentProgress` 对外保留 `AgentProgress` 名） |
 | 被 import | `src/main/systemVoices.ts` | `SystemVoice` |
 | 被 import（仅类型） | `src/preload/index.ts` | `PreloadApi`、`AlignProgressPayload`、`HtmlProgressPayload`、`WhisperProgressPayload` |

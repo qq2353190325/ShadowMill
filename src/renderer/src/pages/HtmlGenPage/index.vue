@@ -5,41 +5,28 @@
       <div class="panel-title"><span class="dot"></span>HTML · Agent {{ hasHtml ? '修改' : '生成' }}</div>
       <!-- 项目状态（原 renderMeta 的 #hg-meta） -->
       <div class="proj-meta">
-        <div v-if="meta.builtin" class="proj-stat"><b>内置示例（只读）</b>示例 HTML 已随包提供、不可改动；请在顶部「工作项目」切换到「我的项目」。</div>
-        <template v-else>
-          <div class="proj-stat" :class="{ on: meta.hasH }"><b>HTML</b>{{ meta.hasH ? '已生成' : '尚未生成' }}</div>
-          <div class="proj-stat" :class="{ on: meta.sceneN > 0 }"><b>内容脚本</b>{{ meta.sceneN ? meta.sceneN + ' 个场景（生成时自动附带）' : '无（可先到「内容脚本」页编写）' }}</div>
-          <div class="proj-stat" :class="{ on: meta.subCount > 0 }"><b>素材</b>{{ meta.subCount ? '字幕 ' + meta.subCount + ' 条' + (meta.audioFile ? ' · 已配背景音频' : '') + (meta.videoMaterial ? ' · 已配视频素材' : '') : '无字幕（可先到「字幕生成」页添加）' }}</div>
-          <div class="proj-stat"><b>用法</b>{{ meta.hasH ? '填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份' : '在「项目素材」里选好素材，再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定' }}</div>
-        </template>
+        <div class="proj-stat" :class="{ on: meta.hasH }"><b>HTML</b>{{ meta.hasH ? '已生成' : '尚未生成' }}</div>
+        <div class="proj-stat" :class="{ on: meta.sceneN > 0 }"><b>内容脚本</b>{{ meta.sceneN ? meta.sceneN + ' 个场景（生成时自动附带）' : '无（可先到「内容脚本」页编写）' }}</div>
+        <div class="proj-stat" :class="{ on: meta.subCount > 0 }"><b>素材</b>{{ meta.subCount ? '字幕 ' + meta.subCount + ' 条' + (meta.audioFile ? ' · 已配背景音频' : '') + (meta.videoMaterial ? ' · 已配视频素材' : '') : '无字幕（可先到「字幕生成」页添加）' }}</div>
+        <div class="proj-stat"><b>用法</b>{{ meta.hasH ? '填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份' : '在「项目素材」里选好素材，再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定' }}</div>
       </div>
       <div class="hgen-block">
         <div class="panel-title-sm">项目素材（均可选，留空则跳过）</div>
         <div class="hgen-row">
           <span class="sel-label" style="flex:none;width:auto">字幕</span>
-          <select v-model="subSel" class="hgen-select" style="flex:1" title="按所选字幕逐条设计动画">
-            <option value="">不使用字幕</option>
-            <option v-if="!appState.isBuiltin && (appState.project?.subtitle || '').trim()" value="__current__">当前项目字幕（{{ appState.project?.subtitleCount || 0 }} 条）</option>
-            <option v-for="mp in appState.myProjects.filter((m) => m.name !== appState.currentName && m.hasSubtitle)" :key="mp.name" :value="mp.name">项目「{{ mp.title || mp.name }}」字幕（{{ mp.subtitleCount || 0 }} 条）</option>
-          </select>
+          <HfSelect v-model="subSel" :groups="subSelGroups" title="按所选字幕逐条设计动画" />
         </div>
-        <template v-if="!appState.isBuiltin">
-          <div class="hgen-row">
-            <span class="sel-label" style="flex:none;width:auto">视频素材</span>
-            <!-- 视频素材只有一个入口：选项目现有素材、或当场导入自定义文件（导入后自动选中） -->
-            <select v-model="videoSel" class="hgen-select" style="flex:1" title="把哪个视频片段放进页面；没有现成素材时可当场导入" @change="onVideoSelect">
-              <option value="">不使用视频素材</option>
-              <option v-if="appState.project?.videoMaterial" value="__current__">当前项目视频素材（{{ appState.project?.videoMaterial }}）</option>
-              <option value="__pick__">选择本地视频文件…（导入为项目素材）</option>
-            </select>
-            <button class="hf-btn" :disabled="!appState.project?.videoMaterial" @click="onClearVideo">移除视频</button>
-            <button class="hf-btn" :disabled="!appState.project?.videoMaterial" title="把视频里的声音提取出来，作为背景音频" @click="onExtractAudio">{{ extractText }}</button>
-          </div>
-          <div class="hgen-row" v-show="videoPrevRowVisible">
-            <video ref="videoPrevEl" :src="videoPrevSrc" controls style="flex:1;max-height:200px;border-radius:8px;background:#000"></video>
-          </div>
-          <div class="hgen-tip">所选素材会用在页面里：字幕逐条依次做动画，视频作为页面片段放进画面。下拉里的「选择本地视频文件…」会导入一份新素材并自动选中；某次不想用视频，选「不使用视频素材」即可。</div>
-        </template>
+        <div class="hgen-row">
+          <span class="sel-label" style="flex:none;width:auto">视频素材</span>
+          <!-- 视频素材只有一个入口：选项目现有素材、或当场导入自定义文件（导入后自动选中） -->
+          <HfSelect v-model="videoSel" :groups="videoSelGroups" title="把哪个视频片段放进页面；没有现成素材时可当场导入" @change="onVideoSelect" />
+          <button class="hf-btn" :disabled="!appState.project?.videoMaterial" @click="onClearVideo">移除视频</button>
+          <button class="hf-btn" :disabled="!appState.project?.videoMaterial" title="把视频里的声音提取出来，作为背景音频" @click="onExtractAudio">{{ extractText }}</button>
+        </div>
+        <div class="hgen-row" v-show="videoPrevRowVisible">
+          <video ref="videoPrevEl" :src="videoPrevSrc" controls style="flex:1;max-height:200px;border-radius:8px;background:#000"></video>
+        </div>
+        <div class="hgen-tip">所选素材会用在页面里：字幕逐条依次做动画，视频作为页面片段放进画面。下拉里的「选择本地视频文件…」会导入一份新素材并自动选中；某次不想用视频，选「不使用视频素材」即可。</div>
       </div>
       <div class="hgen-block">
         <div class="panel-title-sm">需求描述（提示词）</div>
@@ -64,34 +51,28 @@
         </button>
         <button class="hf-btn" title="下载当前项目 HTML 到本地" @click="onDownload">下载 HTML</button>
         <!-- 转视频只剩这一个按钮：点它先开「渲染档位」弹窗，确认后才开始渲染（成品到「视频预览」页看） -->
-        <button v-if="!appState.isBuiltin" class="hf-btn hf-btn-primary" :disabled="!hasHtml || rendering" title="把当前 HTML 渲染成 MP4（约 30 秒）" @click="openRenderModal">转视频</button>
+        <button class="hf-btn hf-btn-primary" :disabled="!hasHtml || rendering" title="把当前 HTML 渲染成 MP4（约 30 秒）" @click="openRenderModal">转视频</button>
       </div>
     </div>
     <div class="card hgen-panel" style="margin-top:16px">
       <div class="panel-title"><span class="dot"></span>预览</div>
-      <!-- 背景音频：不经过 Agent，选定后由主进程注入 HTML 的 <audio>（预览即刻可听，转视频由 HyperFrames 混入 MP4）；
-           内置示例是只读项目、没有项目音频，整块不显示 -->
-      <template v-if="!appState.isBuiltin">
-        <div class="hgen-row">
-          <span class="sel-label" style="flex:none;width:auto">背景音频</span>
-          <span class="hf-file" style="flex:none;max-width:300px" :title="appState.project?.audioFile || '未设置音频'">{{ appState.project?.audioFile ? escTxt(appState.project.audioFile) : '未设置音频' }}</span>
-          <select v-model="audioPick" class="hgen-select" style="flex:1" title="选一份已生成音频作为背景音频" @change="onAudioPick">
-            <option value="">从已生成音频中选择…</option>
-            <option v-for="(it, i) in genAudios" :key="it.path" :value="String(i)">{{ it.name }}（{{ it.group }}）</option>
-          </select>
-          <button class="hf-btn" title="选择本地音频文件作为背景音频" @click="onPickAudioFile">选择音频文件…</button>
-          <button class="hf-btn" :disabled="!appState.project?.audioFile" title="移除背景音频" @click="onRemoveAudio">移除音频</button>
-        </div>
-        <div class="hgen-row" v-show="audioPreviewVisible">
-          <audio ref="audioEl" :src="audioSrc" controls style="flex:1;max-height:44px"></audio>
-          <label class="sel-label">语速</label>
-          <span class="rate-spinner" style="display:inline-flex;align-items:center;flex:none;gap:2px">
-            <button type="button" class="hf-btn" title="语速减 0.05" style="padding:0;width:28px;height:28px;line-height:1;flex:none" @click="rateStep(-0.05)">−</button>
-            <input ref="rateEl" :value="rateValue" type="text" inputmode="decimal" class="hgen-input" title="播放语速 0.5~2.0（非法或空值自动回退 1x）" style="width:60px;text-align:center;flex:none" @input="onRateInput" />
-            <button type="button" class="hf-btn" title="语速加 0.05" style="padding:0;width:28px;height:28px;line-height:1;flex:none" @click="rateStep(0.05)">+</button>
-          </span>
-        </div>
-      </template>
+      <!-- 背景音频：不经过 Agent，选定后由主进程注入 HTML 的 <audio>（预览即刻可听，转视频由 HyperFrames 混入 MP4） -->
+      <div class="hgen-row">
+        <span class="sel-label" style="flex:none;width:auto">背景音频</span>
+        <span class="hf-file" style="flex:none;max-width:300px" :title="appState.project?.audioFile || '未设置音频'">{{ appState.project?.audioFile ? escTxt(appState.project.audioFile) : '未设置音频' }}</span>
+        <HfSelect v-model="audioPick" :groups="audioSelGroups" title="选一份已生成音频作为背景音频" @change="onAudioPick" />
+        <button class="hf-btn" title="选择本地音频文件作为背景音频" @click="onPickAudioFile">选择音频文件…</button>
+        <button class="hf-btn" :disabled="!appState.project?.audioFile" title="移除背景音频" @click="onRemoveAudio">移除音频</button>
+      </div>
+      <div class="hgen-row" v-show="audioPreviewVisible">
+        <audio ref="audioEl" :src="audioSrc" controls style="flex:1;max-height:44px"></audio>
+        <label class="sel-label">语速</label>
+        <span class="rate-spinner" style="display:inline-flex;align-items:center;flex:none;gap:2px">
+          <button type="button" class="hf-btn" title="语速减 0.05" style="padding:0;width:28px;height:28px;line-height:1;flex:none" @click="rateStep(-0.05)">−</button>
+          <input ref="rateEl" :value="rateValue" type="text" inputmode="decimal" class="hgen-input" title="播放语速 0.5~2.0（非法或空值自动回退 1x）" style="width:60px;text-align:center;flex:none" @input="onRateInput" />
+          <button type="button" class="hf-btn" title="语速加 0.05" style="padding:0;width:28px;height:28px;line-height:1;flex:none" @click="rateStep(0.05)">+</button>
+        </span>
+      </div>
       <div class="hf-status" :class="statusDisplayClass">{{ statusDisplay }}</div>
       <div v-show="showThink" style="margin-top:10px;padding:10px 12px;border:1px solid rgba(0,212,255,.22);border-radius:8px;background:rgba(0,212,255,.05)">
         <div style="font-size:12px;color:#00D4FF;margin-bottom:6px">AI 思考过程（实时）</div>
@@ -120,15 +101,11 @@
           <div class="panel-title-sm" style="margin-top:0">渲染档位</div>
           <div class="hgen-row">
             <label class="sel-label" style="flex:none;width:40px">质量</label>
-            <select v-model="quality" class="hgen-select" style="flex:1" :disabled="rendering" @change="onOptionChange">
-              <option v-for="o in qualityOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
+            <HfSelect v-model="quality" :groups="qualityGroups" :disabled="rendering" @change="onOptionChange" />
           </div>
           <div class="hgen-row">
             <label class="sel-label" style="flex:none;width:40px">帧率</label>
-            <select v-model="fps" class="hgen-select" style="flex:1" :disabled="rendering" @change="onOptionChange">
-              <option v-for="o in fpsOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
+            <HfSelect v-model="fps" :groups="fpsGroups" :disabled="rendering" @change="onOptionChange" />
           </div>
           <div class="hgen-row" style="margin-bottom:0">
             <span class="hf-file" style="flex:1">{{ optionNote }}</span>
@@ -165,12 +142,37 @@ import {
 } from '@renderer/utils/render'
 import { effectiveRenderOptions, renderDefaults, saveProjectRenderOverride } from '@renderer/composables/useRenderOptions'
 import StepBar from '@renderer/components/StepBar.vue'
+import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 
 // ===== 生成/修改 =====
 const prompt = ref('');
 const subSel = ref('');
 const videoSel = ref('');
 // 背景音轨不是生成素材（由主进程注入 HTML），故不再有 audioSel
+
+// ===== 项目素材下拉选项（HfSelect；原为 <option v-if>/<option v-for>） =====
+const subSelGroups = computed<HfSelectGroup[]>(() => [{
+  label: '',
+  options: [
+    { value: '', label: '不使用字幕' },
+    ...((appState.project?.subtitle || '').trim()
+      ? [{ value: '__current__', label: '当前项目字幕（' + (appState.project?.subtitleCount || 0) + ' 条）' }]
+      : []),
+    ...appState.myProjects
+      .filter((m) => m.name !== appState.currentName && m.hasSubtitle)
+      .map((mp) => ({ value: mp.name, label: '项目「' + (mp.title || mp.name) + '」字幕（' + (mp.subtitleCount || 0) + ' 条）' }))
+  ]
+}]);
+const videoSelGroups = computed<HfSelectGroup[]>(() => [{
+  label: '',
+  options: [
+    { value: '', label: '不使用视频素材' },
+    ...(appState.project?.videoMaterial
+      ? [{ value: '__current__', label: '当前项目视频素材（' + appState.project.videoMaterial + '）' }]
+      : []),
+    { value: '__pick__', label: '选择本地视频文件…（导入为项目素材）' }
+  ]
+}]);
 const status = ref('');
 const statusClass = ref('');
 const thinkText = ref('');
@@ -186,14 +188,12 @@ watch(thinkText, () => {
 
 // 项目状态条（原 renderMeta）
 const meta = computed(() => {
-  if (appState.isBuiltin) return { builtin: true as const, hasH: false, sceneN: 0, subCount: 0, audioFile: '', videoMaterial: '' };
   const p = appState.project;
   const c = (p && p.content) || { scenes: [] };
   const sceneN = Array.isArray(c.scenes)
     ? c.scenes.filter((s) => s && typeof s.narration === 'string' && s.narration.trim()).length
     : 0;
   return {
-    builtin: false as const,
     hasH: hasHtml.value,
     sceneN,
     subCount: (p && p.subtitleCount) || 0,
@@ -288,16 +288,13 @@ async function loadFrame(): Promise<void> {
 
 // 状态联动：有 HTML → 自动预览；无 HTML → 恢复“尚未生成”提示（不展示空 iframe）
 function syncPreview(): void {
-  // 内置示例为只读项目：其 HTML 属于示例资源而非本页生成产物，不在此展示为“已生成”/自动预览
-  const ok = !appState.isBuiltin && !!(appState.project && appState.project.htmlExists && appState.project.htmlPath);
+  const ok = !!(appState.project && appState.project.htmlExists && appState.project.htmlPath);
   if (ok) loadFrame();
   else {
     frameVisible.value = false;
     frameSrc.value = '';
     emptyVisible.value = true;
-    emptyText.value = appState.isBuiltin
-      ? '内置示例项目为只读：自带示例 HTML，可到「视频预览」页查看效果；生成请先在顶部「工作项目」切换到「我的项目」。'
-      : '尚未生成 HTML。';
+    emptyText.value = '尚未生成 HTML。';
   }
 }
 
@@ -306,7 +303,6 @@ let agentRunning = false;
 async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
   if (agentRunning) { toast('上一个请求还在处理中，请稍候'); return; }
   if (rendering.value) { toast('正在渲染视频，请等它结束再提交需求'); return; }
-  if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
   const p = prompt.value.trim();
   if (!p) { toast('请先填写需求描述（上方提示词输入框）'); return; }
   agentRunning = true;
@@ -369,13 +365,14 @@ const qualityOptions = RENDER_QUALITY_OPTIONS;
 const fpsOptions = RENDER_FPS_OPTIONS;
 const quality = ref<RenderQuality>(FALLBACK_RENDER.quality);
 const fps = ref<RenderFps>(FALLBACK_RENDER.fps);
+// HfSelect 选项（原为 <option v-for>）
+const qualityGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: qualityOptions.map((o) => ({ value: o.value, label: o.label })) }]);
+const fpsGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: fpsOptions.map((o) => ({ value: o.value, label: o.label })) }]);
 
-// 当前项目的覆盖值（内置示例只读，不参与覆盖）
-const projectOverride = computed(() => (appState.isBuiltin ? null : (appState.project && appState.project.render) || null));
+// 当前项目的覆盖值
+const projectOverride = computed(() => ((appState.project && appState.project.render) || null));
 const overridden = computed(() => isRenderOverridden(renderDefaults, projectOverride.value));
-const optionNote = computed(() => (appState.isBuiltin
-  ? '内置示例（只读）：档位仅本次生效'
-  : (overridden.value ? '本项目自定义档位' : '跟随设置页默认：' + renderOptionsText(renderDefaults))));
+const optionNote = computed(() => (overridden.value ? '本项目自定义档位' : '跟随设置页默认：' + renderOptionsText(renderDefaults)));
 // 当前所选质量的说明（选「快速预览」时明确提示画质代价）
 const qualityHint = computed(() => {
   const hit = RENDER_QUALITY_OPTIONS.find((o) => o.value === quality.value);
@@ -393,7 +390,7 @@ function syncFromEffective(): void {
   fps.value = eff.fps;
 }
 
-// 下拉改动 → 写入当前项目的覆盖（内置示例不落盘，仅本次生效）
+// 下拉改动 → 写入当前项目的覆盖
 async function onOptionChange(): Promise<void> {
   const res = await saveProjectRenderOverride({ quality: quality.value, fps: fps.value });
   if (!res.ok && res.message) toast(res.message);
@@ -410,7 +407,6 @@ async function onResetOptions(): Promise<void> {
 // 先做与渲染同样的守卫，避免出现「弹窗刚打开又被拒」的观感。
 const renderModalVisible = ref(false);
 function openRenderModal(): void {
-  if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
   if (rendering.value) return;
   if (agentRunning) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
   const htmlPath = appState.project && appState.project.htmlPath;
@@ -431,7 +427,6 @@ function onModalKeydown(e: KeyboardEvent): void {
 }
 
 async function onRenderVideo(): Promise<void> {
-  if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
   if (rendering.value) return;
   if (agentRunning) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
   const htmlPath = appState.project && appState.project.htmlPath;
@@ -468,13 +463,7 @@ async function onRenderVideo(): Promise<void> {
 
 // ===== 下载 HTML =====
 async function onDownload(): Promise<void> {
-  let res;
-  if (appState.isBuiltin && appState.project && appState.project.htmlPath) {
-    // 内置示例：直接导出其自带 index.html（只读；不落盘到 userData 项目）
-    res = await window.projectTools.downloadFile(appState.project.htmlPath, appState.currentName + '.html');
-  } else {
-    res = await window.projectTools.downloadHtml(appState.currentName);
-  }
+  const res = await window.projectTools.downloadHtml(appState.currentName);
   if (!res) return;
   if (res.ok) toast('已导出：' + res.savedPath);
   else if (!(res as { canceled?: boolean }).canceled) toast((res as { message?: string }).message || '下载失败');
@@ -506,7 +495,6 @@ async function afterAudioChange(tip: string, absPath: string): Promise<void> {
 }
 
 async function onPickAudioFile(): Promise<void> {
-  if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
   const picked = await window.projectTools.pickAudio();
   if (!picked) return;
   const res = await window.projectTools.setAudio(appState.currentName, picked);
@@ -520,14 +508,12 @@ async function onAudioPick(): Promise<void> {
   audioPick.value = '';
   const it = genAudios.value[Number(idx)];
   if (!it) return;
-  if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
   const res = await window.projectTools.setAudio(appState.currentName, it.path);
   if (!res || !res.ok) { toast((res as { message?: string })?.message || '设置背景音频失败'); return; }
   await afterAudioChange('已设为背景音频：' + res.audioFile, it.path);
 }
 
 async function onRemoveAudio(): Promise<void> {
-  if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
   await window.projectTools.clearAudio(appState.currentName);
   await afterAudioChange('已移除背景音频（HTML 里的音轨也已摘掉）', '');
 }
@@ -535,6 +521,14 @@ async function onRemoveAudio(): Promise<void> {
 // 已生成音频列表（只用于填充预览卡片的下拉；本页不再有独立的列表 + 试听 + 设为背景音频三件套）
 interface GenAudioItem { path: string; name: string; group: string; size: number; mtime: number }
 const genAudios = ref<GenAudioItem[]>([]);
+// HfSelect 选项（原为首项固定 option + <option v-for>；value 仍是下标字符串，'' = 未选）
+const audioSelGroups = computed<HfSelectGroup[]>(() => [{
+  label: '',
+  options: [
+    { value: '', label: '从已生成音频中选择…' },
+    ...genAudios.value.map((it, i) => ({ value: String(i), label: it.name + '（' + it.group + '）' }))
+  ]
+}]);
 async function genLoad(): Promise<void> {
   const res = await window.voiceTools.listGenerated().catch(() => ({ ok: false, message: '调用失败' }));
   if (!res || !res.ok) return;   // 静默：下拉留空即可，不打断页面（生成音频不是本页必需）
@@ -557,11 +551,6 @@ function syncVideoPreview(absPath: string): void {
 // 选中「选择本地视频文件…」就弹文件框导入（导入后自动选中新素材）；取消或失败则回到项目真实状态。
 async function onVideoSelect(): Promise<void> {
   if (videoSel.value !== '__pick__') return;   // '' / '__current__' 只是本次生成的选择，无需额外动作
-  if (appState.isBuiltin) {
-    toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」');
-    videoSel.value = currentVideoSel();
-    return;
-  }
   const picked = await window.projectTools.pickVideo();
   if (!picked) { videoSel.value = currentVideoSel(); return; }
   const res = await window.projectTools.setVideo(appState.currentName, picked);
@@ -587,7 +576,6 @@ function syncVideoSelFromProject(): void {
 }
 
 async function onClearVideo(): Promise<void> {
-  if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
   await window.projectTools.clearVideo(appState.currentName);
   await refreshProject();
   syncVideoPreview('');
@@ -598,7 +586,6 @@ async function onClearVideo(): Promise<void> {
 // ===== 提取视频原声 =====
 const extractText = ref('提取原声为背景音频');
 async function onExtractAudio(): Promise<void> {
-  if (appState.isBuiltin) { toast('内置示例项目为只读，请先切换到自己的项目'); return; }
   if (!(appState.project && appState.project.videoMaterial)) { toast('还没有视频素材：可在上方「视频素材」里选「选择本地视频文件…」导入'); return; }
   extractText.value = '提取中…';
   const res = await window.projectTools.extractVideoAudio(appState.currentName).catch(() => null);
@@ -626,7 +613,6 @@ function rateStep(delta: number): void {
 
 // ===== 生命周期 =====
 onMounted(() => {
-  if (appState.isBuiltin) { toast('当前是内置示例项目（只读），请切换到自己的项目'); }
   status.value = '';
   statusClass.value = '';
   thinkText.value = '';

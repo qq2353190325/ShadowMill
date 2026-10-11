@@ -18,7 +18,7 @@
 
 ## 1. 结构总览
 
-- **页面注册与父子关系**：`src/renderer/src/pages/index.ts` 以 `'subtitle': SubtitlePage` 注册进页面映射，由 `goPage('subtitle')` 渲染（`StepBar` 步骤导航亦可跳入）；`SubtitlePage` 顶层渲染 `<TranscribeSection ref="transcribeEl" :page-ctx="pageCtx" />`，「从音频生成字幕」→ `openTranscribe()` → `transcribeEl.value?.open()` 打开弹窗，内置项目守卫在子组件 `open()` 内也有一道。
+- **页面注册与父子关系**：`src/renderer/src/pages/index.ts` 以 `'subtitle': SubtitlePage` 注册进页面映射，由 `goPage('subtitle')` 渲染（`StepBar` 步骤导航亦可跳入）；`SubtitlePage` 顶层渲染 `<TranscribeSection ref="transcribeEl" :page-ctx="pageCtx" />`，「从音频生成字幕」→ `openTranscribe()` → `transcribeEl.value?.open()` 打开弹窗。
 - **`pageCtx` 契约**（父 → 子，父组件源码定义，子组件 `defineProps` 声明）：
 
 | 字段 | 签名 | 说明 |
@@ -78,13 +78,13 @@
 | `applyTextMode()` | `items.value = parseSrtText(srtText.value)` |
 | `copySubtitles()` | 先同步 SRT 模式 → `plainText(items)` → `window.appTools.copyText(txt)`；成功 toast「已复制 N 条字幕文本（不含时间线）」，失败置红色状态 |
 | `exportSrtFile()` | 先同步 SRT 模式 → `itemsToSrt(items)` → `window.projectTools.exportSrt(appState.currentName, srt)`；`res.ok` 时 toast「已导出：<savedPath>」，非 `canceled` 的失败弹 `message` |
-| `saveToProject(options?)` | `options.silent` 控制是否弹 toast；内置项目守卫；SRT 模式先回写条目；`serializeItems` 为空则拒绝；调 `window.projectTools.saveSubtitle(currentName, text, title.trim())` → `refreshProject()`；成功 toast 条数取 `res.project.subtitleCount` 兜底 `items.length` |
+| `saveToProject(options?)` | `options.silent` 控制是否弹 toast；SRT 模式先回写条目；`serializeItems` 为空则拒绝；调 `window.projectTools.saveSubtitle(currentName, text, title.trim())` → `refreshProject()`；成功 toast 条数取 `res.project.subtitleCount` 兜底 `items.length` |
 | `fromContent()` | 读 `appState.project.content.scenes` 批量生成（见 2.4） |
-| `openTranscribe()` | `transcribeEl.value?.open()`（内置项目守卫在子组件 `open()` 内） |
+| `openTranscribe()` | `transcribeEl.value?.open()`（打开转录弹窗） |
 
 ### 2.4 关键流程
 
-**页面挂载**：`onMounted` 读 `appState.project`（空对象兜底）→ `title` 取 `proj.title`（等于 `'字幕动画'` 时视为未自定义、置空）→ `items = parseSubtitleText(proj.subtitle || '')` → `textMode` 强制回 `false` → `appState.isBuiltin` 时 toast「当前是内置示例项目（只读），请切换到自己的项目来编辑字幕」。
+**页面挂载**：`onMounted` 清空状态条 → `title` 取 `proj.title`（等于 `'字幕动画'` 时视为未自定义、置空）→ `items = parseSubtitleText(proj.subtitle || '')` → `textMode` 强制回 `false`（每次重挂载都回到「逐条编辑」默认模式）。
 
 **时间轴自动接续**：① 新增：`itemStartAfter` 取上一条有效 `end`，否则 `start + estDur`；新条目初始时长 2.4 秒。② 删除：`fillEnds` 让下一条起始接管（已有真实结束时间的行不被覆盖）。③ 文本输入：仅末条按新文本重估结束时间。④ 起始时间被改到不小于原结束时间时，结束时间顺延为 `start + estDur(text)`。
 
@@ -92,13 +92,13 @@
 
 **由脚本旁白生成**（`fromContent`）：① 取 `appState.project.content.scenes`，非数组或为空则 toast 引导先去「内容脚本」页。② 逐场景取 `s.narration`（trim 后非空才用）。③ 时长优先取 `s.durHint`：要求非空串 / 非 `null` / 非 `undefined` 且 `Number` 有限且 > 0，命中则计入 `usedDur`；否则用 `estDur(narration)` 计入 `estimated`。④ 以 `time` 游标累加生成 `{ start: time, end: time + dur, text: narr }`，**覆盖**当前条目。⑤ SRT 模式下同步刷新 `srtText`。⑥ toast 汇报总数，并分别标注「按时长提示累计」与「按估时」的条数。
 
-**保存与只读守卫**：① 内置项目：非静默时 toast「内置示例项目只读，请先切换到自己的项目」，返回 `false`。② SRT 模式先 `applyTextMode()`，再 `serializeItems`。③ 文本为空：非静默时 toast「字幕内容为空，请先添加条目或生成字幕」，返回 `false`。④ 调 `window.projectTools.saveSubtitle(name, text, title)`，失败弹 `message`。⑤ 成功后 `refreshProject()`，toast 条数。
+**保存流程**：① SRT 模式先 `applyTextMode()`，再 `serializeItems`。② 文本为空：非静默时 toast「字幕内容为空，请先添加条目或生成字幕」，返回 `false`。③ 调 `window.projectTools.saveSubtitle(name, text, title)`，失败弹 `message`。④ 成功后 `refreshProject()`，toast 条数。
 
 ## 3. SubtitlePage/TranscribeSection.vue（转录弹窗）
 
 ### 3.1 props / defineExpose / 模板
 
-- **props**：仅 `pageCtx`（对象，字段见第 1 节）；`defineExpose({ open })` —— `open()` 先做内置项目守卫：`appState.isBuiltin` 为真时 `toast('内置示例项目只读，请先切换到自己的项目')` 并直接返回；否则 `maskVisible.value = true`。无 `emits`。
+- **props**：仅 `pageCtx`（对象，字段见第 1 节）；`defineExpose({ open })` —— `open()` 只做一件事：`maskVisible.value = true`（打开弹窗后再由 `watch` 触发 `openInit()`）。无 `emits`。
 - **样式**：组件内**没有 `<style>` 区块**，`hf-modal-*`、`hf-btn`、`whisper-bar*`、`whisper-tip`、`hgen-*`、`sel-label` 等类均来自全局样式表 `src/renderer/src/assets/main.css`。
 
 | 模板区块 | 说明 |
@@ -107,7 +107,7 @@
 | ① 选择音频 | `panel-title-sm` 小标题；两个 `radio`（`value="project"` / `value="file"`）绑定 `srcMode`，文案「使用项目音频」「浏览本地文件」 |
 | 音频路径与格式提示 | 只读 `input.hgen-input` 绑定 `audioInput`（`:title="audioInput"`，`placeholder="项目音频（可在「配音」页生成 / 选择）"`）+「选择音频」按钮（`:disabled="srcMode !== 'file'"`，点击 `onPick`）；下方 `div.whisper-tip`（`v-show="audioHint !== ''"`）由 `updateAudioHint()` 生成 |
 | ② 识别模型 | 「当前识别模型」标签 + `span.tw-model`（文本 `modelText`，颜色 `modelColor`）+ `a.tw-link`「管理模型」（点击 `onManage`）；下方 `div.whisper-tip` 显示 `modelHint`（颜色 `modelHintColor`） |
-| 识别语言 | `select.hgen-select` 绑定 `lang`，四个选项：`auto`「自动检测」、`zh`「中文（简体）」、`zh-hant`「中文（繁体）」、`en`「English」 |
+| 识别语言 | `HfSelect`（`v-model="lang"`、`:groups="langGroups"`，全局自绘下拉组件），四个选项：`auto`「自动检测」、`zh`「中文（简体）」、`zh-hant`「中文（繁体）」、`en`「English」 |
 | 进度条 | `div.whisper-bar-wrap`，`v-show="barVisible"`；`div.whisper-bar` 带 `:class="{ indeterminate: barIndeterminate }"`，填充条 `div.whisper-bar-fill` 带 `:class="barState"`、宽度 `barPercent + '%'`；下方 `div.whisper-bar-text` 显示 `barText` |
 | 状态提示 | `div.hf-status`，`:class="statusClass"`，内容为 `status`；状态类取 `''`、`hf-error`、`hf-ok` |
 | 底部按钮组 | `div.hf-modal-foot` 两套，按 `applyMode` 切换显隐：转录态（`v-show="!applyMode"`）「取消」→ `closeTw`、主按钮 `:disabled="startDisabled"` / 文案 `startText` / 点击 `doTranscribe`；回填态（`v-show="applyMode"`）「替换现有」→ `applyTranscript('replace')`、「追加到末尾」→ `applyTranscript('append')` |
@@ -158,7 +158,7 @@
 
 ### 3.4 关键流程
 
-1. **打开与初始化**：`SubtitlePage` 的「从音频生成字幕」→ `openTranscribe()` → `transcribeEl.value?.open()`；`open()` 先判 `appState.isBuiltin`（只读则 toast 并中止），通过后 `maskVisible = true`，`watch` 触发 `openInit()`。`openInit()` 清空上一轮残留（状态、进度条、`applyMode`、`pendingResult`、`audioInput`、`srcMode`），`await loadTwModel()` 取模型状态，再 `await loadProjectAudio()`；成功提示「已载入项目音频：<path>」，失败提示「<message>（可切换为「浏览本地文件」）」并置 `hf-error`。
+1. **打开与初始化**：`SubtitlePage` 的「从音频生成字幕」→ `openTranscribe()` → `transcribeEl.value?.open()`；`open()` 只把 `maskVisible = true`，`watch` 随即触发 `openInit()`。`openInit()` 清空上一轮残留（状态、进度条、`applyMode`、`pendingResult`、`audioInput`、`srcMode`），`await loadTwModel()` 取模型状态，再 `await loadProjectAudio()`；成功提示「已载入项目音频：<path>」，失败提示「<message>（可切换为「浏览本地文件」）」并置 `hf-error`。
 2. **选择音频来源与语言**：默认 `srcMode='project'`（项目音频，需先在「配音」页生成 / 选择）；切到 `file` 后「选择音频」按钮可用，`onPick()` 走 `whisperTools.pickAudio()`；语言在 `auto` / `zh` / `zh-hant` / `en` 中选，默认 `auto`。扩展名不在 `wav/mp3/flac/ogg` 内时 `audioHint` 提前告知会自动转码。
 3. **调用转录**：点击「开始转录」→ `doTranscribe()`。前置校验：`transcribing` 为真直接 `return`（重复提交防护）；`!audioPath` 提示「请先选择要转录的音频」；模型非 `id && downloaded` 提示「识别模型不可用，请先到设置页下载并设为当前使用」。通过后置 `transcribing = true`、`pendingResult = null`、`applyMode = false`，状态与进度条先设为「正在加载模型（<label>）…」，再 `await window.whisperTools.transcribe({ id, audioPath, language: lang })`。
 4. **进度两阶段**：主进程先 `emit({ stage: 'loading', message: '正在提取音频（ffmpeg 转换为 16kHz WAV）…' })`（需要转码时），再 `emit({ stage: 'loading', message: '正在加载模型（<label>）…' })`；转录中按 `stage: 'transcribing'`、`message: '转录中 N%'` 回推 `percent`。渲染层用不确定态进度条表现加载阶段，用百分比填充表现转录阶段。
@@ -204,10 +204,11 @@
 | 来源 | 内容 | 使用方 |
 |------|------|--------|
 | `vue` | `computed`、`nextTick`、`onMounted`、`ref` / `computed`、`onBeforeUnmount`、`onMounted`、`ref`、`watch` | 页面 / 弹窗 |
-| `@renderer/composables/useAppStore` | `appState`（`project` / `currentName` / `isBuiltin`）、`refreshProject` | 页面；弹窗只用 `appState`（`currentName` 读项目音频与保存提示、`isBuiltin` 只读守卫） |
+| `@renderer/composables/useAppStore` | `appState`（`project` / `currentName`）、`refreshProject` | 页面；弹窗只用 `appState`（`currentName` 读项目音频与保存提示） |
 | `@renderer/composables/useToast` | `toast` | 页面、弹窗 |
 | `@renderer/utils/time` | `fmtTime`（`countTip` 总时长格式化为 `分:秒`）、`fmtTimeMs`（`serializeItems` 写毫秒精度，`fmtTime` / `fmtTimeMs` 已统一收敛到该文件） | 页面 / helpers |
 | `@renderer/pages`（`goPage`） / `@renderer/components/StepBar.vue` | 「管理模型」跳设置页（`goPage('settings')`） / 顶部步骤条（`props.page: PageKey`） | 弹窗 / 页面 |
+| `@renderer/components/HfSelect.vue` | 全局自绘下拉（默认导出 `HfSelect` + `type HfSelectGroup`）：转录弹窗的「识别语言」下拉 | 弹窗 |
 | `./helpers` 与 `./TranscribeSection.vue` | helpers 见第 4 节导入清单；转录弹窗经 `:page-ctx` 与 ref `open()` 双向协作 | 页面 / 弹窗 |
 
 **调用的 preload / IPC 方法汇总**
@@ -232,7 +233,7 @@ helpers 不调用任何 preload 方法；弹窗不落盘字幕本身（主进程
 - **落盘格式为 `[开始-结束] 文本`**：`serializeItems` 用 `fmtTimeMs` 毫秒精度写**真实结束时间**（而非下一行起始），供 HTML / 视频阶段严格按窗口显示；无有效 `start` 时退化为纯文本行。
 - **解析细节：小数按位数解释、无时间戳行从 0.4 秒起步、无时间轴块容错**：`.5` = 500ms、`.500` = 500ms，按数字位数除以 `10^位数`，避免把 `.5` 误读成 5ms，并与 `fmtTimeMs` 对齐；`parseSubtitleText` 与 `parseSrtText` 的 `autoT` 初值均为 `0.4`，为无时间戳字幕留起始缓冲；SRT 文本域中无时间轴的块不报错，按纯文本逐行估时处理，因此用户可直接粘贴整段文稿。
 - **文本清洗与过滤**：`serializeItems` / `plainText` / `itemsToSrt` 均把连续空白折叠为单个空格并 trim，空文本条目一律过滤；`itemsToSrt` 序号按过滤后顺序重排，中间有空条目时导出序号仍连续。
-- **只读守卫存在于两处**：页面 `saveToProject` 与 `TranscribeSection.open()` 各一道，避免内置示例项目被改写。
+- **保存与打开都没有形态判定**：`saveToProject` 只做「空文本拦截 → 调 `project:save-subtitle` → 刷新」，`TranscribeSection.open()` 只置 `maskVisible = true`；每个项目都可读可写。
 - **`countTip` 总时长取自末条 `end`**：条目乱序或末条无结束时间时，该数字只是粗略提示。
 - **模型四态与 `fallback` 语义**：`startDisabled` 在 `!(twModel.id && twModel.downloaded)` 时禁用主按钮；`modelHint`、`modelColor` 与 `modelHintColor`（`rgba(255, 176, 32, 0.9)`）同时给出引导，`onManage()` 直接跳设置页。`fallback` 仅当 `isCurrent` 与 `currentModelId` 均未命中、退而找到某个已下载模型时才为 `true`，文案「（已下载，尚未设为当前使用）」，但此时 `startDisabled` 允许开转（`id && downloaded` 成立）。
 - **音频格式限制与主进程自动转码**：`TW_DIRECT_EXTS = ['wav', 'mp3', 'flac', 'ogg']` 与主进程 `whisper.ts` 注释一致；其余格式（`mp4`/`m4a`/`aac` 等）由主进程 `prepareAudio` 用内置 ffmpeg 转为 16kHz 单声道 PCM wav，渲染层只做提前告知；ffmpeg 缺失或转换失败时错误经主进程返回的 `message` 呈现。

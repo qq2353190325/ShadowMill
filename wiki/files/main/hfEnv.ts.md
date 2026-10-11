@@ -161,7 +161,7 @@ if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = h
 3. **不依赖 `findLocalGsap()`**：随包文件缺失时也能换回 CDN（导出行为与本地环境无关）；
 4. 只改文本、不落文件；无引号出现的提及（如纯文本里的 `gsap.min.js`）不会被改写。
 
-> 往返一致性（源码作者实测）：对内置示例 `video-projects/walk-video|person-video/index.html` 执行 `localize → externalize` 后与原文件**逐字节一致**（示例里的 CDN 地址正是 `GSAP_CDN_PINNED`）；带引号的三种本地写法都能换回；无引号出现的 `gsap.min.js` 提及不改写；已本地化的 HTML 再次 `localize` 幂等。
+> 往返一致性（源码作者当初实测所得）：对一份 `index.html` 执行 `localize → externalize` 后与原文件**逐字节一致**（其中 CDN 地址正是 `GSAP_CDN_PINNED`）；带引号的三种本地写法都能换回；无引号出现的 `gsap.min.js` 提及不改写；已本地化的 HTML 再次 `localize` 幂等。该结论来自正则与引号捕获的构造，随包 GSAP 版本未变时依然成立。
 
 ## 4. 依赖与协作
 
@@ -178,8 +178,8 @@ if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = h
 
 | 引用方 | 使用的导出 |
 | --- | --- |
-| `src/main/video.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.hivePlayer`、`BUILTIN_RESOURCES.ffmpeg`、`BUILTIN_RESOURCES.ffprobe`、`BUILTIN_RESOURCES.chromeShell`、`isHyperframesComposition`、`findHyperframesCli`、`findNode`、`findFfmpegBin`，以及 GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（作用于渲染工作目录里的 HTML 副本） |
-| `src/main/projects.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`isHyperframesComposition`（HTML 生成/修改/保存侧的合规判断），GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（生成 / 修改 / 保存 / 预览四个写盘环节；其中**前三个用 `copyGsapIntoProject` 的返回值做「复制失败即退回 CDN」兜底**），以及 `externalizeGsapHtml`（兜底改写 + `project:download-html`、`project:download-file` 的 `.html/.htm` 导出） |
+| `src/main/video.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`BUILTIN_RESOURCES.ffprobe`、`BUILTIN_RESOURCES.chromeShell`、`isHyperframesComposition`、`findHyperframesCli`、`findNode`、`findFfmpegBin`，以及 GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（作用于渲染工作目录里的 HTML 副本） |
+| `src/main/projects.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`isHyperframesComposition`（HTML 生成/修改/保存侧的合规判断），GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（生成 / 修改 / 保存 / 预览四个写盘环节；其中**前三个用 `copyGsapIntoProject` 的返回值做「复制失败即退回 CDN」兜底**），以及 `externalizeGsapHtml`（兜底改写 + `project:download-html` 的导出改写） |
 | `src/main/ttsAlign.ts` | `BUILTIN_RESOURCES`（取 `ffmpeg` / `ffprobe`） |
 | `src/main/whisper.ts` | `BUILTIN_RESOURCES`（取其内的 `ffmpeg`） |
 
@@ -212,4 +212,4 @@ if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = h
 - **幂等判据是“体积一致”**：`copyGsapIntoProject` 只比较字节数。若项目目录里已有一份**体积恰好相同**的旧版 `gsap.min.js`，不会被刷新；升级随包版本时若体积恰好相同，需要手动清理项目目录里的旧副本。
 - **正则尾部字符集决定截断位置**：`[^"'<>()\s]*` 在引号 / 空格 / 括号处停止，因此 `https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js` 这类带路径的地址会被整体替换，`?ver=1` 之类的查询串也在替换范围内；但写成 `src=gsap.min.js`（无引号）时不会被 `referencesLocalGsap` 的 `/["'(]…/` 命中。
 - **改写与复制是两件事**：`localizeGsapHtml` 只管改文本、不落任何文件；`copyGsapIntoProject` 只管复制文件、不看 HTML。“改谁、复制到哪”由 `projects.ts` / `video.ts` 决定（例如预览与渲染都只改副本，不动用户原件）。
-- **与「内置示例未完全离线」的关系**：内置示例 `video-projects/*/index.html` 除 GSAP 外仍从 CDN 引 `@hyperframes/core` 与 `@hyperframes/shader-transitions`，本轮只本地化了 GSAP；示例仅在渲染路径由 CLI 自带运行时兜底。
+- **本地化只覆盖 GSAP**：项目 HTML 里其它 CDN 引用（若有）不受 `localizeGsapHtml` 影响，离线能力取决于这些资源是否另有本地来源。

@@ -186,10 +186,6 @@ async function exportSrtFile(): Promise<void> {
 // ===== 保存到项目 =====
 async function saveToProject(options?: { silent?: boolean }): Promise<boolean> {
   const silent = !!(options && options.silent);
-  if (appState.isBuiltin) {
-    if (!silent) toast('内置示例项目只读，请先切换到自己的项目');
-    return false;
-  }
   if (textMode.value) applyTextMode(); // SRT 模式：先把文本域写回条目再保存
   const text = serializeItems(items.value);
   if (!text.trim()) {
@@ -236,7 +232,6 @@ function fromContent(): void {
 
 // ===== 转录弹窗 ctx（供 TranscribeSection 回填条目） =====
 function openTranscribe(): void {
-  // 内置项目守卫在弹窗 open() 内（与原文案一致）
   transcribeEl.value?.open();
 }
 const pageCtx = {
@@ -254,6 +249,5 @@ onMounted(() => {
   title.value = (proj.title && proj.title !== '字幕动画') ? proj.title : '';
   items.value = parseSubtitleText(proj.subtitle || '');
   textMode.value = false; // 页面重建后回到「逐条编辑」默认模式
-  if (appState.isBuiltin) toast('当前是内置示例项目（只读），请切换到自己的项目来编辑字幕');
 });
 </script>

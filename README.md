@@ -42,8 +42,8 @@ AIGC:
 ### 1.2 项目化与链路状态
 
 - 每个项目 = `userData/projects/<项目名>/` 一个目录，统一存放 `project.json`、`subtitle.txt`、`index.html`、`audio/`、`video/`。
-- 首页「我的项目」卡片按 `HTML✓ / 视频✓ / 字幕✓` 标注进度；顶部 **step-bar** 实时显示五节点完成状态，点击可跳转；step-bar 第二行内置**工作项目切换器**（我的项目 / 内置示例）、**新建项目**、**打开目录**，所有节点页都能直接切换。
-- 内置示例项目在 `video-projects/`（**只读**）：`person-video`、`walk-video`，可在「视频预览」页预览示例 HTML 并试渲染，编辑类操作会引导切换到「我的项目」。
+- 首页「我的项目」区块：项目卡片显示**项目名**（不显示 `project.json` 里的标题——其缺省值会让用户困惑）、副行 `HTML✓ / 视频✓ / 字幕✓`（无则显示 `—`）与「更新于 YYYY-MM-DD HH:mm」；点卡片即切换项目并进入「HTML生成」页，列表为空时提示去顶部「工作项目」栏新建。
+- 顶部 **step-bar** 实时显示五节点完成状态，点击可跳转；第二行是所有节点页共用的**工作项目切换器**（下拉只列「我的项目」、值即项目名，为空时显示「暂无项目，请先『新建项目』」）+ **新建项目** + **打开目录**（打开当前项目所在目录）。**新建项目是弹窗**：点按钮 → 输入项目名称 → Enter（或「创建并切换」）确认后立即创建并切换到新项目，Esc / 点遮罩 / 取消关闭、创建中禁止关闭与重复提交。首页只负责选择 / 打开项目，**不再有新建入口**。
 
 ### 1.3 内容脚本
 
@@ -90,7 +90,6 @@ AIGC:
 
 - 进入「视频预览」页即自动加载当前项目已渲染的成品 MP4 并内嵌播放；「重新加载」重新读盘（同一路径重新渲染后也能刷新），「在文件夹中显示」在系统文件管理器中定位产物。
 - 尚无成品时按项目状态给出引导：已有 HTML → 提示到「HTML生成」页点「转视频」；还没有 HTML → 提示先生成 HTML。
-- **内置示例项目（只读）**：本页提供示例 HTML 预览（预览外壳 + 等比缩放）与「试渲染」，档位只在本次会话生效、不写入项目，试渲染结果直接在页内播放。
 
 ### 1.8 设置
 
@@ -124,10 +123,10 @@ AIGC:
 
 ```
 src/
-├─ main/       主进程 11 个模块（index 装配器 + 10 个业务/工具域，统一 register(ctx) 模式）
-│              index · hfEnv · settings · systemVoices · htmlAgent · projects · voice · ttsAlign · video · whisper · vad
-├─ preload/    index.ts（8 个 contextBridge 命名空间）+ index.d.ts（window.* 类型）
-├─ shared/     ipc.ts（7 组 71 个频道常量）· types.ts（跨进程载荷与 window API 契约）
+├─ main/       主进程 12 个模块（index 装配器 + 11 个业务/工具域，统一 register(ctx) 模式）
+│              index · hfEnv · settings · systemVoices · htmlAgent · projects · voice · ttsAlign · video · whisper · vad · updater
+├─ preload/    index.ts（9 个 contextBridge 命名空间）+ index.d.ts（window.* 类型）
+├─ shared/     ipc.ts（8 组 75 个频道常量）· types.ts（跨进程载荷与 window API 契约）
 ├─ renderer/   Vue 界面：index.html · src/{main.ts, App.vue, assets/main.css, components/, composables/, utils/, pages/}
 │              pages/ 一页一目录 9 页：Home · Content · TextTts · Subtitle · HtmlGen · VideoPreview · SoundCopy · Settings · About
 └─ agent/      独立 ESM 实验脚本（不进构建图、不打包）
@@ -138,7 +137,6 @@ src/
 ```
 vendor/gsap/gsap.min.js   # 随包 GSAP 3.14.2（离线渲染/预览用），经 build.files 打进 asar
 resources/                # 内置运行时（node / ffmpeg / hyperframes+chrome / whisper），走 extraResources，约 715 MB
-video-projects/           # 内置只读示例项目（person-video / walk-video）
 ```
 
 - **IPC 契约单一真源**：频道名集中在 `src/shared/ipc.ts`；所有载荷、结果与进度推送类型集中在 `src/shared/types.ts`；`window.*` 的签名由 `types.ts` 的 `PreloadApi` 统一定义——preload 实现按 `PreloadApi['<命名空间>']` 标注，渲染层通过 `preload/index.d.ts` 挂载同一份契约，两端不会各自漂移。
@@ -242,19 +240,19 @@ npm run dist       # build + electron-builder --win（NSIS 安装包）
 - **③ 字幕**：条目编辑器（时间轴自动接续）、逐条编辑 / SRT 双向、复制字幕、导出 SRT、由脚本旁白生成、whisper 本机转录（替换 / 追加、两阶段进度）。
 - **语音识别模型管理**：内置 4 档 + 自定义模型的下载 / 删除 / 设为当前 / 占用统计，镜像下载与原子落盘。
 - **④ 字幕生成 HTML**：两个并列按钮「生成 HTML」/「按需求修改」+ **每个动作按钮内部各带一个 `?`** 悬浮说明（一个动作一个、只讲自己那个动作；动作行末尾不再有独立 `?`；无 HTML 时「按需求修改」禁用；「生成 HTML」点一次即执行、无二次确认；主进程 `project:generate-html` / `project:modify-html` 两个频道各自独立、未合并）、Agent 流式生成 / 修改、思考过程实时展示、输出为空自动升档重试、素材注入（字幕 / 视频）、**背景音轨由应用注入 HTML**、1920×1080 等比预览与播放控制、下载 HTML、**转视频（含质量 / 帧率档位）**、会话记录落盘。
-- **生成契约与 HyperFrames 对齐 + GSAP 本地化**：提示词要求 `gsap.timeline({ paused: true })` 与「以 composition id 为键的 `__timelines` 对象」（与官方文档、内置示例一致）；GSAP 改为随包 `vendor/gsap/gsap.min.js` + 项目内相对引用，生成 / 保存 / 预览 / 渲染四环节自动改写残留 CDN 引用，预览控制脚本同时兼容旧生成物的数组形态。
-- **⑤ 视频预览与转视频**：合规校验、预览外壳、HyperFrames 后台渲染与中文进度文案、**渲染档位（设置页全局默认 + 项目级覆盖）**、成品内嵌播放与「在文件夹中显示」、产物回写项目；内置示例可在同一页试渲染。
-- **项目化**：创建 / 切换 / 删除、字幕与内容脚本保存、背景音频与视频素材管理（含提取原声）、内置只读示例、`hgpreview://` 预览协议。
+- **生成契约与 HyperFrames 对齐 + GSAP 本地化**：提示词要求 `gsap.timeline({ paused: true })` 与「以 composition id 为键的 `__timelines` 对象」（与官方文档一致）；GSAP 改为随包 `vendor/gsap/gsap.min.js` + 项目内相对引用，生成 / 保存 / 预览 / 渲染四环节自动改写残留 CDN 引用，预览控制脚本同时兼容旧生成物的数组形态。
+- **⑤ 视频预览与转视频**：合规校验、HyperFrames 后台渲染与中文进度文案、**渲染档位（设置页全局默认 + 项目级覆盖）**、成品内嵌播放与「重新加载」「在文件夹中显示」、产物回写项目。
+- **项目化**：创建（弹窗输入名称 → 立即创建并切换）/ 切换 / 删除、字幕与内容脚本保存、背景音频与视频素材管理（含提取原声）、`hgpreview://` 预览协议。
 - **工程化**：TypeScript 全量覆盖（`npm run typecheck` 全绿）、IPC 载荷类型集中在 `shared/types.ts` 并作为 `window.*` 的单一真源、CSP/sandbox/contextIsolation 安全边界、electron-builder 打包配置完备（内置运行时经 `extraResources` 携带）。
 
 ### 已知限制与说明
 
-- **内置示例的预览仍依赖网络**：`video-projects/` 下的两个示例除 GSAP 外还从 CDN 引 `@hyperframes/core` 与 `@hyperframes/shader-transitions`（本轮只本地化了 GSAP）。**转视频不受影响**（HyperFrames CLI 自带并注入自己的运行时），但完全离线时示例的页面内预览可能不完整。
 - **识别模型不随包分发**：首次转录前必须在设置页下载模型，`whisper-cli.exe` 缺失会直接阻塞转录。
 - **VAD 静音裁剪无开关**：阈值与窗口为固定常量，背景噪声较大时可能整体不生效（保守行为）。
 - **对齐配音**：单句最多加速到 1.15 倍，超出靠顺延；末句无槽位、不加速也不顺延；同一时刻只允许一个对齐任务，取消是句间软中断（当前句的合成请求不会被打断）。
 - **本地音频格式**：whisper-cli 原生只支持 flac/mp3/ogg/wav（其它格式会先自动转码）；克隆音色上传的本地音频 Base64 后需小于 10 MB；VAD 只解析 16 bit PCM WAV。
 - **API Key 以明文保存在本机 `userData/settings.json`**，仅主进程读取，不会外传；如需更高安全性可后续接入 Electron `safeStorage` 加密。
-- **内置示例只读**：进入各页编辑时会提示切换到「我的项目」。
+- **首次启动偏慢属于正常现象**：安装包内含完整 Electron 运行时与内置资源（约 1 GB 安装体积），安装后第一次启动时 Windows Defender 会扫描新落盘的 `MarvisStudio.exe`，加上磁盘冷缓存，可能出现十几秒的等待。**这段等待不再是「只有背景」**：窗口一出现就是品牌底色，页面首帧即显示启动画面（logo + 扫描条 + 「正在启动…」），Vue 挂载后自动淡出。应用自身的启动开销也已压缩——`electron-updater` 与 `openai` 两个大模块改为懒加载、启动时不再重复拉取项目数据。
+- **排查启动耗时**：`%APPDATA%\my-app\startup.log` 每次启动追加几行，每行形如 `2026-10-12T01:02:19.780Z +4200ms window created`——`+NNNms` 是距进程启动的毫秒数，可直接看出时间花在「主进程模块加载 / 建窗 / 页面加载」哪一段。（更新日志在同目录 `updater.log`，预览协议日志在 `preview-protocol.log`。）
 
 *（内容由AI生成，仅供参考）*

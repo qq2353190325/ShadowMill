@@ -1,6 +1,5 @@
 <template>
   <div>
-    <StepBar :page="'sound-copy'" />
     <div class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>音色管理 · 创建克隆音色</div>
       <div class="hgen-tip">选择目标模型并上传/粘贴人声音频，即可创建克隆音色。创建时选定的模型会绑定到该音色，后续用该音色合成时自动沿用同一模型（创建计费 0.01 元/个）：<br/>· Qwen-Audio-TTS（qwen-audio-3.0-tts-flash）：粘贴一段 10~20 秒清晰人声的<b>可公开访问音频 URL</b>（该模型克隆不接受本地文件直传）；<br/>· qwen3-tts-vc-* 系列：上传本地音频文件（.wav / .mp3 / .m4a，Base64 后需小于 10 MB）。</div>
@@ -10,9 +9,7 @@
       </div>
       <div class="hgen-row">
         <label class="sel-label">目标模型</label>
-        <select v-model="vcModel" class="hgen-select" style="flex:1" @change="applyInputMode(vcModel)">
-          <option v-for="m in cloneModels" :key="m.id" :value="m.id">{{ m.label }}</option>
-        </select>
+        <HfSelect v-model="vcModel" :groups="cloneModelGroups" @change="applyInputMode" />
       </div>
       <div class="hgen-row" v-show="!urlMode">
         <button class="hf-btn" @click="onPick">选择音频文件</button>
@@ -31,7 +28,7 @@
     <div class="card hgen-panel" style="margin-top:16px">
       <div class="panel-title"><span class="dot"></span>我的音色</div>
       <div class="hf-status" :class="listStatusClass">{{ listStatus }}</div>
-      <div v-if="!voiceList.length" class="hgen-tip">暂无音色。可在上方「创建克隆音色」区创建，或到「配音」页使用内置系统音色。</div>
+      <div v-if="!voiceList.length" class="hgen-tip">暂无音色。可在上方「创建克隆音色」区创建，或到「文字生音频」标签页使用内置系统音色。</div>
       <template v-else>
         <div style="display:grid;grid-template-columns:1.5fr 1.2fr 1fr;gap:8px 12px;font-size:12px;color:var(--text-secondary);padding:6px 2px;"><span>显示名称</span><span>音色 ID（合成模型）</span><span>创建时间 / 参数</span></div>
         <div v-for="it in voiceList" :key="it.key" style="display:grid;grid-template-columns:1.5fr 1.2fr 1fr;gap:8px 12px;align-items:center;padding:6px 2px;border-top:1px solid rgba(0,212,255,.08);word-break:break-all;">
@@ -49,9 +46,7 @@
       <div class="hgen-tip">为任意音色（系统音色 / 克隆音色）设置本地中文显示名与合成模型。显示名与模型仅保存在本机 settings.json；系统音色不传中文名时使用默认描述，不选模型时使用该音色默认合成模型。</div>
       <div class="hgen-row">
         <label class="sel-label">音色</label>
-        <select ref="mapVoiceEl" v-model="mapVoice" class="hgen-select" style="flex:1" @change="syncMapForm">
-          <option v-for="o in mapOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
+        <HfSelect ref="mapVoiceEl" v-model="mapVoice" :groups="mapGroups" />
       </div>
       <div class="hgen-row">
         <label class="sel-label">显示名称</label>
@@ -59,9 +54,7 @@
       </div>
       <div class="hgen-row">
         <label class="sel-label">合成模型</label>
-        <select v-model="mapModel" class="hgen-select" style="flex:1">
-          <option v-for="m in models" :key="m.id" :value="m.id">{{ m.label }}</option>
-        </select>
+        <HfSelect v-model="mapModel" :groups="modelGroups" />
       </div>
       <div class="hgen-actions">
         <button class="hf-btn hf-btn-primary" @click="onSaveMap">保存映射</button>
@@ -73,13 +66,12 @@
 </template>
 
 <script setup lang="ts">
-// pages/SoundCopyPage/index.vue —— 音色管理页（原 JS 版 soundCopy 模块 {template,index}.js 移植）
-// 状态缓存（models/sysVoices/cloudVoices/profiles）改为 ref；下拉由 v-for 响应式填充。
+// pages/TextTtsPage/VoiceSection.vue —— 音色管理卡组（原「音色管理」独立页 SoundCopyPage/index.vue 并入配音页第三个 Tab）
+// 状态缓存（models/sysVoices/cloudVoices/profiles）为 ref；下拉统一走全局 HfSelect。
 import { computed, onMounted, ref } from 'vue'
 import { goPage } from '@renderer/pages'
-import { toast } from '@renderer/composables/useToast'
 import { escTxt } from '@renderer/utils/escape'
-import StepBar from '@renderer/components/StepBar.vue'
+import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 
 // 克隆提交名称必须是 1~16 位 ASCII（数字/字母/下划线）；中文名仅保存为本地「显示名称」
 const toAsciiName = (raw: string): string => String(raw || '').trim().replace(/[^A-Za-z0-9_]/g, '');
@@ -102,6 +94,16 @@ const sysVoices = ref<SysVoiceView[]>([]);
 const cloudVoices = ref<CloudVoiceView[]>([]);
 const profiles = ref<Record<string, ProfileView>>({});
 
+// 下拉数据（HfSelect 的 groups 结构）
+const modelGroups = computed<HfSelectGroup[]>(() => [{
+  label: '',
+  options: models.value.map((m) => ({ value: m.id, label: m.label }))
+}]);
+const cloneModelGroups = computed<HfSelectGroup[]>(() => [{
+  label: '',
+  options: cloneModels.value.map((m) => ({ value: m.id, label: m.label }))
+}]);
+
 // ===== 创建克隆音色 =====
 const vcName = ref('');
 const vcModel = ref('');
@@ -118,14 +120,12 @@ const urlMode = ref(false);
 function applyInputMode(m: string): void {
   urlMode.value = /^qwen-audio-.*-tts/i.test(String(m || ''));
 }
-const getCfg = async (): Promise<{ ok: boolean; apiKey?: string; targetModel?: string } | null> => {
-  try {
-    const c = await window.voiceTools.getConfig();
-    return c && c.ok ? c : null;
-  } catch (e) { return null; }
-};
 const requireCfg = async (): Promise<{ ok: boolean; apiKey?: string; targetModel?: string } | null> => {
-  const c = await getCfg();
+  let c: { ok: boolean; apiKey?: string; targetModel?: string } | null = null;
+  try {
+    const r = await window.voiceTools.getConfig();
+    c = r && r.ok ? r : null;
+  } catch (e) { c = null; }
   if (!c || !c.apiKey) {
     status.value = '尚未配置千问语音 API Key，请先到「设置」-「千问语音」填写';
     statusClass.value = 'hf-error';
@@ -228,7 +228,7 @@ async function loadAll(silent: boolean): Promise<void> {
 }
 
 // ===== 映射管理 =====
-const mapVoiceEl = ref<HTMLSelectElement | null>(null);
+const mapVoiceEl = ref<InstanceType<typeof HfSelect> | null>(null);
 const mapVoice = ref('');
 const mapName = ref('');
 const mapModel = ref('');
@@ -244,6 +244,16 @@ const mapOptions = computed(() => {
   return opts;
 });
 
+// 按「系统 / 克隆」分组展示（原为单个平铺列表，标签里带 [系统] / [克隆] 前缀）
+const mapGroups = computed<HfSelectGroup[]>(() => {
+  const system = mapOptions.value.filter((o) => o.type === 'system').map((o) => ({ value: o.value, label: o.label }));
+  const custom = mapOptions.value.filter((o) => o.type === 'custom').map((o) => ({ value: o.value, label: o.label }));
+  return [
+    { label: '系统音色（内置）', options: system },
+    { label: '自定义音色（我的克隆）', options: custom }
+  ].filter((g) => g.options.length);
+});
+
 function syncMapForm(): void {
   const key = mapVoice.value;
   const prof = profiles.value[key];
@@ -256,7 +266,9 @@ function syncMapForm(): void {
 function editVoice(key: string): void {
   mapVoice.value = key;
   syncMapForm();
-  mapVoiceEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // HfSelect 是单根元素组件：模板 ref 拿到组件实例，$el 即根 DOM，可滚到视口中央
+  const el = (mapVoiceEl.value as unknown as { $el?: HTMLElement } | null)?.$el;
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 async function onSaveMap(): Promise<void> {

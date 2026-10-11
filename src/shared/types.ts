@@ -464,10 +464,6 @@ export interface ProjectExportSrtPayload {
   name?: string
   srt?: string
 }
-export interface ProjectDownloadFilePayload {
-  srcPath?: string
-  defaultName?: string
-}
 export interface ProjectDownloadResult {
   savedPath: string
 }
@@ -532,19 +528,6 @@ export interface ProjectHtmlResult {
 // ============================================================
 // ⑦ 预览 / HyperFrames 转视频（video.ts）
 // ============================================================
-// video:list-projects 结果项（内置只读示例：项目名 + index.html 绝对路径）
-export interface BuiltinProjectEntry {
-  name: string
-  html: string
-}
-
-export interface VideoPreviewShellPayload {
-  htmlPath?: string
-}
-export interface VideoPreviewShellResult {
-  shellPath: string
-}
-
 // 渲染档位随载荷下发（渲染层已把「项目覆盖 > 全局默认」合并成有效值）；缺省则不传参数、走 CLI 默认
 export interface VideoRenderPayload extends RenderOverride {
   htmlPath?: string
@@ -618,8 +601,6 @@ export interface PreloadApi {
   }
   hfTools: {
     openHtml(): Promise<string | null>
-    listProjects(): Promise<BuiltinProjectEntry[]>
-    previewShell(htmlPath: string): Promise<IpcResult<VideoPreviewShellResult>>
     // options 为渲染档位（质量 / 帧率）；缺省项不下发，由主进程交给 CLI 默认（standard / 30）
     renderVideo(htmlPath: string, options?: RenderOverride): Promise<VideoRenderResult>
     showInFolder(filePath: string): Promise<void>
@@ -689,7 +670,6 @@ export interface PreloadApi {
     generateHtml(name: string, prompt: string, materials?: ProjectHtmlMaterials): Promise<IpcResult<ProjectHtmlResult>>
     modifyHtml(name: string, prompt: string, materials?: ProjectHtmlMaterials): Promise<IpcResult<ProjectHtmlResult>>
     downloadHtml(name: string): Promise<IpcResult<ProjectDownloadResult>>
-    downloadFile(srcPath: string, defaultName: string): Promise<IpcResult<ProjectDownloadResult>>
     exportSrt(name: string, srt: string): Promise<IpcResult<ProjectDownloadResult>>
     readHtml(name: string): Promise<IpcResult<ProjectReadHtmlResult>>
     saveHtml(name: string, html: string): Promise<IpcResult<ProjectHtmlResult>>

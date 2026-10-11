@@ -65,9 +65,6 @@ function emptyScene(): Scene {
 }
 
 function load(): void {
-  if (appState.isBuiltin) {
-    toast('当前是内置示例项目（只读），请切换到自己的项目来编辑内容脚本');
-  }
   const content = (appState.project && appState.project.content) || { style: '', scenes: [] };
   style.value = content.style || '';
   scenes.value = (Array.isArray(content.scenes) ? content.scenes : []).map((s) => {
@@ -100,7 +97,6 @@ function move(i: number, delta: number): void {
 }
 
 async function save(): Promise<void> {
-  if (appState.isBuiltin) { toast('内置项目只读，请先切换到自己的项目'); return; }
   const content = { style: style.value.trim(), scenes: scenes.value.map((s) => ({ id: s.id, narration: s.narration, visual: s.visual, durHint: s.durHint })) };
   const res = await window.projectTools.saveContent(appState.currentName, content);
   if (!res || !res.ok) { toast((res as { message?: string })?.message || '保存失败'); return; }

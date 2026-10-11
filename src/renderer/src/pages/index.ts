@@ -10,9 +10,9 @@ import TextTtsPage from './TextTtsPage/index.vue'
 import SubtitlePage from './SubtitlePage/index.vue'
 import HtmlGenPage from './HtmlGenPage/index.vue'
 import VideoPreviewPage from './VideoPreviewPage/index.vue'
-import SoundCopyPage from './SoundCopyPage/index.vue'
 import SettingsPage from './SettingsPage/index.vue'
 
+// 音色管理不再是独立页：已并入 TextTtsPage 的第三个 Tab（原 SoundCopyPage 下线）
 export const pages: Record<PageKey, Component> = {
   home: HomePage,
   about: AboutPage,
@@ -21,7 +21,6 @@ export const pages: Record<PageKey, Component> = {
   subtitle: SubtitlePage,
   'html-gen': HtmlGenPage,
   'video-preview': VideoPreviewPage,
-  'sound-copy': SoundCopyPage,
   settings: SettingsPage
 };
 

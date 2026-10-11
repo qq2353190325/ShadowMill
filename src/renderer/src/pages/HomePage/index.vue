@@ -21,66 +21,41 @@
       <div class="metric-card"><div class="metric-value">MP4</div><div class="metric-label">视频输出格式</div></div>
     </div>
 
-    <!-- 我的项目入口：列表 + 新建 -->
-    <div style="margin-top:var(--space-5);">
+    <!-- 我的项目：只做“选择 / 打开”，新建入口统一在顶部「工作项目」栏（首页不允许新建） -->
+    <div class="card hgen-panel" style="margin-top:var(--space-5)">
       <div class="panel-title"><span class="dot"></span>我的项目</div>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <input v-model="newName" class="hgen-input" style="flex:1" placeholder="新项目名，回车或点新建" @keydown.enter="createMy" />
-        <button class="hf-btn hf-btn-primary" style="flex:none" @click="createMy">新建项目</button>
-      </div>
-      <div v-if="appState.myProjects.length" class="builtin-grid" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;">
+      <div v-if="appState.myProjects.length" class="proj-grid">
         <div
-          v-for="(p, i) in appState.myProjects"
+          v-for="p in appState.myProjects"
           :key="p.name"
-          class="my-card"
-          :title="'打开项目 ' + escTxt(p.name)"
-          style="flex:1;min-width:200px;padding:14px 16px;border:1px solid rgba(0,212,255,.35);border-radius:10px;background:linear-gradient(105deg,rgba(0,212,255,.10),rgba(139,92,246,.10));cursor:pointer;"
-          @click="openMy(i)"
+          class="proj-card"
+          :title="'打开项目 ' + p.name"
+          @click="openMy(p.name)"
         >
-          <b style="color:#00D4FF;">{{ escTxt(p.title || p.name) }}</b>
-          <div style="margin-top:var(--space-1);font-size:12px;color:var(--text-secondary,#8CA3C7);">
-            {{ p.hasHtml ? 'HTML✓ ' : '' }}{{ p.hasVideo ? '视频✓ ' : '' }}{{ p.hasSubtitle ? '字幕✓' : '' }}
+          <b class="proj-card-name">{{ p.name }}</b>
+          <div class="proj-card-meta">
+            <span :class="{ on: p.hasHtml }">HTML{{ p.hasHtml ? '✓' : '—' }}</span>
+            <span :class="{ on: p.hasVideo }">视频{{ p.hasVideo ? '✓' : '—' }}</span>
+            <span :class="{ on: p.hasSubtitle }">字幕{{ p.hasSubtitle ? '✓' : '—' }}</span>
           </div>
+          <div class="proj-card-time">{{ p.updatedAt ? '更新于 ' + fmtTime(p.updatedAt) : '' }}</div>
         </div>
       </div>
-      <div v-else class="builtin-empty" style="color:var(--text-secondary,#8CA3C7);font-size:13px;margin-top:12px;">暂无项目，在上方输入名称新建一个（也可先点下方内置示例体验流程）。</div>
-    </div>
-
-    <!-- 内置示例快捷入口：点击即选中该内置项目并进入「视频预览」页 -->
-    <div style="margin-top:var(--space-5);">
-      <div v-if="!appState.builtinProjects.length" class="builtin-empty" style="color:var(--text-secondary,#8CA3C7);font-size:13px;">暂无内置示例项目</div>
-      <template v-else>
-        <div class="panel-title"><span class="dot"></span>内置示例<b style="font-weight:500;color:var(--text-secondary,#8CA3C7);font-size:12px;margin-left:8px;">只读 · 可预览 / 试渲染</b></div>
-        <div class="builtin-grid" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;">
-          <div
-            v-for="(b, i) in appState.builtinProjects"
-            :key="b.name"
-            class="builtin-card"
-            :title="'打开内置示例 ' + escTxt(b.name)"
-            style="flex:1;min-width:200px;padding:14px 16px;border:1px solid rgba(0,212,255,.35);border-radius:10px;background:linear-gradient(105deg,rgba(0,212,255,.10),rgba(139,92,246,.10));cursor:pointer;transition:transform .15s ease, box-shadow .15s ease;"
-            @click="openBuiltin(i)"
-          >
-            <b style="color:#00D4FF;">{{ escTxt(b.title) }}</b>
-            <div style="margin-top:var(--space-1);font-size:12px;color:var(--text-secondary,#8CA3C7);">点击打开示例预览 / 试渲染</div>
-          </div>
-        </div>
-      </template>
+      <div v-else class="empty-hint">暂无项目。点顶部「工作项目」栏的「新建项目」创建一个。</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// pages/HomePage/index.vue —— 首页（hero + 动态流水线 + 我的项目/内置示例快捷入口）
+// pages/HomePage/index.vue —— 首页（hero + 动态流水线 + 我的项目入口）
 // 原 JS 版 home 模块 {template,index}.js 移植；原 init 的 DOM 注入改为响应式 v-for。
-// 原 home/index.js 的 latent bug（toast/refreshProject 未解构）随模块化导入自然修复。
-import { computed, ref } from 'vue'
+// 内置示例项目已下线（含其快捷入口块）；新建项目入口统一收在顶部 StepBar 的弹窗，首页只选择/打开项目。
+import { computed } from 'vue'
 import {
   appState, hasAudio, hasContent, hasHtml, hasSubtitle, hasVideo,
-  refreshProject, switchProject, type PageKey
+  switchProject, type PageKey
 } from '@renderer/composables/useAppStore'
 import { goPage } from '@renderer/pages'
-import { toast } from '@renderer/composables/useToast'
-import { escTxt } from '@renderer/utils/escape'
 
 // 首页：动态流水线（反映当前项目状态，可点击跳转）
 const flowDefs = computed(() => [
@@ -91,31 +66,16 @@ const flowDefs = computed(() => [
   { idx: '05', t: '视频预览', d: '查看 / 定位导出的视频成品（转视频在 HTML生成页）', page: 'video-preview' as PageKey, done: hasVideo.value }
 ]);
 
-const newName = ref('');
-
-async function createMy(): Promise<void> {
-  const nm = newName.value.trim();
-  if (!nm) { toast('请输入项目名'); return; }
-  const res = await window.projectTools.create(nm);
-  if (!res || !res.ok) { toast((res as { message?: string })?.message || '创建失败'); return; }
-  newName.value = '';
-  await refreshProject();
-  await switchProject(nm, false);
-  await goPage('home');
-  toast('已创建并切换到项目「' + nm + '」');
+// 列表项时间：形如 2026-02-07 15:04（只截到分钟，避免卡片换行）
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
 }
 
-async function openMy(i: number): Promise<void> {
-  const p = appState.myProjects[Number(i)];
-  if (!p) return;
-  await switchProject(p.name, false);
+async function openMy(name: string): Promise<void> {
+  await switchProject(name);
   await goPage('html-gen');
-}
-
-async function openBuiltin(i: number): Promise<void> {
-  const b = appState.builtinProjects[Number(i)];
-  if (!b) return;
-  await switchProject(b.name, true);
-  await goPage('video-preview');
 }
 </script>

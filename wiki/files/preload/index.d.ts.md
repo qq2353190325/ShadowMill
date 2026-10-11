@@ -14,7 +14,7 @@
 它不参与打包、不在产物中出现，但其声明决定了整个渲染层的开发体验：
 
 1. 让 `src/renderer/src/**` 中的 `window.electronAPI`、`window.projectTools` 等调用通过编译期检查，并在 VS Code 中获得自动补全与参数提示。
-2. 通过 `interface Window extends PreloadApi {}` 把 8 个命名空间（共 71 个成员）一次性并入全局 `Window`，成员签名直接来自共享层的 ⑨ 节。
+2. 通过 `interface Window extends PreloadApi {}` 把 `PreloadApi` 声明的**全部命名空间**（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / `updateTools`，共 9 个）一次性并入全局 `Window`，成员签名直接来自共享层的 ⑨ 节（成员数随契约演进，不在本文件写死）。
 3. 与 `src/preload/index.ts` 共用**同一份契约**：preload 实现侧用 `PreloadApi['<命名空间>']` 标注各 `contextBridge` 对象，本文件把同一契约交给渲染层，因此「实现」与「渲染层看到的签名」不会再各自漂移。
 
 ## 2. 导出与关键实现
@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 1 | `import type { PreloadApi } from '../shared/types'` | 唯一依赖；仅类型导入，编译后不残留 |
 | 2 | `export {}` | 使文件成为模块，`declare global` 才能生效 |
-| 3 | `declare global { interface Window extends PreloadApi {} }` | 用**接口继承**把 8 个命名空间并入全局 `Window` |
+| 3 | `declare global { interface Window extends PreloadApi {} }` | 用**接口继承**把 `PreloadApi` 的全部命名空间并入全局 `Window` |
 | 4 | （注释） | 文件头部注释说明唯一真源与「实现 / 消费同一契约」的语义 |
 
 ### 2.1 与旧形态的差异
@@ -37,20 +37,20 @@
 | 与 preload 实现的关系 | 「实现 + 声明」两份契约，需人工保持逐字一致 | 同一份契约：preload 实现标注 `PreloadApi['x']`，本文件把 `PreloadApi` 挂给渲染层 |
 | 成功载荷的字段访问 | `OkResult` 带 `[key: string]: any` 索引签名，拼错字段名不报错 | 成功分支是 `{ ok: true } & T` 交叉类型，字段名有精确类型（索引签名已取消） |
 
-### 2.2 `declare global` 内 Window 的 8 个命名空间
+### 2.2 `declare global` 内 Window 的 9 个命名空间
 
-成员数不变（签名详见 [`shared/types.ts.md`](../shared/types.ts.md) 第 2.9 节）：
+各命名空间的成员一览（成员数以第三列为准，签名详见 [`shared/types.ts.md`](../shared/types.ts.md) 第 2.9 节）：
 
 | 命名空间 | 成员数 | 成员一览 |
 | --- | --- | --- |
 | `electronAPI` | 2 | `platform: string`；`versions: { node; chrome; electron }` |
 | `appTools` | 1 | `copyText(text): Promise<boolean>` |
 | `windowControls` | 4 | `minimize()`、`toggleMaximize()`、`close()`、`onMaximizedChange(cb)` |
-| `hfTools` | 6 | `openHtml`、`listProjects`、`previewShell`、`renderVideo`、`showInFolder`、`onProgress` |
-| `settingsTools` | 3 | `get`、`save`、`test` |
+| `hfTools` | 4 | `openHtml`、`renderVideo`、`showInFolder`、`onProgress` |
+| `settingsTools` | 5 | `get`、`save`、`saveRender`、`saveUpdater`、`test` |
 | `voiceTools` | 18 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` |
-| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`downloadFile`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`onHtmlProgress` |
+| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` |
 
 ### 2.3 结果类型约定（定义在 `src/shared/types.ts` ① 节）
 

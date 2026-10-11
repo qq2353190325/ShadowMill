@@ -187,7 +187,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 - `src/main/index.ts:150` 执行 `voice.register(ctx)`（主进程装配，依赖图 `settings ← htmlAgent ← projects ← voice ← ttsAlign`）。
 - `src/main/ttsAlign.ts` 导入 `synthOne` / `resolveVoiceModel` / `voiceFriendlyError`，用于 `voice:synth-aligned` 逐句合成。
 - `src/preload/index.ts` 暴露 `window.voiceTools`（`getConfig` / `getSaveDir` / `saveConfig` / `pickAudio` / `pickDir` / `listGenerated` / `create` / `list` / `listSystemVoices` / `listAll` / `listModels` / `getProfiles` / `saveProfile` / `deleteProfile` / `synth`）。
-- 渲染层：`src/renderer/src/pages/SoundCopyPage/index.vue`（克隆音色、映射管理）、`src/renderer/src/pages/TextTtsPage/SynthSection.vue`（保存位置、`synth`、`listGenerated`）、`src/renderer/src/pages/TextTtsPage/helpers.ts`（`list-all` 失败时的回退组装）。
+- 渲染层：`src/renderer/src/pages/TextTtsPage/VoiceSection.vue`（克隆音色、映射管理；原独立页 `SoundCopyPage/index.vue` 已并入配音页第三个 Tab）、`src/renderer/src/pages/TextTtsPage/SynthSection.vue`（保存位置、`synth`、`listGenerated`）、`src/renderer/src/pages/TextTtsPage/helpers.ts`（`list-all` 失败时的回退组装）。
 
 ## 6. 注意事项与实现要点
 

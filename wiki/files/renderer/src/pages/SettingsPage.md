@@ -22,7 +22,7 @@
 | 1 | 「自定义模型（OpenAI 兼容）」：Base URL / 模型 ID / API Key / 启用 + 保存 / 测试连接 | 父组件 |
 | 2 | 「千问语音（音色管理 & 文字生音频）」：API Key + 目标模型下拉 + 保存 | 父组件 |
 | 3 | 「视频渲染默认档位」：质量 / 帧率下拉 + 保存渲染默认档位 + 状态条 + 当前质量说明 | 父组件 |
-| 4 | 「应用更新」：当前版本 + 更新源输入 + 启动检查开关 + 保存更新设置 / 检查更新 / 下载更新 / 取消下载 / 立即重启安装 + 跳过版本 | 父组件 |
+| 4 | 「应用更新」：当前版本 + 更新源摘要 + 检查更新 / 自定义更新源（弹窗）/ 下载 / 取消 / 重启安装 + 状态条 + 跳过版本 | 父组件 |
 | 5 | 「语音识别模型（whisper.cpp 字幕转录）」：仅标题与 `.hgen-tip` 长说明 | `<WhisperSection />` |
 
 自定义模型开启后「HTML 生成 / 修改」页改用该模型；千问语音配置供「音色管理」「文字生音频」使用；卡片 3 是「HTML生成」页「转视频」的全局默认档位（项目级覆盖优先于它）；卡片 4 是应用自更新的唯一入口（检查 / 下载 / 重启安装，全部状态由 `update:progress` 通道驱动）；卡片 5 供字幕页「从音频生成字幕」本机离线识别（不消耗 API 额度）。
@@ -39,15 +39,16 @@
 | `.hgen-actions`（卡片 1） | `保存配置`（主按钮 → `onSave`）、`测试连接`（`onTest`） |
 | `.hf-status`（卡片 1） | `:class="statusClass"`，`{{ status }}` |
 | API Key 行（卡片 2） | `v-model="vApiKey"`、`type="password"`，placeholder「sk-...（DASHSCOPE_API_KEY）」 |
-| 目标模型行 | `v-model="vModel"` 的 `<select>`，`v-for="m in voiceModels"`、`:value="m.id"`、显示 `m.label` |
+| 目标模型行 | `HfSelect`（`v-model="vModel"`、`:groups="voiceModelGroups"`），选项来自 `voiceModels`（`:value="m.id"`、显示 `m.label`） |
 | `.hgen-actions` / `.hf-status`（卡片 2） | `保存千问语音配置` → `onSaveVoice`；`:class="vStatusClass"`、`{{ vStatus }}` |
-| 质量 / 帧率行（卡片 3） | 两个 `select.hgen-select`：`v-model="rQuality"` / `v-model="rFps"`，选项来自 `qualityOptions`（`RENDER_QUALITY_OPTIONS`）与 `fpsOptions`（`RENDER_FPS_OPTIONS`） |
+| 质量 / 帧率行（卡片 3） | 两个 `HfSelect`（`v-model="rQuality"` / `v-model="rFps"`、`:groups="qualityGroups"` / `"fpsGroups"`），选项来自 `qualityOptions`（`RENDER_QUALITY_OPTIONS`）与 `fpsOptions`（`RENDER_FPS_OPTIONS`） |
 | `.hgen-actions` / `.hf-status`（卡片 3） | `保存渲染默认档位`（主按钮 → `onSaveRender`）；`:class="rStatusClass"`、`{{ rStatus }}`；下方 `.hgen-tip` 显示 `{{ qualityHint }}`（当前所选质量的说明） |
 | `.hgen-tip`（卡片 3 顶部） | 原文：「「HTML生成」页点「转视频」时的默认档位，普通使用只需在这两项中选择。单个项目可在「HTML生成」页的「渲染档位」单独覆盖（项目覆盖优先于这里的默认）。质量 draft 编码最快但文字边缘可能有压缩痕迹，仅用于快速确认内容；降低帧率不会缩短成片时长，只是采样更稀、渲染更快。」|
-| 更新源 / 启动检查行（卡片 4） | `v-model="feedUrl"`（`.hgen-input`，placeholder「留空 = 使用打包时内置的更新地址；如 http://192.168.1.10:8099/」）+ `v-model="autoCheck"` 复选框「启动后静默检查一次更新」 |
-| `.hgen-actions`（卡片 4） | `保存更新设置`（主按钮 → `onSaveUpdater`）、`检查更新`（`:disabled="updateBusy"` → `onCheckUpdate`）、`下载更新`（仅 `updateStage` 为 `available` / `skipped` 时渲染 → `onDownloadUpdate`）、`取消下载`（仅 `downloading`）、`立即重启安装`（仅 `downloaded`，主按钮 → `onInstallUpdate`） |
-| `.hf-status`（卡片 4） | `:class="updateStatusClass"`、`{{ updateMessage }}`（文案全部来自主进程 `update:progress` 推送） |
-| 跳过版本行（卡片 4） | `available` 态显示「跳过版本 x.y.z」→ `onSkipVersion(true)`；`skipped` 态显示「恢复提示版本 x.y.z」→ `onSkipVersion(false)` |
+| 更新源摘要行（卡片 4） | `{{ feedDisplay }}`（`.hf-file`）：未配置时显示「内置地址（打包时写入）」，超 64 字符截断 |
+| `.hgen-actions`（卡片 4） | `检查更新`（主按钮，`:disabled="updateBusy"`）、`自定义更新源`（→ `openFeedDialog`）、`下载更新`（仅 `available` / `skipped`）、`取消下载`（仅 `downloading`）、`立即重启安装`（仅 `downloaded`，主按钮） |
+| `.hf-status`（卡片 4，两行） | 第一行 `{{ updateMessage }}`（检查/下载进度，来自 `update:progress`）；第二行 `{{ updaterStatus }}`（保存/重置反馈，`v-if` 有值才显示）——**必须分两行**：共行会被随后的进度文案盖掉，表现为「点了保存没反应」 |
+| 跳过版本行（卡片 4） | `available` 态显示「跳过版本 x.y.z」；`skipped` 态显示「恢复提示版本 x.y.z」 |
+| **自定义更新源弹窗** | 沿用 `.hf-modal-mask` / `.hf-modal` 组件类（同 `HtmlGenPage` 的渲染档位弹窗）；含更新源输入 `v-model="feedDraft"`、启动检查 `v-model="autoCheckDraft"`、说明 `留空即重置为内置地址…须以 / 结尾`；底部 `重置` / `取消` / `保存` 三个按钮 |
 
 卡片 5 说明由父组件提供：模型按「id ↔ 文件名」枚举登记、枚举外文件视为未知模型、模型不随应用打包、下载源为 HuggingFace 国内镜像 hf-mirror.com（规避 GitHub 直链超时）。
 
@@ -69,8 +70,11 @@
 | `updateStage` | `ref<UpdateStage>('idle')` | 应用更新阶段；`idle` 表示本进程尚未检查过 |
 | `updateMessage` / `updateStatusClass` | `ref('')` | 卡片 4 状态文案与样式类（`error` → `hf-error`，`downloaded` / `available` → `hf-ok`） |
 | `updateBusy` | `computed<boolean>` | `updateStage` 为 `checking` / `downloading` 时禁用「检查更新」按钮 |
-| `feedUrl` / `autoCheck` | `ref('')` / `ref(true)` | 更新源覆盖地址与启动静默检查开关（回填自 `settings.updater`） |
-| `updaterStatus` / `updaterStatusClass` | `ref('')` | 保存更新设置的状态文案与样式类 |
+| `feedUrl` / `autoCheck` | `ref('')` / `ref(true)` | **已保存**的更新源覆盖地址与启动静默检查开关（回填自 `settings.updater`，也是卡片摘要文案的来源） |
+| `updaterStatus` / `updaterStatusClass` | `ref('')` | 保存 / 重置更新的反馈文案与样式类（独立于 `updateMessage` 那行，避免互相覆盖） |
+| `feedDialogVisible` | `ref(false)` | 自定义更新源弹窗可见性 |
+| `feedDraft` / `autoCheckDraft` | `ref('')` / `ref(true)` | 弹窗内**编辑中的副本**：只有点「保存」才写回 `feedUrl` / `autoCheck` 并落盘，取消不影响已存值 |
+| `feedDisplay` | `computed<string>` | 卡片上「更新源」摘要：空值显示「内置地址（打包时写入）」，超 64 字符截断加省略号 |
 
 `interface VoiceModelView { id: string; label: string; isDefault?: boolean }`。
 
@@ -87,10 +91,15 @@
 | `onSaveRender()` | `await saveRenderDefaults({ quality: rQuality.value, fps: rFps.value })`（`useRenderOptions.ts`，内部走 `settingsTools.saveRender` → `settings:save-render`）；成功提示「渲染默认档位已保存：质量标签 · N fps」`hf-ok`，失败 `res.message \|\| '保存失败'` `hf-error` |
 | `applyUpdateProgress(d)` | `update:progress` 的回调：写 `updateStage` / `updateVersion`（取 `d.currentVersion`）/ `updateMessage` / `updateStatusClass` |
 | `setUpdaterStatus(text, kind)` | 写卡片 4 的 `updaterStatus` / `updaterStatusClass`，`text \|\| ''` |
-| `onSaveUpdater()` | `await window.settingsTools.saveUpdater({ feedUrl: feedUrl.value.trim(), autoCheck: autoCheck.value })` → `settings:save-updater`；成功「更新设置已保存（下次启动按新设置检查）」 |
+| `onSaveUpdater()` → 已拆为 `onSaveFeed()` / `onResetFeed()` | 见下两行 |
+| `openFeedDialog()` / `closeFeedDialog()` | 打开时把已存的 `feedUrl` / `autoCheck` 拷进 draft；关闭只清 `feedDialogVisible`（不落盘） |
+| `onSaveFeed()` | 把 draft 写入 `saveUpdater({ feedUrl, autoCheck })` → `settings:save-updater`；成功后回写 `feedUrl` / `autoCheck`（并优先采用返回值里规范化过的 `settings.updater.feedUrl`），提示「更新源已保存」并关闭弹窗；异常被 `try/catch` 兜住并写 `hf-error` |
+| `onResetFeed()` | `saveUpdater({ feedUrl: '', skippedVersion: '' })`：**清空更新源回到内置地址，同时清掉「跳过版本」**，让所有版本重新可提示；成功后 draft 同步清空 |
+| `onFeedDialogKey(e)` | 弹窗 ESC 关闭；在 `onMounted` 注册、`onBeforeUnmount` 注销（成对，项目既有惯例） |
 | `onCheckUpdate()` | 先置「正在检查更新…」，再 `await window.updateTools.check()`；**用返回值兜底重写一次状态**（主进程事件可能早于 IPC 返回到达），按 `state` 分支写文案 |
 | `onDownloadUpdate()` / `onCancelUpdate()` | `window.updateTools.download()` / `cancel()`；下载失败时写 `hf-error` |
 | `onInstallUpdate()` | `window.updateTools.install()`；成功时主进程即将退出安装，**只在返回 `ok: false` 时**写提示（如「当前有任务正在进行」） |
+| `handleUpdateError(what, e)` | **所有更新动作的统一异常兜底**。`updateTools.*` / `settingsTools.saveUpdater` 都是 `ipcRenderer.invoke`：主进程 handler 抛错或频道未注册时 Promise 会 **reject**，不用 `try/catch` 包住就既不改状态也不提示——界面表现为「点了没反应」（历史上 `electron-updater` 加载失败时正是如此）。该函数把异常写进 `updateMessage` + `hf-error`；`onCheckUpdate` / `onDownloadUpdate` / `onCancelUpdate` / `onInstallUpdate` / `onSkipVersion` / `onSaveFeed` / `onResetFeed` 全部已包 `try/catch` |
 | `onSkipVersion(skip)` | `saveUpdater({ skippedVersion: skip ? updateVersion.value : '' })`，用于「跳过版本」与「恢复提示版本」两个按钮 |
 | `onMounted(async cb)` | 配置回填（见 2.4） |
 
@@ -107,6 +116,8 @@
 **保存渲染默认档位**（`onSaveRender`）：无前置校验（下拉值必然合法），经 `saveRenderDefaults({ quality, fps })` 提交；该函数内部调 `window.settingsTools.saveRender(next)`（`settings:save-render`），成功后用返回的 `res.settings.render` 就地刷新模块级单例 `renderDefaults`——因此保存后无需重启或刷新页面，「HTML生成」页的 `optionNote`（「跟随设置页默认：…」）立刻反映新值。失败时取 `res.message || '保存失败'`。
 
 **应用更新**（卡片 4）：状态**全部由主进程 `update:progress` 推送驱动**，页面本身不做轮询。挂载时 `window.updateTools.onProgress(applyUpdateProgress)` 订阅（preload 为单订阅，反复进出本页只替换回调）；`updateVersion` 先用同步的 `window.updateTools.version()` 首屏填充；随后第四次 `settingsTools.get()` → `s.updater || {}` 回填 `feedUrl` / `autoCheck`（`autoCheck !== false` 即视为开启，与主进程默认值一致）。因为主进程的启动静默检查在 3 秒后触发，用户若已进入本页就会直接看到状态变化；若在此之前就发生过，页面首次检查时会由 `onCheckUpdate()` 的返回值补齐状态。所有触发动作都只是 `invoke` 一发，结果与进度都从同一路推送回来。
+
+**更新源编辑（弹窗）**：更新源不在卡片上直接编辑，而是「自定义更新源」按钮打开弹窗。打开时 `openFeedDialog()` 把已存值拷进 `feedDraft` / `autoCheckDraft`；**编辑期间不动已存值**，点「保存」才经 `settings:save-updater` 落盘并关闭，点「取消」或 ESC 直接丢弃。「重置」把 `feedUrl` 与 `skippedVersion` 一起清空（回到打包内置地址、并恢复所有版本的提示）。保存 / 重置的反馈写在**卡片第二行 `.hf-status`**（`updaterStatus`），与检查更新的进度文案（`updateMessage`）分属两行 —— 早前把两者放在同一行时，保存后紧接着到达的进度推送会把提示覆盖掉，表现为「点了保存没反应」。
 
 ## 3. SettingsPage/WhisperSection.vue
 
@@ -187,9 +198,10 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 | 来源 | 名称 | 用途 |
 |------|------|------|
 | `vue`（页面） | `computed`、`onMounted`、`ref` | 响应式、派生的档位说明与挂载回填 |
-| `@shared/types`（页面） | `type RenderFps`、`type RenderQuality`、`type UpdateProgressPayload`、`type UpdateStage` | 卡片 3 两个下拉的类型标注；卡片 4 的进度回调与阶段标注 |
+| `@shared/types`（页面） | `type RenderFps`、`type RenderQuality`、`type UpdateProgressPayload`、`type UpdateStage` | 卡片 3 两个下拉的类型标注（`rQuality` / `rFps`）；卡片 4 的进度回调与阶段标注 |
 | `@renderer/utils/render`（页面） | `FALLBACK_RENDER`、`RENDER_FPS_OPTIONS`、`RENDER_QUALITY_OPTIONS`、`renderQualityLabel` | 档位选项表、内置默认档位与保存成功文案里的质量标签 |
 | `@renderer/composables/useRenderOptions`（页面） | `saveRenderDefaults` | 保存全局默认档位（内部刷新 `renderDefaults` 单例） |
+| `@renderer/components/HfSelect.vue`（页面） | `HfSelect`（默认）、`type HfSelectGroup` | 三处下拉（目标模型 / 质量 / 帧率）自绘控件与选项分组类型 |
 | `./WhisperSection.vue`（页面） | `WhisperSection` | 语音识别模型区块子组件 |
 | `vue`（子组件） | `computed`、`onMounted`、`ref` | 派生文案、进度订阅与状态 |
 | `@renderer/utils/escape`（子组件） | `escTxt` | 模型文本（名称、文件名、说明、URL、`localFile`）的 HTML 转义 |

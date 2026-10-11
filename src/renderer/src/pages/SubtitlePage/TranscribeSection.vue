@@ -26,12 +26,7 @@
         <div class="whisper-tip" :style="modelHintColor ? { color: modelHintColor } : {}">{{ modelHint }}</div>
         <div class="hgen-row" style="margin-top:var(--space-3)">
           <label class="sel-label">识别语言</label>
-          <select v-model="lang" class="hgen-select" style="flex:1">
-            <option value="auto">自动检测</option>
-            <option value="zh">中文（简体）</option>
-            <option value="zh-hant">中文（繁体）</option>
-            <option value="en">English</option>
-          </select>
+          <HfSelect v-model="lang" :groups="langGroups" />
         </div>
 
         <div class="whisper-bar-wrap" v-show="barVisible">
@@ -59,6 +54,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { appState } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { goPage } from '@renderer/pages'
+import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import { estDur, type SubtitleItem } from './helpers'
 
 const props = defineProps<{
@@ -77,6 +73,16 @@ const srcMode = ref<'project' | 'file'>('project');
 const audioInput = ref('');
 const audioHint = ref('');
 const lang = ref('auto');
+// HfSelect 选项（原为 4 个固定 <option>）
+const langGroups: HfSelectGroup[] = [{
+  label: '',
+  options: [
+    { value: 'auto', label: '自动检测' },
+    { value: 'zh', label: '中文（简体）' },
+    { value: 'zh-hant', label: '中文（繁体）' },
+    { value: 'en', label: 'English' }
+  ]
+}];
 const status = ref('');
 const statusClass = ref('');
 const transcribing = ref(false);
@@ -336,10 +342,9 @@ onBeforeUnmount(() => {
 // 供父组件打开弹窗（父组件直接控制 maskVisible 亦可；这里暴露打开入口）
 defineExpose({
   open: () => {
-    if (appState.isBuiltin) { toast('内置示例项目只读，请先切换到自己的项目'); return; }
     maskVisible.value = true;
   }
 });
 
-// 注意：openTranscribe 在父组件通过 ref 调用本组件 open()（内置项目守卫在打开前完成）
+// 注意：openTranscribe 在父组件通过 ref 调用本组件 open()
 </script>

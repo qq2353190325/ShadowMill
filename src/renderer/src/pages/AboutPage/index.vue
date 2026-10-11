@@ -8,7 +8,7 @@
     </div>
     <div class="hgen-row">
       <span class="sel-label" style="flex:none;width:auto">项目数据</span>
-      <span class="hf-file" style="flex:1">项目保存在本机 video-projects 目录，每个项目一个文件夹（audio/ 音频、video/ 素材与成品、project.json 元数据），全部本地留存。</span>
+      <span class="hf-file" style="flex:1">项目保存在本机用户数据目录（userData/projects），每个项目一个文件夹（audio/ 音频、video/ 素材与成品、project.json 元数据），全部本地留存。</span>
     </div>
   </div>
 </template>

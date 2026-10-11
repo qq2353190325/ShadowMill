@@ -20,7 +20,6 @@ import type {
   ContentScript,
   Project,
   ProjectAgentPayload,
-  ProjectDownloadFilePayload,
   ProjectExportSrtPayload,
   ProjectNamePayload,
   ProjectSaveContentPayload,
@@ -569,36 +568,13 @@ function register(ctx?: RegisterCtx): void {
   // 打开项目所在目录
   ipcMain.handle(IPC.Project.OpenFolder, async (_event, name?: string) => {
     const dir = projectDir(String(name || ''));
-    if (!fs.existsSync(dir)) return { ok: false, message: '项目目录不存在（该内置示例/未保存项目无本地目录）' };
+    if (!fs.existsSync(dir)) return { ok: false, message: '项目目录不存在（项目尚未保存）' };
     // shell.openPath 返回 Promise<string>：成功为空串，失败为错误信息，必须 await
     const r = await shell.openPath(dir);
     return { ok: r === '' ? true : false, message: r ? ('打开失败：' + r) : '' };
   });
 
-  // 导出任意文件（内置示例项目 HTML 的只读导出入口）
-  ipcMain.handle(IPC.Project.DownloadFile, (_event, payload?: ProjectDownloadFilePayload) => {
-    const src = payload && payload.srcPath;
-    const defaultName = (payload && payload.defaultName) || 'export.html';
-    if (!src || typeof src !== 'string' || !fs.existsSync(src)) {
-      return { ok: false, message: '文件不存在' };
-    }
-    const win = getWindow();
-    const save = win ? dialog.showSaveDialogSync(win, {
-      title: '导出 HTML',
-      defaultPath: String(defaultName).replace(/[\\/:*?"<>|]/g, '_'),
-      filters: [{ name: 'HTML 文件', extensions: ['html'] }]
-    }) : undefined;
-    if (!save) return { ok: false, canceled: true };
-    // HTML 走文本写出（导出单个文件时把 ./gsap.min.js 换回 CDN 地址，理由同 DownloadHtml）；其它文件保持字节复制
-    if (/\.html?$/i.test(src)) {
-      fs.writeFileSync(save, hfEnv.externalizeGsapHtml(fs.readFileSync(src, 'utf8')), 'utf8');
-    } else {
-      fs.copyFileSync(src, save);
-    }
-    return { ok: true, savedPath: save };
-  });
-
-  // 打开指定文件所在目录 / 指定目录（内置示例资源目录入口）
+  // 打开指定文件所在目录 / 指定目录（配音、对齐、音色等页面的「打开目录」入口）
   ipcMain.handle(IPC.Project.OpenFolderOf, (_event, p?: string) => {
     if (!p || typeof p !== 'string') return { ok: false, message: '参数缺失' };
     let dir = p;

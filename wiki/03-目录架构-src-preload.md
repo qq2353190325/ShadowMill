@@ -1,6 +1,6 @@
 # 03 · 目录架构：`src/preload/`（桥接层）
 
-> 预加载脚本是渲染层通往系统的**唯一门面**：它把 78 个 IPC 频道收敛成 9 个命名空间的方法，并用「单订阅」语义转发 5 路进度推送。渲染层永远不直接接触 `ipcRenderer`。
+> 预加载脚本是渲染层通往系统的**唯一门面**：它把 75 个 IPC 频道收敛成 9 个命名空间的方法，并用「单订阅」语义转发 5 路进度推送。渲染层永远不直接接触 `ipcRenderer`。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 文件 | 行数 | 角色 | 是否进运行时 |
 |---|---|---|---|
-| [index.ts](./files/preload/index.ts.md) | 194 | `contextBridge` 暴露 9 个命名空间 + 5 路进度通道的单订阅转发；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
+| [index.ts](./files/preload/index.ts.md) | 191 | `contextBridge` 暴露 9 个命名空间 + 5 路进度通道的单订阅转发；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
 | [index.d.ts](./files/preload/index.d.ts.md) | 11 | 只做 `interface Window extends PreloadApi {}`，把共享层契约挂到全局 `Window` | 否（仅类型，被 `tsconfig.web.json` include，为渲染层提供智能提示） |
 
 ---
@@ -28,7 +28,7 @@
 | `electronAPI` | — | 无（纯数据） | `platform`、`versions{node,chrome,electron}` |
 | `appTools` | 1 | `app:copy-text` | 剪贴板写入（sandbox 下渲染层无 `clipboard` 模块） |
 | `windowControls` | 4 | `window:*` | 最小化 / 最大化切换 / 关闭 / 最大化状态订阅 |
-| `hfTools` | 6 | `dialog:open-html`、`video:*` | HTML 选择、内置项目列表、预览外壳、转视频、在文件夹中显示、渲染进度订阅 |
+| `hfTools` | 4 | `dialog:open-html`、`video:*` | HTML 选择（`openHtml`，**当前无渲染层调用方**）、转视频、在文件夹中显示、渲染进度订阅 |
 | `settingsTools` | 5 | `settings:*` | 读取 / 保存自定义模型 / 保存渲染档位 / 保存更新设置 / 连接测试 |
 | `voiceTools` | 18 | `voice:*` | 音色管理、文字生音频、字幕配音对齐（含 `synthAligned` / `cancelAlign` / `onAlignProgress`） |
 | `whisperTools` | 12 | `whisper:*` | 模型状态 / 下载 / 删除 / 设为当前 / 自定义模型增删改 / 打开目录 / 选音频 / 项目音频 / 转录 / 进度订阅 |
@@ -71,7 +71,7 @@ type IpcResult<T = unknown> = ({ ok: true } & T) | IpcFail
 
   `message` 为**可选**，因为 `voice:pick-dir` 的用户取消分支只回 `{ ok: false, canceled: true }`；成功分支的业务字段是**平铺**的（没有 `data` 包装，也没有旧版 `OkResult` 的 `[key: string]: any` 索引签名）。
 - 该文件被 `tsconfig.web.json` 的 `include` 显式引入（`src/preload/index.d.ts`），这是渲染层获得 IPC 类型的唯一途径；`tsconfig.node.json` 则包含 `src/preload/index.ts` 本体，两侧共同保证契约不漂移。
-- 少数接口不遵循 `IpcResult`：`projectTools.list()` 返回数组、`projectTools.load()` 返回项目对象或 `null`、`pickAudio()` / `pickVideo()` 返回 `string | null`、`hfTools.listProjects()` 返回数组、`settingsTools.get()` 直接返回 `AppSettings`、`hfTools.renderVideo()` 返回 `VideoRenderResult` —— 这些是历史契约，改动会同时影响渲染层多处调用。
+- 少数接口不遵循 `IpcResult`：`projectTools.list()` 返回数组、`projectTools.load()` 返回项目对象或 `null`、`pickAudio()` / `pickVideo()` 返回 `string | null`、`settingsTools.get()` 直接返回 `AppSettings`、`hfTools.renderVideo()` 返回 `VideoRenderResult` —— 这些是历史契约，改动会同时影响渲染层多处调用。
 - 另有 **1 个同步方法**：`updateTools.version()` 走 `ipcRenderer.sendSync('update:version')`，同步返回版本号字符串（设置页首屏要立刻显示，不愿等一轮异步渲染）。这是全层唯一的同步 IPC，除它之外一律异步。
 
 ---

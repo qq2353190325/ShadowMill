@@ -5,20 +5,13 @@
     <div class="hgen-tip" v-show="alignMode === 'timeline-driven'">保持字幕时间不变，把每句配音摆到其字幕时间戳（句间补静音），放不下时轻微加速（≤1.15 倍）或顺延后续句子并同步改字幕。结果写入当前项目。</div>
     <div class="hgen-row">
       <span class="sel-label" style="flex:none;width:auto">字幕来源</span>
-      <select v-model="subSrc" class="hgen-select" style="flex:1" title="选用哪份字幕逐句合成配音" @change="syncSubCount">
-        <option value="__current__">当前项目字幕（{{ appState.project?.subtitleCount || 0 }} 条）</option>
-        <option v-for="mp in appState.myProjects.filter((m) => m.name !== appState.currentName && m.hasSubtitle)" :key="mp.name" :value="mp.name">项目「{{ mp.title || mp.name }}」字幕（{{ mp.subtitleCount || 0 }} 条）</option>
-      </select>
+      <HfSelect v-model="subSrc" :groups="subSrcGroups" title="选用哪份字幕逐句合成配音" @change="syncSubCount" />
       <button class="hf-btn" @click="syncSubCount">刷新</button>
       <span class="hgen-tip" style="margin:0;font-size:12px;white-space:nowrap">{{ subCountTip }}</span>
     </div>
     <div class="hgen-row">
       <span class="sel-label" style="flex:none;width:auto">音色</span>
-      <select v-model="voiceId" class="hgen-select" style="flex:1">
-        <optgroup v-for="g in voiceGroups" :key="g.label" :label="g.label">
-          <option v-for="o in g.options" :key="o.voiceId" :value="o.voiceId">{{ o.label }}</option>
-        </optgroup>
-      </select>
+      <HfSelect v-model="voiceId" :groups="voiceGroups" />
       <button class="hf-btn" @click="onRefreshVoice">刷新</button>
     </div>
     <div class="hgen-row">
@@ -72,6 +65,7 @@ import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { escTxt } from '@renderer/utils/escape'
 import { fmtTime, fmtTimeMs } from '@renderer/utils/time'
+import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import { firstVoiceId, loadVoices, requireCfg, voiceGroups, voiceModelOf } from './helpers'
 
 interface AlignDetail {
@@ -103,6 +97,16 @@ const setStatus = (text: string, kind: string): void => {
 // ===== 字幕来源 =====
 const subSrc = ref('__current__');
 const subCountTip = ref('');
+// HfSelect 选项（原为 <option v-for> + 固定 option；候选项筛选条件与原实现一致）
+const subSrcGroups = computed<HfSelectGroup[]>(() => [{
+  label: '',
+  options: [
+    { value: '__current__', label: '当前项目字幕（' + (appState.project?.subtitleCount || 0) + ' 条）' },
+    ...appState.myProjects
+      .filter((m) => m.name !== appState.currentName && m.hasSubtitle)
+      .map((mp) => ({ value: mp.name, label: '项目「' + (mp.title || mp.name) + '」字幕（' + (mp.subtitleCount || 0) + ' 条）' }))
+  ]
+}]);
 const countSubtitleLines = (text: string): number => String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).length;
 function syncSubCount(): void {
   if (subSrc.value === '__current__') {
@@ -180,7 +184,6 @@ function resetAlignUi(): void {
 
 async function startAlign(): Promise<void> {
   if (alignBusy.value) { toast('对齐合成进行中，请稍候'); return; }
-  if (appState.isBuiltin) { toast('内置示例项目只读，请先切换到自己的项目'); return; }
   if (!(await requireCfg(setStatus))) return;
   const sub = await getAlignSubtitleText();
   if (!sub.ok) { setStatus(sub.message || '字幕为空', 'hf-error'); return; }
@@ -246,7 +249,6 @@ function onOpenDir(): void {
 async function writeAlign(): Promise<void> {
   const last = alignResult.value;
   if (!last) { toast('暂无对齐结果'); return; }
-  if (appState.isBuiltin) { toast('内置示例项目只读，请先切换到自己的项目'); return; }
   // [开始-结束] 毫秒精度按实测音频起止写入：结束 = 该句音频起点 + 实测时长（与成片音轨严格一致）
   const ds = last.details || [];
   const lines = ds

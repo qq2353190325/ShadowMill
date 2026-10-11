@@ -1,22 +1,23 @@
 # src/renderer/index.html
 
-> 渲染层 HTML 宿主：承载 CSP、#app 挂载点与 Vue 模块入口
+> 渲染层 HTML 宿主：承载 CSP、#app 挂载点、启动画面与 Vue 模块入口
 
 - **所在目录**：`src/renderer/`
 - **类型**：HTML 宿主（Vite 的 renderer 入口页）
-- **规模**：12 行
-- **对外导出**：无模块导出；对外提供两个契约——DOM 挂载点 `#app` 与模块脚本 `/src/main.ts`
+- **规模**：96 行（其中启动画面的内联样式与标记约 76 行）
+- **对外导出**：无模块导出；对外提供三个契约——DOM 挂载点 `#app`、启动画面 `#boot-splash` 与模块脚本 `/src/main.ts`
 
 ## 1. 作用与职责
 
-本文件是整个渲染进程的**唯一 HTML 宿主**，由 electron-vite 交给 Vite 作为 renderer 端的 `index.html` 处理。它只承担四件事：
+本文件是整个渲染进程的**唯一 HTML 宿主**，由 electron-vite 交给 Vite 作为 renderer 端的 `index.html` 处理。它承担五件事：
 
 1. 声明文档为中文页面（`<html lang="zh-CN">`）并固定 UTF-8 编码。
 2. 用一条 `<meta http-equiv="Content-Security-Policy">` 在**页面级**声明内容安全策略，约束 Electron 渲染进程能加载哪些资源。
 3. 提供 Vue 应用的挂载容器 `<div id="app"></div>`。
-4. 用 `<script type="module" src="/src/main.ts">` 拉起 Vue 应用入口。
+4. 提供**启动画面** `<div id="boot-splash">`（见 2.2）：它由 HTML 直接渲染、不依赖任何脚本，用来填掉「窗口已出现、Vue 还没挂载」那段空背景。
+5. 用 `<script type="module" src="/src/main.ts">` 拉起 Vue 应用入口。
 
-除此之外没有任何标签：没有内联脚本、没有内联样式、没有 favicon 链接，所有界面结构都由 `App.vue` 及页面组件在运行时生成。
+除启动画面外没有其它界面结构：所有标题栏、菜单、Toast 都由 `App.vue` 及页面组件在运行时生成。
 
 ## 2. 结构说明
 
@@ -26,7 +27,9 @@
 | `<meta charset="UTF-8" />` | meta | 字符集声明，须位于 `<head>` 顶部 |
 | `<meta http-equiv="Content-Security-Policy" ... />` | meta | 全站 CSP，指令见 2.1 |
 | `<title>我的应用</title>` | 元素 | 窗口/任务栏标题文本 |
+| `<style>`（head 内） | 元素 | 启动画面的自包含样式；不引用 `main.css` 的 CSS 变量（那份样式由 JS 侧注入，启动画面必须自包含） |
 | `<div id="app"></div>` | 挂载点 | `main.ts` 中 `createApp(App).mount('#app')` 的目标容器 |
+| `<div id="boot-splash">` | 启动画面 | 见 2.2；置于 `#app` **之外**，Vue 挂载清空 `#app` 内容时不受影响 |
 | `<script type="module" src="/src/main.ts">` | 模块脚本 | ESM 入口，构建后由 Vite 改写为带 hash 的相对路径资源 |
 
 ### 2.1 CSP 指令逐条对照
@@ -51,12 +54,26 @@ connect-src 'self' ws://localhost:5173
 
 > CSP 是静态 meta，而 dev server 端口由 Vite 决定，因此 `electron.vite.config.ts` 中的 `cspDevWsPlugin` 在 **dev（`apply: 'serve'`）** 的 `transformIndexHtml` 阶段读取 `server.resolvedUrls`，把实际的 `ws://` 源补进 `connect-src`（已包含则不重复追加）。构建产物保持本文件的字面值不变。
 
+### 2.2 启动画面（`#boot-splash`）
+
+**解决的问题**：窗口一旦创建就会立刻显示（`BrowserWindow` 默认 `show: true`），而页面从「HTML/CSS 上屏」到「Vue 挂载出内容」之间有一段空档；首屏慢时（冷启动、杀软扫描首次运行的 exe）表现为「只有一片背景，十几秒后才出现内容」。
+
+**做法**：把这段画面写进 HTML 本身，浏览器解析到就能画出来，**不依赖 JS、不依赖 `main.css`**：
+
+- 颜色硬编码为设计系统的值（`#0B1220` 底 + 两处青/紫径向渐变、主色 `#00D4FF`、次文字 `#8A9BB5`），因为 `main.css` 由 JS 侧注入，启动画面必须自包含。
+- 主进程 `BrowserWindow.backgroundColor` 取同一个 `#0B1220`，于是「窗口出现 → 启动画面上屏」两段颜色一致，不会闪白。
+- 元素固定定位 `inset: 0` + `z-index: 9999`，并带 `-webkit-app-region: drag`（此时自绘标题栏还没上屏，拖动窗口不至于无处可拖）。
+- 内容：六边形 logo（呼吸动画）+ 标题 + 副标题 + 扫描条（`bootScan` 1.2s 循环）+「正在启动…」。
+- 元素放在 `#app` **之外**：Vue 的 `mount('#app')` 会清空 `#app` 的子节点，若放进去会被连带删掉，失去「可控地淡出」的机会。
+
+**收尾**：`src/renderer/src/main.ts` 在 `mount()` 之后加 `.boot-done`（`opacity: 0` + `pointer-events: none`，0.28s 过渡），300ms 后 `remove()` 掉节点。
+
 ## 3. 关键流程
 
 1. **开发模式**：主进程 `createWindow()` 检测到 `ELECTRON_RENDERER_URL`，调用 `loadURL(...)` 指向 `127.0.0.1:5173`；Vite 读取本文件，`cspDevWsPlugin` 先修正 `connect-src`，再注入 HMR 客户端。
 2. **生产模式**：主进程调用 `loadFile('../renderer/index.html')` 加载构建产物；因 `electron.vite.config.ts` 设置了 `renderer.base = './'`，构建后的 script src 为相对路径，可在 `file://` 下正确解析。
-3. **解析阶段**：浏览器按 meta 建立 CSP，允许同源的 CSS/JS 加载。
-4. **执行阶段**：`/src/main.ts` 作为 ES module 执行，`createApp(App).mount('#app')` 把根组件渲染进 `<div id="app">`，页面骨架（标题栏、侧边栏、内容区、Toast 宿主）全部由 `App.vue` 生成。
+3. **解析阶段**：浏览器按 meta 建立 CSP，允许同源的 CSS/JS 加载；**此时启动画面已可绘制**（样式内联在本文件里）。
+4. **执行阶段**：`/src/main.ts` 作为 ES module 执行，`createApp(App).mount('#app')` 把根组件渲染进 `<div id="app">`，页面骨架（标题栏、侧边栏、内容区、Toast 宿主）全部由 `App.vue` 生成；随后 `main.ts` 淡出并移除启动画面。
 
 ## 4. 依赖与协作
 
@@ -65,6 +82,8 @@ connect-src 'self' ws://localhost:5173
 | 被使用 | `src/main/index.ts` | dev 经 `ELECTRON_RENDERER_URL`、prod 经 `loadFile` 加载本页 |
 | 被使用 | `electron.vite.config.ts` | renderer 端入口页；`base: './'` 与 `cspDevWsPlugin` 都作用于本文件 |
 | 依赖 | `/src/main.ts` | 唯一的模块脚本入口 |
+| 协作 | `src/renderer/src/main.ts` | 挂载后加 `.boot-done` 并在 300ms 后移除 `#boot-splash`（本条是启动画面的收尾契约） |
+| 协作 | `src/main/index.ts` | 该文件的 `backgroundColor: '#0B1220'` 与启动画面同色，保证「窗口 → 画面」之间不闪白 |
 | 契约 | `hgpreview:` 协议 | `frame-src` 中的自定义协议由 `src/main/index.ts` 注册并在应用 ready 后 `protocol.handle` |
 | 无依赖 | 无第三方 CDN | CSP 未放开任何外部源，所有依赖必须打进产物 |
 
@@ -75,4 +94,6 @@ connect-src 'self' ws://localhost:5173
 - **`img-src`/`media-src` 必须含 `file:`**：本地素材按绝对路径直接引用，缺 `file:` 时预览会出现"图片/音频不显示但无报错"的现象。
 - **端口写死的风险与兜底**：`ws://localhost:5173` 与 `electron.vite.config.ts` 中固定的 `127.0.0.1:5173`/`strictPort: true` 相配套——端口被占用时 Vite 直接报错而不是静默换端口，避免 Electron 仍指向 5173 导致白屏。
 - **挂载点不可改名**：`#app` 必须与 `main.ts` 的 `mount('#app')` 逐字一致。
-- **本文件不含业务逻辑**：所有标题栏、菜单、Toast 结构都由 `App.vue` 在客户端生成，此处只保留最小外壳。
+- **启动画面不要挪进 `#app`**：`mount('#app')` 会清空 `#app` 的子节点，放进去就等于「靠 Vue 来删除自己」，无法做淡出收尾（现在由 `main.ts` 主动加 `.boot-done` 再 `remove()`）。它的样式也必须自包含——`main.css` 在 Vue 挂载时才随 JS 注入，指望 CSS 变量会先渲染出一片无色背景。
+- **启动画面与 CSP 的关系**：它只用内联 `<style>` 与内联 SVG，因此依赖 `style-src 'unsafe-inline'`（已放开）；不要为了它引入外部字体或图标库，否则会被 `default-src 'self'` 拦掉。
+- **本文件不含业务逻辑**：除启动画面外，所有标题栏、菜单、Toast 结构都由 `App.vue` 在客户端生成，此处只保留最小外壳。

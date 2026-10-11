@@ -1,20 +1,17 @@
 // src/main/video.ts
-// 预览 / HyperFrames 转视频（内置项目列表 + 自定义 HTML 渲染）
-// 提供：dialog:open-html / video:list-projects / video:preview-shell /
-//       video:show-in-folder / video:render（含 video:progress 推送）
+// 预览 / HyperFrames 转视频（自定义 HTML 渲染）
+// 提供：dialog:open-html / video:show-in-folder / video:render（含 video:progress 推送）
 // 依赖：hfEnv(BUILTIN_RESOURCES / findHyperframesCli / findNode / findFfmpegBin /
 //       isHyperframesComposition) / settings(渲染档位白名单) / dialog / shell
 import { app, ipcMain, dialog, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
-import { pathToFileURL } from 'node:url'
 import * as hfEnv from './hfEnv'
 import { pickRenderOverride } from './settings'
 import { IPC } from '../shared/ipc'
 import type {
   RegisterCtx,
-  VideoPreviewShellPayload,
   VideoRenderPayload,
   VideoRenderResult
 } from '../shared/types'
@@ -36,53 +33,6 @@ function register(ctx?: RegisterCtx): void {
     });
     if (r.canceled || !r.filePaths.length) return null;
     return r.filePaths[0];
-  });
-
-  // 扫描内置视频项目（项目根 video-projects 下含 index.html 的子目录）
-  // 注：内置项目根以 app.getAppPath() 为基准（dev=项目根，打包后=app.asar 根，均命中）
-  ipcMain.handle(IPC.Video.ListProjects, () => {
-    const root = path.join(app.getAppPath(), 'video-projects');
-    if (!fs.existsSync(root)) return [];
-    const list: { name: string; html: string }[] = [];
-    for (const d of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!d.isDirectory()) continue;
-      const html = path.join(root, d.name, 'index.html');
-      if (fs.existsSync(html)) list.push({ name: d.name, html });
-    }
-    return list;
-  });
-
-  // 生成（复用）"预览外壳"页面：位于目标 HTML 同目录，经本地 hyperframes-player 组件加载
-  // composition，提供播放条（controls）与等比缩放，修复"预览只显示一部分/无进度条"问题。
-  ipcMain.handle(IPC.Video.PreviewShell, (_event, payload?: VideoPreviewShellPayload) => {
-    const htmlPath = payload && payload.htmlPath;
-    if (!htmlPath || typeof htmlPath !== 'string' || !fs.existsSync(htmlPath)) {
-      return { ok: false, message: 'HTML 文件不存在' };
-    }
-    const dir = path.dirname(htmlPath);
-    const shellPath = path.join(dir, '_hf_preview_shell.html');
-    try {
-      if (!fs.existsSync(shellPath)) {
-        let playerTag = '';
-        const localPlayer = hfEnv.BUILTIN_RESOURCES.hivePlayer;
-        if (localPlayer && fs.existsSync(localPlayer)) {
-          playerTag = '<script src="' + pathToFileURL(localPlayer).href + '"></script>';
-        } else {
-          playerTag = '<script type="module" src="https://cdn.jsdelivr.net/npm/@hyperframes/player@latest"></script>';
-        }
-        const html =
-          '<!doctype html>\n<html>\n<head>\n<meta charset="utf-8">\n<title>HyperFrames Preview</title>\n' +
-          '<style>html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000}</style>\n' +
-          playerTag + '\n</head>\n<body>\n' +
-          '<hyperframes-player id="p" controls autoplay muted preload style="display:block;width:100vw;height:100vh"></hyperframes-player>\n' +
-          '<script>document.getElementById("p").setAttribute("src", "./' + path.basename(htmlPath) + '");</script>\n' +
-          '</body>\n</html>\n';
-        fs.writeFileSync(shellPath, html, 'utf8');
-      }
-      return { ok: true, shellPath };
-    } catch (e) {
-      return { ok: false, message: (e as Error) && (e as Error).message ? (e as Error).message : String(e) };
-    }
   });
 
   // 在资源管理器中定位视频文件

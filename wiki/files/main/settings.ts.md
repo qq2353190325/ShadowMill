@@ -4,18 +4,19 @@
 
 - **所在目录**：src/main/
 - **类型**：设置存储模块（settings.json）
-- **规模**：263 行
-- **对外导出**：`register`、`readSettings`、`writeSettings`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceConfig`、`getUpdaterSettings`、`saveUpdaterSettings`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`
+- **规模**：270 行
+- **对外导出**：`register`、`readSettings`、`writeSettings`、`loadOpenAI`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceConfig`、`getUpdaterSettings`、`saveUpdaterSettings`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`
 
 ## 1. 作用与职责
 
-本模块是主进程唯一的「全局设置」落盘入口，统一管理 `userData/settings.json` 的读取、合并与写入，并对外提供五类能力：
+本模块是主进程唯一的「全局设置」落盘入口，统一管理 `userData/settings.json` 的读取、合并与写入，并对外提供六类能力：
 
 1. **设置读写**：`readSettings` / `writeSettings`，以及按分区拆分的 getter / setter。
 2. **OpenAI 兼容客户端配置**：`customModel` 分区，供 HtmlAgent 等模块调用大模型。
-3. **视频渲染档位白名单**：`DEFAULT_RENDER` / `normalizeRenderOptions` / `pickRenderOverride`——**白名单只此一处**，`projects.ts`（项目级覆盖落盘）与 `video.ts`（渲染 CLI 参数）都复用，避免校验逻辑三处漂移。
-4. **应用自更新设置**：`updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`）由 `getUpdaterSettings` / `saveUpdaterSettings` 管理，`updater.ts` 读它决定更新源与启动检查。
-5. **IPC 注册**：`register(ctx)` 注册 `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` 五个频道。
+3. **OpenAI SDK 懒加载**：`loadOpenAI()` 是**全工程唯一的 openai SDK 加载入口**（`settings:test` 与 `htmlAgent` 共用），见 §2 与 §5。
+4. **视频渲染档位白名单**：`DEFAULT_RENDER` / `normalizeRenderOptions` / `pickRenderOverride`——**白名单只此一处**，`projects.ts`（项目级覆盖落盘）与 `video.ts`（渲染 CLI 参数）都复用，避免校验逻辑三处漂移。
+5. **应用自更新设置**：`updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`）由 `getUpdaterSettings` / `saveUpdaterSettings` 管理，`updater.ts` 读它决定更新源与启动检查。
+6. **IPC 注册**：`register(ctx)` 注册 `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` 五个频道。
 
 配置文件路径由 `settingsFile()` 计算：
 
@@ -34,6 +35,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `normalizeRenderOptions` | `(raw: unknown, fallback?: RenderOptions) => RenderOptions` | **完整档位**规范化：非法/缺省字段回退 `fallback`（默认 `DEFAULT_RENDER`），返回 `{ quality, fps }` 两项齐全的对象 |
 | `pickRenderOverride` | `(raw: unknown) => RenderOverride` | **覆盖**规范化：只保留显式给出的合法字段（`quality` ∈ `draft/standard/high`、`fps` ∈ `24/30`），没给 ≠ 要默认值 |
 | `readSettings` | `() => AppSettings` | 读取并解析 settings.json，与默认值做浅合并；任何异常都回退默认值 |
+| `loadOpenAI` | `() => any \| null` | **openai SDK 懒加载入口**：首次调用才 `require('openai')` 并取 `mod.default \|\| mod`；成功返回可 `new` 的构造函数，失败/形态不对返回 `null`（调用方落到 fetch 兜底分支）。带 `openaiLoadTried` 一次性标志，失败不重试 |
 | `writeSettings` | `(s: AppSettings) => void` | 先 `mkdirSync(userData, { recursive: true })`，再以 `JSON.stringify(s, null, 2)` 写盘 |
 | `getCustomModel` | `() => CustomModelConfig` | 返回 `settings.customModel`，缺失时退回默认值 |
 | `getVoiceConfig` | `() => VoiceTTSConfig` | 返回与默认 `voiceTTS` 合并后的配置 |
@@ -104,13 +106,13 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 **`settings:test` 的成功判定**：先用 `getCustomModel()` 与 payload 中的 `customModel` 合并成待测配置 `m`，再依次判断：
 
 1. `baseUrl`、`modelId`、`apiKey` 任一为空 → `ok: false`，提示「配置不完整：Base URL / Model ID / API Key 均需填写」。
-2. 若 `typeof OpenAI === 'function'`，用 `new OpenAI({ apiKey, baseURL })` 调 `client.chat.completions.create({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 64 })`；否则走 `fetch` 兜底，POST 到 `baseUrl` 去尾斜杠后拼 `/chat/completions`，带 `Content-Type: application/json` 与 `Authorization: Bearer <apiKey>`，非 2xx 时抛 `HTTP <status>：<body>`。
+2. 先 `const OpenAI = loadOpenAI()`：拿到构造函数就用 `new OpenAI({ apiKey, baseURL })` 调 `client.chat.completions.create({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 64 })`；返回 `null`（SDK 未随包 / 形态不对）则走 `fetch` 兜底，POST 到 `baseUrl` 去尾斜杠后拼 `/chat/completions`，带 `Content-Type: application/json` 与 `Authorization: Bearer <apiKey>`，非 2xx 时抛 `HTTP <status>：<body>`。
 3. **仅当拿到模型返回的文本内容才算成功**：取 `choices[0].message.content`，`String(text).trim()` 为空则返回 `ok: false`，提示「连接已通但模型未返回文本内容（可能为推理模型/网关异常），请检查 Model ID 或更换模型」。
 4. 成功时返回 `{ ok: true, message: '连接成功：模型已响应（' + text.slice(0, 40) + '）' }`；抛错时返回 `{ ok: false, message: '连接失败：' + 错误消息 }`。
 
 ## 4. 依赖与协作
 
-依赖：`electron`（`app` / `ipcMain`）、`node:path`、`node:fs`、`openai`、`../shared/ipc`（`IPC.Settings` 频道常量）、`../shared/types`（`AppSettings`、`RenderOptions` / `RenderOverride` / `RenderQuality` / `RenderFps` / `SettingsSaveRenderPayload` / `SettingsSaveUpdaterPayload` / `UpdaterSettings` 等类型）。
+依赖：`electron`（`app` / `ipcMain`）、`node:path`、`node:fs`、`../shared/ipc`（`IPC.Settings` 频道常量）、`../shared/types`（`AppSettings`、`RenderOptions` / `RenderOverride` / `RenderQuality` / `RenderFps` / `SettingsSaveRenderPayload` / `SettingsSaveUpdaterPayload` / `UpdaterSettings` 等类型）；**`openai` 是懒加载依赖**（`loadOpenAI()` 内 `require`，不在模块顶层）。
 
 被谁使用：
 
@@ -119,7 +121,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `src/main/index.ts` | `import * as settings`，并在装配阶段最早调用 `settings.register(ctx)` |
 | `src/main/whisper.ts` | `getWhisperModel` / `saveWhisperModel` / `getWhisperCustomModels` / `saveWhisperCustomModels`（模型档位与自定义模型增删） |
 | `src/main/voice.ts` | `getVoiceConfig` / `readSettings` / `writeSettings` / `DEFAULT_SETTINGS` / `getVoiceProfiles` / `saveVoiceProfile` / `deleteVoiceProfile` |
-| `src/main/htmlAgent.ts` | `import { getCustomModel }`，取自定义模型配置发起对话 |
+| `src/main/htmlAgent.ts` | `getCustomModel`（取自定义模型配置发起对话）与 `loadOpenAI`（懒加载 SDK 构造函数） |
 | `src/main/projects.ts` | `pickRenderOverride`——`project:set-render` 写 / 清除项目级渲染档位覆盖时做白名单过滤 |
 | `src/main/video.ts` | `pickRenderOverride`——把 `video:render` 载荷里显式给出的档位拼成 `--quality` / `--fps` 参数 |
 | `src/preload/index.ts` | 暴露 `window.settingsTools = { get, save, saveRender, saveUpdater, test }`，分别 invoke `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` |
@@ -142,5 +144,6 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 - **合并是浅合并**：若某分区将来嵌套更深的子对象，`Object.assign` 不会递归合并。
 - **`settings:save` 不做完整性校验**：即使三项为空也会写入，只有 `settings:test` 才校验配置完整性。
 - **渲染档位的两种规范化不可混用**：`normalizeRenderOptions`（补默认，得到完整档位）用于**读取**（`readSettings`）与保存默认档位（`settings:save-render`）；`pickRenderOverride`（只留显式合法值）用于**覆盖类**场景（项目覆盖、渲染参数）。用错会导致「没传档位」被静默升级成「显式默认档位」，覆盖掉上一级配置。
-- **`settings:test` 依赖 SDK 形态**：成功路径取决于 `OpenAI` 是否为可构造函数，`import OpenAI from 'openai'` 的默认导出形态变化会静默切到 `fetch` 分支。
+- **`settings:test` 依赖 SDK 形态**：成功路径取决于 `loadOpenAI()` 是否返回可构造函数（内部按 `mod.default || mod` 取），SDK 的导出形态变化会静默切到 `fetch` 分支。
+- **openai SDK 必须保持懒加载**（2026-10）：它的模块图较大（`require` 实测 ~110ms，冷启动 / 杀软扫描时更久），而 `settings.ts` 是主进程**启动路径上的模块**（`index.ts` → `settings` → …）。顶层 `import OpenAI from 'openai'` 会让这段成本压在建窗 / 首屏之前，因此改成 `loadOpenAI()` 按需 `require`；`htmlAgent.ts` 也不再自行 `import`，统一经此入口。改回顶层 `import` 会直接拖慢首屏。
 - **whisper 条目按 `file` 存活**：`file` 缺失的条目在下次读取时被丢弃；`id` 由文件名派生，因此同一文件名等价于同一 `id`。

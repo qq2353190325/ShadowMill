@@ -401,6 +401,53 @@ body {
   letter-spacing: 1px;
 }
 
+/* ===== 首页 · 我的项目卡片（只选择 / 打开，新建入口在顶部工作项目栏） ===== */
+.proj-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin-top: 12px;
+}
+
+.proj-card {
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  border-radius: 10px;
+  background: linear-gradient(105deg, rgba(0, 212, 255, 0.10), rgba(139, 92, 246, 0.10));
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.proj-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-primary);
+  box-shadow: var(--glow-card);
+}
+
+.proj-card-name {
+  font-size: 14px;
+  color: var(--color-primary);
+  word-break: break-all;
+}
+
+.proj-card-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: var(--space-1);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.proj-card-meta .on {
+  color: var(--color-success);
+}
+
+.proj-card-time {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(138, 155, 181, 0.75);
+}
+
 /* ===== 预览 / HyperFrames 转视频 ===== */
 .hf-toolbar {
   display: flex;
@@ -453,16 +500,6 @@ body {
   text-overflow: ellipsis;
 }
 
-.hf-select {
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--color-primary);
-  background: var(--bg-secondary);
-  border: 1px solid rgba(0, 212, 255, 0.4);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
 .hf-status {
   min-height: 22px;
   margin-top: var(--space-3);
@@ -480,17 +517,6 @@ body {
 .hf-status.hf-error {
   color: #ff5470;
   text-shadow: 0 0 8px rgba(255, 84, 112, 0.5);
-}
-
-.hf-frame {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 9;
-  min-height: 280px;
-  max-height: 68vh;
-  border: 1px solid rgba(0, 212, 255, 0.2);
-  border-radius: 12px;
-  background: #051018;
 }
 
 .hf-video-wrap {
@@ -643,7 +669,8 @@ body {
   margin-bottom: var(--space-4);
 }
 
-.hgen-panel .panel-title {
+/* 面板标题：全局可用（各页面 <div class="card hgen-panel"> 内的 .panel-title 都用这一套） */
+.panel-title {
   font-size: 12px;
   color: var(--text-secondary);
   letter-spacing: 2px;
@@ -653,12 +680,13 @@ body {
   gap: 8px;
 }
 
-.hgen-panel .panel-title .dot {
+.panel-title .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--color-primary);
   box-shadow: 0 0 6px var(--color-primary);
+  flex: none;
 }
 
 .hgen-subtitle {
@@ -691,23 +719,23 @@ body {
   outline: none;
 }
 
-.hgen-select {
-  min-width: 0;
-  padding: 9px 12px;
-  font-size: 13px;
-  color: var(--color-primary);
-  background: var(--bg-secondary);
-  border: 1px solid rgba(0, 212, 255, 0.4);
-  border-radius: 8px;
-  cursor: pointer;
-}
-
 .hgen-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
   margin-bottom: var(--space-3);
+}
+
+/* 表单行标签（.hgen-row 内的 label.sel-label / span.sel-label）
+   此前只作标记、没有规则，标签会继承 14px 正文字号与主文字色，与 13px 的控件不对齐；
+   这里补成标准「雾蓝小标签」，与按钮/输入框同一行时基线更稳。各页面行内 style 仍可覆盖。 */
+.sel-label {
+  flex: none;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .hgen-actions {
@@ -1300,6 +1328,62 @@ body {
 }
 
 /* ===== 通用弹窗（转录弹窗） ===== */
+/* ===== 设置页：左侧分类 + 右侧内容 =====
+   刻意压低视觉重量（无卡片底色、无辉光），与全局侧栏菜单（渐变底 + 卡片感）区分开，
+   避免"两层导航"的观感：这里只是页面内的局部切换。 */
+.settings-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-5);
+}
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: none;
+  width: 150px;
+  padding-top: 2px;
+}
+.settings-nav-item {
+  position: relative;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0 var(--radius-btn) var(--radius-btn) 0;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.settings-nav-item:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+.settings-nav-item.active {
+  color: var(--text-primary);
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.25) 0%, rgba(0, 212, 255, 0) 100%);
+  border-left-color: var(--color-primary);
+}
+/* 有新版本时在「应用更新」上点一个主色小点（不干扰其它分类） */
+.settings-nav-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+  background: var(--color-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--color-primary);
+}
+/* 内容区占满剩余宽度；卡片在窄屏下不再被挤压 */
+.settings-content {
+  flex: 1;
+  min-width: 0;
+}
+
 .hf-modal-mask {
   position: fixed;
   inset: 0;

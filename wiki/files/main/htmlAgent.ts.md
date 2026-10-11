@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块
-- **规模**：248 行
+- **规模**：235 行
 - **对外导出**：`HTML_AGENT_SYSTEM`、`extractHtmlFromReply`、`chatWithCustomModel`，以及类型 `AgentProgress`、`AgentOpts`
 
 ## 1. 作用与职责
@@ -51,7 +51,7 @@
 | 序号 | 约束要点 |
 |------|----------|
 | 1 | 直接输出完整 HTML 文档，以 `<!DOCTYPE html>` 开头，含 `<head>` 与 `<body>` |
-| 2 | 满足 HyperFrames composition 规范（与 HyperFrames 官方文档/内置示例对齐）：① 动画根容器带 `data-composition-id`（如 `<div data-composition-id="main">`）；② 用 `<script src="./gsap.min.js"></script>` 引入 GSAP——该文件由应用随项目提供，**禁止改用任何 CDN 地址**，也不再钉版本号；③ 时间轴一律 `gsap.timeline({ paused: true })` 创建（起播由渲染器与预览控制负责，不自动播放）；④ 时间轴登记到**以 composition id 为键的对象**上：`window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;`，键必须与 `data-composition-id` 完全一致，**不要写成数组** |
+| 2 | 满足 HyperFrames composition 规范（与 **HyperFrames 官方文档 / 官方示例**对齐——此处「示例」指上游 HyperFrames 的样例）：① 动画根容器带 `data-composition-id`（如 `<div data-composition-id="main">`）；② 用 `<script src="./gsap.min.js"></script>` 引入 GSAP——该文件由应用随项目提供，**禁止改用任何 CDN 地址**，也不再钉版本号；③ 时间轴一律 `gsap.timeline({ paused: true })` 创建（起播由渲染器与预览控制负责，不自动播放）；④ 时间轴登记到**以 composition id 为键的对象**上：`window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;`，键必须与 `data-composition-id` 完全一致，**不要写成数组** |
 | 3 | 视觉风格：深空科技 / Cyber UI（`#0B1220` 深色背景、`#00D4FF` 电子蓝辉光、玻璃拟态、霓虹渐变） |
 | 4 | 若用户提供字幕，按字幕条目逐条依次播放入场动画 |
 | 5 | 字幕时间轴严格按提供的起止时间执行；秒可带小数，GSAP 直接按小数秒定位，禁止四舍五入或重排；无结束时间的行自行安排节奏 |
@@ -76,7 +76,7 @@
 3. **准备记录容器**：建立 `attempts` 数组，并用 `logEntry` 闭合函数固定 `ts` / `project` / `action` / `model` / `baseUrl` / `messages` / `attempts`。
 4. **遍历 max_tokens 档位**：默认 `[32768, 65536]`，可被 `opts.maxTokenTries` 覆盖。每档重置 `content`、`thinkText`、`finishReason`、`usage`、计时点。
 5. **发起流式请求（两条路径，二选一）**：
-   - 路径 A（优先）：`typeof OpenAI === 'function'` 成立时，`new OpenAI({ apiKey, baseURL })` + `client.chat.completions.create({ model, messages, max_tokens, stream: true, stream_options: { include_usage: true } })`，`for await` 消费 chunk。
+   - 路径 A（优先）：`const OpenAI = loadOpenAI()`（settings.ts 里的懒加载入口）返回可构造函数时，`new OpenAI({ apiKey, baseURL })` + `client.chat.completions.create({ model, messages, max_tokens, stream: true, stream_options: { include_usage: true } })`，`for await` 消费 chunk。
    - 路径 B（兜底）：SDK 不可用时直接 `fetch(baseUrl 去尾斜杠 + '/chat/completions')`，带 `Content-Type` 与 `Authorization: Bearer <apiKey>`，手动读取 `resp.body.getReader()`，按行解析 SSE：仅处理 `data:` 前缀行，跳过空载荷与 `[DONE]`，`JSON.parse` 失败的行直接忽略。响应非 2xx 时抛 `HTTP <status>：<JSON>`；无 body 时抛「HTTP 响应无 body」。
 6. **逐块解析**：`chunk.usage` 存在则覆盖 `usage`；`choices[0].finish_reason` 存在则覆盖 `finishReason`；`delta.reasoning_content` 追加到 `thinkText` 并 emit `thinking`；`delta.content` 追加到 `content` 并 emit `writing`。
 7. **异常捕获**：请求期异常写入 `attemptErr`，不立即中断循环之外的记录——本档记录仍会 push 进 `attempts`，随后记录一次 `ok: false` 并抛出该错误信息。
@@ -117,8 +117,7 @@
 | `electron` | `app` | 取 `userData` 拼接日志目录 |
 | `node:path` | `path`（默认导入） | 拼接 `html-agent/chat.jsonl` |
 | `node:fs` | `fs`（默认导入） | `mkdirSync` / `appendFileSync` |
-| `openai` | `OpenAI`（默认导入） | 首选流式客户端；运行时以 `typeof OpenAI === 'function'` 判断可用性 |
-| `./settings` | `getCustomModel` | 读取自定义模型配置 |
+| `./settings` | `getCustomModel`、`loadOpenAI` | 读取自定义模型配置；**懒加载** openai SDK 构造函数（本模块不再自行 `import 'openai'`，见 §5） |
 | `../shared/types` | `type HtmlAgentProgress` | 进度载荷的真实定义（以 `export type AgentProgress = HtmlAgentProgress` 再导出，本地不再声明 interface） |
 
 ### 4.2 被谁使用
@@ -135,7 +134,8 @@
 ## 5. 注意事项与实现要点
 
 - **max_tokens 起点为何是 32768**：注释明确记录 8192 / 16384 实测会被思考阶段耗尽（`reasoning_tokens=16384` 仍无输出），故直接以 32768 起步，第二档 65536。
-- **两条请求路径的取舍**：SDK 路径拿到官方 SSE 解析与类型；当 `OpenAI` 不是函数（打包裁剪、依赖缺失等）时自动退到 `fetch` 手写 SSE，逻辑与 SDK 路径保持同构（同样读取 `usage`、`finish_reason`、`reasoning_content`、`content`），保证能力不降级。
+- **两条请求路径的取舍**：SDK 路径拿到官方 SSE 解析与类型；当 `loadOpenAI()` 返回 `null`（打包裁剪、依赖缺失、导出形态变化等）时自动退到 `fetch` 手写 SSE，逻辑与 SDK 路径保持同构（同样读取 `usage`、`finish_reason`、`reasoning_content`、`content`），保证能力不降级。
+- **SDK 经 `settings.loadOpenAI()` 懒加载**（2026-10）：本模块处于主进程启动路径上（`index.ts` → `projects` → `htmlAgent`），顶层 `import OpenAI from 'openai'` 会让 openai 的模块图加载（实测 ~110ms）压在建窗 / 首屏之前。现在只有真正发起对话时才 `require`，且与 `settings:test` 共用同一份懒加载状态。
 - **思考与输出严格分离**：`reasoning_content` 只进 `thinkText` 与进度上报，绝不混入返回值；只有 `content` 会作为最终 HTML 返回。
 - **进度节流与体积控制**：`emit` 默认 300ms 一次（`force` 用于阶段首次切换与 retry/done），`thinkText` 只回传末尾 20000 字符，避免长思考撑爆 IPC 载荷。
 - **截断判定依赖结尾标签**：正则要求内容结尾为 `</body>` 或 `</html>`；因此提示词第 1 条要求完整文档结构，二者互相支撑。
