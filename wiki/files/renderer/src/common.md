@@ -1,0 +1,327 @@
+# 渲染层公共方法与工具（src/renderer/src/composables、utils、pages/index.ts）
+
+> 渲染层 7 个公共模块：全局状态、轻提示、渲染进度、语速、转义、时间格式化与页面注册表。
+
+- **覆盖文件**（行数为源文件行数）
+
+| 文件 | 行数 | 作用 |
+| --- | --- | --- |
+| `src/renderer/src/composables/useAppStore.ts` | 132 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写 |
+| `src/renderer/src/composables/useToast.ts` | 22 | 全局轻提示队列（自增 id + 2800ms 自动移除） |
+| `src/renderer/src/composables/useRenderProgress.ts` | 56 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行并生成中文进度文案 |
+| `src/renderer/src/utils/rate.ts` | 21 | 语速控件共享逻辑：0.5~2.0 播放速率同步到输入框与音频元素 |
+| `src/renderer/src/utils/escape.ts` | 4 | 单函数 HTML 转义（`&`、`<`、`>`） |
+| `src/renderer/src/utils/time.ts` | 15 | 秒 → `分:秒` 与 `分:秒.毫秒` 两种时间轴格式化 |
+| `src/renderer/src/pages/index.ts` | 41 | 页面注册表 + `goPage` 导航（含强制重挂载序号），替代 `vue-router` |
+
+- **类型**：组合式函数（全局状态 / 提示 / 进度）+ 纯工具函数（语速 / 转义 / 时间）+ 页面注册表与导航函数。这 7 个文件共同替代了旧版挂在 `window.App` 上的 `AppState`、`toast`、HF 进度监听、`rateClamp/applyRate/stepRate`、`escTxt`、时间格式化与 `pages/goPage`。
+
+## 1. 全局状态：composables/useAppStore.ts
+
+渲染层唯一的「当前项目」状态源，负责四件事：持有当前项目上下文、派生流水线链路状态、把上下文持久化到 `localStorage`、通过两次 IPC 刷新列表与详情。
+
+**类型声明**
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `PageKey` | 字符串字面量联合 | 页面键，与菜单 `data-page` 一致：`'home' \| 'about' \| 'content' \| 'text-tts' \| 'subtitle' \| 'html-gen' \| 'video-gen' \| 'sound-copy' \| 'settings'` |
+| `ProjectState` | interface（本文件定义） | 当前项目**详情**（渲染层自身的视图模型，与主进程 `project.json` 字段对应） |
+| `BuiltinProject` | interface（本文件定义） | 内置示例项目（由 `hfTools.listProjects` 映射而来） |
+| `ProjectMeta` | interface（**再导出**） | 「我的项目」**列表项**元信息；真实定义在 `src/shared/types.ts` ⑥ 节，本文件以 `import type { ProjectMeta } from '@shared/types'` + `export type { ProjectMeta }` 转发，保持 `import { ProjectMeta } from '@renderer/composables/useAppStore'` 的既有引用面 |
+
+**结构体字段表（`ProjectState` / `BuiltinProject` / `ProjectMeta`）**
+
+> `ProjectState` 与 `BuiltinProject` 是渲染层自己的视图模型（定义在本文件）；`ProjectMeta` 的结构定义在 `src/shared/types.ts` ⑥ 节，下表列出的是消费侧语义。
+
+| 归属 | 字段 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `ProjectState` | `name` | `string` | 项目名 |
+| `ProjectState` | `title` | `string` | 项目标题（缺省时 `refreshProject` 回填 `'字幕动画'`） |
+| `ProjectState` | `subtitle` | `string` | 字幕文本（SRT 风格多行文本） |
+| `ProjectState` | `htmlPath` | `string` | 生成/修改得到的 HTML 绝对路径 |
+| `ProjectState` | `videoPath` | `string` | 渲染产出的视频路径 |
+| `ProjectState` | `audioFile` | `string` | 背景音频 / 生成语音路径 |
+| `ProjectState` | `videoMaterial` | `string` | 视频素材路径（可从其提取原声） |
+| `ProjectState` | `htmlExists` | `boolean` | HTML 是否真实存在（来自列表项 `hasHtml`，非详情字段） |
+| `ProjectState` | `videoExists` | `boolean` | 视频是否真实存在（来自列表项 `hasVideo`，非详情字段） |
+| `ProjectState` | `subtitleCount` | `number` | 字幕条数 |
+| `ProjectState` | `content` | `{ style: string; scenes: { id: string; narration: string; visual: string; durHint: string }[] }` | 内容脚本：全局风格 `style` + 场景数组，每个场景含 `id`、旁白 `narration`、画面 `visual`、时长提示 `durHint` |
+| `BuiltinProject` | `name` | `string` | 示例目录名 |
+| `BuiltinProject` | `title` | `string` | 显示标题，映射时直接取 `b.name` |
+| `BuiltinProject` | `htmlPath` | `string` | 示例 `index.html` 路径（映射自 `b.html`） |
+| `BuiltinProject` | `htmlExists` | `boolean` | 映射为 `!!b.html`；`b.html` 为空时绝不为 `true` |
+| `BuiltinProject` | `videoExists` | `boolean` | 映射时**写死 `false`**（内置示例不参与视频产物判定） |
+| `BuiltinProject` | `subtitle` | `string` | 映射时**写死 `''`**（内置示例不提供字幕） |
+| `ProjectMeta` | `name` | `string` | 项目名 |
+| `ProjectMeta` | `title` | `string` | 项目标题 |
+| `ProjectMeta` | `hasSubtitle` | `boolean` | 是否有字幕 |
+| `ProjectMeta` | `hasHtml` | `boolean` | 是否有 HTML |
+| `ProjectMeta` | `hasVideo` | `boolean` | 是否有视频 |
+| `ProjectMeta` | `subtitleCount` | `number` | 字幕条数 |
+| `ProjectMeta` | `updatedAt` | `string` | 更新时间（ISO 字符串，主进程按此倒序排序） |
+
+**导出成员**
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `appState` | `reactive` 对象 | 字段 `currentName`（初值 `'demo-project'`）、`isBuiltin`（初值 `false`）、`project`（`ProjectState \| null`，初值 `null`）、`myProjects`（`ProjectMeta[]`，初值 `[]`）、`builtinProjects`（`BuiltinProject[]`，初值 `[]`） |
+| `activeMenu` | `ref<PageKey>` | 当前菜单高亮键，初值 `'home'` |
+| `hasSubtitle` | `computed<boolean>` | `!appState.isBuiltin && !!(p && p.subtitle)` |
+| `hasHtml` | `computed<boolean>` | `!appState.isBuiltin && !!(p && p.htmlExists && p.htmlPath)` |
+| `hasVideo` | `computed<boolean>` | `!!(p && p.videoExists)`（**未**再判 `isBuiltin`） |
+| `hasContent` | `computed<boolean>` | `!appState.isBuiltin && !!(p && p.content && Array.isArray(p.content.scenes) && p.content.scenes.length)` |
+| `hasAudio` | `computed<boolean>` | `!appState.isBuiltin && !!(p && p.audioFile)` |
+| `saveProjectCtx()` | `() => void` | 写 `localStorage['myapp.projectCtx'] = { name, builtin }` |
+| `refreshProject()` | `() => Promise<void>` | 拉取两份列表并加载当前项目详情 |
+| `switchProject(name, isBuiltin)` | `(string, boolean) => Promise<void>` | 切换当前项目并立即刷新 |
+
+**「内置示例不算已生成」的语义**：`hasSubtitle` / `hasHtml` / `hasContent` / `hasAudio` 四个 computed 的第一个条件都是 `!appState.isBuiltin`——内置示例（`video-projects/` 下只读样例）自带 `index.html`，但它属于**只读示例资源**，不是用户在本项目里生成的产物，因此不能让它把流水线步骤点亮成“已完成”；`hasHtml` 还额外要求 `p.htmlExists && p.htmlPath` 同时成立，避免只有路径、文件已被删除时误判；`hasVideo` 唯一没有 `!isBuiltin` 判定，原因是 `refreshProject` 在构造内置项目对象时把 `videoExists` 写死为 `false`，等价于内置示例永远没有视频产物，真正的视频存在性判断交给 `videoExists` 本身；`hasContent` 对旧项目做**向后兼容**：详情没有 `content` 字段时按空处理（`scenes` 非数组或长度为 0 即视为未产出）。
+
+**`saveProjectCtx()`**：读取 `appState.currentName` 与 `appState.isBuiltin` → 序列化为 `{ name, builtin }` 写入 `localStorage` 键 `'myapp.projectCtx'`；该键的值在 `App.vue` 的 `initApp()` 中于启动时读取回填（`saved.name` / `saved.builtin`），实现上下文延续。
+
+**`refreshProject()`（列表 + 详情两次 IPC）**
+
+1. `Promise.all` **并行**发起两个列表请求，且各自 `.catch(() => [])` 兜底，任一失败都不阻断刷新：`window.projectTools.list()` → 我的项目列表 `projs`；`window.hfTools.listProjects()` → 内置示例 `[{ name, html }]`。
+2. 写入 `appState.myProjects = projs`；把内置列表映射为 `BuiltinProject`：`name → name`、`title → b.name`、`htmlPath → b.html`、`htmlExists → !!b.html`、`videoExists → false`、`subtitle → ''`。
+3. **内置示例分支**（`appState.isBuiltin === true`）：在 `builtinProjects` 中按 `currentName` 查找——找不到（示例已被删除/改名）→ 回退到 `myProjects[0].name`，无则 `'demo-project'`，把 `isBuiltin` 置回 `false` 并调用 `saveProjectCtx()`，随后**继续走下面的“我的项目”分支**；找到 → `appState.project = Object.assign({}, entry)`（浅拷贝副本，避免直接改写列表项）并 `return`——**不再发起详情 IPC**。
+4. **我的项目分支**：按 `currentName` 在 `myProjects` 中查找 `entry`；找不到则把 `currentName` 回退为 `myProjects[0].name`（无则 `'demo-project'`）并重新查找一次。
+5. 发起第二次 IPC：`await window.projectTools.load(appState.currentName)`。
+6. **空值守卫**：`if (!loaded) { appState.project = null; return }` —— 主进程只在项目名为空（`currentName === ''`）时返回 `null`（`project:load` 的类型即 `Promise<Project \| null>`）；历史实现在这里直接解引用 `null` 会抛运行时报错，现在显式兜底为「无当前项目」，由页面走空态。
+7. 组装 `appState.project`，缺省值一律显式兜底：`title || '字幕动画'`、`subtitle / htmlPath / videoPath / audioFile / videoMaterial` 均为 `|| ''`、`htmlExists: !!(entry && entry.hasHtml)`、`videoExists: !!(entry && entry.hasVideo)`、`subtitleCount: loaded.subtitleCount || 0`、`content: loaded.content || { style: '', scenes: [] }`。
+8. `htmlExists` / `videoExists` **不是**来自 `load` 的详情，而是来自第 4 步列表项 `entry`——产物存在性由主进程 `scanProjects()` 用文件系统检查得出。
+
+**`switchProject(name, isBuiltin)`**：`appState.currentName = name` → `appState.isBuiltin = isBuiltin` → `saveProjectCtx()` 立即持久化（即使随后刷新失败，下次启动仍记得用户选择）→ `await refreshProject()` 重新拉列表并加载详情。
+
+**注意事项**：**单例而非工厂**——文件未导出 `useAppStore()` 之类的函数而是直接导出实例，任何 `import` 都拿到同一个响应式对象，因此不存在多份状态，也意味着**热更新时状态会跨模块残留**；**`'myapp.projectCtx'` 键名与结构不可漂移**（生产环境用 `file://` 同源，`localStorage` 因此可跨次启动延续，键或字段名改动会导致用户上下文丢失）；**`isBuiltin` 与 `videoExists` 耦合**——内置示例的 `videoExists` 由本地映射写死 `false`，所以 `hasVideo` 才敢不加 `isBuiltin` 判定，若将来给内置示例补视频产物必须同步修改 `hasVideo`；**列表项是存在性的唯一来源**——`htmlExists` / `videoExists` 取自 `myProjects` 的 `hasHtml` / `hasVideo`，而 `load()` 返回值里没有这两项，若 `load` 成功但列表为空（例如刚创建、列表未刷新），会得到 `htmlExists: false`，需重新 `refreshProject()`；**两次 IPC 的失败语义不同**——列表请求有 `.catch(() => [])` 兜底，`projectTools.load()` **没有** catch，若主进程抛错仍会向上冒泡到调用方（如 `goPage` / `switchProject` 的 `await`）；但它的 `null` 返回值已有显式守卫（`if (!loaded) { appState.project = null; return }`），因此「项目名为空 → 主进程回 `null`」不再触发解引用异常，界面表现为无当前项目的空态。**回退链**：内置示例缺失 → 我的项目；我的项目缺失 → `myProjects[0]`；列表为空 → `'demo-project'`，回退只改 `currentName`，不会主动创建项目；**内置详情是浅拷贝**——`Object.assign({}, entry)` 只保证顶层不被别名修改，`content` 等嵌套字段仍可能与列表对象共享引用（内置映射当前未设置该字段，故实际影响有限）。
+
+## 2. 提示：composables/useToast.ts
+
+替代旧版 `window.App.toast`，提供全应用统一的“轻提示”：模块级 `const toasts = ref<ToastItem[]>([])` 持有全局队列，`App.vue` 的统一宿主把它渲染成浮层小条；命令式入口 `toast(msg)` 调用即显示，2800ms 后自动移除，因此调用方不需要（也没有提供）`close` / `remove` 接口。它刻意保持极简：没有提示类型（success/error）、没有手动关闭按钮、没有去重，只有「一条文本 + 一个自增 id」。
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `ToastItem` | interface | `{ id: number; msg: string }`，`id` 为内部自增序号，`msg` 为展示文本 |
+| `toast` | `(msg: string) => void` | 追加一条提示并启动 2800ms 定时移除 |
+| `useToasts` | `() => typeof toasts` | 返回模块级 `toasts` 这个 `ref<ToastItem[]>`，供宿主组件渲染 |
+
+**内部状态**：`toasts`（`const toasts = ref<ToastItem[]>([])`，模块级单例，**不导出**，只能经 `useToasts()` 获取）；`seq`（`let seq = 0`，普通变量非响应式，每次 `toast()` 调用 `++seq` 生成 id）。
+
+**`toast(msg)` 执行步骤**：① `const id = ++seq`——先自增再取用，保证 id 从 1 开始且**永不重复**（进程生命周期内单调递增，切换项目/页面都不会重置）；② `toasts.value.push({ id, msg })`——追加到队列尾部，`App.vue` 的 `TransitionGroup` 立即渲染出来（新条目触发过渡动画）；③ `setTimeout(..., 2800)`——2800ms 后执行 `toasts.value = toasts.value.filter((t) => t.id !== id)`，**整体替换数组**（而非 `splice`）以稳定触发 Vue 的响应式更新；④ 定时器不保存引用、不做 `clearTimeout`，因此没有“提前取消某条提示”的能力。
+
+**渲染端（`App.vue`）**：`const toasts = useToasts();`，模板为 `<TransitionGroup tag="div" name="toast" class="toast-host">` 内 `v-for="t in toasts" :key="t.id"` 的 `.toast-item`，文本 `{{ t.msg }}`。`:key="t.id"` 依赖自增 id 才能正确区分多条内容相同的提示（数组索引做 key 会导致过渡与列表复用错乱）；样式 `.toast-host` / `.toast-item` 由 `App.vue` 的 `<style scoped>` 提供（自旧版 `app.js` 的内联样式移植）。
+
+**使用方**：`App.vue`（`useToasts()` 取队列并渲染宿主）；其余均为调用 `toast()`——`components/StepBar.vue`（创建项目成功/失败、内置示例只读提示）、`pages/HomePage/index.vue`（项目名校验、创建失败、创建成功）、`pages/ContentPage/index.vue`（只读拦截、保存成功/失败）、`pages/SubtitlePage/index.vue`（删除条目、复制、导出 SRT、保存、由脚本生成字幕）、`pages/HtmlGenPage/index.vue`（Agent 请求排队、只读拦截、生成/修改完成、导入导出、音频与视频素材设置）、`pages/TextTtsPage/SynthSection.vue`（试听、设为背景音频、只读拦截）、`pages/TextTtsPage/AlignSection.vue`（对齐合成忙、取消、试听失效、写回结果）、`pages/SubtitlePage/TranscribeSection.vue`（转录回填结果、只读拦截）。约定式写法：主进程返回 `res.ok === false` 时统一 `toast((res as { message?: string })?.message || '默认文案')`，并且取消类结果（`canceled`）通常**不**提示。
+
+**注意事项**：**模块级单例**使所有页面共享同一队列，因此同一时刻可能叠多条提示（宿主用固定定位 + `TransitionGroup` 依次排布）；**2800ms 是硬编码常量**，没有配置项，如需按类型区分时长需要先扩展 `ToastItem`；**无去重**，连续调用 `toast('保存成功')` 会得到两条独立计时、独立消失的提示；**计时器不随组件卸载取消**，定时器闭包只捕获 `id`，页面切换后仍会执行过滤，但过滤是幂等的（id 已不存在时结果不变）故不会出错；`id` 用普通变量而非响应式，因为它只作为 DOM key 使用、不需要参与响应式追踪；`useToasts()` 返回 `typeof toasts` 即 `Ref<ToastItem[]>`，调用方在模板中写 `v-for="t in toasts"` 时由 Vue 自动解包，若在脚本中使用需要 `.value`；**不适用于需要用户确认的消息**——本模块是“一闪而过”的轻提示，阻塞式确认应使用对话框类能力，而不是在此扩展。
+
+## 3. 渲染进度：composables/useRenderProgress.ts
+
+HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进程经 `video:progress` 频道回推到渲染层。这些日志里混着两类内容：**结构化事件行** `[Render:trace] {"phase":...,"status":...,"elapsedMs":...,"message":...}` 与**普通日志 / 进度条行**（各种人类可读输出，没有固定结构）。本文件的职责是把这条嘈杂的文本流压成一句人话，写入全局 `renderProgress.text`，由视频页（`pages/VideoPage/index.vue`）展示，例如 `渲染中 · 逐帧捕获（12s）：frame 240/600`；解析失败时**决不静默丢弃**，而是回退显示原文尾部，保证用户始终能看到“还在动”。关键设计是**跨 chunk 半行缓冲**：主进程推送的 `data.text` 可能把一行日志从中间截断，解析必须以“完整行”为单位。
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `renderProgress` | `reactive({ text: string })` | 全局进度文案单例，初值 `text: ''` |
+| `resetRenderProgress` | `() => void` | 页面挂载时复位：`text`、`hfLogBuf`、`hfLastLine` 全部清空 |
+| `initRenderProgress` | `() => void` | 订阅 `window.hfTools.onProgress`，每次收到 chunk 就解析并更新 `renderProgress.text` |
+
+**模块级私有状态**：`HF_PHASE_LABELS`（`Record<string, string>`，阶段英文名 → 中文名映射表）；`hfLogBuf`（`let hfLogBuf = ''`，跨 chunk 的半行缓冲，未以 `\n` 结束的残片留在这里等下一块拼上）；`hfLastLine`（`let hfLastLine = ''`，最近一条**完整**日志行，trace 解析失败时作为兜底素材）。
+
+**`HF_PHASE_LABELS` 全量映射（12 条）**
+
+| `ev.phase` | 中文名 |
+| --- | --- |
+| `compile` | 编译组合 |
+| `browser_launch` | 启动渲染浏览器 |
+| `browser_probe` | 浏览器校准 |
+| `session_init` | 初始化渲染会话 |
+| `video_extract` | 提取视频素材 |
+| `audio_process` | 处理音轨 |
+| `capture_calibration` | 帧捕获校准 |
+| `capture_hdr_layered` | 逐帧捕获 |
+| `capture_streaming` | 逐帧捕获 |
+| `capture_disk` | 逐帧捕获 |
+| `encode` | 视频编码 |
+| `assemble` | 合成输出 |
+
+三种 `capture_*` 阶段共用同一中文名「逐帧捕获」，因为对用户而言它们都是“一帧一帧出画面”的同一环节，无需区分底层策略。
+
+**`initRenderProgress()`**
+
+1. 调用 `window.hfTools.onProgress(callback)` 注册进度回调。preload 层对进度类频道实施**单订阅语义**（模块级保存回调、只注册一次 `ipcRenderer.on`），因此重复调用只会替换回调，不会叠加监听器；实际调用点是 `App.vue` 的 `onMounted`，全局只执行一次。
+2. **拼接缓冲**：`hfLogBuf += String((data && data.text) || '')`——对 `data` 与 `data.text` 双重兜底，非字符串值先 `String()` 化。
+3. **按行切分循环**：`while ((nl = hfLogBuf.indexOf('\n')) >= 0)`——取出 `hfLogBuf.slice(0, nl)` 并 `trim()` 得到当前行；`hfLogBuf = hfLogBuf.slice(nl + 1)` 吃掉已处理部分；若该行非空则更新 `hfLastLine = line`（空行被忽略，不会把上一行的信息冲掉）。循环结束时 `hfLogBuf` 里只剩**最后一个不完整行**，留给下一 chunk 继续拼——这就是半行缓冲的全部实现。
+4. **定位 trace**：`const tIdx = hfLastLine.lastIndexOf('[Render:trace]')`，用 `lastIndexOf` 而非 `indexOf`，以便同一行里出现多次时取最后一段。
+5. 若 `tIdx >= 0`，进入 `try`：`JSON.parse(hfLastLine.slice(tIdx + 14).trim())`（`14` 正是 `'[Render:trace]'` 的长度，即跳过标记本身；`trim()` 容忍标记与 JSON 之间的空格）→ `phase = HF_PHASE_LABELS[ev.phase] || String(ev.phase || '')`（映射不到时回退英文原名，不显示 `undefined`）→ `msg = String(ev.message || '').trim()` → `secs = isFinite(Number(ev.elapsedMs)) ? Math.round(Number(ev.elapsedMs) / 1000) : 0`（耗时毫秒转**整秒**，非法值视为 0）→ 拼装文案 `'渲染中 · ' + phase + (secs ? '（' + secs + 's）' : '') + (msg ? '：' + msg : '')`，其中 `secs` 为 0 时**整段括号省略**（不显示「（0s）」）、`msg` 为空时**整段冒号省略**，随后 `return` 提前结束本次回调。
+6. **失败兜底**：`JSON.parse` 抛错（被 `catch (e)` 吞掉）、或该行根本没有 `[Render:trace]` 标记时，执行 `renderProgress.text = '渲染中... ' + hfLastLine.slice(-160)`——只取最近完整行的**末尾 160 字符**，避免超长日志行把 UI 撑爆。
+
+**`resetRenderProgress()` 与调用时机**：`renderProgress.text = ''` 清空展示 → `hfLogBuf = ''` **丢弃未挂载期间缓冲的半行残片** → `hfLastLine = ''` 清掉旧行的兜底素材。语义对应旧版 `initHfPage` 清空 `#hf-status`：如果不重置 `hfLastLine`，用户进入视频页时会立刻看到上一次渲染的残句。调用时机：`initRenderProgress()` 在 `App.vue` 的 `onMounted` 全局只执行一次（订阅）；`resetRenderProgress()` 在 `pages/VideoPage/index.vue` 页面挂载时执行（复位），页面渲染开始/结束时由页面自行把 `renderProgress.text` 置空，用本地完成文案覆盖 trace 残留。
+
+**展示侧（`pages/VideoPage/index.vue`）**：`const statusText = computed(() => renderProgress.text || localStatus.value)`——全局 trace 文案优先，为空时回退页面本地状态文案。
+
+**注意事项**：**必须以完整行为单位解析**（`[Render:trace]` 行可能被 IPC 分块从任意位置截断，直接对每次 chunk 做 `JSON.parse` 会频繁失败）；**半行只在“收到换行”后才被消费**，若 CLI 的最后一行没有以 `\n` 结尾（进程结束时常见），它不会被计入 `hfLastLine`，也就不会参与解析——这是刻意取舍，避免解析半截 JSON；**兜底截断 160 字符**用 `slice(-160)` 取尾部而非头部，因为进度信息（百分比、帧号）通常在行尾；**`slice(tIdx + 14)` 的魔法数**与 `'[Render:trace]'.length` 绑定，若主进程日志标记改名，必须同步改 `lastIndexOf` 的字面量与偏移量两处；**`elapsedMs` 单位是毫秒、展示单位是整秒**，`Math.round` 四舍五入，因此 1499ms 显示 `1s`、1500ms 显示 `2s`；**非法 `phase` 不吞掉**，映射缺失时显示原始英文 key，便于排查主进程新增了未登记阶段；**`catch (e)` 为空块**，解析异常只用于“走兜底分支”，不打印错误避免刷屏，代价是排查解析问题需自行打断点；**单例与订阅次数**——`renderProgress` 是模块级 `reactive`，多个页面读同一份文本，但 `initRenderProgress()` 若被多处调用，最终生效的是**最后一次**传入的回调（preload 单订阅语义），不会重复处理同一 chunk。
+
+## 4. 语速：utils/rate.ts
+
+试听已生成的配音时，用户需要临时调快/调慢播放速度（例如 1.5x 快速检查），但**磁盘上的音频文件不能被改动**。本模块据此提供三个纯函数，核心语义是「**只改播放速率，不改磁盘音频**」：这三个函数**只**触碰（a）输入框的 `value` 与（b）`audio.playbackRate` 这一个运行时属性，既不写文件、也不通知主进程、也不参与任何落盘/合成流程；因此用户调完语速后重新打开应用，音频文件仍是原始速度。
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `rateClamp` | `(v: number) => number` | `Math.min(2, Math.max(0.5, v))`，取值域 `0.5 ~ 2.0` |
+| `applyRate` | `(el: HTMLInputElement, audio?: HTMLMediaElement \| null) => number` | 从 `el.value` 解析速率 → 兜底 → 夹紧 → 回写 `el.value` → 同步 `audio.playbackRate` → 返回最终数值 |
+| `stepRate` | `(el: HTMLInputElement, audio: HTMLMediaElement \| null, delta: number) => number` | 在当前值上 `+delta`，四舍五入到两位小数后夹紧，写回输入框并同步播放器，返回最终数值 |
+
+**参数与返回值**：`rateClamp` 收 `v`（待夹紧的数值），返回落在 `[0.5, 2.0]` 内的数值；`applyRate` 的 `el` 为语速文本框 `HTMLInputElement`、`audio` 为 `HTMLMediaElement | null` 且默认 `null`，返回规范化后的速率数值（调用方用它更新 Vue 的显示状态）；`stepRate` 的 `audio` 此处**无默认值**、必须显式传，`delta` 为步长（如 `+0.1` / `-0.1`），返回步进并夹紧后的速率数值。
+
+**`rateClamp(v)`**：`Math.max(0.5, v)` 抬到下限 0.5 → `Math.min(2, ...)` 压到上限 2.0。上下限都是**硬编码字面量**，与本文件顶部注释「0.5~2.0」以及输入框 `title="播放语速 0.5~2.0（非法或空值自动回退 1x）"` 一一对应。它**不做 `NaN` 防护**：`Math.max(0.5, NaN)` 得 `NaN`，再 `Math.min(2, NaN)` 仍为 `NaN`；NaN 兜底由 `applyRate` / `stepRate` 负责。
+
+**`applyRate(el, audio = null)`**：`let v = parseFloat(el.value)` 从输入框当前文本解析浮点数（用户手输场景，如 `1.25`）→ `if (!isFinite(v)) v = 1`（空串、`"abc"`、`NaN`、`Infinity` 一律回退 `1` 即 1x 原速）→ `v = rateClamp(v)` 夹紧 → `el.value = String(v)` **把规范化结果写回输入框**，用户立刻看到被修正/夹紧后的值（输入 `5` 会变成 `2`，输入 `0.1` 会变成 `0.5`）→ `if (audio) audio.playbackRate = v`（仅在传入播放器时同步；音频元素尚未挂载/未选中时传 `null` 也不会报错）→ `return v`，调用方通常写成 `rateValue.value = String(applyRate(el, genAudioEl.value))`。
+
+**`stepRate(el, audio, delta)`**：`parseFloat(el.value)` + `if (!isFinite(v)) v = 1`（与 `applyRate` 相同的兜底）→ `v = rateClamp(Math.round((v + delta) * 100) / 100)`，即**先加步长、再四舍五入到两位小数、最后夹紧**，先取整是为了消除浮点误差累积（`1.1 + 0.1` 会得到 `1.2000000000000002`，取整后是 `1.2`）→ `el.value = String(v)` 回写输入框 → `if (audio) audio.playbackRate = v` 同步播放器 → `return v`。`delta` 本身不做 `isFinite` 校验，约定由调用方传入有限的字面量（`0.1` / `-0.1`）。
+
+**使用方**：`pages/HtmlGenPage/index.vue`（`import { applyRate, stepRate }`；输入框 `rateEl` 配 `rateValue` 初值 `'1'`，`onRateInput` 调 `applyRate(el, genAudioEl.value)`，加减按钮调 `stepRate(el, genAudioEl.value, delta)`）；`pages/TextTtsPage/SynthSection.vue` 两处独立使用——合成结果试听（`resultRateValue` + `resultAudioEl`）与生成音频试听（`genRateValue` + `genAudioEl`），同样走 `applyRate` / `stepRate`。两个页面的模式完全一致：`<input ref="rateEl" :value="rateValue" ... @input="onRateInput">` + 一对 `+/-` 按钮，Vue 侧只保存显示字符串，**真值由本模块返回**。
+
+**注意事项**：**取值范围恒为 `0.5 ~ 2.0`**，修改上限/下限必须同时改 `rateClamp` 内的两个字面量与输入框 `title` 提示文案；**非法值回退 1 而不是回退到上一次有效值**，因为函数是无状态的、拿不到历史值；**`el` 是必需参数且会被就地修改**，本模块的“输入框”是唯一数据载体，Vue 里配合 `:value="rateValue"`（单向绑定）+ `@input` 回写，而不是 `v-model`，以避免双向绑定与函数内写值互相打架；**`audio` 可空是刻意的**，用户可能还没选中音频文件就先调语速，此时传 `null` 只更新输入框和返回值，等音频就绪后再调用一次即可生效；**`stepRate` 的 `audio` 没有默认值**，必须显式传 `null` 或元素，这是类型签名层面的有意区分（防止忘记传播放器）；**只影响播放，不影响产物**——`playbackRate` 是纯粹的客户端播放属性，不改变音频数据，因此语速试验可以随意做，不会污染项目产物；**浮点精度**：`stepRate` 用 `Math.round(x * 100) / 100` 固定两位小数，`applyRate` 则**保留用户输入的全部精度**（如 `1.333`），只在超界时夹紧；**不做四舍五入到 0.1 网格**，手动输入 `1.05` 是允许的，界面上并不强制对齐到步长。
+
+## 5. 工具：utils/escape.ts 与 utils/time.ts
+
+### 5.1 `utils/escape.ts` —— `escTxt`
+
+全渲染层唯一的文本转义入口（替代旧版 `window.App.escTxt`，导出 `escTxt(s: unknown): string`）。它解决的问题是：项目名、文件名、音频路径、音色名、模型 URL、字幕文本等数据都来自**主进程扫描或用户输入**，属于不可信内容；一旦被拼进 `innerHTML` / `v-html` / 模板字符串渲染的富文本中，其中的 `<` 就可能被浏览器当成标签开始，造成**标记注入**（轻则排版错乱，重则执行注入的标签/属性，例如 `<img onerror=...>`）；`escTxt()` 把危险字符替换为 HTML 实体，使它们在页面上**按字面显示**而不是被解析。它还承担了「历史重复实现合并」的职责：注释明确指出字幕页的本地副本在 Phase 6 合并到此文件，全项目只需维护一份。
+
+**实现逐步拆解**：`String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')`
+
+| 步骤 | 代码 | 说明 |
+| --- | --- | --- |
+| 1 | `s == null ? '' : s` | 用宽松等于同时兜住 `null` 与 `undefined`，统一转为空串（而不是显示 `"null"` / `"undefined"`） |
+| 2 | `String(...)` | 数字、布尔、对象等非字符串值先安全字符串化 |
+| 3 | `.replace(/&/g, '&amp;')` | **必须第一步做**：`&` → `&amp;` |
+| 4 | `.replace(/</g, '&lt;')` | `<` → `&lt;` |
+| 5 | `.replace(/>/g, '&gt;')` | `>` → `&gt;` |
+
+**转义范围**：`&` → `&amp;` ✅、`<` → `&lt;` ✅、`>` → `&gt;` ✅；`"` / `'` ❌ 不处理、`` ` `` ❌ 不处理。**顺序为何重要**：如果先替换 `<` 再替换 `&`，那么第 4 步生成的 `&lt;` 会被第 3 步的 `&` 规则二次转义成 `&amp;lt;`，页面上就会显示成字面量 `&lt;`，因此 `&` 必须排在最前。**为何不转义引号**：本函数的使用场景是把外部数据放进**元素文本内容**（`{{ }}` 之外需要手工拼接的富文本、`v-html` 内的文本节点），此时引号不构成边界；若要在 HTML **属性**中拼接该值，则需要额外的引号转义。
+
+**典型调用形态**：页面脚本中 `import { escTxt } from '@renderer/utils/escape'`（跨目录导入统一走 `@renderer` 别名），再在拼接 HTML 字符串或绑定 `title` 时包裹外部数据，如 `'<b>' + escTxt(p.title || p.name) + '</b>'`、`:title="'打开项目 ' + escTxt(p.name)"`。执行链路：页面拿到主进程返回的原始字符串（含可能的 `<` 等字符）→ 调用 `escTxt(raw)` 得到实体化后的安全字符串 → 拼进 HTML 字符串 / 绑定到 `:title` / 用于 `v-html` → 浏览器解析时实体被还原为字面字符，标签注入失效。
+
+**调用方（已核对 import）**：`pages/HtmlGenPage/index.vue`（音频文件名 `appState.project.audioFile`、视频素材名等路径展示）、`pages/VideoPage/index.vue`（当前所选 HTML 路径 `hfHtmlPath` 展示）、`pages/HomePage/index.vue`（项目名/标题：我的项目卡片、内置示例卡片的 `title` 与标题文本）、`pages/SoundCopyPage/index.vue`（音色条目名称、音色值、目标模型、附加说明、降级原因文案）、`pages/SettingsPage/WhisperSection.vue`（模型名称、文件名、描述、下载地址等说明文本）、`pages/TextTtsPage/AlignSection.vue`（对齐结果中的每句文本 `d.text`，含 `:title` 与文本节点两处）。使用场景高度集中在「**字幕/文本类内容 + 文件路径类内容**」——正是最可能包含 `<`、`&` 的数据来源（例如 SRT 文本里的 `<i>`、路径里的 `&`）。
+
+**注意事项**：**只转义 `& < >`**，这是“文本节点防注入”的最小充分集，不要把它当通用 HTML 过滤函数使用，它**不做**属性值转义、不剥离标签、不防 `javascript:` URL；**不做反转义**，没有对应的 `unescape`，如果拿到的是 HTML 实体文本却需要原文，需另行处理；**幂等性**——对已转义文本再次调用会二次转义（`&lt;` → `&amp;lt;`），因为 `&` 会被再处理一次，**切勿对同一值重复调用**；**入参类型是 `unknown`**，设计上允许传任何值（对象会被 `String()` 成 `[object Object]`），但不建议把结构化数据交给它，需要展示对象字段时先取字段再转义；**`null` / `undefined` 视为空串**，界面上表现为“该处无内容”而不是显示 `null`，调用方因此可以省掉前置空值判断；**它不能替代 Vue 的默认转义**——在 `{{ }}` 插值中 Vue 已自动转义，重复调用 `escTxt()` 会让用户看到 `&amp;` 之类的实体文本，本函数只用于**必须手工拼 HTML 字符串**的场合（如 `v-html`、动态 `title`、表格行拼接）；**源文件仅 4 行**，任何功能扩展（例如补引号转义）都会改变上述使用点的行为，需同时检查上表全部调用方。
+
+### 5.2 `utils/time.ts` —— `fmtTime` / `fmtTimeMs`
+
+字幕与配音对齐都需要把「秒」显示成人类可读的时间轴字符串，本文件是这一需求的**唯一实现**（注释说明它合并了原先分散在 `subtitle/index.js` 与 `textTts/align.js` 中的重复代码；`pages/SubtitlePage/helpers.ts` 顶部也注明「fmtTime / fmtTimeMs 已合并至 utils/time.ts」）。
+
+| 函数 | 定位 | 输出示例 |
+| --- | --- | --- |
+| `fmtTime(sec: number): string` | **粗粒度**展示与合计（秒级，四舍五入） | `00:07`、`01:23`、`60:00` |
+| `fmtTimeMs(sec: number): string` | **精确**时间轴（毫秒级，3 位小数，用于落盘/对齐） | `00:07.250`、`01:23.004`、`00:02.000` |
+
+关键取舍：`fmtTime` 会**四舍五入到整秒**（适合“总时长约 …”这类概览），`fmtTimeMs` 用**截断秒 + 四舍五入毫秒 + 进位递归**（适合必须精确、不能出现 `.1000` 的时间轴）。
+
+**`fmtTime(sec)`**：`const s = Math.max(0, Math.round(Number(sec) || 0))` → `String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')`。逐步为：① `Number(sec) || 0` 把入参转数字，`NaN`、`0`、`''`、`null` 等假值统一成 `0`；② `Math.round(...)` 四舍五入到整秒（`0.4 → 0`，`0.5 → 1`）；③ `Math.max(0, ...)` 负数归零，保证不出现 `-1:59`；④ `Math.floor(s / 60)` 取分钟部分；⑤ `s % 60` 取秒部分（`0 ~ 59`）；⑥ `padStart(2, '0')` 两段都补零，分钟**不截断**，超过 99 分钟自然显示 3 位（如 `100:00`）。
+
+**`fmtTimeMs(sec)`**：`const t = Math.max(0, Number(sec) || 0)`；`const s = Math.floor(t)`；`let ms = Math.round((t - s) * 1000)`；`if (ms >= 1000) return fmtTimeMs(s + 1)`；最后拼接 `分 + ':' + 秒 + '.' + String(ms).padStart(3, '0')`。逐步为：① `Number(sec) || 0` + `Math.max(0, ...)` 与 `fmtTime` 相同的兜底（非法值/负数归零）；② `Math.floor(t)` **截断**取整秒（这里刻意不四舍五入，否则 1.9 会变成 2 而毫秒部分错位）；③ `Math.round((t - s) * 1000)` 把小数部分换算为毫秒并四舍五入；④ **进位规则**——小数部分 ≥ 0.9995 时毫秒会变成 1000，此时递归调用 `fmtTimeMs(s + 1)`，让下一层的毫秒自然归零为 `000`；⑤ 拼接时分钟、秒同样 `padStart(2, '0')`，毫秒 `padStart(3, '0')`（`7` → `007`）。
+
+**进位为什么用递归**：`1.9996` → `s = 1`、`ms = 1000` → 递归 `fmtTimeMs(2)` → 输出 `00:02.000`。若改用“毫秒置 0、秒 +1 后继续拼接”，需要额外处理秒达到 60 再进位到分钟的情况；直接递归复用同一套 `Math.floor` / `%` / `padStart` 逻辑，天然覆盖 59 → 60 秒与 59 → 60 分的边界。
+
+**格式对照表**
+
+| 入参 `sec` | `fmtTime` 结果 | `fmtTimeMs` 结果 |
+| --- | --- | --- |
+| `0` | `00:00` | `00:00.000` |
+| `7.25` | `00:07` | `00:07.250` |
+| `59.6` | `01:00` | `00:59.600` |
+| `1.9996` | `00:02` | `00:02.000` |
+| `83.004` | `01:23` | `01:23.004` |
+| `-5` | `00:00` | `00:00.000` |
+| `NaN` / `undefined` | `00:00` | `00:00.000` |
+
+**调用侧两条链路**：1. **概览/合计链路（`fmtTime`）**——`pages/SubtitlePage/index.vue` 汇总字幕条目 → `'共 ' + valid + ' 条 · 总时长约 ' + fmtTime(total)`；`pages/TextTtsPage/AlignSection.vue` 对齐结果汇总 → `'共 ' + ds.length + ' 句 · 总时长 ' + fmtTime(res.totalDur)`，同一文件还用 `fmtTime(d.subtitleStart)` / `fmtTime(d.audioStart)` 展示每句的字幕/音频起点。2. **精确时间轴链路（`fmtTimeMs`）**——`pages/SubtitlePage/helpers.ts` 生成 SRT 时间码：`'[' + fmtTimeMs(s) + (e > s ? '-' + fmtTimeMs(e) : '') + '] ' + txt`；`pages/TextTtsPage/AlignSection.vue` 用相同模式生成对齐后的字幕行。注释说明 `fmtTimeTrim` 解析用户输入的 `.900` 这类小数时按位数解释，与落盘的 `fmtTimeMs` 对齐。
+
+**调用方（已核对 import）**：`pages/SubtitlePage/index.vue` 用 `fmtTime` 做字幕总时长概览（`共 N 条 · 总时长约 MM:SS`）；`pages/SubtitlePage/helpers.ts` 用 `fmtTimeMs` 生成标准 SRT 时间码 `[MM:SS.mmm-MM:SS.mmm]`；`pages/TextTtsPage/AlignSection.vue` 同时用 `fmtTime`、`fmtTimeMs`——每句起点展示（秒级）+ 对齐字幕行落盘（毫秒级）。注意 `pages/SubtitlePage/index.vue` 中每行输入框显示的是 `fmtTimeTrim(...)`（`helpers.ts` 中的函数，允许带小数），而**汇总**用 `fmtTime`——两种精度分别对应“编辑参考”与“概览”。
+
+**注意事项**：**`fmtTime` 与 `fmtTimeMs` 对同一入参可能给出不同分钟**——例如 `59.6` → `fmtTime` 得 `01:00`（四舍五入到 60 秒），`fmtTimeMs` 得 `00:59.600`（截断秒），这是刻意行为，不要在“概览”与“时间轴”之间互相复制粘贴结果；**负数一律归零**（`Math.max(0, ...)` 使 `-1.5` 显示为 `00:00.000` / `00:00`，不出现负号）；**`Number(sec) || 0` 会把 `0` 也走兜底分支**，但结果相同（0），因此无害，真正的意义是把 `NaN`、`undefined`、`''` 变成 0；**未做 `isFinite` 兜底**——`Number(sec) || 0` 不会拦下 `Infinity`（`Infinity || 0` 仍是 `Infinity`），此时 `fmtTime` 会得到类似 `"Infinity:NaN"` 的异常字符串，约定调用方只传有限的秒数（来自主进程的时长/偏移计算）；**毫秒固定 3 位**，不显示帧号、不做 `HH:MM:SS` 的小时段，超过一小时的时长表现为分钟继续累加（如 `125:30`）；**`fmtTimeMs` 依赖递归进位**——`1.9996` → `00:02.000`，`59.9999` → `01:00.000`，递归深度为 1 级（`s + 1` 必为整数，其小数部分为 0），无栈风险；**分钟段不设上限**，`padStart(2, '0')` 只在不足两位时补零，分钟超过 99 时自然变宽（配合 `JetBrains Mono` / `Consolas` 等宽字体下更明显）；**格式统一为 `MM:SS` / `MM:SS.mmm` 且用冒号分隔**——SRT 标准要求 `,` 分隔毫秒，本模块输出的是方括号包裹的展示/中间格式，最终落盘的 SRT 文本由 `helpers.ts` 组装，改动格式前需核对下游解析（`parseSrtText` / `parseSubtitleText`）。
+
+## 6. 页面注册表与导航：pages/index.ts
+
+替代旧版 `window.App.pages` 与 `goPage`，用**注册表 + 单容器渲染**实现页面切换而不引入 `vue-router`：集中登记页面（把 9 个 `PageKey` 映射到对应的单文件组件，新增页面只需改这一处）、持有“当前页面组件”状态（`currentPage` 是 `<component :is>` 的绑定源）、提供导航函数 `goPage(key)`（按固定三步完成跳转并递增 `pageNavKey` 强制重挂载）、维护重挂载序号（作为 `:key`，恢复旧版“每次导航都重建页面 DOM、重跑页面 init”的语义）。之所以不引入路由库，是因为这是单窗口固定菜单的桌面应用：没有 URL、没有前进后退、没有嵌套路由需求，注册表模式更轻且与「菜单 `data-page`」一一对应。
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `pages` | `Record<PageKey, Component>` | 页面注册表：9 个 key ↔ 9 个 `.vue` 组件 |
+| `currentPage` | `shallowRef<Component>` | 当前渲染的组件定义，初值 `pages.home` |
+| `pageNavKey` | `ref<number>` | 导航序号，初值 `0`，每次 `goPage` 自增 1 |
+| `goPage` | `(key: PageKey) => Promise<void>` | 导航入口；异步（内部 `await refreshProject()`） |
+
+**`pages` 注册表全量映射（9 个 key）**
+
+| key（`PageKey`） | 组件 | 组件文件 |
+| --- | --- | --- |
+| `home` | `HomePage` | `pages/HomePage/index.vue` |
+| `about` | `AboutPage` | `pages/AboutPage/index.vue` |
+| `content` | `ContentPage` | `pages/ContentPage/index.vue` |
+| `text-tts` | `TextTtsPage` | `pages/TextTtsPage/index.vue` |
+| `subtitle` | `SubtitlePage` | `pages/SubtitlePage/index.vue` |
+| `html-gen` | `HtmlGenPage` | `pages/HtmlGenPage/index.vue` |
+| `video-gen` | `VideoPage` | `pages/VideoPage/index.vue` |
+| `sound-copy` | `SoundCopyPage` | `pages/SoundCopyPage/index.vue` |
+| `settings` | `SettingsPage` | `pages/SettingsPage/index.vue` |
+
+说明：`video-gen` 绑定的组件是 `VideoPage`（**不是** `VideoGenPage`）；`text-tts` 绑定 `TextTtsPage`。这两个 key 与组件名不一致，是本文件最容易被误读的地方。**导入清单**：`vue` → `ref`、`shallowRef`、`type Component`；`@renderer/composables/useAppStore` → `activeMenu`、`refreshProject`、`type PageKey`；`./HomePage/index.vue` … `./SettingsPage/index.vue` 共 9 个页面组件（每个页面一个文件夹，入口统一 `index.vue`；跨目录导入统一走 `@renderer/*` 别名，页面注册表内的同目录导入用相对路径）。
+
+**`goPage(key)` 的三步**
+
+```ts
+export async function goPage(key: PageKey): Promise<void> {
+  activeMenu.value = key;         // ① 菜单高亮
+  await refreshProject();         // ② 刷新项目上下文（两次 IPC）
+  currentPage.value = pages[key]; // ③ 切换组件
+  pageNavKey.value++;             // ④ 递增 key → 强制重挂载
+}
+```
+
+① `activeMenu.value = key`——侧栏 `App.vue` 用它渲染 `.menu-item.active`，高亮**先于**数据刷新生效，点击反馈即时；② `await refreshProject()`——调用 `useAppStore` 的刷新，并行拉 `projectTools.list` + `hfTools.listProjects`，再 `projectTools.load` 当前项目，保证新页面拿到的是最新 `appState.project`；③ `currentPage.value = pages[key]`——**必须放在 `await` 之后**，否则页面会先挂载、后刷新，出现旧数据闪烁；④ `pageNavKey.value++`——见下。
+
+**`pageNavKey` 递增强制重挂载的语义**：1. 旧版每次 `goPage` 都重建页面 DOM、重跑页面 `init`；2. 迁移到 Vue 后，`<component :is>` 在同一组件类型之间切换时，Vue 会**复用同一个组件实例**，不会重新执行 `onMounted`；3. 于是「在配音页切换到另一个项目、再点配音」这类**同页切换**会出现：`appState` 已更新，但页面内部自己缓存的列表/预览/表单仍是旧项目的数据；4. 解决方式：给 `<component :is="currentPage" :key="pageNavKey" />` 传一个每次导航都变化的 key。key 变化 → Vue 销毁旧实例、创建新实例 → 各页面 `onMounted` 重新加载当前项目数据，**恢复旧语义**；5. 每次递增（而非随机/时间戳）便于调试时观察导航次数。
+
+**宿主 `App.vue` 中的配合**：`<component :is="currentPage" :key="pageNavKey" />` 由内容容器 `<main class="content" ref="contentEl">` 承载；滚动复位由宿主承担：`watch(currentPage, () => { contentEl.value.scrollTop = 0 })`——对应旧版 `goPage` 末尾的 `content.scrollTop = 0`，本文件注释明确指向这一点。启动流程：`App.vue` 的 `initApp()` 先读 `localStorage['myapp.projectCtx']` 回填上下文，`await refreshProject()`，再 `goPage('home')`（因此首次进入首页时会多执行一次刷新）。
+
+**与侧栏菜单的差异**：`App.vue` 的 `menuItems` 只登记 **8 项**（`home`、`content`、`text-tts`、`subtitle`、`html-gen`、`video-gen`、`about`、`settings`），**不含 `sound-copy`**。该 key 虽然在本注册表里存在，但只能通过页面内按钮（配音页「管理音色」）进入——注册表 9 项、菜单 8 项是**预期状态**，不是遗漏。
+
+**注意事项**：**key 必须同时覆盖 9 个页面**，`pages` 用 `Record<PageKey, Component>` 声明，新增 `PageKey` 时 TypeScript 会强制补齐映射，避免出现“菜单能点但没有组件”的空页；**`currentPage` 用 `shallowRef` 而非 `ref`**——源码注释明确：组件对象**不应**被 Vue 深度代理，用 `ref` 会把组件定义包进响应式代理，可能引发组件实例/性能问题（Vue 对组件对象也有额外校验警告），`shallowRef` 只追踪 `.value` 的替换，正好匹配“切换即整体替换”的使用方式；**`pageNavKey` 递增会销毁并重建页面**，这是刻意行为，代价是每次导航都丢失页面内部状态（表单草稿、预览滚动位置等），若某页面需要保留状态，需要评估是否改用 `keep-alive` 或把状态提升到 `appState`；**导航是异步的且无并发保护**，两次快速点击会让两个 `refreshProject()` 并行，最终以最后完成的一次为准，页面切换也可能短暂落后于菜单高亮（当前通过“菜单高亮先更新”保证点击手感，未做取消/序号校验）；**`refreshProject()` 未捕获异常**，若 `projectTools.load` 抛错，`goPage` 的 Promise 会 reject，`currentPage` 与 `pageNavKey` 都不会更新——页面停在原处，宿主目前以 `void goPage(...)` / `goPage(...)` 方式调用，不做错误处理；**滚动复位不在本文件**，`goPage` 不再操作 DOM（旧版有 `scrollTop = 0`），改由 `App.vue` 的 `watch(currentPage)` 承担，因为 `currentPage` 是 `shallowRef`，只有真正切换组件时才会触发该 watch；**`sound-copy` 无菜单入口**，调整侧栏菜单项时不要误以为注册表多了一项，反过来若把它加进 `menuItems`，则需同步补充对应的 `label` / `title`。
+
+## 7. 协作与约定
+
+**依赖的 preload API**
+
+| API | 频道 / 用途 | 使用模块 |
+| --- | --- | --- |
+| `window.projectTools.list()` | 拉「我的项目」列表（`ProjectMeta[]`） | `useAppStore.refreshProject()` |
+| `window.projectTools.load(name)` | 拉当前项目详情（`project.json` 内容）；返回 `Project \| null`，`refreshProject()` 已加空值守卫 | `useAppStore.refreshProject()` |
+| `window.hfTools.listProjects()` | 拉内置示例列表（`{ name, html }[]`） | `useAppStore.refreshProject()` |
+| `window.hfTools.onProgress(callback)` | 频道 `video:progress`，渲染进度订阅，回调参数形如 `{ text: string }`（日志 chunk） | `renderProgress.initRenderProgress()` |
+
+`renderProgress` 不调用 `hfTools.renderVideo()`——发起渲染的是 `pages/VideoPage/index.vue`，这里只消费日志流。`pages/index.ts` **不直接**调用 preload API，而是通过 `useAppStore` 间接使用。`useToast.ts`、`rate.ts`、`escape.ts`、`time.ts` 均为**零依赖**（仅 `useToast` 依赖 Vue 的 `ref`），不接触主进程。
+
+**谁用谁（被导入情况）**
+
+- `appState` / `activeMenu` / `refreshProject` / `PageKey` / 5 个 `has*`：`App.vue`（`activeMenu`、`appState`、`refreshProject`、`PageKey`，启动时读 `localStorage['myapp.projectCtx']` 回填）、`components/StepBar.vue`（`appState`、`hasContent`、`hasAudio`、`hasSubtitle`、`hasHtml`、`hasVideo`、`refreshProject`、`switchProject`、`PageKey`）、`pages/HomePage/index.vue`（`appState`、5 个 `has*`、`refreshProject`、`switchProject`、`PageKey`）、`pages/HtmlGenPage/index.vue`（`appState`、`hasHtml`、`refreshProject`）、`pages/ContentPage/index.vue` / `pages/SubtitlePage/index.vue` / `pages/TextTtsPage/SynthSection.vue` / `pages/SubtitlePage/TranscribeSection.vue`（`appState.isBuiltin` 只读拦截）、`pages/TextTtsPage/AlignSection.vue`（`appState`、`appState.myProjects` 跨项目取字幕源）。
+- `switchProject`：`components/StepBar.vue`、`pages/HomePage/index.vue`。
+- `toast` / `useToasts`：见 §2「使用方」。
+- `renderProgress` / `initRenderProgress` / `resetRenderProgress`：`App.vue`（`onMounted` 中调用 `initRenderProgress()`，全局只订阅一次）、`pages/VideoPage/index.vue`（读取 `renderProgress.text` 合成 `statusText`，在渲染开始/结束时清空，页面挂载时用 `resetRenderProgress()` 复位）。
+- `rateClamp` / `applyRate` / `stepRate`：见 §4「使用方」；`escTxt`：见 §5.1「调用方」；`fmtTime` / `fmtTimeMs`：见 §5.2「调用方」。
+- `pages` / `currentPage` / `pageNavKey` / `goPage`：`App.vue`（`currentPage`、`pageNavKey` 渲染容器；`goPage(item.key)` 绑定菜单点击；`watch(currentPage)` 做滚动复位；启动时 `goPage('home')`）、`components/StepBar.vue`（`goPage('content')`、`goPage('text-tts')`、`goPage('subtitle')`、`goPage('html-gen')`、`goPage('video-gen')` 以及 `props.page` 回跳）、`pages/HomePage/index.vue`（流程图节点 `goPage(n.page)`；项目卡片跳 `goPage('html-gen')` / `goPage('video-gen')` / `goPage('home')`）、`pages/SoundCopyPage/index.vue`（`goPage('settings')` 跳「API Key 设置」）、`pages/TextTtsPage/SynthSection.vue`（`goPage('sound-copy')` 管理音色、`goPage('settings')`）、`pages/SubtitlePage/TranscribeSection.vue`（`goPage('settings')`）、`pages/TextTtsPage/helpers.ts`（`goPage('settings')`）。
+
+典型协作链：`components/StepBar.vue` / `pages/HomePage/index.vue` 调 `switchProject()` → 内部 `refreshProject()` 更新 `appState.project` → 5 个 computed 变化 → 流程图与步骤条完成态同步刷新。
+
+**注意事项汇总**
+
+- **单例状态跨模块共享**：`appState`、`activeMenu`、`toasts`、`renderProgress`、`pages`、`currentPage`、`pageNavKey` 都定义在模块顶层，任何 `import` 都拿到同一份；无需 `provide/inject` 或 Pinia。代价是**热更新时状态会跨模块残留**。
+- **进度单订阅**：preload 对进度类频道实施单订阅语义，`initRenderProgress()` 重复调用只会**替换回调**，不叠加监听器；因此约定只在 `App.vue` 的 `onMounted` 调用一次。
+- **不要引入 `vue-router` / `pinia`**：导航用页面注册表 + `goPage()`，全局状态用模块级 `reactive` / `ref` 单例——这是本项目的既定架构。
+- **导航无并发保护**：`goPage` 是异步的且未捕获 `refreshProject()` 异常，快速连点或 `projectTools.load` 抛错会导致页面停在原处，调用方不做错误处理。
+- **`pageNavKey` 递增的代价**：每次导航都销毁重建页面实例，页面内部状态（表单草稿、预览滚动位置等）不保留。
+- **持久化键 `'myapp.projectCtx'` 不可漂移**：生产环境 `file://` 同源，键或字段名改动会导致用户上下文丢失。
+- **存在性判定必须走列表项**：`htmlExists` / `videoExists` 来自 `projectTools.list()` 的 `hasHtml` / `hasVideo`（主进程文件系统检查），`projectTools.load()` 不返回这两项。
+- **`composables` 与 `utils` 的分界（与 `agents.md` 规则 6 一致，当前成立）**：`composables/` 放依赖 Vue 响应式 API 或有状态、带副作用（IPC 订阅、`localStorage`）的复用逻辑，文件名以 `use` 开头（`useAppStore.ts` / `useToast.ts` / `useRenderProgress.ts`，三者都有模块级单例状态）；`utils/` 放无状态纯函数（`escape.ts` / `time.ts` / `rate.ts`，其中 `rate.ts` 只读写传入的 DOM 元素，不持有状态）。跨目录引用这些模块一律走 `@renderer/*` 别名。
+- **`ProjectMeta` 只在共享层定义一处**：`useAppStore.ts` 用 `import type { ProjectMeta } from '@shared/types'` + `export type { ProjectMeta }` 引入并再导出（`project:list` 的条目结构因此与主进程同源）；而 `ProjectState` / `BuiltinProject` 仍是渲染层自己的视图模型（含 `htmlExists` / `videoExists` 这类由列表项推导出来的字段），不要与主进程结构混用。
+- **转义与格式化只在必要时使用**：`escTxt()` 仅用于手工拼 HTML 字符串（`v-html`、动态 `title`），`{{ }}` 插值不要重复转义；`fmtTime`（概览）与 `fmtTimeMs`（时间轴）结果可能不同分钟，不可互换。

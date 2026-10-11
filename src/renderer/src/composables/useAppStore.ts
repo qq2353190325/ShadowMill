@@ -1,6 +1,7 @@
 // composables/useAppStore.ts —— 全局项目状态（原 window.App 的 AppState + refreshProject/switchProject/saveProjectCtx）
 // 模块级 reactive 单例；localStorage key 'myapp.projectCtx' 与结构不变（prod file:// 同源，上下文自动延续）。
 import { computed, reactive, ref } from 'vue'
+import type { ProjectMeta } from '@shared/types'
 
 // ===== 页面键（与菜单 data-page 一致） =====
 export type PageKey = 'home' | 'about' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'video-gen' | 'sound-copy' | 'settings'
@@ -27,15 +28,8 @@ export interface BuiltinProject {
   videoExists: boolean
   subtitle: string
 }
-export interface ProjectMeta {
-  name: string
-  title: string
-  hasSubtitle: boolean
-  hasHtml: boolean
-  hasVideo: boolean
-  subtitleCount: number
-  updatedAt: string
-}
+// project:list 的条目结构来自跨进程契约（shared/types.ts），此处只做再导出，避免两处漂移
+export type { ProjectMeta };
 
 export const appState = reactive({
   currentName: 'demo-project',
@@ -109,6 +103,12 @@ export async function refreshProject(): Promise<void> {
     entry = appState.myProjects.find((p) => p.name === appState.currentName);
   }
   const loaded = await window.projectTools.load(appState.currentName);
+  // 主进程仅在项目名为空（currentName === ''）时返回 null；正常路径恒返回 Project。
+  // 历史实现在这里会直接解引用 null（运行时报错），此处显式兜底为「无当前项目」，由页面走空态。
+  if (!loaded) {
+    appState.project = null;
+    return;
+  }
   appState.project = {
     name: loaded.name,
     title: loaded.title || '字幕动画',

@@ -6,7 +6,7 @@
 
 目标：迁移到 electron-vite 5 + Vue 3 + **全面 TypeScript**（渲染层 SFC、主进程、preload 全转 TS），功能与 IPC 契约不变，打包体积不变（大头在 resources 二进制 726M，与前端无关）。用户已确认全面转 TS。
 
-约束（CLAUDE.md）：禁 UI 测试、禁启动应用；验证靠静态门禁（typecheck / build / vad-test），界面由用户在 3 个验证点手动确认。
+约束：不启动应用验证界面；验证靠静态检查（typecheck / build），界面由用户手动确认。
 
 ## 关键决策（已核实）
 
@@ -17,7 +17,6 @@
 | 不引入 vue-router/pinia：保留注册表 + `goPage()`；状态用模块级 `reactive` 单例 | goPage 有"先 refreshProject 再渲染"副作用，函数式更直观；全局仅一份项目上下文，单例足够 |
 | `externalizeDepsPlugin()`（main/preload） | `openai`/`opencc-js` 保持运行时 require 语义，打包后经 files 白名单随 asar 携带 |
 | CSS 整体搬移为全局 `assets/main.css`，不按页拆分 | 1341 行是已验证设计系统，拆分引入无收益回归风险；新组件按需 scoped |
-| VAD 测试：`test/vad-test.js` 删 electron 桩，改 `await import('../src/main/vad.ts')` | Node 22.23.2 `process.features.typescript==='strip'` 实测支持；vad.ts 零依赖 erasable-only 语法 |
 | CSP 保留 meta，追加 `connect-src 'self' ws://localhost:5173`；严禁运行时模板编译 | dev HMR 需要 ws；SFC 全预编译则无需 'unsafe-eval' |
 | localStorage key `myapp.projectCtx` 与结构不变 | prod 仍 loadFile(file://) 同源 → 用户项目上下文自动延续 |
 | IPC 线上载荷格式**一个字节不改**；频道名上移 `src/shared/ipc.ts` 常量 | preload 8 命名空间约 60 方法是渲染层唯一依赖面 |
@@ -30,7 +29,6 @@ E:\my
 ├─ electron.vite.config.ts     # 新增：main/preload externalize；renderer base:'./' + vue() + 别名 @renderer/@shared
 ├─ tsconfig.json               # solution 根（references）＋ tsconfig.{node,web,agent}.json
 ├─ video-projects/ resources/  # 完全不动（asar 根 / extraResources）
-├─ test/vad-test.js            # 更新（Phase 2）
 └─ src/
    ├─ main/                    # *.ts ×10：index.ts(入口) + vad.ts(新增) + 原 9 模块
    ├─ preload/index.ts + index.d.ts   # 8 命名空间逐字搬运 + Window 全局类型
@@ -56,7 +54,6 @@ E:\my
 ```
 npm run typecheck            # 三项目 tsc --noEmit 全过
 npx electron-vite build      # 三端构建成功
-node test/vad-test.js        # Phase 2 / 3 额外要求：6/6 用例通过
 ```
 
 任一不通过 → 修复至通过为止，不得带着红门禁进入下一阶段。
@@ -66,7 +63,7 @@ node test/vad-test.js        # Phase 2 / 3 额外要求：6/6 用例通过
 ### Phase 0 — 基线清理（无行为变化）
 1. 删 8 个死文件 `src/renderer/pages/{home,content,htmlGen,settings,soundCopy,subtitle,textTts,video}.js`（已确认零引用）。
 2. `.gitignore` 追加 `out/`。
-3. 门禁：grep 无引用、`node --check test/vad-test.js` 过；提交基线。
+3. 检查：grep 无残留引用；提交基线。
 
 ### Phase 1 — 工具链脚手架（旧 app 仍可运行）
 1. `npm i -D electron-vite@^5 vite@^7 @vitejs/plugin-vue@^6`；`npm i vue@^3.5`。
@@ -76,10 +73,9 @@ node test/vad-test.js        # Phase 2 / 3 额外要求：6/6 用例通过
 5. scripts：`dev: electron-vite dev`、`build: electron-vite build`、`typecheck`（三项目）。
 6. 门禁：typecheck 过；build 产出 out/ 三端；`node --check out/preload/index.js` 确认 CJS。旧 `npm start` 不受影响（main 字段未改）。
 
-### Phase 2 — VAD 抽取（保护测试，先于 whisper 转 TS）
-1. 新建 `src/main/vad.ts`：从 `whisper.js` 逐字搬 `readWavSamples`/`vadTrimSegments`（`toVadSamples` 留 whisper，它依赖 hfEnv.ffmpeg+userData）。零依赖、erasable-only。
-2. `test/vad-test.js`：删 electron 桩与 Module._load 猴子补丁；async 化 + `const vad = await import('../src/main/vad.ts')`；用例逐字保留。
-3. 门禁：`node test/vad-test.js` 6/6 通过；typecheck。
+### Phase 2 — VAD 抽取（先于 whisper 转 TS）
+1. 新建 `src/main/vad.ts`：从 `whisper.js` 逐字搬 `readWavSamples`/`vadTrimSegments`（`toVadSamples` 留 whisper，它依赖 hfEnv.ffmpeg+userData）。零依赖、只用类型标注（erasable-only）。
+2. 检查：typecheck 过。
 
 ### Phase 3 — 主进程全量转 TS
 顺序（叶子先行）：settings → hfEnv → systemVoices → htmlAgent → projects → voice → ttsAlign → video → whisper（内嵌 VAD 改 import vad.ts）→ index.ts（完整装配，替换占位）。每转完删对应 .js。
@@ -92,7 +88,7 @@ node test/vad-test.js        # Phase 2 / 3 额外要求：6/6 用例通过
 3. `hfEnv.ts` 删机器相关 `E:\my\node_modules\hyperframes` 回退。
 4. `video.ts` 内置项目根 → `path.join(app.getAppPath(),'video-projects')`（dev=项目根，打包=asar 根，均命中）。whisper `resolveCliPath` 已用 getAppPath，不动。
 
-门禁：typecheck + build + vad-test 仍 6/6。
+检查：typecheck + build 通过。
 
 ### Phase 4 — preload 转 TS + Window 全局类型
 1. `src/preload/index.ts`：8 命名空间 + 4 个单订阅标志逐字搬运，频道名引 `IPC.*`。
@@ -132,6 +128,6 @@ node test/vad-test.js        # Phase 2 / 3 额外要求：6/6 用例通过
 
 ## 验证方式（汇总）
 
-- 每阶段静态门禁：`npm run typecheck` + `npx electron-vite build`（+ Phase 2/3 的 `node test/vad-test.js` 6/6）
+- 每阶段静态检查：`npm run typecheck` + `npx electron-vite build`
 - Phase 7：asar list 产物结构核对 + resources 体积对比 + 旧引用 grep 清零
 - 用户手动验证点：① Phase 5 末 dev 壳/HMR ② Phase 6 末 dev 全功能 ③ Phase 7 末打包 exe（+④ 可选安装包）

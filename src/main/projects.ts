@@ -15,39 +15,27 @@ import { spawn } from 'node:child_process'
 import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './htmlAgent'
 import { BUILTIN_RESOURCES, isHyperframesComposition } from './hfEnv'
 import { IPC } from '../shared/ipc'
-import type { RegisterCtx } from '../shared/types'
+import type {
+  ContentScript,
+  Project,
+  ProjectAgentPayload,
+  ProjectDownloadFilePayload,
+  ProjectExportSrtPayload,
+  ProjectNamePayload,
+  ProjectSaveContentPayload,
+  ProjectSaveHtmlPayload,
+  ProjectSaveSubtitlePayload,
+  ProjectSetAudioPayload,
+  ProjectSetVideoPayload,
+  RegisterCtx,
+  Scene,
+  SubtitleLine
+} from '../shared/types'
 
 // ===== 项目数据结构 =====
-export interface Scene {
-  id: string
-  narration: string
-  visual: string
-  durHint: string
-}
-export interface ContentScript {
-  style: string
-  scenes: Scene[]
-}
-export interface Project {
-  name: string
-  title: string
-  subtitle: string
-  subtitleCount?: number
-  htmlPath: string
-  videoPath: string
-  videoMaterial?: string
-  audioFile: string
-  content: ContentScript
-  createdAt: string
-  updatedAt?: string
-}
-// 字幕行（parseSubtitle 输出）：time/end 为秒（可带小数）
-export interface SubtitleLine {
-  n: number
-  text: string
-  time: number
-  end: number | null
-}
+// 结构定义已上移到 src/shared/types.ts（跨进程单一真源），此处再导出以保持既有引用面：
+// 主进程内部与 `projects.Project` / `./projects` 的旧引用都不受影响，但字段只定义一处。
+export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'
 
 const projectsRoot = path.join(app.getPath('userData'), 'projects');
 
@@ -290,7 +278,7 @@ const HG_PREVIEW_CTRL = [
 ].join('\n');
 
 // 素材选择结果（生成/修改共用）：字幕 / 音频 / 视频引用
-function resolveMaterials(name: string, proj: Project, payload: Record<string, unknown>): { subtitleText: string; audioRef: string; videoRef: string } {
+function resolveMaterials(name: string, proj: Project, payload: ProjectAgentPayload): { subtitleText: string; audioRef: string; videoRef: string } {
   // 字幕：'' = 不使用；'__current__' = 当前项目字幕；其他 = 指定带字幕的项目名
   let subtitleText = '';
   const subSel = payload.subtitleProject;
@@ -358,7 +346,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 保存字幕到当前项目
-  ipcMain.handle(IPC.Project.SaveSubtitle, (_event, payload?: { name?: string; subtitle?: string; title?: string }) => {
+  ipcMain.handle(IPC.Project.SaveSubtitle, (_event, payload?: ProjectSaveSubtitlePayload) => {
     const name = payload && payload.name;
     const subtitle = payload && typeof payload.subtitle === 'string' ? payload.subtitle : '';
     const title = payload && typeof payload.title === 'string' ? payload.title : '';
@@ -375,7 +363,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 整体保存内容脚本（style + scenes）到当前项目
-  ipcMain.handle(IPC.Project.SaveContent, (_event, payload?: { name?: string; content?: unknown }) => {
+  ipcMain.handle(IPC.Project.SaveContent, (_event, payload?: ProjectSaveContentPayload) => {
     const name = payload && payload.name;
     if (!name) return { ok: false, message: '缺少项目名' };
     const content = normalizeContent(payload && payload.content);
@@ -389,7 +377,7 @@ function register(ctx?: RegisterCtx): void {
   // 接入点：handler 收到 { name, prompt } 后调用自定义模型 Agent，
   // Agent 产出/修改 HTML 并写入 projectFilePath(name,'index.html')，
   // 应用侧随后更新 proj.htmlPath、置空 proj.videoPath 并刷新链路。
-  ipcMain.handle(IPC.Project.GenerateHtml, async (event, payload?: Record<string, unknown>) => {
+  ipcMain.handle(IPC.Project.GenerateHtml, async (event, payload?: ProjectAgentPayload) => {
     const name = payload && payload.name as string;
     if (!name) return { ok: false, message: '缺少项目名' };
     const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : '';
@@ -430,7 +418,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 修改：基于现有 HTML，由 Agent 按需求改造后覆盖
-  ipcMain.handle(IPC.Project.ModifyHtml, async (event, payload?: Record<string, unknown>) => {
+  ipcMain.handle(IPC.Project.ModifyHtml, async (event, payload?: ProjectAgentPayload) => {
     const name = payload && payload.name as string;
     if (!name) return { ok: false, message: '缺少项目名' };
     const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : '';
@@ -492,7 +480,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 导出字幕为 .srt 文件（含时间轴，供外部播放器/剪辑软件使用）
-  ipcMain.handle(IPC.Project.ExportSrt, (_event, payload?: { name?: string; srt?: string }) => {
+  ipcMain.handle(IPC.Project.ExportSrt, (_event, payload?: ProjectExportSrtPayload) => {
     const name = payload && payload.name;
     const srt = payload && typeof payload.srt === 'string' ? payload.srt : '';
     if (!String(srt).trim()) return { ok: false, message: 'SRT 内容为空' };
@@ -517,7 +505,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 导出任意文件（内置示例项目 HTML 的只读导出入口）
-  ipcMain.handle(IPC.Project.DownloadFile, (_event, payload?: { srcPath?: string; defaultName?: string }) => {
+  ipcMain.handle(IPC.Project.DownloadFile, (_event, payload?: ProjectDownloadFilePayload) => {
     const src = payload && payload.srcPath;
     const defaultName = (payload && payload.defaultName) || 'export.html';
     if (!src || typeof src !== 'string' || !fs.existsSync(src)) {
@@ -559,7 +547,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 视频渲染完成后，把产物路径回写进项目（供链路状态条点亮“视频”节点）
-  ipcMain.handle(IPC.Project.SaveVideo, (_event, payload?: { name?: string; videoPath?: string }) => {
+  ipcMain.handle(IPC.Project.SaveVideo, (_event, payload?: ProjectSetVideoPayload) => {
     const name = payload && payload.name;
     const videoPath = payload && payload.videoPath;
     if (!name || !videoPath) return { ok: false, message: '参数缺失' };
@@ -583,7 +571,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 把音频复制进项目目录 audio/ 并记录相对引用
-  ipcMain.handle(IPC.Project.SetAudio, (_event, payload?: { name?: string; audioPath?: string }) => {
+  ipcMain.handle(IPC.Project.SetAudio, (_event, payload?: ProjectSetAudioPayload) => {
     const name = payload && payload.name;
     const audioPath = payload && payload.audioPath;
     if (!name) return { ok: false, message: '缺少项目名' };
@@ -597,7 +585,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 移除当前项目音频引用（保留音频文件，避免误删资源）
-  ipcMain.handle(IPC.Project.ClearAudio, (_event, payload?: { name?: string }) => {
+  ipcMain.handle(IPC.Project.ClearAudio, (_event, payload?: ProjectNamePayload) => {
     const name = payload && payload.name;
     if (!name) return { ok: false, message: '缺少项目名' };
     const proj = ensureProject(name);
@@ -620,7 +608,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 把视频复制进项目目录 video/ 并记录相对引用（videoMaterial 与成品 videoPath 字段区分）
-  ipcMain.handle(IPC.Project.SetVideo, (_event, payload?: { name?: string; videoPath?: string }) => {
+  ipcMain.handle(IPC.Project.SetVideo, (_event, payload?: ProjectSetVideoPayload) => {
     const name = payload && payload.name;
     const videoPath = payload && payload.videoPath;
     if (!name) return { ok: false, message: '缺少项目名' };
@@ -635,7 +623,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 移除当前项目视频素材引用（保留视频文件，避免误删资源）
-  ipcMain.handle(IPC.Project.ClearVideo, (_event, payload?: { name?: string }) => {
+  ipcMain.handle(IPC.Project.ClearVideo, (_event, payload?: ProjectNamePayload) => {
     const name = payload && payload.name;
     if (!name) return { ok: false, message: '缺少项目名' };
     const proj = ensureProject(name);
@@ -709,7 +697,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 直接保存（覆盖）项目 HTML 源码，支持"不满意再改"
-  ipcMain.handle(IPC.Project.SaveHtml, (_event, payload?: { name?: string; html?: string }) => {
+  ipcMain.handle(IPC.Project.SaveHtml, (_event, payload?: ProjectSaveHtmlPayload) => {
     const name = payload && payload.name;
     const html = payload && typeof payload.html === 'string' ? payload.html : '';
     if (!name) return { ok: false, message: '缺少项目名' };

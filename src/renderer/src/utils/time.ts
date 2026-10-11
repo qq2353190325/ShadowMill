@@ -1,4 +1,4 @@
-// utils/time.ts —— 时间格式化（合并原 subtitle/index.js 与 textTts/align.js 的重复实现）
+// utils/time.ts —— 时间格式化（合并原 JS 版 subtitle 模块 index.js 与 textTts 模块 align.js 的重复实现）
 // fmtTime：秒 → [分:秒]（四舍五入到秒）
 export function fmtTime(sec: number): string {
   const s = Math.max(0, Math.round(Number(sec) || 0));

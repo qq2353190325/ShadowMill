@@ -11,21 +11,24 @@ import * as settings from './settings'
 import * as projects from './projects'
 import { SYSTEM_VOICES, isSystemVoice } from './systemVoices'
 import { IPC } from '../shared/ipc'
-import type { RegisterCtx, SystemVoice, VoiceProfile, VoiceTTSConfig } from '../shared/types'
+import type {
+  RegisterCtx,
+  SystemVoice,
+  VoiceCreatePayload,
+  VoiceModel,
+  VoiceProfileKeyPayload,
+  VoiceProfilePayload,
+  VoiceProfile,
+  VoiceSaveConfigPayload,
+  VoiceSaveDirPayload,
+  VoiceSynthPayload,
+  VoiceTTSConfig
+} from '../shared/types'
 
 const VOICE_API_BASE = 'https://dashscope.aliyuncs.com/api/v1';
 const VOICE_ENROLL_MODEL = 'qwen-voice-enrollment'; // Qwen-TTS 系列克隆模型，请勿修改
 const VOICE_ENROLL_MODEL_AUDIO = 'voice-enrollment'; // Qwen-Audio-TTS 系列克隆模型
-// 候选模型表（角色：clone=语音复刻/克隆音色合成，system=内置系统音色合成）
-interface VoiceModel {
-  id: string
-  label: string
-  role: string
-  input?: string
-  group?: string
-  isDefault?: boolean
-  series?: string
-}
+// 候选模型表（角色：clone=语音复刻/克隆音色合成，system=内置系统音色合成）；结构见 shared/types.ts 的 VoiceModel
 const VOICE_MODELS: VoiceModel[] = [
   { id: 'qwen-audio-3.0-tts-flash', label: 'qwen-audio-3.0-tts-flash', role: 'clone', input: 'url', group: '语音复刻（克隆音色合成）', isDefault: true },
   { id: 'qwen3-tts-vc-2026-01-22', label: 'qwen3-tts-vc-2026-01-22（非实时）', role: 'clone', input: 'file' },
@@ -196,7 +199,7 @@ function register(ctx?: RegisterCtx): void {
 
   // 返回当前选择的 TTS 保存目录绝对路径（配音页「打开目录」按钮用，无需合成）
   // 与 voice:synth 相同优先级解析：自定义目录 > 音频输出目录 > 所选项目 audio/ > 兜底
-  ipcMain.handle(IPC.Voice.GetSaveDir, (_event, payload?: { saveDir?: string; defaultOut?: boolean; projectName?: string }) => {
+  ipcMain.handle(IPC.Voice.GetSaveDir, (_event, payload?: VoiceSaveDirPayload) => {
     const saveDir = String((payload && payload.saveDir) || '').trim();
     const defaultOut = !!(payload && payload.defaultOut);
     const projectName = String((payload && payload.projectName) || '').trim();
@@ -208,7 +211,8 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, mode: mode, saveDir: dir };
   });
 
-  ipcMain.handle(IPC.Voice.SaveConfig, (_event, payload?: { voiceTTS?: Partial<VoiceTTSConfig> } | Partial<VoiceTTSConfig>) => {
+  // 兼容两种线上形态：{ voiceTTS } 与裸 Partial<VoiceTTSConfig>（历史调用）
+  ipcMain.handle(IPC.Voice.SaveConfig, (_event, payload?: VoiceSaveConfigPayload | Partial<VoiceTTSConfig>) => {
     const raw = settings.readSettings();
     const incoming = (payload && (payload as any).voiceTTS) || payload || {};
     // 与既有配置合并：未传入的字段保留原值（避免「只存 saveDir」时误清空 API Key，也避免设置页保存时覆盖 saveDir）
@@ -236,7 +240,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 创建克隆音色（Qwen-TTS：action=create / Qwen-Audio-TTS：action=create_voice）
-  ipcMain.handle(IPC.Voice.Create, async (_event, payload?: { audioPath?: string; targetModel?: string; preferredName?: string }) => {
+  ipcMain.handle(IPC.Voice.Create, async (_event, payload?: VoiceCreatePayload) => {
     const cfg = getVoiceConfig();
     const noKey = getVoiceApiError(cfg);
     if (noKey) return { ok: false, message: noKey };
@@ -333,7 +337,7 @@ function register(ctx?: RegisterCtx): void {
 
   // 本地音色映射：读取 / 保存 / 删除（key 形如 system:<voice> 或 custom:<voice_id>）
   ipcMain.handle(IPC.Voice.GetProfiles, () => ({ ok: true, profiles: settings.getVoiceProfiles() }));
-  ipcMain.handle(IPC.Voice.SaveProfile, (_event, payload?: { profile?: Partial<VoiceProfile> & { type?: string } }) => {
+  ipcMain.handle(IPC.Voice.SaveProfile, (_event, payload?: VoiceProfilePayload) => {
     const p = (payload && payload.profile) || {};
     const key = String(p.key || '').trim();
     if (!key || !p.voice || !p.targetModel) return { ok: false, message: '映射信息不完整' };
@@ -346,7 +350,7 @@ function register(ctx?: RegisterCtx): void {
     });
     return { ok: true, profiles: settings.getVoiceProfiles() };
   });
-  ipcMain.handle(IPC.Voice.DeleteProfile, (_event, payload?: { key?: string }) => {
+  ipcMain.handle(IPC.Voice.DeleteProfile, (_event, payload?: VoiceProfileKeyPayload) => {
     const key = String((payload && payload.key) || '').trim();
     if (!key) return { ok: false, message: '缺少映射 key' };
     settings.deleteVoiceProfile(key);
@@ -445,7 +449,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 文字合成语音并保存（Qwen-TTS：generation 取 audio.url 下载 / Qwen-Audio-TTS：SpeechSynthesizer 直写音频流）
-  ipcMain.handle(IPC.Voice.Synth, async (_event, payload?: { text?: string; voice?: string; targetModel?: string; projectName?: string; saveDir?: string; defaultOut?: boolean; audioName?: string }) => {
+  ipcMain.handle(IPC.Voice.Synth, async (_event, payload?: VoiceSynthPayload) => {
     const cfg = getVoiceConfig();
     const noKey = getVoiceApiError(cfg);
     if (noKey) return { ok: false, message: noKey };

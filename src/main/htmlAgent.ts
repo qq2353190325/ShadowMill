@@ -7,6 +7,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import OpenAI from 'openai'
 import { getCustomModel } from './settings'
+import type { HtmlAgentProgress } from '../shared/types'
 
 const HTML_AGENT_SYSTEM = [
   '你是专业的 HTML 动画创作者，为桌面创作应用输出完整、独立、可运行的 HTML 单页。',
@@ -48,12 +49,8 @@ function logConversation(entry: Record<string, unknown>): void {
   } catch (e) { /* ignore */ }
 }
 
-export interface AgentProgress {
-  stage: 'connecting' | 'thinking' | 'writing' | 'retry' | 'done'
-  thinkChars: number
-  contentChars: number
-  thinkText: string
-}
+// 进度载荷类型统一取自 shared/types.ts 的 HtmlAgentProgress（⑧ 节）
+export type AgentProgress = HtmlAgentProgress
 
 export interface AgentOpts {
   meta?: { project?: string; action?: string }

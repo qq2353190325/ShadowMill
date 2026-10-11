@@ -2,16 +2,16 @@
 // 无 vue-router：保留注册表模式（goPage = 菜单高亮 → refreshProject → 切换当前组件）。
 // 组件对象不 reactive 化（shallowRef），避免 Vue 代理组件定义。
 import { ref, shallowRef, type Component } from 'vue'
-import { activeMenu, refreshProject, type PageKey } from '../composables/useAppStore'
-import HomePage from './HomePage.vue'
-import AboutPage from './AboutPage.vue'
-import ContentPage from './ContentPage.vue'
-import TextTtsPage from './TextTtsPage.vue'
-import SubtitlePage from './SubtitlePage.vue'
-import HtmlGenPage from './HtmlGenPage.vue'
-import VideoPage from './VideoPage.vue'
-import SoundCopyPage from './SoundCopyPage.vue'
-import SettingsPage from './SettingsPage.vue'
+import { activeMenu, refreshProject, type PageKey } from '@renderer/composables/useAppStore'
+import HomePage from './HomePage/index.vue'
+import AboutPage from './AboutPage/index.vue'
+import ContentPage from './ContentPage/index.vue'
+import TextTtsPage from './TextTtsPage/index.vue'
+import SubtitlePage from './SubtitlePage/index.vue'
+import HtmlGenPage from './HtmlGenPage/index.vue'
+import VideoPage from './VideoPage/index.vue'
+import SoundCopyPage from './SoundCopyPage/index.vue'
+import SettingsPage from './SettingsPage/index.vue'
 
 export const pages: Record<PageKey, Component> = {
   home: HomePage,

@@ -15,7 +15,7 @@ import { synthOne, resolveVoiceModel, voiceFriendlyError } from './voice'
 import { parseSubtitle, type SubtitleLine } from './projects'
 import { BUILTIN_RESOURCES } from './hfEnv'
 import { IPC } from '../shared/ipc'
-import type { RegisterCtx } from '../shared/types'
+import type { AlignProgressPayload, RegisterCtx, VoiceAlignPayload } from '../shared/types'
 
 const MAX_RATE = 1.15; // atempo 加速上限（超过则顺延后续）
 const EPS = 0.05;      // 槽位判定容差（秒，吸收 atempo 帧粒度误差）
@@ -38,13 +38,7 @@ export interface AlignSeg {
   wavPath: string
 }
 
-interface AlignProgressInfo {
-  stage: string
-  index?: number
-  total?: number
-  percent?: number
-  message: string
-}
+// 进度载荷类型统一取自 shared/types.ts 的 AlignProgressPayload（stage: synth | assemble | done | error）
 
 // 秒 → [分:秒]（与 subtitle.js fmtTime 一致：四舍五入到秒）
 function fmtTime(sec: number): string {
@@ -115,7 +109,7 @@ async function genSilence(dur: number, out: string): Promise<void> {
 }
 
 // ===== 逐句合成：TTS → 转 wav → 量时长 =====
-async function synthSentence(taskDir: string, line: SubtitleLine, i: number, total: number, voiceId: string, useModel: string, send: (info: AlignProgressInfo) => void): Promise<{ wavPath: string; dur: number }> {
+async function synthSentence(taskDir: string, line: SubtitleLine, i: number, total: number, voiceId: string, useModel: string, send: (info: AlignProgressPayload) => void): Promise<{ wavPath: string; dur: number }> {
   if (alignCancelled) { const e = new Error('已取消') as Error & { canceled?: boolean }; e.canceled = true; throw e; }
   send({ stage: 'synth', index: i, total, percent: Math.round((i * 100) / total), message: '合成第 ' + (i + 1) + '/' + total + ' 句…' });
   const { buf, ext } = await synthOne(line.text, voiceId, useModel);
@@ -230,7 +224,7 @@ function register(ctx?: RegisterCtx): void {
   ipcMain.on(IPC.Voice.AlignCancel, () => { alignCancelled = true; });
 
   // 逐句合成 + 对齐：payload { projectName, subtitleText, voice, voiceModel, mode, gapSec }
-  ipcMain.handle(IPC.Voice.SynthAligned, async (event, payload?: { projectName?: string; subtitleText?: string; voice?: string; voiceModel?: string; mode?: string; gapSec?: number }) => {
+  ipcMain.handle(IPC.Voice.SynthAligned, async (event, payload?: VoiceAlignPayload) => {
     if (alignRunning) return { ok: false, message: '已有对齐任务进行中，请稍候' };
     const ffmpeg = BUILTIN_RESOURCES.ffmpeg;
     const ffprobe = BUILTIN_RESOURCES.ffprobe;
@@ -251,7 +245,7 @@ function register(ctx?: RegisterCtx): void {
     // 合成模型：优先音色绑定模型，无则按音色解析（含全局默认兜底）
     const useModel = String((payload && payload.voiceModel) || '').trim() || resolveVoiceModel(voiceId, ctx);
 
-    const send = (info: AlignProgressInfo) => {
+    const send = (info: AlignProgressPayload) => {
       if (info && event.sender && !event.sender.isDestroyed()) event.sender.send(IPC.Voice.AlignProgress, info);
     };
     const base = path.join(app.getPath('userData'), 'voice');

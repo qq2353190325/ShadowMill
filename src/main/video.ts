@@ -11,15 +11,15 @@ import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import * as hfEnv from './hfEnv'
 import { IPC } from '../shared/ipc'
-import type { RegisterCtx } from '../shared/types'
+import type {
+  RegisterCtx,
+  VideoPreviewShellPayload,
+  VideoRenderPayload,
+  VideoRenderResult
+} from '../shared/types'
 
-interface RenderPayload {
-  htmlPath?: string
-}
-interface PreviewShellPayload {
-  htmlPath?: string
-}
-type RenderResult = { ok: true; outputVideo: string; projectDir: string } | { ok: false; message: string; compatible?: boolean }
+// 载荷与结果类型统一取自 shared/types.ts（⑦ 节），此处不再重复声明：
+// RenderPayload / PreviewShellPayload / RenderResult（见 VideoRenderPayload / VideoPreviewShellPayload / VideoRenderResult）
 
 function register(ctx?: RegisterCtx): void {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
@@ -52,7 +52,7 @@ function register(ctx?: RegisterCtx): void {
 
   // 生成（复用）"预览外壳"页面：位于目标 HTML 同目录，经本地 hyperframes-player 组件加载
   // composition，提供播放条（controls）与等比缩放，修复"预览只显示一部分/无进度条"问题。
-  ipcMain.handle(IPC.Video.PreviewShell, (_event, payload?: PreviewShellPayload) => {
+  ipcMain.handle(IPC.Video.PreviewShell, (_event, payload?: VideoPreviewShellPayload) => {
     const htmlPath = payload && payload.htmlPath;
     if (!htmlPath || typeof htmlPath !== 'string' || !fs.existsSync(htmlPath)) {
       return { ok: false, message: 'HTML 文件不存在' };
@@ -90,8 +90,8 @@ function register(ctx?: RegisterCtx): void {
     }
   });
 
-  ipcMain.handle(IPC.Video.Render, (event, payload?: RenderPayload) => {
-    return new Promise<RenderResult>((resolve) => {
+  ipcMain.handle(IPC.Video.Render, (event, payload?: VideoRenderPayload) => {
+    return new Promise<VideoRenderResult>((resolve) => {
       const htmlPath = payload && payload.htmlPath;
       if (!htmlPath || !fs.existsSync(htmlPath)) {
         resolve({ ok: false, message: 'HTML 文件不存在' });
@@ -156,7 +156,7 @@ function register(ctx?: RegisterCtx): void {
       });
 
       let finished = false;
-      const done = (res: RenderResult) => {
+      const done = (res: VideoRenderResult) => {
         if (finished) return;
         finished = true;
         resolve(res);

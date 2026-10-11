@@ -6,35 +6,105 @@ AIGC:
     ReservedCode1: n/C5UHkbt+XC6mkpM4VL9VQRQd3Dsoc+VZMHRkeuxPkaoSGJCTttJ/VxjAbsAfX0tg/SXnwD7YjPAQBajvZysJP/9v6lZdO+bUuF2cQaPPsZI+azcbIzv8Sdj84OVjS2y+uPuP7HC4KjfrB2KGVYFYWKmtFZR3OOcddmxIJ5i3grX3KOkEGru7E7hFI=
     ContentPropagator: 001191440300708461136T1XGW3
     PropagateID: f69bc2375915f6bd143015178aac0d6c_566161c2aff911f18874525400287e28
-    ReservedCode2: n/C5UHkbt+XC6mkpM4VL9VQRQd3Dsoc+VZMHRkeuxPkaoSGJCTttJ/VxjAbsAfX0tg/SXnwD7YjPAQBajvZysJP/9v6lZdO+bUuF2cQaPPsZI+azcbIzv8Sdj84OVjS2y+uPuP7HC4KjfrB2KGVYFYWKmtFZR3OOcddmxIJ5i3grX3KOkEGru7E7hFI=
+    ReservedCode2: n/C5UHkbt+XC6mkpM4VL9VQRQd3Dsoc+VZMHRkeuxPkaoSGJCTttJ/VxjAbsAfX0tg/SXnwD7YjPAQBajvZysJP/9v6lZdO+bUuF2cQaPPsZI+azcbIzv8Sdj84OVjSuy+uPuP7HC4KjfrB2KGVYFYWKmtFZR3OOcddmxIJ5i3grX3KOkEGru7E7hFI=
 ---
 
+# MarvisStudio（我的应用）—— 一站式音视频创作流水线
 
+基于 **Electron + Vue 3 + electron-vite + TypeScript** 的桌面应用，以「项目」为粒度，把 **内容脚本 → 配音 → 字幕 → HTML 动画 → 视频** 五个创作节点串成一条完整流水线。每个项目对应本地一个目录，字幕既可由脚本旁白生成，也可用**内置 whisper.cpp 在本机把音频转录成字幕**；视频由 **HyperFrames + FFmpeg 在本机渲染**——语音识别与视频渲染都不消耗 API 额度。
 
-# 我的（My）—— 一站式音视频创作流水线
-
-一个基于 Electron 的桌面应用，以「项目」为粒度，把 **音色管理 → 文字生音频 → 文字转字幕 → 字幕生成 HTML → 转成视频** 五个创作节点串联成一条完整流水线。每个项目对应一个本地目录，字幕既可由脚本旁白生成，也可用**内置 whisper.cpp 在本机把音频转录成字幕**（本地 CPU 推理，不消耗 API 额度）。
+> 工程内知识库（源码级说明、IPC 契约、逐文件文档）见 [`wiki/README.md`](wiki/README.md)；
+> 界面设计规范（深空科技 / Cyber UI 配色与组件风格）见 [`src/renderer/agents.md`](src/renderer/agents.md)；
+> Vue3 + TS 重构的过程记录见 [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md)。
 
 ---
 
 ## 一、项目功能
 
-- **项目化管理**：所有创作围绕一个「项目」实体进行，每个项目对应一个目录，统一存放字幕、HTML、音频、视频产物；可在首页或各页顶部「新建项目」直接创建并切换，首页「我的项目」卡片按 `HTML✓ / 视频✓ / 字幕✓` 标注各项目进度；内置示例项目放在 `video-projects`（只读）。
-- **内容脚本**：为项目编写全局视觉风格与场景分镜（旁白 + 画面分镜 + 时长提示），作为配音、字幕与 HTML 生成共用的内容源。
-- **音色管理**：接入千问AI平台 Qwen-TTS，上传 / 粘贴人声音频即可创建克隆音色；按目标模型自动切换输入方式（qwen-audio-* 粘贴音频 URL、qwen3-tts-vc-* 上传本地文件），并支持本地中文显示名与绑定模型映射管理。
-- **文字生音频**：选择音色按绑定模型合成自然语音，保存到项目 `audio/` 或自定义保存目录；合成结果可试听、可一键设为当前项目背景音频。
-- **文字转字幕**：以条目列表编辑字幕（增删改、时间轴自动接续、保存即落盘），支持两种格式混用：
-  - 纯文本行：自动按语速估算时长；
-  - `[分:秒] 文本`：指定时间轴（如 `[00:05] 大家好`），转视频后精确对齐。
-  - 还可「由脚本旁白生成」，按内容脚本的场景旁白与时长提示批量生成条目。
-- **从音频生成字幕（语音识别转录）**：把**项目音频或任意本地音频**一键转录成带时间轴的字幕。转录在本机 CPU 完成，不消耗 API 额度；支持自动检测 / 中文 / English；完成后可选「替换现有」或「追加到末尾」回填条目，并自动保存到项目。
-- **语音识别模型管理**：「设置 → 语音识别模型」内置四档 whisper.cpp 模型，一键下载（走国内镜像）、删除文件、设为当前使用，并统计各模型本地占用空间；亦可**添加自定义模型**（名称 / 文件名 / 下载地址 / 体积 / 说明），模型目录中未登记的文件会自动列出并引导纳入管理。
-- **字幕生成 HTML（Agent 接口）**：把内容脚本与字幕渲染成精美的 HTML 动画页面。生成与修改均通过**提示词输入框**提交需求，由**自定义模型 Agent**（OpenAI 兼容接口，流式对话）完成，应用侧不内置模板；生成过程实时显示阶段进度与 **AI 思考过程**原文。
-- **HTML 预览**：HTML 生成页内嵌 iframe 实时预览；「视频生成」页同样可预览项目 HTML 并一键转视频。
-- **背景音频**：可选为本项目配置一首背景音乐，Agent 生成 HTML 时会注入为音轨（在索引 `audio/` 下），预览即可听，转视频时自动混入声音。
-- **下载 HTML**：一键把项目当前的 `index.html` 导出到本地任意位置。
-- **转成视频**：复用项目内 HTML，调用 HyperFrames CLI 在后台渲染为 MP4，渲染完成后直接在页面内播放，并支持「在文件夹中显示」定位产物。
-- **链路状态条**：顶部 step-bar 实时显示五个节点（音色管理 → 文字生音频 → 文字转字幕 → 字幕生成 HTML → 转成视频）的完成进度，已完成节点自动点亮，点击可跳转对应页面。
+### 1.1 五个创作节点
+
+```
+① 音色管理   →   ② 配音        →   ③ 字幕            →   ④ 字幕生成 HTML     →   ⑤ 转成视频
+（克隆音色）      （文字生音频 /     （手写 / 脚本生成 /    （自定义模型 Agent      （HyperFrames
+                  逐句对齐配音）      whisper 本机转录）     流式生成，可预览）      渲染 MP4）
+```
+
+| 节点 | 页面 | 要点 |
+|---|---|---|
+| — 内容脚本 | 内容脚本 | 全局视觉风格 + 逐场景「旁白 / 画面分镜 / 时长提示」，是配音、字幕与 HTML 生成共用的内容源 |
+| ① 音色管理 | 音色管理（无侧栏入口，从配音页「管理音色」进入） | 上传 / 粘贴音频创建 Qwen 克隆音色；按目标模型自动切换输入方式；维护本地中文显示名与绑定模型 |
+| ② 配音 | 配音 | 「TTS 合成」与「字幕配音（逐句对齐）」两个 Tab |
+| ③ 字幕 | 字幕生成 | 条目编辑器、`[分:秒]` / `[开始-结束]` 时间轴、SRT 双向编辑与导出、whisper 转录 |
+| ④ HTML | HTML生成 | 提示词驱动 Agent 流式生成 / 修改，内嵌 1920×1080 等比预览 |
+| ⑤ 视频 | 视频生成 | 预览项目 HTML，一键后台渲染 MP4，完成后内嵌播放 |
+| — 设置 | 设置 | 自定义模型 / 千问语音 / 语音识别模型三块配置 |
+
+### 1.2 项目化与链路状态
+
+- 每个项目 = `userData/projects/<项目名>/` 一个目录，统一存放 `project.json`、`subtitle.txt`、`index.html`、`audio/`、`video/`。
+- 首页「我的项目」卡片按 `HTML✓ / 视频✓ / 字幕✓` 标注进度；顶部 **step-bar** 实时显示五节点完成状态，点击可跳转；step-bar 第二行内置**工作项目切换器**（我的项目 / 内置示例）、**新建项目**、**打开目录**，所有节点页都能直接切换。
+- 内置示例项目在 `video-projects/`（**只读**）：`person-video`、`walk-video`，可预览与转视频，编辑类操作会引导切换到「我的项目」。
+
+### 1.3 内容脚本
+
+编辑全局视觉风格与逐场景分镜（旁白 / 画面分镜 / 时长提示），支持添加、上移、下移、删除；保存写入 `project.json` 的 `content`，之后成为配音（「载入脚本旁白」）、字幕（「由脚本旁白生成」）与 HTML 生成（自动附带）的统一内容源。
+
+### 1.4 配音
+
+**Tab A · 文字生音频（TTS 合成）**
+
+- 输入文本 + 选择音色（系统音色 / 我的克隆音色分组）+ 可选文件名（留空自动命名「时间_前五字_音色id」）。
+- **保存位置三选一**：项目 `audio/`（回写 `project.json`）· 自定义目录（持久化记忆）· 音频输出目录（`userData/tts-output`，不写入项目）；旁常驻「打开目录」，无需等合成完成即可打开当前目录。
+- 可「载入脚本旁白」批量填入；合成结果可试听（语速仅改播放速率，不改磁盘音频）。
+- 「已生成音频」区按来源分组列出历史产物，可试听、可一键**设为当前项目背景音频**。
+
+**Tab B · 字幕配音（逐句对齐）**
+
+把字幕逐句合成配音，再按两种模式对齐成一条音轨：
+
+- **重排字幕（音频驱动，默认）**：以每句实测时长重建字幕时间线，句间停顿优先按字幕原有间隔推算、放不下才用「句间停顿（秒）」兜底（0–10 s，默认 0.5）；音频不变速。
+- **修正音频（时间轴驱动）**：字幕时间不变，每句配音摆到其字幕时间点（句间补静音）；槽位放不下先 `atempo` 轻微加速（**上限 1.15 倍**），仍溢出则顺延后续句子并**同步平移后续字幕时间**。
+- 结果区逐句显示字幕起点 / 音频起点 / 实测时长与状态徽标（正常 / 加速 / 顺延 +Ns），可试听单句或整轨；「写入当前项目」把**毫秒精度**的对齐字幕与音轨一起写回项目。
+- 进度两阶段（逐句合成 → 对齐装配），支持取消（句间检查点，当前句合成完成后停止）。
+
+### 1.5 字幕生成
+
+- **条目编辑器**：增删改、时间轴自动接续、字数与总时长统计；`[分:秒]` 精确定时与纯文本行（按语速估时）可混用。
+- **两种写入方式**：「逐条编辑」与「SRT」（标准 SRT 文本域）可互相转换，复制 / 导出 / 保存三个出口都会先应用当前编辑。
+- **复制字幕**：复制纯文本（不含时间线）；**导出 SRT 文件**：保存为标准 `.srt`。
+- **由脚本旁白生成**：按内容脚本的场景旁白与时长提示批量生成条目。
+- **从音频生成字幕**：用内置 whisper.cpp 把项目音频或任意本地音频转录成带时间轴的字幕，可选自动检测 / 中文（简体）/ 中文（繁体）/ English；完成后选「替换现有」或「追加到末尾」回填并自动保存。转录在本机 CPU 完成、不消耗 API 额度。
+
+### 1.6 字幕生成 HTML
+
+- 用**需求描述（提示词）**驱动自定义模型 Agent：可生成，也可在已有 HTML 上「修改 HTML」；生成期间实时显示阶段进度与 **AI 思考过程**原文。
+- **项目素材**可选配并注入提示词：字幕（当前项目 / 其它含字幕项目）、背景音频、视频素材（Agent 会以 `<video>` 引入并用 GSAP 编排播放时段）。
+- **预览**：内嵌 iframe 按 1920×1080 等比缩放，带暂停 / 播放 / 重播与进度条。
+- 可**下载 HTML** 到本地任意位置；HTML 变更后旧的视频产物自动失效。
+- 「自定义素材」区可导入 / 移除背景音频、从已生成音频中设为背景音频、导入 / 移除视频素材，或把视频**原声提取为背景音频**（ffmpeg 转 AAC 192k）。
+
+### 1.7 转成视频
+
+复用项目 `index.html`，调用 HyperFrames CLI 在后台渲染 MP4，渲染日志实时回推为中文阶段文案；完成后页面内嵌播放，并支持「在文件夹中显示」定位产物、路径回写项目并点亮「视频」节点。也可手动「选择 HTML 文件」预览任意本地 HTML。
+
+### 1.8 设置
+
+| 区块 | 配置项 | 说明 |
+|---|---|---|
+| 自定义模型（OpenAI 兼容） | Base URL / 模型 ID / API Key / 启用 | HTML 生成与修改的唯一模型入口；「测试连接」**必须拿到模型文本输出**才算成功 |
+| 千问语音 | API Key / 目标模型 | 音色管理、文字生音频与逐句对齐配音依赖它；候选模型表内置 7 条 |
+| 语音识别模型（whisper.cpp） | 内置 4 档 + 自定义模型 | 下载 / 删除 / 设为当前 / 本地占用统计；可打开模型目录；模型文件不随包分发 |
+
+内置识别档位（**id 与文件名严格一一对应**，`base` 与 `base-q5_1` 是两个独立档位）：
+
+| id | 文件名 | 体积 | 速度 | 适用 |
+|---|---|---|---|---|
+| `tiny-q8_0` | `ggml-tiny-q8_0.bin` | 43.5 MB | 最快 | 快速出稿、长音频粗剪、低配机器 |
+| `base` | `ggml-base.bin` | 148 MB | 快 | 日常转录 |
+| `base-q5_1` | `ggml-base-q5_1.bin` | 59.7 MB | 快 | 常规字幕生成（体积约为 base 的四成） |
+| `small-q8_0` | `ggml-small-q8_0.bin` | 264 MB | 较慢 | 中文准确率明显提升，长音频推荐 |
+
+下载走国内镜像 `hf-mirror.com`，边下边写 `.part`、完成后原子改名，进度实时回推；枚举外的模型文件会列为「未知模型」，可「添加自定义模型」（名称 / 文件名 / 下载地址 / 体积 / 说明）纳入管理。
 
 ---
 
@@ -42,114 +112,132 @@ AIGC:
 
 ### 2.1 技术栈与架构
 
-- **Electron + 原生前端**（HTML / CSS / JS），无第三方 UI 框架。
-- 主进程 `main.js`：装配各业务模块并注册 IPC；`src/main/` 下按职责划分：`settings.js`（设置存储）、`voice.js`（千问语音）、`projects.js`（项目化流水线）、`htmlAgent.js`（自定义模型 Agent）、`video.js`（HyperFrames 转视频）、`whisper.js`（whisper.cpp 字幕转录与模型管理）、`hfEnv.js`（环境探测与内置资源定位）、`systemVoices.js`（内置系统音色表）。
-- 预加载脚本 `preload.js`：通过 `contextBridge` 安全暴露 API：
-  - `projectTools` —— 项目化流水线（list / create / load / saveSubtitle / saveContent / generateHtml / modifyHtml / downloadHtml / downloadFile / readHtml / saveHtml / pickAudio / setAudio / clearAudio / openFolder / openFolderOf / delete / saveVideo），以及 HTML 生成过程的流式进度订阅 onHtmlProgress。
-  - `hfTools` —— HTML 预览与 HyperFrames 转视频（openHtml / listProjects / previewShell / renderVideo / showInFolder / onProgress）。
-  - `voiceTools` —— 千问语音：音色管理 + 文字生音频（getConfig / getSaveDir / saveConfig / pickAudio / pickDir / listGenerated / create / list / listSystemVoices / listAll / listModels / getProfiles / saveProfile / deleteProfile / synth）。
-  - `whisperTools` —— whisper.cpp 字幕转录（status / download / delete / setCurrent / addModel / updateModel / removeModel / openDir / pickAudio / projectAudio / transcribe / onProgress）。
-  - `settingsTools` —— 自定义模型（OpenAI 兼容）设置（get / save / test）。
-  - `windowControls` —— 自绘标题栏的窗口控制。
-- 渲染进程 `src/renderer/`：`app.js` 承担状态、路由与顶部链路状态条（renderStepBar）；`entry.js` 承担左侧菜单导航与窗口控制；`pages/<页面>/` 每个页面一个文件夹（`template.js` DOM 模板 → `App.templates`，`index.js` 逻辑，大页面再拆逻辑模块）；`renderer.css` 承担深空科技风格视觉。
-
-### 2.2 项目目录结构
+- **Electron 31.7.7 + Vue 3.5 + electron-vite 5 + Vite 7 + TypeScript 7**；全量 TS，`main` / `preload` 输出 **CJS**（sandboxed preload 的硬要求，全工程无 `"type": "module"`）。
+- **无 vue-router / pinia**：导航用页面注册表（`src/renderer/src/pages/index.ts`）的 `goPage()`，全局状态为模块级 `reactive` / `ref` 单例（`composables/useAppStore.ts`）。
+- 源码分层：
 
 ```
-userData/projects/<项目名>/
-├── project.json        # 项目元数据（标题、字幕、内容脚本、音频引用、HTML/视频产物路径等）
-├── subtitle.txt        # 字幕文本
-├── index.html          # Agent 生成的 HTML composition
-└── audio/              # 背景音频副本与 TTS 合成结果（可选）
+src/
+├─ main/       主进程 11 个模块（index 装配器 + 10 个业务/工具域，统一 register(ctx) 模式）
+│              index · hfEnv · settings · systemVoices · htmlAgent · projects · voice · ttsAlign · video · whisper · vad
+├─ preload/    index.ts（8 个 contextBridge 命名空间）+ index.d.ts（window.* 类型）
+├─ shared/     ipc.ts（7 组 69 个频道常量）· types.ts（跨进程载荷与 window API 契约）
+├─ renderer/   Vue 界面：index.html · src/{main.ts, App.vue, assets/main.css, components/, composables/, utils/, pages/}
+│              pages/ 一页一目录 9 页：Home · Content · TextTts · Subtitle · HtmlGen · Video · SoundCopy · Settings · About
+└─ agent/      独立 ESM 实验脚本（不进构建图、不打包）
 ```
 
-语音识别模型不放在项目内，而是全局共享在：
+- **IPC 契约单一真源**：频道名集中在 `src/shared/ipc.ts`；所有载荷、结果与进度推送类型集中在 `src/shared/types.ts`；`window.*` 的签名由 `types.ts` 的 `PreloadApi` 统一定义——preload 实现按 `PreloadApi['<命名空间>']` 标注，渲染层通过 `preload/index.d.ts` 挂载同一份契约，两端不会各自漂移。
+- **安全边界**：`contextIsolation: true` + `nodeIntegration: false`；API Key 只留在主进程 `settings.json`；CSP meta 禁 `unsafe-eval`（SFC 全预编译）；渲染层无 `clipboard` 模块（复制经 `app:copy-text` 主进程写入）；文本一律 `textContent` / `escTxt()` 写入防注入；外置程序一律取自随包 `resources/`，`spawn` 用数组参数不经 shell。
+
+### 2.2 运行时数据目录
 
 ```
-userData/whisper/models/  # whisper.cpp 识别模型（ggml-*.bin，按需下载，不打包进应用）
+userData/
+├─ settings.json                 # customModel / voiceTTS / voiceProfiles / whisper 四个分区
+├─ projects/<项目名>/
+│  ├─ project.json               # 项目元数据：title/subtitle/htmlPath/videoPath/audioFile/videoMaterial/content…
+│  ├─ subtitle.txt               # 字幕文本（[开始-结束] 文本，毫秒精度）
+│  ├─ index.html                 # Agent 生成的 HyperFrames composition
+│  ├─ index.preview.html         # 预览副本（剥离 CSP + 注入播放控制脚本）
+│  ├─ audio/                     # 背景音频副本与 TTS 合成结果
+│  └─ video/                     # 视频素材副本
+├─ whisper/models/               # 识别模型（ggml-*.bin，按需下载）
+├─ html-agent/chat.jsonl         # 每次 HTML 生成/修改的完整会话（含思考全文、usage、各阶段耗时）
+├─ voice/align-<时间戳>/         # 逐句对齐任务临时目录（raw/seg/sil + 整轨 WAV），只保留最近一次
+├─ hf-projects/html-video-<时间戳>/  # HyperFrames 渲染工作目录（output.mp4）
+├─ tts-output/                   # 「音频输出目录（不写入项目）」的落点
+└─ preview-protocol.log          # hgpreview:// 协议请求日志，排查预览异常
 ```
-
-内容脚本（`content.style` + 逐场景 `narration / visual / durHint`）随项目元数据存入 `project.json`，作为配音、字幕与 HTML 生成的统一内容源。内置示例项目位于 `E:\my\video-projects`（只读展示）。
 
 ### 2.3 关键技术点
 
-- **音色管理输入联动**：音色管理页按所选目标模型的名称正则切换输入方式 —— `qwen-audio-*`（Qwen-Audio-TTS）显示「粘贴音频 URL」行，`qwen3-tts-vc-*` 系列显示「上传本地文件」行；模型下拉 `change` 事件即时联动，模型列表加载后按当前选中值同步初始态。
-- **TTS 保存位置**：文字生音频页用单个「保存到」下拉合并三种落盘位置 —— 项目 `audio/`（写入 project.json）/ 自定义目录（持久化保存到 settings.json）/ 音频输出目录（不写入项目）。选择「自定义目录」时直接弹出文件夹选择器（取消则回退原选择），已选目录可一键恢复默认；「打开目录」按钮经 `voice:get-save-dir` IPC 直接取得当前选择的保存目录并打开，无需等待合成完成。
-- **转视频**：主进程解析出 Node.js 真实绝对路径（应对 nvm shim / WindowsApps alias 下 `spawn('node')` 不稳定问题），以绝对路径 spawn 运行 `hyperframes.mjs render`；同时把 WinGet 安装的 `Gyan.FFmpeg` 的 bin 目录注入渲染进程的 `env.PATH`，保证 FFmpeg 可用。内置依赖（chrome-headless-shell / node / ffmpeg / hyperframes）优先从打包 `resources` 或项目 `resources/` 目录定位。
-- **HTML 合规校验**：转视频前校验 HTML 是 HyperFrames 合规的 composition —— 需同时包含 `data-composition-id` 与 GSAP `__timelines` 结构。
-- **whisper.cpp 本地转录**：`whisper.js` 以 `child_process.spawn` 调 `whisper-cli.exe`（`-m 模型 -f 音频 -oj 输出 JSON --no-prints -pp`），解析 JSON 的 `transcription.segments` 取出 `{start, end, text}`，再按项目字幕格式转成 `[分:秒] 文本`，因此转录结果与手写字幕无缝混用、可直接参与后续 HTML 生成与转视频。转录不直接写项目文件：由渲染层弹窗按「替换现有 / 追加到末尾」回填条目后统一走 `project:save-subtitle` 落盘。进度分两阶段回推：spawn 后先为「正在加载模型」（不确定态进度条），从 stderr 解析到首个 `whisper_print_progress_callback: progress = N%` 进度行后进入「转录中 N%」（按百分比填充进度条）。
-- **识别模型的「id ↔ 文件名」严格对应**：内置档位与自定义模型各自登记唯一的 `ggml-*.bin` 文件名，识别本地文件时只认登记名，不做前缀或模糊归属推断 —— 因此 `base` 与 `base-q5_1` 是相互独立的档位。枚举外的模型文件一律列为「未知模型」，引导用户「添加自定义模型」纳入管理（自定义条目含名称 / 文件 / 下载地址 / 体积 / 说明，持久化在 settings.json 的 `whisper.customModels`）。
-- **模型下载**：模型文件不打包进应用，首次使用时按需下载（`https://hf-mirror.com/ggerganov/whisper.cpp` 国内镜像，规避 GitHub 直链超时），边下边写 `.part`、进度节流回推（`whisper:progress`），完成后原子 rename；下载失败清理残片。`whisper-cli.exe` 及其 DLL 由打包 `extraResources` 携带，开发运行则从项目 `resources/whisper/` 定位。
-- **生成过程流式反馈**：HTML 生成/修改通过 SSE 流式接收，按 `connecting → thinking → writing → retry → done` 分阶段回推（`project:html-progress`），页面既显示阶段文案也实时滚动展示模型 `reasoning_content` 思考原文。推理模型可能把 `max_tokens` 全耗在思考阶段导致 `content` 为空，此时按 `32768 → 65536` 自动升档重试，仍失败则抛出带 `usage` 的诊断错误。
-- **对话记录落盘**：每次 HTML 生成/修改的完整会话以 JSONL 追加写入 `userData/html-agent/chat.jsonl`（一行一次会话，含项目名、generate/modify 动作、模型与 Base URL）。每行含 `messages`（system + user 完整输入）与 `attempts` 数组——**每档 max_tokens 尝试的完整思考原文（`reasoning_content` 全文）、完整输出、`finish_reason`、`usage`（token 用量）与各阶段耗时（总耗时 / 首 token 等待 / 纯思考时长 / 输出时长）**，升档重试的每一档都会记录，供事后分析每次生成的优化空间；记录失败静默忽略，不影响主流程。
-- **CSP 与安全**：iframe 预览使用 `sandbox="allow-scripts allow-same-origin"`；字幕文本一律用 `textContent` 写入，防注入。
+- **TTS 保存位置**：由渲染层显式传入（`项目 audio/` / 自定义目录 / 音频输出目录），主进程按 `saveDir → defaultOut → 项目 audio/ → 兜底` 解析；只有真正写入项目 `audio/` 时才回写 `project.json`。
+- **逐句对齐配音**：逐句合成后统一转 24 kHz 单声道（避开 mp3 头尾 padding 的时间漂移）→ ffprobe 量实测时长 → 按模式重排/摆放 → 静音拼接 + `-c copy` **零重编码**装配整轨 → 整轨时长终验（与末句终点偏差 > 0.3 s 即判失败）。模式 B 的加速上限 1.15 倍，加速后必须重新量时长（吸收帧粒度误差）。
+- **whisper 本地转录**：`spawn whisper-cli.exe -m 模型 -f 音频 -oj --no-prints -pp`，从 stderr 抓进度行；非 CLI 原生支持的格式先经内置 ffmpeg 转 16 kHz WAV；中文自动繁→简（opencc-js，失败降级保留原文）；解析 `transcription.segments` 后转为项目的 `[开始-结束]` 毫秒精度字幕，与手写字幕无缝混用。
+- **VAD 静音裁剪**：转录后对每段做能量 VAD，把结束时间收敛到**实际语音结束**（前导 ≥0.4 s、尾随 ≥0.15 s 才裁剪，只收敛不放大、相邻段至少留 0.05 s）；纯函数模块、无参数无开关，失败静默跳过、不阻断转录。
+- **模型管理**：id 与文件名严格一一对应，不做前缀 / 模糊归属推断；下载走国内镜像、边下边写 `.part`、完成后同目录原子改名，断网或中断不会留下「看似已下载」的坏档。
+- **HTML 生成流式反馈**：按 `connecting → thinking → writing → retry → done` 分阶段回推（300 ms 节流），实时滚动展示模型思考原文（末 2 万字符）；推理模型把配额耗在思考阶段导致输出为空或被截断时，自动按 **32768 → 65536** 升档重试；每次生成/修改的完整会话写入 `html-agent/chat.jsonl`（含每档尝试的思考全文、`finish_reason`、`usage` 与各阶段耗时），供事后分析。
+- **HTML 合规校验**：转视频前要求源码同时命中 `data-composition-id` / `__timelines` / `gsap` 三个特征（启发式文本匹配）；生成侧只提示不阻断，转视频侧是硬门槛。
+- **转视频**：把 Node 解析为真实绝对路径（规避 nvm shim / WindowsApps alias），把内置 FFmpeg 的 bin 注入渲染进程 `PATH`，并指定内置 chrome-headless-shell，避免渲染时重新下载浏览器。
+- **预览协议 `hgpreview://`**：dev 下渲染层来自 http 源，Chromium 会拦截 `file://` iframe，故预览统一走自定义协议 `hgpreview://p/<项目名>/<相对路径>`；主进程把 URL 映射回项目目录内的文件，并做目录穿越校验（解析后必须位于该项目目录内），显式给出 MIME、`Cache-Control: no-store`，失败落盘日志便于排查。
 
 ---
 
 ## 三、流水线流程
 
-```
-① 音色管理  →  ② 文字生音频  →  ③ 文字转字幕  →  ④ 字幕生成 HTML  →  ⑤ 转成视频
-  (克隆音色/留档)     (文字合成语音)   (whisper 音频转录 或 手写/脚本生成)  (渲染动画页面)   (导出 MP4)
-```
+1. **内容脚本**：写全局风格与逐场景旁白 / 画面 / 时长（可选，但建议——它是后续三步的共同内容源）。
+2. **配音**：文字生音频合成语音；或用「逐句对齐」按字幕生成对齐配音。（可选节点）
+3. **字幕**：手写条目、`[分:秒]` 定时、由脚本旁白生成，或用 whisper 从音频转录；可导出 / 复制 SRT。保存后点亮「字幕」节点。
+4. **HTML 生成**：在提示词框描述想要的效果（可附带字幕 / 背景音频 / 视频素材），Agent 生成或修改 `index.html` 并刷新预览；满意后可下载 HTML。
+5. **转成视频**：预览项目 HTML 并一键转换，完成后内嵌播放并显示产物位置，路径回写项目、点亮「视频」节点。
 
-1. **音色管理**：克隆音色 / 音色改名与绑定模型（可选节点）。
-2. **文字生音频**：输入文字合成自然语音（可选节点）。
-3. **文字转字幕**：在「字幕生成」页编辑字幕条目（纯文本自动估时，或 `[分:秒]` 精确定时）；编辑支持「逐条编辑 / SRT」两种写入方式（SRT 为单文本域、标准 SRT 字幕格式：序号 / 时间轴 / 文本，块间空行分隔），并可一键「复制字幕」（复制的文本不含时间线）；也可点「由脚本旁白生成」按内容脚本批量生成，或点「从音频生成字幕」用 whisper.cpp 把项目音频转录成带时间轴的字幕（转录完可选替换或追加），保存后点亮「字幕」节点。
-4. **字幕生成 HTML**：在「HTML 生成」页打开对话框，描述想要的效果，提交给 Agent；Agent 生成/修改 HTML 写回项目并刷新预览；如需背景音乐，先选好音频再让 Agent 带上音轨。满意后可「下载 HTML」。
-5. **转成视频**：在「视频生成」页预览项目 HTML 并一键转换（后台渲染），完成后内嵌播放并显示产物文件位置。
-
-整个链路围绕同一个「项目」实体共享状态，各页面顶部 step-bar 实时反映进度，避免了「选 HTML 文件」这类割裂操作。
+整条链路围绕同一个「项目」实体共享状态，避免「选 HTML 文件」这类割裂操作。
 
 ---
 
 ## 四、HTML 由自定义模型 Agent 实现（重要说明）
 
-- **生成**：HTML 不再由应用内置模板生成。在「HTML 生成」页填写需求描述（提示词输入框），可选配**字幕**与**背景音频**素材后点击 **生成 HTML**，应用把需求描述连同当前项目内容脚本（旁白 / 画面分镜 / 时长）与所选素材一起提交给自定义模型 Agent；Agent 产出符合规范（含 `data-composition-id` 与 GSAP `__timelines`）的 HTML，写回项目 `index.html`，应用刷新预览并点亮链路节点。
-- **修改**：项目已有 HTML 后点击 **修改 HTML**，Agent 基于当前 `index.html` 源码按修改诉求改造，覆盖项目 `index.html` 并刷新预览，同时置空失效的旧视频产物。不需要源码兜底编辑，应用不内置生成逻辑。
-- **Agent 接入（已实装）**：主进程 `htmlAgent.js` 实现 `chatWithCustomModel` —— 优先经 OpenAI 兼容客户端（`openai` 依赖），回退直接请求 `${baseUrl}/chat/completions`，**两条路径均走 `stream: true` 流式接收**，边收边按阶段回调 `onProgress`（`connecting / thinking / writing / retry / done`，含思考与输出字符数）；系统提示词约束输出完整、独立、符合 HyperFrames composition 规范的 HTML，并从回复中提取 HTML（兼容 Markdown 代码块包裹）。
-- **输出为空的升档重试**：推理模型可能把 `max_tokens` 全部消耗在 `reasoning_content` 上，导致 `content` 为空且 `finish_reason === 'length'`。此时自动按 `32768 → 65536` 升档重试；仍无内容则抛出带 `usage` 的诊断错误，便于判断是配额问题还是模型/网关异常。
-- **模型配置**：在「设置」页配置自定义模型（Base URL / 模型 ID / API Key / 启用），提供「测试连接」按钮验证 —— 必须拿到模型返回的文本才算连接成功，避免把「接口通了但模型不产出」误判为可用；API Key 仅保存在本机 `userData/settings.json`，不明文外传。自定义模型未启用或配置不完整时，生成/修改接口返回明确错误提示。
-- **应用侧职责**：仅负责 UI（需求输入 / 素材选配 / 预览 / 链路状态）、文件落盘、下载导出与转视频调度；生成与修改的具体魔法由 Agent 完成。主进程 `project:generate-html` / `project:modify-html` 收到 `{ name, prompt, subtitleProject, audioPath }` 后调用 Agent，回写 HTML 后更新 `htmlPath` 并置空失效的 `videoPath`，同时做 HyperFrames 合规校验并返回 `compatible` 提示。
+- **生成**：应用不内置 HTML 模板。填写需求描述（可选配字幕 / 背景音频 / 视频素材）后，主进程把需求连同当前项目**内容脚本**（旁白 / 画面 / 时长）与素材一起提交给自定义模型；Agent 产出符合行业规范（含 `data-composition-id` 与 GSAP `__timelines`）的 HTML，写回项目 `index.html`，应用刷新预览并点亮节点。
+- **修改**：已有 HTML 时，Agent 基于当前源码按修改诉求改造，覆盖写回、刷新预览，并置空失效的旧视频产物。
+- **接入方式**：优先走 `openai` SDK，不可用时回退直接请求 `${baseUrl}/chat/completions`，**两条路径都是 `stream: true` 流式接收**，边收边按阶段回调。
+- **输出为空的升档重试**：`max_tokens` 全被思考阶段消耗导致输出为空或被截断时自动升档（32768 → 65536）；仍失败则抛出带 `usage` 的诊断错误，便于区分配额问题与网关异常。
+- **模型配置**：设置页配置 Base URL / 模型 ID / API Key / 启用，「测试连接」必须拿到模型文本输出才算通过；API Key 仅保存在本机 `settings.json`，由主进程读取、不经渲染层外传。
+- **应用侧职责**：UI（需求输入 / 素材选配 / 预览 / 链路状态）、文件落盘、导出与转视频调度；生成与修改的具体创作交给 Agent。
 
 ---
 
-## 五、当前进度
-
-### 已完成
-
-- **五节点流水线全链路贯通**：内容脚本（辅助数据源）→ 音色管理 → 文字生音频 → 文字转字幕 → 字幕生成 HTML → 转成视频；链路状态条 step-bar 实时反馈各节点完成状态，点击可跳转对应页面。
-- **① 音色管理（已完整）**：接入千问AI平台 Qwen-TTS 克隆音色（pages/soundCopy/ / voice.js）。按目标模型自动联动输入方式：`qwen-audio-*`（Qwen-Audio-TTS）显示「粘贴音频 URL」行、`qwen3-tts-vc-*` 系列显示「上传本地音频文件」行（applyInputMode 正则切换）；可创建克隆音色、拉取云端音色列表，并为任意音色维护本地中文显示名与绑定合成模型（映射仅存本机 settings.json）。
-- **② 文字生音频（已完整）**：按所选音色绑定的模型调用千问 TTS 合成语音（pages/textTts/ / voice.js）。「保存到」下拉合并项目 `audio/`、自定义目录（持久化记忆）、音频输出目录三选一，旁常驻「打开目录」按钮（`voice:get-save-dir` IPC，无需等合成完成即可打开当前选择的保存目录）；合成成功提示按实际落盘位置回报（项目 / 自定义目录 / 音频输出目录）；「已生成音频」区按来源分组列出历史 TTS 音频，可试听、可一键设为当前项目背景音频；「合成结果」卡紧邻合成区展示产物路径并可打开所在目录；支持「载入脚本旁白」与带语速调节的双区域试听（仅改播放速率，不改磁盘音频）。
-- **③ 文字转字幕（已完整）**：条目列表式字幕编辑器（增删改、时间轴自动接续、字数统计），支持纯文本自动估时与 `[分:秒]` 精确定时、两种格式混用；可「由脚本旁白生成」按场景旁白与时长提示逐条生成；保存后链路「字幕」节点点亮（pages/subtitle/ / projects.js）。
-- **③+ 从音频生成字幕（已完整）**：内置 whisper.cpp 本地转录（whisper.js / pages/subtitle/transcribe.js）。转录弹窗可选「使用项目音频」或「浏览本地文件」、选识别语言（自动检测 / 中文 / English），带进度条与阶段状态；完成后「替换现有」或「追加到末尾」回填条目并自动保存。转录在本机 CPU 完成、不消耗 API 额度。
-- **语音识别模型管理（已完整）**：设置页「语音识别模型」区块（pages/settings/whisper.js / whisper.js）。四档内置模型（tiny-q8_0 / base / base-q5_1 / small-q8_0）下载 / 删除 / 设为当前使用 / 本地占用统计，走国内镜像下载并实时回推进度；支持添加、编辑、移除自定义模型，并可一键打开模型目录或 whisper-cli 所在目录。
-- **④ 字幕生成 HTML（已完整）**：HTML 由自定义模型 Agent 流式生成/修改（pages/htmlGen/ / htmlAgent.js / projects.js），不再依赖内置模板；生成期间实时显示阶段进度（连接 / 推理 / 生成 / 重试）与 AI 思考过程原文，输出为空时自动升档重试；可选用字幕素材（当前项目/其他项目）与背景音频（自动复制进项目 `audio/`）；生成后刷新预览、点亮链路节点；可下载 HTML 到本地；修改后旧视频产物自动置空。
-- **⑤ 转成视频（已完整）**：预览外壳 + HyperFrames 后台渲染（video.js / projects.js / hfEnv.js），Node 绝对路径启动 CLI、FFmpeg PATH 注入，渲染进度实时推送；完成后内嵌播放 + 「在文件夹中显示」，产物路径回写项目并点亮「视频」节点。
-- **内容脚本（已完整）**：全局视觉风格 + 场景分镜（旁白 / 画面分镜 / 时长提示）编辑保存（pages/content/），作为配音、字幕与 HTML 生成共用的内容源。
-- **项目创建与切换（已完整）**：新增 `project:create` IPC（项目名校验 + 写 `project.json`）；顶部步骤条内置全局「工作项目」切换器（我的项目 / 内置示例）+ 新建项目，所有节点页均可直接切换（app.js renderStepBar）；首页「我的项目」卡片区按 `HTML✓ / 视频✓ / 字幕✓` 标注进度（pages/home/ / projects.js）。
-- **设置与配置（已完整）**：设置页支持自定义模型（OpenAI 兼容，Base URL / 模型 ID / API Key / 启用 + 测试连接）、千问语音（API Key / 目标模型 / 自定义保存目录）与语音识别模型（whisper.cpp 模型档位管理）三块配置（pages/settings/）。
-- **内置示例与打包**：`video-projects` 内置示例项目（只读，可预览 / 转视频）；electron-builder 打包配置完备，`resources/` 下的 node / ffmpeg / whisper-cli 及依赖 DLL 经 `extraResources` 随应用携带（识别模型体积大，改为首次使用时按需下载）；git 仓库已多次提交，README 与代码保持同步。
-
-### 说明
-
-- 内置示例项目只读，进入各页时会提示切换到「我的项目」后再编辑。
-- 首次使用需在「设置」页配置千问语音 API Key（用于音色管理 / 文字生音频）与自定义模型（用于 HTML 生成 / 修改）；若要用「从音频生成字幕」，还需在「设置 → 语音识别模型」下载并设为当前使用一个识别模型。
-- 语音识别模型文件不随应用打包，首次使用时按需下载到 `userData/whisper/models/`；`whisper-cli.exe` 及依赖 DLL 随应用携带（开发运行从项目 `resources/whisper/` 读取）。
-
----
-
-## 六、运行
+## 五、运行与依赖
 
 ```bash
 cd E:\my
-npm install        # 首次安装 Electron 等依赖
-npm start          # 启动应用（或用 electron .
+npm install
+
+npm run dev        # 开发：起 Vite dev server（127.0.0.1:5173）+ Electron，渲染层 HMR
+npm run build      # 构建三端产物到 out/
+npm start          # 以构建产物启动（= electron-vite preview，需先 npm run build）
+npm run typecheck  # 三份 tsconfig 串行类型检查
+npm run pack       # build + electron-builder --dir（免安装解包目录）
+npm run dist       # build + electron-builder --win（NSIS 安装包）
 ```
 
-> 转视频依赖：Node.js >= 22（HyperFrames CLI）、HyperFrames CLI（`hyperframes.mjs`，可用环境变量 `HYPERFRAMES_CLI` 指定路径）、FFmpeg（WinGet 安装 `Gyan.FFmpeg`）。
-> 字幕转录依赖：`resources/whisper/whisper-cli.exe`（含依赖 DLL，已随仓库/打包携带）+ 一个已下载的 ggml 识别模型（在应用内下载，无需自备）。
+**外部依赖**
 
-首次启动后，请先到「设置」页完成配置：① 千问语音 API Key 与目标模型（供音色管理 / 文字生音频）；② 自定义模型 Base URL / 模型 ID / API Key 并启用（供 HTML 生成 / 修改），保存后可用「测试连接」验证；③ 如需字幕转录，在「语音识别模型」区块下载一个识别模型并「设为当前使用」。
-*（内容由AI生成，仅供参考）*
+- **Node.js ≥ 22**：HyperFrames CLI 需要；优先使用随包 `resources/node/node.exe`，否则解析系统 Node 真实路径。
+- **HyperFrames CLI**：优先用内置 `resources/hyperframes/`（含 chrome-headless-shell），也可用环境变量 `HYPERFRAMES_CLI` 指定。
+- **FFmpeg / FFprobe**：内置 `resources/ffmpeg/bin/`，同时会探测 WinGet 安装的 `Gyan.FFmpeg` 并注入 `PATH`。
+- **whisper-cli.exe**：内置 `resources/whisper/`（含依赖 DLL）；**识别模型文件不随包分发**，在应用内按需下载。
+
+**首次使用配置**（设置页）
+
+1. **自定义模型**：填 Base URL / 模型 ID / API Key 并启用（HTML 生成/修改的唯一入口）。
+2. **千问语音**：填 DashScope API Key、选目标模型（音色管理与配音依赖它）。
+3. **语音识别模型**：确认 `whisper-cli.exe：已就绪`，下载至少一个档位并「设为当前使用」（要转录才需要）。
+
+---
+
+## 六、当前进度
+
+### 已完成
+
+- **五节点流水线全链路贯通**：内容脚本 → 配音 → 字幕 → HTML → 视频；step-bar 实时反馈完成状态、可点击跳转、内置工作项目切换器与新建项目。
+- **① 音色管理**：克隆音色创建（按模型自动切换「粘贴 URL / 上传文件」）、系统音色表、云端克隆列表、本地显示名与绑定模型映射管理。
+- **② 配音**：TTS 合成（保存位置三选一、载入脚本旁白、试听与语速调节、历史音频复用、设为背景音频）+ **字幕配音逐句对齐**（双模式、加速/顺延、进度与取消、结果明细、写回项目）。
+- **③ 字幕**：条目编辑器（时间轴自动接续）、逐条编辑 / SRT 双向、复制字幕、导出 SRT、由脚本旁白生成、whisper 本机转录（替换 / 追加、两阶段进度）。
+- **语音识别模型管理**：内置 4 档 + 自定义模型的下载 / 删除 / 设为当前 / 占用统计，镜像下载与原子落盘。
+- **④ 字幕生成 HTML**：Agent 流式生成 / 修改、思考过程实时展示、输出为空自动升档重试、素材注入、1920×1080 等比预览与播放控制、下载 HTML、会话记录落盘。
+- **⑤ 转成视频**：合规校验、预览外壳、HyperFrames 后台渲染与中文进度文案、内嵌播放、在文件夹中显示、产物回写。
+- **项目化**：创建 / 切换 / 删除、字幕与内容脚本保存、背景音频与视频素材管理（含提取原声）、内置只读示例、`hgpreview://` 预览协议。
+- **工程化**：TypeScript 全量覆盖（`npm run typecheck` 全绿）、IPC 载荷类型集中在 `shared/types.ts` 并作为 `window.*` 的单一真源、CSP/sandbox/contextIsolation 安全边界、electron-builder 打包配置完备（内置运行时经 `extraResources` 携带）。
+
+### 已知限制与说明
+
+- **生成的 HTML 依赖外网 CDN 引入 GSAP**（提示词要求 `cdn.jsdelivr.net/npm/gsap`），完全离线环境下预览 / 渲染可能失败。
+- **识别模型不随包分发**：首次转录前必须在设置页下载模型，`whisper-cli.exe` 缺失会直接阻塞转录。
+- **VAD 静音裁剪无开关**：阈值与窗口为固定常量，背景噪声较大时可能整体不生效（保守行为）。
+- **对齐配音**：单句最多加速到 1.15 倍，超出靠顺延；末句无槽位、不加速也不顺延；同一时刻只允许一个对齐任务，取消是句间软中断（当前句的合成请求不会被打断）。
+- **本地音频格式**：whisper-cli 原生只支持 flac/mp3/ogg/wav（其它格式会先自动转码）；克隆音色上传的本地音频 Base64 后需小于 10 MB；VAD 只解析 16 bit PCM WAV。
+- **API Key 以明文保存在本机 `userData/settings.json`**，仅主进程读取，不会外传；如需更高安全性可后续接入 Electron `safeStorage` 加密。
+- **内置示例只读**：进入各页编辑时会提示切换到「我的项目」。
+
 *（内容由AI生成，仅供参考）*

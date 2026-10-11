@@ -16,7 +16,17 @@ import * as settings from './settings'
 import { BUILTIN_RESOURCES } from './hfEnv'
 import { readWavSamples, vadTrimSegments, type VadSegment } from './vad'
 import { IPC } from '../shared/ipc'
-import type { RegisterCtx, WhisperCustomModel } from '../shared/types'
+import type {
+  RegisterCtx,
+  WhisperAddModelPayload,
+  WhisperCustomModel,
+  WhisperIdPayload,
+  WhisperOpenDirPayload,
+  WhisperProgressPayload,
+  WhisperProjectAudioPayload,
+  WhisperTranscribePayload,
+  WhisperUpdateModelPayload
+} from '../shared/types'
 
 // ===== whisper.cpp 模型档位枚举（ggml 格式）=====
 // 枚举规则：id ↔ 文件名严格一一对应登记，只认各自登记的文件名，不做前缀/模糊归属推断，
@@ -396,14 +406,7 @@ function loadT2s(): ((t: string) => string) | null {
   return t2sConverter;
 }
 
-interface WhisperProgressPayload {
-  id?: string
-  stage: string
-  percent?: number
-  receivedBytes?: number
-  totalBytes?: number
-  message: string
-}
+// 进度载荷类型统一取自 shared/types.ts（⑧ 节），此处不再重复声明
 
 function register(ctx?: RegisterCtx): void {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
@@ -447,7 +450,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 下载模型（带进度回推 whisper:progress）；一次仅允许一个下载任务
-  ipcMain.handle(IPC.Whisper.Download, async (_event, payload?: { id?: string }) => {
+  ipcMain.handle(IPC.Whisper.Download, async (_event, payload?: Partial<WhisperIdPayload>) => {
     const id = payload && payload.id;
     const meta = findModel(String(id || ''));
     if (!meta) return { ok: false, message: UNKNOWN_MODEL_MSG + (id || '(空)') };
@@ -465,7 +468,7 @@ function register(ctx?: RegisterCtx): void {
       const url = meta.url || (MODEL_BASE_URL + meta.file);
       emit({ id: String(id), stage: 'downloading', percent: 0, receivedBytes: 0, totalBytes: 0, message: '开始下载 ' + meta.label + '…' });
       const received = await downloadFile(url, partPath, (info) => {
-        emit(Object.assign({ id: String(id), stage: 'downloading', message: '下载中 ' + info.percent + '%' }, info));
+        emit(Object.assign({ id: String(id), stage: 'downloading' as const, message: '下载中 ' + info.percent + '%' }, info));
       });
       const sizeBytes = fs.statSync(partPath).size;
       fs.renameSync(partPath, finalPath);
@@ -482,7 +485,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 删除已下载模型文件（可重新下载）
-  ipcMain.handle(IPC.Whisper.Delete, (_event, payload?: { id?: string }) => {
+  ipcMain.handle(IPC.Whisper.Delete, (_event, payload?: Partial<WhisperIdPayload>) => {
     const id = payload && payload.id;
     const meta = findModel(String(id || ''));
     if (!meta) return { ok: false, message: UNKNOWN_MODEL_MSG + (id || '(空)') };
@@ -497,7 +500,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 设为「当前使用的识别模型」（已下载才允许，持久化到 userData/settings.json 的 whisper.modelId）
-  ipcMain.handle(IPC.Whisper.SetCurrent, (_event, payload?: { id?: string }) => {
+  ipcMain.handle(IPC.Whisper.SetCurrent, (_event, payload?: Partial<WhisperIdPayload>) => {
     const id = payload && payload.id;
     const meta = findModel(String(id || ''));
     if (!meta) return { ok: false, message: UNKNOWN_MODEL_MSG + (id || '(空)') };
@@ -510,7 +513,7 @@ function register(ctx?: RegisterCtx): void {
 
   // ===== 自定义模型（用户起名 + 自定义下载源；条目写 settings.json，模型文件仍存 modelsDir）=====
   // 添加自定义模型
-  ipcMain.handle(IPC.Whisper.AddModel, (_event, payload?: { name?: string; file?: string; url?: string; desc?: string; sizeMB?: number }) => {
+  ipcMain.handle(IPC.Whisper.AddModel, (_event, payload?: WhisperAddModelPayload) => {
     const p = payload || {};
     const name = String(p.name || '').trim();
     const file = String(p.file || '').trim();
@@ -529,7 +532,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 编辑自定义模型：可改名称 / 下载地址 / 体积 / 说明；文件名与 id 固定不变
-  ipcMain.handle(IPC.Whisper.UpdateModel, (_event, payload?: { id?: string; name?: string; url?: string; desc?: string; sizeMB?: number | string }) => {
+  ipcMain.handle(IPC.Whisper.UpdateModel, (_event, payload?: WhisperUpdateModelPayload) => {
     const p = payload || {};
     const id = String(p.id || '');
     const meta = findModel(id);
@@ -552,7 +555,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 移除自定义模型条目（仅从枚举中移除，不删除本地已下载的模型文件）
-  ipcMain.handle(IPC.Whisper.RemoveModel, (_event, payload?: { id?: string }) => {
+  ipcMain.handle(IPC.Whisper.RemoveModel, (_event, payload?: Partial<WhisperIdPayload>) => {
     const id = String((payload && payload.id) || '');
     const meta = findModel(id);
     if (!meta) return { ok: false, message: UNKNOWN_MODEL_MSG + (id || '(空)') };
@@ -565,7 +568,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 打开模型目录 / whisper-cli 所在目录（资源管理器定位，便于用户手动放置 cli 或查看已下载模型）
-  ipcMain.handle(IPC.Whisper.OpenDir, async (_event, payload?: { which?: string }) => {
+  ipcMain.handle(IPC.Whisper.OpenDir, async (_event, payload?: WhisperOpenDirPayload) => {
     const which = (payload && payload.which) || 'models';
     let target = modelsDir();
     if (which === 'cli') {
@@ -582,7 +585,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 读取当前项目内的音频（供「从音频生成字幕」弹窗的「使用项目音频」）
-  ipcMain.handle(IPC.Whisper.ProjectAudio, (_event, payload?: { name?: string }) => {
+  ipcMain.handle(IPC.Whisper.ProjectAudio, (_event, payload?: Partial<WhisperProjectAudioPayload>) => {
     const name = payload && payload.name;
     if (!name) return { ok: false, message: '未指定项目' };
     const proj = projects.ensureProject(name) || {} as projects.Project;
@@ -608,7 +611,7 @@ function register(ctx?: RegisterCtx): void {
 
   // 转录：spawn whisper-cli → 解析 JSON → 返回 [{start,end,text}] 与 [分:秒] 字幕文本
   // 不直接写项目文件：由渲染层弹窗按「替换现有 / 追加到末尾」回填条目列表后统一走 project:save-subtitle 落盘
-  ipcMain.handle(IPC.Whisper.Transcribe, async (_event, payload?: { id?: string; audioPath?: string; language?: string }) => {
+  ipcMain.handle(IPC.Whisper.Transcribe, async (_event, payload?: WhisperTranscribePayload) => {
     const id = (payload && payload.id) || settings.getWhisperModel();
     const audioPath = payload && payload.audioPath;
     const language = (payload && payload.language) || 'auto';

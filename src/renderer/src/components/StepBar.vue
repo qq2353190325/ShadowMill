@@ -39,9 +39,9 @@ import { computed, nextTick, ref } from 'vue'
 import {
   appState, hasAudio, hasContent, hasHtml, hasSubtitle, hasVideo,
   refreshProject, switchProject, type PageKey
-} from '../composables/useAppStore'
-import { goPage } from '../pages'
-import { toast } from '../composables/useToast'
+} from '@renderer/composables/useAppStore'
+import { goPage } from '@renderer/pages'
+import { toast } from '@renderer/composables/useToast'
 
 const props = defineProps<{ page: PageKey }>()
 

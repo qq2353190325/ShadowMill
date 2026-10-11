@@ -65,7 +65,7 @@ import { onMounted, ref, watch } from 'vue'
 import { activeMenu, appState, refreshProject, type PageKey } from './composables/useAppStore'
 import { currentPage, goPage, pageNavKey } from './pages'
 import { useToasts } from './composables/useToast'
-import { initRenderProgress } from './composables/renderProgress'
+import { initRenderProgress } from './composables/useRenderProgress'
 
 const toasts = useToasts();
 const contentEl = ref<HTMLElement | null>(null);
