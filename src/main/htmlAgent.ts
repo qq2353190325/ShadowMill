@@ -1,12 +1,11 @@
 // src/main/htmlAgent.ts
 // HTML 生成/修改：自定义模型 Agent 实现（生成/修改共用）
 // 提供：HTML_AGENT_SYSTEM / extractHtmlFromReply / chatWithCustomModel
-// 依赖：settings(settings.getCustomModel)
+// 依赖：settings(settings.getCustomModel / settings.loadOpenAI)
 import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
-import OpenAI from 'openai'
-import { getCustomModel } from './settings'
+import { getCustomModel, loadOpenAI } from './settings'
 import type { HtmlAgentProgress } from '../shared/types'
 
 const HTML_AGENT_SYSTEM = [
@@ -111,7 +110,8 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
       }
     };
     try {
-      if (typeof OpenAI === 'function') {
+      const OpenAI = loadOpenAI();
+      if (OpenAI) {
         const client = new OpenAI({ apiKey: m.apiKey, baseURL: m.baseUrl });
         const stream = await client.chat.completions.create({
           model: m.modelId, messages, max_tokens: maxTokens, stream: true,

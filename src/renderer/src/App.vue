@@ -104,7 +104,9 @@ async function initApp(): Promise<void> {
   } catch (e) { /* ignore */ }
   // 项目列表与渲染默认档位并行载入（档位读取失败不影响启动，落回内置默认）
   await Promise.all([refreshProject(), loadRenderDefaults()]);
-  goPage('home');
+  // 这里刻意**不再**调 goPage('home')：首页本就是初始页（pages.currentPage 初值 + activeMenu 初值都是 home），
+  // 再走一遍 goPage 只会白白多跑一轮 refreshProject（项目列表 + 项目详情两次 IPC）并递增 pageNavKey
+  // 把已经挂好的首页整页重挂一次。首页内容由上面的 refreshProject 直接驱动渲染。
 }
 
 onMounted(() => {

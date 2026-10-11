@@ -25,6 +25,23 @@ import * as video from './video'
 import * as whisper from './whisper'
 import * as updater from './updater'
 
+// ===== 启动时序打点（userData/startup.log）=====
+// 首屏慢（「只有背景很久」）时用来定位时间花在哪一段：进程启动 → 主进程模块加载 → app ready
+// → 建窗 → 页面开始加载 → DOM ready → 加载完成 → 首帧（ready-to-show）。
+// 每行：ISO 时间 + 距**进程启动**的毫秒数 + 阶段；写盘用 appendFileSync（每次启动几行，<1ms），
+// 文件超过 64KB 自动清一次，避免长期使用无限增长。打点失败一律静默——它不能影响启动。
+const BOOT_AT = Date.now() - Math.round(process.uptime() * 1000) // 进程启动时刻（用 uptime 反推，含 Electron 自身引导耗时）
+function bootLog(stage: string): void {
+  try {
+    const file = path.join(app.getPath('userData'), 'startup.log');
+    try {
+      if (fs.statSync(file).size > 64 * 1024) fs.rmSync(file);
+    } catch (e) { /* 日志不存在：首次启动的正常情形 */ }
+    fs.appendFileSync(file, new Date().toISOString() + ' +' + (Date.now() - BOOT_AT) + 'ms ' + stage + '\n', 'utf8');
+  } catch (e) { /* 打点失败不影响启动 */ }
+}
+bootLog('main module loaded');
+
 // ===== 预览文件协议 hgpreview://p/<encodeURIComponent(项目名)>/<相对路径> =====
 // dev 下渲染层来自 http://localhost，Chromium 会拦截 file:// iframe（Not allowed to load local resource），
 // 故 HTML 预览统一走本协议：主进程把 URL 路径映射回 userData\projects 下对应项目目录内文件。
@@ -88,12 +105,22 @@ function createWindow(): void {
     minHeight: 600,
     titleBarStyle: 'hidden',
     autoHideMenuBar: true,
+    // 与设计系统 --bg-primary / index.html 启动画面同色：窗口在页面首帧之前也不会闪白，
+    // 「窗口已出现但内容未上屏」的那一小段是品牌底色而不是空白。
+    backgroundColor: '#0B1220',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
   })
+  bootLog('window created')
+
+  // 页面加载各阶段（首屏排查用；只打点，无业务副作用）
+  mainWindow.webContents.on('did-start-loading', () => bootLog('page load start'))
+  mainWindow.webContents.on('dom-ready', () => bootLog('dom ready'))
+  mainWindow.webContents.on('did-finish-load', () => bootLog('page load finished'))
+  mainWindow.on('ready-to-show', () => bootLog('first paint (ready-to-show)'))
 
   // dev：electron-vite 注入 ELECTRON_RENDERER_URL（HMR）；prod：加载构建产物
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -115,6 +142,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  bootLog('app ready')
   // hgpreview 协议处理：仅允许读取目标项目目录内的文件（防目录穿越），供预览 iframe 与页面内相对素材引用。
   // 直接读文件字节构造 Response（net.fetch(file://) 在协议处理器内存在兼容性问题，易致预览空白）；
   // 失败/异常落盘 userData/preview-protocol.log，便于预览异常时排查。

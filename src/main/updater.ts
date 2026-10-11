@@ -11,6 +11,7 @@
 //    autoInstallOnAppQuit = true，用户直接关窗也会装上。
 // ③ 安装前检查「本机任务是否在跑」：whisper 转录 / HyperFrames 渲染 / 逐句对齐期间重启会丢进度，
 //    故忙碌时拒绝安装并回明确文案（忙状态由 4 路进度通道的起止自动推导，无需其它模块配合）。
+// ④ electron-updater 一律**懒加载**（ensureUpdater）：启动路径不 require 它，首屏不为更新模块买单。
 import { app, ipcMain } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -25,6 +26,10 @@ import { getUpdaterSettings, saveUpdaterSettings } from './settings'
 
 // electron-updater 是 CJS 包（main 指向 out/main.js 且无 ESM 具名导出），
 // 这里按官方 TypeScript 写法取 autoUpdater；整段包在 try 里，缺依赖时给出明确失败而不是让主进程启动崩掉。
+//
+// 【为什么是懒加载】它的模块图不小（require 实测 ~70ms，冷启动/杀软扫描时更久），而"检查更新"
+// 最早也发生在启动 3s 之后（见 register 的静默检查）或用户手动点击时。顶层 require 会让主进程在
+// **建窗之前**就白付这段成本、直接推迟首屏，因此改为 ensureUpdater() 首次真正用到时再加载。
 interface UpdaterProgressLike {
   percent?: number
   transferred?: number
@@ -45,17 +50,7 @@ interface UpdaterLike {
 }
 let autoUpdater: UpdaterLike | null = null
 let updaterLoadError = ''
-try {
-  const mod: any = require('electron-updater')
-  const cand: any = mod && mod.autoUpdater ? mod.autoUpdater : (mod && mod.default && mod.default.autoUpdater ? mod.default.autoUpdater : null)
-  if (cand && typeof cand.checkForUpdates === 'function') {
-    autoUpdater = cand as UpdaterLike
-  } else {
-    updaterLoadError = 'electron-updater 未导出 autoUpdater（依赖未正确打包？）'
-  }
-} catch (e) {
-  updaterLoadError = 'electron-updater 加载失败：' + errText(e)
-}
+let updaterLoadTried = false
 
 function errText(e: unknown): string {
   const err = e as { message?: string } | null
@@ -155,7 +150,7 @@ function applyFeedUrl(u: UpdaterLike): string {
   }
 }
 
-// ===== 事件绑定（register 时一次）=====
+// ===== 事件绑定（ensureUpdater 首次加载成功时一次）=====
 function bindEvents(u: UpdaterLike): void {
   u.on('checking-for-update', () => {
     state.stage = 'checking'
@@ -207,6 +202,31 @@ function bindEvents(u: UpdaterLike): void {
   })
 }
 
+// ===== 懒加载 electron-updater（只尝试一次）=====
+// 成功：取到 autoUpdater → 立刻设好两个开关并绑定事件（bindEvents 必须恰好一次，故放在这里）。
+// 失败：记 updaterLoadError + 落日志，返回 null，调用方走 notReady() 给出明确文案。
+function ensureUpdater(): UpdaterLike | null {
+  if (updaterLoadTried) return autoUpdater
+  updaterLoadTried = true
+  try {
+    const mod: any = require('electron-updater')
+    const cand: any = mod && mod.autoUpdater ? mod.autoUpdater : (mod && mod.default && mod.default.autoUpdater ? mod.default.autoUpdater : null)
+    if (cand && typeof cand.checkForUpdates === 'function') {
+      autoUpdater = cand as UpdaterLike
+      autoUpdater.autoDownload = false       // 安装包近百 MB：下载只能由用户显式触发
+      autoUpdater.autoInstallOnAppQuit = true // 已下载完成则关窗即装
+      bindEvents(autoUpdater)
+    } else {
+      updaterLoadError = 'electron-updater 未导出 autoUpdater（依赖未正确打包？）'
+      writeLog('updater 不可用：' + updaterLoadError)
+    }
+  } catch (e) {
+    updaterLoadError = 'electron-updater 加载失败：' + errText(e)
+    writeLog('updater 不可用：' + updaterLoadError)
+  }
+  return autoUpdater
+}
+
 // ===== 对外动作 =====
 function notReady(): { ok: false; message: string } {
   return { ok: false, message: updaterLoadError || '更新模块不可用，请重新安装应用' }
@@ -215,7 +235,7 @@ function notReady(): { ok: false; message: string } {
 // 检查更新：不做「已跳过」的提前 return，仍走真实检查（用户可能在设置页手动点），
 // 只是把 stage 标为 skipped 让 UI 显示「已跳过该版本」。
 async function checkNow(trigger: 'manual' | 'startup'): Promise<any> {
-  const u = autoUpdater
+  const u = ensureUpdater()
   if (!u) return notReady()
   state.currentVersion = appVersion()
   const feedUrl = applyFeedUrl(u)
@@ -249,7 +269,7 @@ async function checkNow(trigger: 'manual' | 'startup'): Promise<any> {
 
 // 下载更新：用户点「下载」才走这里（autoDownload = false）
 async function downloadUpdate(): Promise<any> {
-  const u = autoUpdater
+  const u = ensureUpdater()
   if (!u) return notReady()
   if (state.downloaded) return { ok: true, version: state.version }
   if (state.stage !== 'available' && state.stage !== 'skipped') {
@@ -278,7 +298,7 @@ async function downloadUpdate(): Promise<any> {
 }
 
 function cancelDownload(): any {
-  const u = autoUpdater as any
+  const u = ensureUpdater() as any
   if (!u) return notReady()
   try {
     if (typeof u.cancelDownload === 'function') u.cancelDownload()
@@ -297,7 +317,7 @@ function cancelDownload(): any {
 
 // 退出并安装：置 quitForUpdate 标志，让 index.ts 的 window-all-closed 不再抢着 app.quit()
 function installNow(): any {
-  const u = autoUpdater
+  const u = ensureUpdater()
   if (!u) return notReady()
   if (!state.downloaded) return { ok: false, message: '更新尚未下载完成' }
   if (busy) return { ok: false, message: '当前有任务正在进行（转录 / 渲染 / 配音），请等任务结束后再重启安装' }
@@ -333,14 +353,8 @@ function bindBusyTracking(): void {
 function register(ctx: RegisterCtx): void {
   getWindow = ctx && ctx.getWindow ? ctx.getWindow : null
 
-  if (!autoUpdater) {
-    writeLog('updater 不可用：' + updaterLoadError)
-  } else {
-    const u = autoUpdater
-    u.autoDownload = false
-    u.autoInstallOnAppQuit = true
-    bindEvents(u)
-  }
+  // 这里刻意**不**加载 electron-updater：装配阶段只挂 IPC 与忙碌推导（都是极轻的操作），
+  // 真正的 require 推迟到 ensureUpdater()——即启动静默检查（3s 后）或用户手动点检查时。
   bindBusyTracking()
 
   ipcMain.handle(IPC.Update.Check, () => checkNow('manual'))
@@ -361,8 +375,10 @@ function register(ctx: RegisterCtx): void {
       writeLog('startup check skipped: dev 环境未提供 dev-app-update.yml')
       return
     }
+    const u = ensureUpdater()
+    if (!u) return
     if (!app.isPackaged) {
-      try { (autoUpdater as any).forceDevUpdateConfig = true } catch (e) { /* 老版本无此属性则忽略 */ }
+      try { (u as any).forceDevUpdateConfig = true } catch (e) { /* 老版本无此属性则忽略 */ }
     }
     void checkNow('startup')
   }, 3000)

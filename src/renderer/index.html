@@ -4,9 +4,97 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:; frame-src file: hgpreview:; media-src 'self' file:; script-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:5173" />
   <title>我的应用</title>
+  <style>
+    /* ===== 启动画面（boot splash）=====
+       目的：窗口出现到 Vue 挂载之间，页面原本只有一片空背景（首屏慢时表现为「十几秒只有背景」）。
+       这段标记由 HTML 直接渲染、不依赖任何脚本，因此只要渲染进程画出第一帧就有内容可看；
+       主进程 BrowserWindow.backgroundColor 同色，窗口首帧之前也不会闪白。
+       主界面挂载后由 src/main.ts 加 .boot-done 淡出并移除。
+       配色取自设计系统（深空科技）：--bg-primary #0B1220 / 主色 #00D4FF / 次色 #8B5CF6，
+       此处不引用 main.css 变量——它由 JS 侧注入，启动画面必须自包含。 */
+    #boot-splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+      color: #E6F1FF;
+      background:
+        radial-gradient(1200px 600px at 82% -10%, rgba(0, 212, 255, 0.10), transparent 60%),
+        radial-gradient(900px 520px at 8% 112%, rgba(139, 92, 246, 0.12), transparent 60%),
+        #0B1220;
+      transition: opacity 0.28s ease;
+      -webkit-app-region: drag; /* 启动期间窗口可拖动（自绘标题栏还没上屏） */
+    }
+    #boot-splash.boot-done {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #boot-splash .boot-logo {
+      width: 64px;
+      height: 64px;
+      color: #00D4FF;
+      filter: drop-shadow(0 0 10px rgba(0, 212, 255, 0.55));
+      animation: bootBreath 2.4s ease-in-out infinite;
+    }
+    #boot-splash .boot-title {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 2px;
+    }
+    #boot-splash .boot-sub {
+      font-size: 12px;
+      color: #8A9BB5;
+      letter-spacing: 1px;
+    }
+    #boot-splash .boot-bar {
+      width: 180px;
+      height: 2px;
+      border-radius: 2px;
+      overflow: hidden;
+      background: rgba(138, 155, 181, 0.22);
+    }
+    #boot-splash .boot-bar i {
+      display: block;
+      width: 40%;
+      height: 100%;
+      border-radius: 2px;
+      background: linear-gradient(90deg, rgba(0, 212, 255, 0), #00D4FF 50%, rgba(139, 92, 246, 0));
+      animation: bootScan 1.2s ease-in-out infinite;
+    }
+    #boot-splash .boot-tip {
+      font-size: 12px;
+      color: #8A9BB5;
+    }
+    @keyframes bootScan {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(250%); }
+    }
+    @keyframes bootBreath {
+      0%, 100% { opacity: 0.75; }
+      50% { opacity: 1; }
+    }
+  </style>
 </head>
 <body>
   <div id="app"></div>
+
+  <!-- 启动画面：置于 #app 之外，Vue 挂载清空 #app 内容时不受影响（由 main.ts 收尾移除） -->
+  <div id="boot-splash" role="status" aria-label="正在启动">
+    <svg class="boot-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+      <polygon points="12,2 21,7 21,17 12,22 3,17 3,7" />
+      <polygon points="12,6.5 17,9.4 17,15.1 12,18 7,15.1 7,9.4" opacity="0.55" />
+    </svg>
+    <div class="boot-title">我的应用</div>
+    <div class="boot-sub">MarvisStudio · 音视频创作流水线</div>
+    <div class="boot-bar"><i></i></div>
+    <div class="boot-tip">正在启动…</div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -4,11 +4,11 @@
 //       以及 settings:get / settings:save / settings:save-render / settings:save-updater / settings:test IPC
 //       + whisper 当前模型档位与自定义模型列表（getWhisperModel / saveWhisperModel / getWhisperCustomModels / saveWhisperCustomModels）
 //       + 视频渲染档位的白名单校验（DEFAULT_RENDER / normalizeRenderOptions / pickRenderOverride，供 projects.ts / video.ts 复用）
-// 依赖：app / ipcMain / fs / path / openai
+//       + OpenAI SDK 懒加载入口（loadOpenAI，供 settings:test 与 htmlAgent 共用）
+// 依赖：app / ipcMain / fs / path（openai 为懒加载，不在启动路径上）
 import { app, ipcMain } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
-import OpenAI from 'openai'
 import { IPC } from '../shared/ipc'
 import type {
   AppSettings,
@@ -25,6 +25,26 @@ import type {
   VoiceTTSConfig,
   WhisperCustomModel
 } from '../shared/types'
+
+// ===== OpenAI SDK 懒加载（settings:test 与 htmlAgent 共用）=====
+// openai SDK 的模块图较大（require 实测 ~110ms，冷启动 + 杀软扫描时更久）。它只在**真正要发请求**的
+// 两处才需要（测试连接 / 生成或修改 HTML），而这两处都在用户动作之后，因此顶层不再 import：
+// 改成首次用到时 require，主进程启动路径（建窗 → 首屏）不再为它买单。
+// 返回 null 表示 SDK 不可用，调用方各自落到内置 fetch 兜底分支（两处都已有该分支）。
+let openaiCtor: unknown = null
+let openaiLoadTried = false
+function loadOpenAI(): any {
+  if (!openaiLoadTried) {
+    openaiLoadTried = true
+    try {
+      const mod: any = require('openai')
+      openaiCtor = (mod && (mod.default || mod)) || null
+    } catch (e) {
+      openaiCtor = null
+    }
+  }
+  return typeof openaiCtor === 'function' ? openaiCtor : null
+}
 
 const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.json')
 
@@ -211,7 +231,8 @@ function register(ctx?: RegisterCtx): void {
     }
     try {
       let text = '';
-      if (typeof OpenAI === 'function') {
+      const OpenAI = loadOpenAI();
+      if (OpenAI) {
         const client = new OpenAI({ apiKey: m.apiKey, baseURL: m.baseUrl });
         const res = await client.chat.completions.create({
           model: m.modelId,
@@ -245,6 +266,7 @@ export {
   register,
   readSettings,
   writeSettings,
+  loadOpenAI,
   DEFAULT_RENDER,
   normalizeRenderOptions,
   pickRenderOverride,
