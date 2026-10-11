@@ -15,7 +15,7 @@
         <div class="hf-toolbar">
           <span class="hf-file">{{ htmlPath ? escTxt(htmlPath) : '未找到示例 HTML' }}</span>
           <button class="hf-btn" :disabled="!htmlPath" @click="loadBuiltinPreview">重新加载预览</button>
-          <button class="hf-btn hf-btn-primary" :disabled="!htmlPath || rendering" @click="onRender">HyperFrames 试渲染</button>
+          <button class="hf-btn hf-btn-primary" :disabled="!htmlPath || rendering" title="把示例 HTML 渲染成 MP4（约 30 秒）" @click="onRender">试渲染</button>
         </div>
         <div class="hf-toolbar">
           <!-- 渲染档位：内置示例只读，档位仅本次生效（不写入项目） -->

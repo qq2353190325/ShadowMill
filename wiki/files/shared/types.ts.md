@@ -4,8 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：651 行
-- **对外导出**：按 9 个小节组织，共 96 个导出 —— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置 16 个 ④ 音色与配音 26 个 ⑤ 语音识别 13 个 ⑥ 项目与字幕 24 个 ⑦ 预览 / 转视频 5 个 ⑧ 进度推送 8 个 ⑨ `PreloadApi` 1 个
+- **规模**：712 行
+- **对外导出**：按 10 个小节组织（源码编号 ①～⑨，其中更新一节编号为 ③.5）—— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置 21 个（新增 `UpdaterSettings`、`SettingsSaveUpdaterPayload`）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）④ 音色与配音 26 个 ⑤ 语音识别 13 个 ⑥ 项目与字幕 24 个 ⑦ 预览 / 转视频 5 个 ⑧ 进度推送 8 个 ⑨ `PreloadApi` 1 个
 
 ## 1. 作用与职责
 
@@ -14,23 +14,24 @@
 1. **统一载荷格式**：IPC 两端对同一份数据（设置文件、音色条目、模型条目、项目结构）使用完全相同的字段名与类型，避免「主进程叫 `voiceId`、渲染层叫 `voice_id`」这类漂移。
 2. **统一 IPC 结果形状**：`IpcFail` / `IpcResult<T>` 是全部 `{ ok, ... }` 结果类型的唯一来源 —— 它们原先只在 `src/preload/index.d.ts` 内部以 `OkResult` / `FailResult` / `IpcResult` 三个未导出类型存在，现在上移到共享层并被主进程、preload、渲染层共同引用。
 3. **描述持久化结构**：`CustomModelConfig` / `VoiceTTSConfig` / `VoiceProfile` / `WhisperCustomModel` / `WhisperSettings` / `AppSettings` 共同构成 `userData/settings.json` 的完整 schema。
-4. **定义 `window.*` 契约**：⑨ 节的 `PreloadApi` 用 8 个命名空间的完整方法签名描述「preload 实现 ↔ 渲染层消费」的唯一真源 —— `src/preload/index.ts` 用它标注各 `contextBridge` 对象，`src/preload/index.d.ts` 用它给 `Window` 补类型，因此两端不会再各自漂移。
+4. **定义 `window.*` 契约**：⑨ 节的 `PreloadApi` 用 9 个命名空间的完整方法签名描述「preload 实现 ↔ 渲染层消费」的唯一真源 —— `src/preload/index.ts` 用它标注各 `contextBridge` 对象，`src/preload/index.d.ts` 用它给 `Window` 补类型，因此两端不会再各自漂移。
 5. **收敛主进程的本地类型**：`whisper.ts` / `ttsAlign.ts` / `video.ts` / `htmlAgent.ts` / `voice.ts` / `projects.ts` 原先各自声明过 `WhisperProgressPayload`、`AlignProgressInfo`、`RenderPayload` / `PreviewShellPayload` / `RenderResult`、`AgentProgress`、`VoiceModel`、`Scene` / `ContentScript` / `Project` / `SubtitleLine`，现在全部改为从本文件导入（`htmlAgent.ts` 保留 `AgentProgress` 这一导出名，但它已是 `HtmlAgentProgress` 的类型别名；`projects.ts` 用 `export type { … } from '../shared/types'` 再导出，保持 `projects.Project` / `from './projects'` 的既有引用面）。**`src/main/` 下已不存在任何本地声明的 payload / result / progress 接口**，各 IPC handler 的 `payload` 参数也一律用本文件的 `*Payload` 类型标注（此前多为 `Record<string, unknown>` 或内联字面量）。
 6. **约束主进程装配模式**：`RegisterCtx` 把 `src/main/*.ts` 各模块 `register(ctx)` 所依赖的能力（拿主窗口）显式化。
 
-文件按 9 个小节组织，首行注释给出两条硬约束：**载荷格式必须与现行实现逐字段一致，禁止改结构**；**新增/修改 IPC 接口须三处齐改 —— 主进程 `register()` 回调、本文件类型、preload 桥接方法**。文件为纯类型模块，编译后不产生任何运行时代码，仅 1 个 `import type`（引自 `electron`，用于 `BrowserWindow`）。
+文件按 10 个小节组织，首行注释给出两条硬约束：**载荷格式必须与现行实现逐字段一致，禁止改结构**；**新增/修改 IPC 接口须三处齐改 —— 主进程 `register()` 回调、本文件类型、preload 桥接方法**。文件为纯类型模块，编译后不产生任何运行时代码，仅 1 个 `import type`（引自 `electron`，用于 `BrowserWindow`）。
 
 | 小节 | 覆盖内容 | 主要消费方 |
 | --- | --- | --- |
 | ① 通用 IPC 结果 | `IpcFail`、`IpcResult<T>` | `PreloadApi` 全体成员、各主进程模块的返回结构 |
 | ② 主进程装配上下文 | `RegisterCtx` | `src/main/*.ts` 的 `register(ctx)` |
-| ③ 设置 | `settings.json` 的 schema（含渲染档位 `render`）与 `settings:*` / `voice:save-config` 载荷 | `src/main/settings.ts`、设置页、配音页 |
+| ③ 设置 | `settings.json` 的 schema（含渲染档位 `render` 与更新设置 `updater`）与 `settings:*` / `voice:save-config` 载荷 | `src/main/settings.ts`、设置页、配音页 |
+| ③.5 应用自更新 | `update:*` 的检查结果与进度载荷 | `src/main/updater.ts`、设置页 |
 | ④ 音色与配音 | 系统音色、克隆音色、音色映射、合成/对齐载荷与结果 | `src/main/voice.ts`、`src/main/ttsAlign.ts` |
 | ⑤ 语音识别 | whisper 模型状态、转录载荷与结果 | `src/main/whisper.ts` |
 | ⑥ 项目与字幕 | `project.json`（含渲染档位覆盖 `render`）、字幕行、项目列表项、HTML 生成载荷 | `src/main/projects.ts` |
 | ⑦ 预览 / 转视频 | 内置示例项目项、预览外壳与渲染载荷/结果 | `src/main/video.ts` |
-| ⑧ 进度推送 | 4 路 main → renderer 推送的载荷 | `src/main/*.ts` 推送方 + `src/preload/index.ts` 订阅方 |
-| ⑨ `window.*` API 契约 | `PreloadApi`（8 个命名空间） | `src/preload/index.ts`、`src/preload/index.d.ts`、渲染层全部 `window.*` 调用 |
+| ⑧ 进度推送 | 5 路 main → renderer 推送的载荷 | `src/main/*.ts` 推送方 + `src/preload/index.ts` 订阅方 |
+| ⑨ `window.*` API 契约 | `PreloadApi`（9 个命名空间） | `src/preload/index.ts`、`src/preload/index.d.ts`、渲染层全部 `window.*` 调用 |
 
 ## 2. 导出与关键实现
 
@@ -191,13 +192,13 @@
 | `ProjectDownloadFilePayload` | `interface` | `{ srcPath?, defaultName? }` |
 | `ProjectDownloadResult` | `interface` | `{ savedPath }`（下载 HTML / 下载文件 / 导出 SRT 共用） |
 | `ProjectSetAudioPayload` / `ProjectSetVideoPayload` | `interface` | `{ name?, audioPath? }` / `{ name?, videoPath? }` |
-| `ProjectSetAudioResult` | `interface` | `{ audioFile }`（`setAudio` / `extractVideoAudio` 共用） |
+| `ProjectSetAudioResult` | `interface` | `{ audioFile, htmlUpdated? }`（`setAudio` / `extractVideoAudio` 共用）；`htmlUpdated` 为「设置 / 移除背景音频时 `index.html` 的注入音轨是否被同步改写」，可选（未改写 / 主进程未上报时为 `undefined`） |
 | `ProjectSetVideoResult` | `interface` | `{ videoFile, abs }` |
 | `ProjectReadHtmlResult` | `interface` | `{ html }` |
 | `ProjectSaveHtmlPayload` | `interface` | `{ name?, html? }` |
 | `ProjectPreviewHtmlResult` | `interface` | `{ previewPath }` |
 | `ProjectOpenFolderOfResult` | `interface` | `{ dir }` |
-| `ProjectHtmlMaterials` | `interface` | HTML 生成/修改的素材选择：`subtitleProject?` / `audioPath?` / `videoPath?` |
+| `ProjectHtmlMaterials` | `interface` | HTML 生成/修改的素材选择：`subtitleProject?` / `videoPath?`（**`audioPath?` 已删除**：背景音频不是生成素材，由应用按 `project.audioFile` 注入 HTML 的 `<audio id="myv-bgm">`。`videoPath` 只承载「要不要带当前项目视频素材」，自定义导入的文件路径不经此载荷，走 `project:set-video`） |
 | `ProjectAgentPayload` | `interface` | `extends ProjectHtmlMaterials` + `name` / `prompt`（`generateHtml` / `modifyHtml` 线上载荷） |
 | `ProjectHtmlResult` | `interface` | `{ htmlPath, compatible, message? }` |
 | `ProjectSetRenderPayload` | `interface` | `project:set-render` 线上载荷：`{ name?: string; render?: RenderOverride \| null }`——`render` 传 `null`（或字段全非法）表示清除项目覆盖、回到跟随全局默认 |
@@ -208,7 +209,7 @@
 | `Project` | `subtitleCount` | 可选 `number` | 字幕条数 |
 | `Project` | `htmlPath` / `videoPath` | `string` | 产物路径（**绝对路径**；空串表示未生成或已失效，HTML 变更后 `videoPath` 会被置空） |
 | `Project` | `videoMaterial` | 可选 `string` | 视频**素材**相对引用（`video/xxx`，与成品 `videoPath` 严格区分） |
-| `Project` | `audioFile` | `string` | 背景音频 / 生成语音相对引用（`audio/xxx`，空串表示无） |
+| `Project` | `audioFile` | `string` | 背景音频 / 生成语音相对引用（`audio/xxx`，空串表示无）；也是主进程注入 HTML 音轨（`<audio id="myv-bgm">`）的唯一来源 |
 | `Project` | `content` | `ContentScript` | 内容脚本 |
 | `Project` | `render` | 可选 `RenderOverride` | 视频渲染档位的**项目级覆盖**（字段缺省即跟随全局默认；`render` 为空覆盖时该字段被删除） |
 | `Project` | `createdAt` / `updatedAt` | `string` / 可选 `string` | 创建与更新时间（ISO 字符串） |
@@ -217,11 +218,11 @@
 | `ProjectMeta` | `hasSubtitle` / `hasHtml` / `hasVideo` | `boolean` | 三类产物的文件系统存在性（主进程 `scanProjects()` 判定） |
 | `ProjectMeta` | `subtitleCount` | `number` | 字幕条数 |
 | `ProjectHtmlMaterials` | `subtitleProject` | 可选 `string` | `''` = 不使用；`'__current__'` = 当前项目字幕；其他 = 指定带字幕的项目名 |
-| `ProjectHtmlMaterials` | `audioPath` / `videoPath` | 可选 `string` | `''` = 不使用；`'__current__'` = 当前项目素材 |
+| `ProjectHtmlMaterials` | `videoPath` | 可选 `string` | `''` = 不使用；`'__current__'` = 当前项目视频素材（**自定义导入走 `project:set-video`，不由本载荷传路径**；其他值一律按「不使用」处理） |
 | `ProjectHtmlResult` | `compatible` | `boolean` | HTML 是否通过 HyperFrames 合规校验 |
 | `ProjectHtmlResult` | `message` | 可选 `string` | **成功分支也可能带提示**：合规校验未过 / 修改后旧视频已置空等 |
 
-三个键名与主进程 `resolveMaterials` 严格对应（`subtitleProject` / `audioPath` / `videoPath`），`ProjectAgentPayload` 由 preload 用 `{ name, prompt, ...materials }` 展开合并而成。
+两个键名与主进程 `resolveMaterials` 严格对应（`subtitleProject` / `videoPath`），`ProjectAgentPayload` 由 preload 用 `{ name, prompt, ...materials }` 展开合并而成。**背景音频不在素材里**：它由应用按 `project.audioFile` 直接注入 HTML 的 `<audio id="myv-bgm">`，提示词只声明「不要写音轨标签」，模型不需要也无法处理音轨。
 
 ### 2.7 ⑦ 预览 / HyperFrames 转视频（`video.ts`）
 
@@ -235,7 +236,7 @@
 
 `VideoRenderResult` **不是** `IpcResult<T>` 的实例：它的失败分支 `message` 必填，且成功分支不复用 `IpcFail` 联合；失败分支的 `compatible: false` 表示 HTML 未通过 HyperFrames 合规校验（渲染层据此区分「环境错误」与「HTML 不合规」）。
 
-### 2.8 ⑧ 进度推送（4 路 main → renderer）
+### 2.8 ⑧ 进度推送（5 路 main → renderer）
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
@@ -247,12 +248,14 @@
 | `AlignProgressStage` | `type` | `'synth' \| 'assemble' \| 'done' \| 'error'` |
 | `AlignProgressPayload` | `interface` | `{ stage, index?, total?, percent?, message }`；频道 `voice:align-progress` |
 | `VideoProgressPayload` | `interface` | `{ text }`（HyperFrames 渲染日志行，渲染层按 `[Render:trace]` 前缀自行解析）；频道 `video:progress` |
+| `UpdateStage` | `type` | `'idle' \| 'checking' \| 'available' \| 'skipped' \| 'downloading' \| 'downloaded' \| 'none' \| 'error'`（应用更新的阶段；`idle` 表示本进程尚未检查过） |
+| `UpdateProgressPayload` | `interface` | `{ stage, version, currentVersion, percent, transferred, total, bytesPerSecond, message }`；频道 `update:progress`（检查结果与下载进度共用一路） |
 
-`HtmlAgentProgress` 与 `HtmlProgressPayload` 的分工：前者是 Agent 调用层（`htmlAgent.ts` 的 `emit` / `AgentProgress`）的形状，后者是**线上载荷**（`projects.ts` 补上 `text` 文案字段后推送）。`video:progress` 是 4 路里唯一**没有**单订阅包装的通道（preload 直接 `ipcRenderer.on`）。
+`HtmlAgentProgress` 与 `HtmlProgressPayload` 的分工：前者是 Agent 调用层（`htmlAgent.ts` 的 `emit` / `AgentProgress`）的形状，后者是**线上载荷**（`projects.ts` 补上 `text` 文案字段后推送）。`video:progress` 是 5 路里唯一**没有**单订阅包装的通道（preload 直接 `ipcRenderer.on`）。
 
 ### 2.9 ⑨ `PreloadApi`（`window.*` API 契约）
 
-`PreloadApi` 用一个 `interface` 描述 8 个命名空间的完整方法签名，是「preload 实现 ↔ 渲染层消费」的唯一真源：
+`PreloadApi` 用一个 `interface` 描述 9 个命名空间的完整方法签名，是「preload 实现 ↔ 渲染层消费」的唯一真源：
 
 ```ts
 // 用法（源码注释）
@@ -313,8 +316,8 @@
 | `projectTools` | `downloadHtml` / `downloadFile` / `exportSrt` | `Promise<IpcResult<ProjectDownloadResult>>` |
 | `projectTools` | `readHtml` / `saveHtml` / `previewHtml` | `IpcResult<ProjectReadHtmlResult>` / `IpcResult<ProjectHtmlResult>` / `IpcResult<ProjectPreviewHtmlResult>` |
 | `projectTools` | `pickAudio()` / `pickVideo()` | `Promise<string \| null>` |
-| `projectTools` | `setAudio` / `extractVideoAudio` / `setVideo` | `IpcResult<ProjectSetAudioResult>` / `IpcResult<ProjectSetAudioResult>` / `IpcResult<ProjectSetVideoResult>` |
-| `projectTools` | `clearAudio` / `clearVideo` / `openFolder` / `delete` | `Promise<IpcResult>`（无载荷） |
+| `projectTools` | `setAudio` / `extractVideoAudio` / `setVideo` | `IpcResult<ProjectSetAudioResult>`（含可选 `htmlUpdated`，表示注入音轨改写了 `index.html`） / `IpcResult<ProjectSetAudioResult>` / `IpcResult<ProjectSetVideoResult>` |
+| `projectTools` | `clearAudio` / `clearVideo` / `openFolder` / `delete` | `Promise<IpcResult>`（无载荷）；主进程 `project:clear-audio` 实际上还返回 `htmlUpdated`（是否摘掉了 HTML 里的注入音轨），但**未纳入本契约**，渲染层不使用该字段 |
 | `projectTools` | `openFolderOf(dirOrFile)` | `Promise<IpcResult<ProjectOpenFolderOfResult>>` |
 | `projectTools` | `onHtmlProgress(cb)` | `void`，回调 `(data: HtmlProgressPayload) => void`（单订阅） |
 
@@ -352,7 +355,7 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 
 1. `src/preload/index.ts` 的 8 个 `contextBridge` 对象分别标注为 `PreloadApi['electronAPI']`、`PreloadApi['hfTools']` … —— 方法名、参数顺序、返回类型写错会在 `tsconfig.node.json` 阶段直接编译失败（实现被契约校验）。
 2. `src/preload/index.d.ts` 只有 `import type { PreloadApi } from '../shared/types'` + `declare global { interface Window extends PreloadApi {} }`，不再自己定义任何类型；渲染层看到的 `window.*` 与 preload 实现同源。
-3. 因此「改契约」变成**只改本文件 ⑨ 节**这一件事：两端同时生效。⑨ 节注释同时指明命名空间与 IPC 频道的对应关系见 `src/shared/ipc.ts`（8 个命名空间 ↔ 7 组频道常量）。
+3. 因此「改契约」变成**只改本文件 ⑨ 节**这一件事：两端同时生效。⑨ 节注释同时指明命名空间与 IPC 频道的对应关系见 `src/shared/ipc.ts`（9 个命名空间 ↔ 8 组频道常量）。
 
 ### 3.5 `IpcResult` 的判别联合与收窄
 

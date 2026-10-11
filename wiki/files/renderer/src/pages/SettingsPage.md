@@ -1,12 +1,12 @@
 # src/renderer/src/pages/SettingsPage/（页面）
 
-> 设置页：自定义模型、千问语音与视频渲染默认档位，并挂载语音识别模型区块。
+> 设置页：自定义模型、千问语音、视频渲染默认档位与应用更新，并挂载语音识别模型区块。
 
 - **覆盖文件**：
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `src/renderer/src/pages/SettingsPage/index.vue` | 208 | 页面主体：自定义模型卡片、千问语音卡片、视频渲染默认档位卡片，第四张卡片挂载子组件 |
+| `src/renderer/src/pages/SettingsPage/index.vue` | 354 | 页面主体：自定义模型卡片、千问语音卡片、视频渲染默认档位卡片、应用更新卡片，末张卡片挂载子组件 |
 | `src/renderer/src/pages/SettingsPage/WhisperSection.vue` | 274 | 页面子组件：语音识别模型区块（原 `pages/settings/whisper.js` 的 `window.__settings.initWhisper`） |
 
 - **类型**：页面 + 页面子组件（均为 SFC，`<script setup lang="ts">`）
@@ -15,16 +15,17 @@
 
 ## 1. 结构总览
 
-根节点下依次四张 `.card.hgen-panel`（后三张 `margin-top:16px`，第 1 张无上边距）：
+根节点下依次五张 `.card.hgen-panel`（后四张 `margin-top:16px`，第 1 张无上边距）：
 
 | 卡片 | 内容 | 归属 |
 |------|------|------|
 | 1 | 「自定义模型（OpenAI 兼容）」：Base URL / 模型 ID / API Key / 启用 + 保存 / 测试连接 | 父组件 |
 | 2 | 「千问语音（音色管理 & 文字生音频）」：API Key + 目标模型下拉 + 保存 | 父组件 |
 | 3 | 「视频渲染默认档位」：质量 / 帧率下拉 + 保存渲染默认档位 + 状态条 + 当前质量说明 | 父组件 |
-| 4 | 「语音识别模型（whisper.cpp 字幕转录）」：仅标题与 `.hgen-tip` 长说明 | `<WhisperSection />` |
+| 4 | 「应用更新」：当前版本 + 更新源输入 + 启动检查开关 + 保存更新设置 / 检查更新 / 下载更新 / 取消下载 / 立即重启安装 + 跳过版本 | 父组件 |
+| 5 | 「语音识别模型（whisper.cpp 字幕转录）」：仅标题与 `.hgen-tip` 长说明 | `<WhisperSection />` |
 
-自定义模型开启后「HTML 生成 / 修改」页改用该模型；千问语音配置供「音色管理」「文字生音频」使用；卡片 3 是「HTML生成」页「转视频」的全局默认档位（项目级覆盖优先于它）；卡片 4 供字幕页「从音频生成字幕」本机离线识别（不消耗 API 额度）。
+自定义模型开启后「HTML 生成 / 修改」页改用该模型；千问语音配置供「音色管理」「文字生音频」使用；卡片 3 是「HTML生成」页「转视频」的全局默认档位（项目级覆盖优先于它）；卡片 4 是应用自更新的唯一入口（检查 / 下载 / 重启安装，全部状态由 `update:progress` 通道驱动）；卡片 5 供字幕页「从音频生成字幕」本机离线识别（不消耗 API 额度）。
 
 ## 2. SettingsPage/index.vue
 
@@ -43,8 +44,12 @@
 | 质量 / 帧率行（卡片 3） | 两个 `select.hgen-select`：`v-model="rQuality"` / `v-model="rFps"`，选项来自 `qualityOptions`（`RENDER_QUALITY_OPTIONS`）与 `fpsOptions`（`RENDER_FPS_OPTIONS`） |
 | `.hgen-actions` / `.hf-status`（卡片 3） | `保存渲染默认档位`（主按钮 → `onSaveRender`）；`:class="rStatusClass"`、`{{ rStatus }}`；下方 `.hgen-tip` 显示 `{{ qualityHint }}`（当前所选质量的说明） |
 | `.hgen-tip`（卡片 3 顶部） | 原文：「「HTML生成」页点「转视频」时的默认档位，普通使用只需在这两项中选择。单个项目可在「HTML生成」页的「渲染档位」单独覆盖（项目覆盖优先于这里的默认）。质量 draft 编码最快但文字边缘可能有压缩痕迹，仅用于快速确认内容；降低帧率不会缩短成片时长，只是采样更稀、渲染更快。」|
+| 更新源 / 启动检查行（卡片 4） | `v-model="feedUrl"`（`.hgen-input`，placeholder「留空 = 使用打包时内置的更新地址；如 http://192.168.1.10:8099/」）+ `v-model="autoCheck"` 复选框「启动后静默检查一次更新」 |
+| `.hgen-actions`（卡片 4） | `保存更新设置`（主按钮 → `onSaveUpdater`）、`检查更新`（`:disabled="updateBusy"` → `onCheckUpdate`）、`下载更新`（仅 `updateStage` 为 `available` / `skipped` 时渲染 → `onDownloadUpdate`）、`取消下载`（仅 `downloading`）、`立即重启安装`（仅 `downloaded`，主按钮 → `onInstallUpdate`） |
+| `.hf-status`（卡片 4） | `:class="updateStatusClass"`、`{{ updateMessage }}`（文案全部来自主进程 `update:progress` 推送） |
+| 跳过版本行（卡片 4） | `available` 态显示「跳过版本 x.y.z」→ `onSkipVersion(true)`；`skipped` 态显示「恢复提示版本 x.y.z」→ `onSkipVersion(false)` |
 
-卡片 4 说明由父组件提供：模型按「id ↔ 文件名」枚举登记、枚举外文件视为未知模型、模型不随应用打包、下载源为 HuggingFace 国内镜像 hf-mirror.com（规避 GitHub 直链超时）。
+卡片 5 说明由父组件提供：模型按「id ↔ 文件名」枚举登记、枚举外文件视为未知模型、模型不随应用打包、下载源为 HuggingFace 国内镜像 hf-mirror.com（规避 GitHub 直链超时）。
 
 ### 2.2 状态与类型
 
@@ -60,6 +65,12 @@
 | `rQuality` / `rFps` | `ref<RenderQuality>` / `ref<RenderFps>` | 卡片 3 的全局默认档位，初值取 `FALLBACK_RENDER`（`standard` / `30`） |
 | `rStatus` / `rStatusClass` | `ref('')` | 卡片 3 状态文案与样式类 |
 | `qualityHint` | `computed<string>` | 当前所选质量档位的 `hint`（找不到时为空串） |
+| `updateVersion` | `ref('')` | 当前版本号；`onMounted` 用同步的 `window.updateTools.version()` 首屏填充，后续由 `update:progress` 的 `currentVersion` 刷新 |
+| `updateStage` | `ref<UpdateStage>('idle')` | 应用更新阶段；`idle` 表示本进程尚未检查过 |
+| `updateMessage` / `updateStatusClass` | `ref('')` | 卡片 4 状态文案与样式类（`error` → `hf-error`，`downloaded` / `available` → `hf-ok`） |
+| `updateBusy` | `computed<boolean>` | `updateStage` 为 `checking` / `downloading` 时禁用「检查更新」按钮 |
+| `feedUrl` / `autoCheck` | `ref('')` / `ref(true)` | 更新源覆盖地址与启动静默检查开关（回填自 `settings.updater`） |
+| `updaterStatus` / `updaterStatusClass` | `ref('')` | 保存更新设置的状态文案与样式类 |
 
 `interface VoiceModelView { id: string; label: string; isDefault?: boolean }`。
 
@@ -74,6 +85,13 @@
 | `onTest()` | `await window.settingsTools.test(collectCustomModel())` |
 | `onSaveVoice()` | `await window.voiceTools.saveConfig({ apiKey: vApiKey.value.trim(), targetModel: vModel.value })` |
 | `onSaveRender()` | `await saveRenderDefaults({ quality: rQuality.value, fps: rFps.value })`（`useRenderOptions.ts`，内部走 `settingsTools.saveRender` → `settings:save-render`）；成功提示「渲染默认档位已保存：质量标签 · N fps」`hf-ok`，失败 `res.message \|\| '保存失败'` `hf-error` |
+| `applyUpdateProgress(d)` | `update:progress` 的回调：写 `updateStage` / `updateVersion`（取 `d.currentVersion`）/ `updateMessage` / `updateStatusClass` |
+| `setUpdaterStatus(text, kind)` | 写卡片 4 的 `updaterStatus` / `updaterStatusClass`，`text \|\| ''` |
+| `onSaveUpdater()` | `await window.settingsTools.saveUpdater({ feedUrl: feedUrl.value.trim(), autoCheck: autoCheck.value })` → `settings:save-updater`；成功「更新设置已保存（下次启动按新设置检查）」 |
+| `onCheckUpdate()` | 先置「正在检查更新…」，再 `await window.updateTools.check()`；**用返回值兜底重写一次状态**（主进程事件可能早于 IPC 返回到达），按 `state` 分支写文案 |
+| `onDownloadUpdate()` / `onCancelUpdate()` | `window.updateTools.download()` / `cancel()`；下载失败时写 `hf-error` |
+| `onInstallUpdate()` | `window.updateTools.install()`；成功时主进程即将退出安装，**只在返回 `ok: false` 时**写提示（如「当前有任务正在进行」） |
+| `onSkipVersion(skip)` | `saveUpdater({ skippedVersion: skip ? updateVersion.value : '' })`，用于「跳过版本」与「恢复提示版本」两个按钮 |
 | `onMounted(async cb)` | 配置回填（见 2.4） |
 
 ### 2.4 关键流程
@@ -87,6 +105,8 @@
 **保存千问语音**：无前置校验，直接提交，成功提示「千问语音配置已保存，可在「音色管理」「文字生音频」中使用」`hf-ok`，失败 `res.message || '保存失败'` `hf-error`。
 
 **保存渲染默认档位**（`onSaveRender`）：无前置校验（下拉值必然合法），经 `saveRenderDefaults({ quality, fps })` 提交；该函数内部调 `window.settingsTools.saveRender(next)`（`settings:save-render`），成功后用返回的 `res.settings.render` 就地刷新模块级单例 `renderDefaults`——因此保存后无需重启或刷新页面，「HTML生成」页的 `optionNote`（「跟随设置页默认：…」）立刻反映新值。失败时取 `res.message || '保存失败'`。
+
+**应用更新**（卡片 4）：状态**全部由主进程 `update:progress` 推送驱动**，页面本身不做轮询。挂载时 `window.updateTools.onProgress(applyUpdateProgress)` 订阅（preload 为单订阅，反复进出本页只替换回调）；`updateVersion` 先用同步的 `window.updateTools.version()` 首屏填充；随后第四次 `settingsTools.get()` → `s.updater || {}` 回填 `feedUrl` / `autoCheck`（`autoCheck !== false` 即视为开启，与主进程默认值一致）。因为主进程的启动静默检查在 3 秒后触发，用户若已进入本页就会直接看到状态变化；若在此之前就发生过，页面首次检查时会由 `onCheckUpdate()` 的返回值补齐状态。所有触发动作都只是 `invoke` 一发，结果与进度都从同一路推送回来。
 
 ## 3. SettingsPage/WhisperSection.vue
 
@@ -167,7 +187,7 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 | 来源 | 名称 | 用途 |
 |------|------|------|
 | `vue`（页面） | `computed`、`onMounted`、`ref` | 响应式、派生的档位说明与挂载回填 |
-| `@shared/types`（页面） | `type RenderFps`、`type RenderQuality` | 卡片 3 两个下拉的类型标注 |
+| `@shared/types`（页面） | `type RenderFps`、`type RenderQuality`、`type UpdateProgressPayload`、`type UpdateStage` | 卡片 3 两个下拉的类型标注；卡片 4 的进度回调与阶段标注 |
 | `@renderer/utils/render`（页面） | `FALLBACK_RENDER`、`RENDER_FPS_OPTIONS`、`RENDER_QUALITY_OPTIONS`、`renderQualityLabel` | 档位选项表、内置默认档位与保存成功文案里的质量标签 |
 | `@renderer/composables/useRenderOptions`（页面） | `saveRenderDefaults` | 保存全局默认档位（内部刷新 `renderDefaults` 单例） |
 | `./WhisperSection.vue`（页面） | `WhisperSection` | 语音识别模型区块子组件 |
@@ -180,10 +200,17 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 
 | preload 调用 | IPC 频道 | 说明 |
 |--------------|----------|------|
-| `window.settingsTools.get()` | `settings:get` | 读取 `AppSettings`（页面三次调用：`customModel`、`voiceTTS`、`render`） |
+| `window.settingsTools.get()` | `settings:get` | 读取 `AppSettings`（页面四次调用：`customModel`、`voiceTTS`、`render`、`updater`） |
 | `window.settingsTools.save(customModel)` | `settings:save` | preload 包装为 `{ customModel }` |
 | `window.settingsTools.test(customModel)` | `settings:test` | preload 包装为 `{ customModel }`，用当前表单内容测试 |
 | `window.settingsTools.saveRender(render)` | `settings:save-render` | preload 包装为 `{ render }`；经 `saveRenderDefaults` 调用，只更新 `render` 段 |
+| `window.settingsTools.saveUpdater(updater)` | `settings:save-updater` | preload 包装为 `{ updater }`；只更新 `updater` 段（`feedUrl` / `autoCheck` / `skippedVersion`） |
+| `window.updateTools.version()` | `update:version` | **同步**返回当前版本号字符串（`sendSync`），首屏显示用 |
+| `window.updateTools.check()` | `update:check` | 检查更新，返回 `{ ok, state, version, currentVersion }` |
+| `window.updateTools.download()` | `update:download` | 下载安装包 |
+| `window.updateTools.cancel()` | `update:cancel` | 取消下载 |
+| `window.updateTools.install()` | `update:install` | 退出并运行安装器；本机有任务在跑时返回 `ok: false` + 提示 |
+| `window.updateTools.onProgress(cb)` | `update:progress` | 更新状态与下载进度订阅（单订阅） |
 | `window.voiceTools.saveConfig({ apiKey, targetModel })` | `voice:save-config` | preload 包装为 `{ voiceTTS }` |
 | `window.voiceTools.listModels()` | `voice:list-models` | 候选模型（`id`、`label`、可选 `isDefault`），异常被 `.catch()` 吞掉 |
 | `window.whisperTools.status()` | `whisper:status` | 返回 `{ ok, cli, modelsDir, langs, models, unknownFiles, usedBytes, currentModelId }` |

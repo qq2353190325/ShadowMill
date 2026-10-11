@@ -9,19 +9,19 @@
 ```
 src/renderer/
 ├─ index.html                    # 12 行   HTML 宿主：#app + CSP meta + 模块入口
-├─ agents.md                     # 125 行   科技主题（Cyber UI / 深空科技）设计规范正文（自 pages/ 上提到 renderer/ 层）
+├─ agents.md                     # 139 行   科技主题（Cyber UI / 深空科技）设计规范正文（自 pages/ 上提到 renderer/ 层）
 └─ src/
    ├─ main.ts                    #   6 行   createApp + 挂载 + 导入全局 CSS
    ├─ App.vue                    # 154 行   外壳：标题栏 + 侧栏菜单 + 页面容器 + Toast + 启动流程
    ├─ env.d.ts                   #   8 行   .vue 等模块类型补丁
    ├─ assets/
-   │  └─ main.css                # 1363 行   全局设计系统（深空科技主题）
+   │  └─ main.css                # 1431 行   全局设计系统（深空科技主题）
    ├─ components/
    │  └─ StepBar.vue             # 104 行   五节点链路状态条 + 工作项目切换器
    ├─ composables/
    │  ├─ useAppStore.ts          # 138 行   全局项目状态单例（appState / has* / refreshProject；含项目级渲染档位覆盖）
    │  ├─ useToast.ts             #  22 行   轻提示
-   │  ├─ useRenderProgress.ts    #  56 行   HyperFrames 渲染进度解析（含阶段中文名表）
+   │  ├─ useRenderProgress.ts    #  92 行   HyperFrames 渲染进度解析（长阶段中文名 + 内部微阶段不上屏）
    │  └─ useRenderOptions.ts     #  41 行   渲染档位：全局默认载入 / 生效档位 / 项目级覆盖写入
    ├─ utils/
    │  ├─ escape.ts               #   4 行   escTxt 文本转义
@@ -46,13 +46,13 @@ src/renderer/
       │  ├─ TranscribeSection.vue# 345 行   转录弹窗
       │  └─ helpers.ts           # 165 行   字幕助手（估时、条目类型等）
       ├─ HtmlGenPage/
-      │  └─ index.vue            # 586 行   HTML 生成 / 修改 + 预览 + 转视频（含渲染档位）
+      │  └─ index.vue            # 658 行   HTML 生成 / 修改（「生成 HTML」与「按需求修改」两个并列按钮，**每个动作按钮内部各带一个 `?`**（悬浮只显示该动作自己的说明；动作行末尾不再有独立 `?`）；生成点一次即执行、无二次确认，按需求修改在无 HTML 时禁用；字幕 / 视频素材选配：视频只有一个入口，可选项目现有素材或当场导入）+ 背景音频选定 + 预览 + 转视频（含渲染档位）
       ├─ VideoPreviewPage/
       │  └─ index.vue            # 199 行   视频预览（成品播放 / 定位；内置示例预览 + 试渲染）
       ├─ SoundCopyPage/
       │  └─ index.vue            # 308 行   音色管理
       └─ SettingsPage/
-         ├─ index.vue            # 208 行   设置（含渲染默认档位）
+         ├─ index.vue            # 354 行   设置（自定义模型 / 千问语音 / 渲染默认档位 / 应用更新）
          └─ WhisperSection.vue   # 274 行   语音识别模型管理区块
 ```
 
@@ -111,10 +111,10 @@ export async function goPage(key: PageKey) {
 | `text-tts` | `TextTtsPage/index.vue` | ✅ 配音 | 内含「合成 / 对齐」两卡 |
 | `sound-copy` | `SoundCopyPage/index.vue` | ✖ | 音色管理，由其它页面（配音页）跳转进入；在 StepBar 中与 `text-tts` 同属「配音」节点 |
 | `subtitle` | `SubtitlePage/index.vue` | ✅ 字幕生成 | 含转录弹窗子组件 |
-| `html-gen` | `HtmlGenPage/index.vue` | ✅ HTML生成 | 最复杂页面；**转视频入口与渲染档位在此** |
+| `html-gen` | `HtmlGenPage/index.vue` | ✅ HTML生成 | 最复杂页面；**转视频入口与渲染档位在此**；背景音频在「预览」卡片里选定（音轨由主进程写进 HTML） |
 | `video-preview` | `VideoPreviewPage/index.vue` | ✅ 视频预览 | 流水线终点：成品播放 / 定位（内置示例可预览 + 试渲染） |
 | `about` | `AboutPage/index.vue` | ✅ 关于 | 静态页 |
-| `settings` | `SettingsPage/index.vue` | ✅ 设置 | 含 WhisperSection 子组件 |
+| `settings` | `SettingsPage/index.vue` | ✅ 设置 | 含 WhisperSection 子组件；**应用更新入口在此**（检查 / 下载 / 重启安装 + 更新源配置） |
 
 > 侧栏菜单项在 `App.vue` 中以 `menuItems` 数组声明（8 项，不含 `sound-copy`），点击调用 `goPage(item.key)`；页面切换后由 `watch(currentPage)` 把 `content` 容器滚动复位。
 
@@ -162,10 +162,10 @@ export async function goPage(key: PageKey) {
 | └ AlignSection | 逐句对齐（模式 A/B）、进度与取消、结果写回字幕与音频 | `voiceTools`、`projectTools` |
 | SubtitlePage | 字幕条目编辑、SRT 写入方式、复制、导出、由脚本旁白生成、保存 | `projectTools` |
 | └ TranscribeSection | 选音频与语言、转录、进度、结果替换/追加 | `whisperTools` |
-| HtmlGenPage | 提示词生成/修改 HTML、预览、下载、AI 思考过程、**转视频（含档位）** | `projectTools`（`onHtmlProgress`、`saveVideo`、`setRender`）、`hfTools`（`renderVideo`）、全局 `renderProgress` / `renderDefaults` |
+| HtmlGenPage | 提示词生成/修改 HTML（**两个并列按钮**：「生成 HTML」/「按需求修改」，区别由**每个动作按钮内部各自的 `?`** 悬浮说明承载（一个动作一个，只讲自己那个动作；动作行末尾不再有独立 `?`）；「按需求修改」在无 HTML 时禁用，「生成 HTML」点一次即执行、无二次确认；主进程两个频道各自独立未合并）、素材选配（字幕 / 视频素材）、**背景音频选定**（音轨由主进程注入 HTML，不经 Agent）、预览、下载、AI 思考过程、**转视频（点按钮先开「渲染档位」弹窗，确认后渲染）** | `projectTools`（`onHtmlProgress`、`setAudio` / `clearAudio`、`extractVideoAudio`、`saveVideo`、`setRender`）、`hfTools`（`renderVideo`）、`voiceTools`（`listGenerated`，仅填充音频下拉）、全局 `renderProgress` / `renderDefaults` |
 | VideoPreviewPage | 播放 / 定位项目成品 MP4；内置示例的 HTML 预览与试渲染 | `projectTools`、`hfTools`（`previewShell` / `renderVideo` / `showInFolder`）、全局 `renderProgress` |
 | SoundCopyPage | 创建克隆音色、云端/系统音色列表、本地显示名与绑定模型 | `voiceTools` |
-| SettingsPage | 自定义模型（含测试连接）、千问语音配置 | `settingsTools`、`voiceTools` |
+| SettingsPage | 自定义模型（含测试连接）、千问语音配置、渲染默认档位、**应用更新**（版本显示 / 检查 / 下载 / 取消 / 重启安装 / 更新源与启动检查开关 / 跳过版本） | `settingsTools`、`voiceTools`、`updateTools` |
 | └ WhisperSection | 识别模型下载/删除/设为当前、自定义模型管理、占用统计 | `whisperTools` |
 
 > 具体方法名与参数见 [files/renderer/](./files/renderer/) 下的页面 / 组件 / 公共方法文档（每页一篇，页面自己的子组件与助手并入该篇）；频道 ↔ 命名空间总表见 [01-架构总览 §3.3](./01-架构总览.md)。
@@ -174,7 +174,7 @@ export async function goPage(key: PageKey) {
 
 ## 6. 样式策略
 
-- **全局设计系统**：`assets/main.css`（1363 行）承载根变量、标题栏、布局、菜单、卡片、按钮、表单、表格、`step-bar` 以及各页面专有样式（按源码注释可划分为约 30 个样式节）；由 `main.ts` 全局导入。视觉规范（配色、辉光、字号、间距、圆角）写在 `src/renderer/agents.md`（科技主题设计规范，已随渲染层代码上提到 `renderer/` 层；根目录 `agents.md` 只是指向它的指针）。
+- **全局设计系统**：`assets/main.css`（1431 行）承载根变量、标题栏、布局、菜单、卡片、按钮、表单、表格、`step-bar` 以及各页面专有样式（按源码注释可划分为约 31 个样式节）；由 `main.ts` 全局导入。视觉规范（配色、辉光、字号、间距、圆角）写在 `src/renderer/agents.md`（科技主题设计规范，已随渲染层代码上提到 `renderer/` 层；根目录 `agents.md` 只是指向它的指针）。
 - **组件补充**：经核查，全部 `.vue` 中**只有 `App.vue` 带 `<style scoped>`**（Toast 宿主 `.toast-host` / `.toast-item`），其余页面/组件不含样式块，完全依赖 `main.css` 的类名。新增样式时优先在 `main.css` 内按节追加，保持设计系统集中。
 - 主题通过 CSS 变量（`--bg-primary`、`--color-primary`、`--text-secondary`、`--glow-*`、`--radius-*` 等）切换，若要加亮色模式只需在 `:root[data-theme="light"]` 覆盖变量。
 
@@ -187,6 +187,7 @@ export async function goPage(key: PageKey) {
 3. **文档级监听要成对**：`HtmlGenPage` 的 `message` 监听、`TranscribeSection` 的 ESC 监听都改为 `onMounted` / `onBeforeUnmount` 成对注册，不要再用模块级 once-guard。
 4. **内置示例只读**：所有编辑型操作前都要判 `appState.isBuiltin` 并提示用户切换到「我的项目」；`has*` computed 对内置示例恒为 false。
 5. **CSP 禁止运行时模板编译**：SFC 全部预编译，不要使用 `Vue.compile` / 字符串模板。
+6. **唯一的同步 IPC 在设置页**：`updateTools.version()` 是 `sendSync`（首屏立刻显示当前版本号），调用点只在 `SettingsPage` 的 `onMounted` 里、且包在 `try` 中；新增页面不要模仿这个做法，异步接口足够。
 
 ---
 

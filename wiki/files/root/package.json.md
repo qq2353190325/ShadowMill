@@ -10,7 +10,7 @@
 
 - **项目身份**：声明 `name` / `version` / `description`，并指定 Electron 主进程入口 `main`。
 - **脚本入口**：`start` / `dev` / `build` / `typecheck` / `pack` / `dist` 六个脚本，覆盖「开发 → 构建 → 类型检查 → 打包 → 出安装包」全流程。
-- **依赖分层**：`devDependencies` 放构建期工具（electron、electron-vite、vite、typescript 等），`dependencies` 放**运行期真正被 require 的库**（openai、opencc-js、vue）。
+- **依赖分层**：`devDependencies` 放构建期工具（electron、electron-vite、vite、typescript 等），`dependencies` 放**运行期真正被 require 的库**（openai、opencc-js、electron-updater、vue）。
 - **打包配置**：`build` 段直接内嵌 electron-builder 配置（appId、产物白名单、asar、NSIS 安装器、extraResources）。
 - **注意**：本文件**没有** `"type"` 字段，因此包根默认按 CommonJS 解析（见第 3 节）。
 
@@ -56,6 +56,7 @@
 | --- | --- | --- |
 | `openai` | `^7.15.0` | LLM / TTS 云端调用 SDK；被主进程在**运行时** require，故必须留在 `dependencies` |
 | `opencc-js` | `^1.4.2` | 简繁转换库；同样在运行时 require |
+| `electron-updater` | `^6.8.9` | 应用自更新库；被 `src/main/updater.ts` 在**运行时** `require`（CJS 包，不能 `import`），故必须留在 `dependencies` 并进 `files` 白名单 |
 | `vue` | `^3.5.43` | 渲染层框架；由 Vite 打进 renderer bundle（但仍按惯例列在 `dependencies`） |
 
 ### 2.5 build 段（electron-builder）
@@ -74,6 +75,9 @@
 | `nsis.allowToChangeInstallationDirectory` | `true` | 允许用户自选安装目录 |
 | `nsis.createDesktopShortcut` | `true` | 创建桌面快捷方式 |
 | `nsis.createStartMenuShortcut` | `true` | 创建开始菜单快捷方式 |
+| `nsis.perMachine` | `false` | 按用户安装（`%LOCALAPPDATA%`）——**自动更新静默安装的前提**：装到 `Program Files` 会弹 UAC，无法静默升级 |
+| `nsis.differentialPackage` | `true` | 生成差分包元数据，配合安装包旁的 `.exe.blockmap` 让客户端只下变化部分 |
+| `publish` | `[{ "provider": "generic", "url": "…" }]` | 更新源。**`npm run dist` 借此生成 `resources/app-update.yml` 与 `dist/latest.yml`；generic 源不会自动上传**，两个文件要手工传到该 URL 下 |
 | `extraResources` | `[{ "from": "resources", "to": "." }]` | 把工程根 `resources/` 原样复制到安装目录的 `resources/`（asar **外**） |
 
 ### 2.6 files 白名单（逐条）
@@ -87,6 +91,20 @@
   "!node_modules/**/*",
   "node_modules/openai/**/*",
   "node_modules/opencc-js/**/*",
+  "node_modules/electron-updater/**/*",
+  "node_modules/builder-util-runtime/**/*",
+  "node_modules/js-yaml/**/*",
+  "node_modules/semver/**/*",
+  "node_modules/fs-extra/**/*",
+  "node_modules/lazy-val/**/*",
+  "node_modules/lodash.isequal/**/*",
+  "node_modules/lodash.escaperegexp/**/*",
+  "node_modules/tiny-typed-emitter/**/*",
+  "node_modules/argparse/**/*",
+  "node_modules/graceful-fs/**/*",
+  "node_modules/jsonfile/**/*",
+  "node_modules/universalify/**/*",
+  "node_modules/sax/**/*",
   "!*.js.map"
 ]
 ```
@@ -100,6 +118,8 @@
 | `!node_modules/**/*` | **先整体排除** node_modules（体积控制），避免把整个依赖树塞进 asar |
 | `node_modules/openai/**/*` | 再把 openai **单独捞回来** |
 | `node_modules/opencc-js/**/*` | 再把 opencc-js **单独捞回来** |
+| `node_modules/electron-updater/**/*` | 再把 electron-updater **单独捞回来**（`src/main/updater.ts` 运行时 `require`） |
+| `node_modules/builder-util-runtime/**/*` 等 13 条 | electron-updater 的**传递依赖**也要逐条捞回（`js-yaml` / `semver` / `fs-extra` / `builder-util-runtime` / `lazy-val` / `lodash.isequal` / `lodash.escaperegexp` / `tiny-typed-emitter` / `argparse` / `graceful-fs` / `jsonfile` / `universalify` / `sax`）——`!node_modules/**/*` 对它们一视同仁，漏一条就会在安装版运行时报 `Cannot find module` |
 | `!*.js.map` | 排除所有 sourcemap，减小体积、避免泄露源码映射 |
 
 ## 3. 关键流程或约定
@@ -107,8 +127,8 @@
 1. **开发**：`npm run dev` → electron-vite 起 dev server（127.0.0.1:5173，`strictPort`）→ Electron 主进程加载该 URL。
 2. **检查**：`npm run typecheck` → 三个 `tsc -p` 串行执行，全部 `--noEmit`。
 3. **构建**：`npm run build` → `out/` 三端产物。
-4. **打包**：`npm run pack`（解包目录，快速验证）或 `npm run dist`（NSIS 安装包）。
-5. **运行期依赖解析**：`main` 指向的 `out/main/index.js` 里对 `openai` / `opencc-js` 保持 `require` 形态，由 asar 内的 `node_modules` 提供。
+4. **打包**：`npm run pack`（解包目录，快速验证；**不生成 `app-update.yml`，无法验证自动更新**）或 `npm run dist`（NSIS 安装包 + `latest.yml` + `.exe.blockmap` + `resources/app-update.yml`）。
+5. **运行期依赖解析**：`main` 指向的 `out/main/index.js` 里对 `openai` / `opencc-js` / `electron-updater` 保持 `require` 形态，由 asar 内的 `node_modules` 提供。**新增运行时依赖后必须 `npm run dist` 并用 `npx asar list dist/win-unpacked/resources/app.asar` 复核。**
 6. **运行时二进制**：ffmpeg/node 等大体积运行时不在 asar 内，而从安装目录 `resources/` 取（见第 4、5 节）。
 
 ## 4. 与其他文件的关系
@@ -125,10 +145,10 @@
 
 ## 5. 注意事项与实现要点
 
-### 5.1 为什么 `files` 必须显式带上 `node_modules/openai/**/*` 与 `node_modules/opencc-js/**/*`
+### 5.1 为什么 `files` 必须显式带上运行时依赖（openai / opencc-js / electron-updater 及后者 13 个传递依赖）
 
-- `electron.vite.config.ts` 在 main/preload 里都启用了 `externalizeDepsPlugin()`，该插件会把 `dependencies` 中的包**排除出 bundle**，让产物保留运行时 `require('openai')` / `require('opencc-js')`。
-- 既然代码没有把这两个库内联进 `out/`，打包后就必须在 asar 内**能找到真实的包文件**，否则运行时报 `Cannot find module`。
+- `electron.vite.config.ts` 在 main/preload 里都启用了 `externalizeDepsPlugin()`，该插件会把 `dependencies` 中的包**排除出 bundle**，让产物保留运行时 `require('openai')` / `require('opencc-js')` / `require('electron-updater')`。
+- 既然代码没有把这些库内联进 `out/`，打包后就必须在 asar 内**能找到真实的包文件**，否则运行时报 `Cannot find module`。electron-updater 尤其隐蔽：`src/main/updater.ts` 把 `require` 包在 `try` 里，缺依赖时只是「功能静默不可用」（设置页检查更新报「更新模块不可用」），应用照常启动。
 - 但 `files` 中的 `!node_modules/**/*` 已经把 node_modules 整体排除，所以必须用**更具体的模式按顺序重新包含**回来——数组顺序即匹配顺序，后写的包含规则生效。
 - 只捞这两个包（及其依赖树），而不是放开整个 `node_modules`，是为了在可用性与体积之间取平衡。
 - 对照：`vue` 也在 `dependencies` 里，但它是被 Vite **打进** renderer bundle 的，不需要在 asar 里保留 `node_modules/vue`。

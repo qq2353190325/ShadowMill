@@ -40,6 +40,17 @@ export interface VoiceTTSConfig {
   saveDir: string
 }
 
+// ===== 应用自更新（electron-updater generic provider）=====
+// feedUrl 留空 = 使用打包时写死在 resources/app-update.yml 的地址（由 package.json 的 build.publish 生成）；
+// 非空 = 运行时用 autoUpdater.setFeedURL 覆盖，供测试源 / 内网源切换（见 settings:save-updater）。
+export interface UpdaterSettings {
+  feedUrl: string
+  // 启动后是否静默检查一次（只更新状态，不弹窗打扰）
+  autoCheck: boolean
+  // 用户选择「跳过」的版本号；该版本不再提示（升到更新的版本后提示自动恢复）
+  skippedVersion: string
+}
+
 // 音色类型：system = 内置系统音色，custom = 用户克隆音色
 export type VoiceProfileType = 'system' | 'custom'
 
@@ -95,6 +106,8 @@ export interface AppSettings {
   whisper: WhisperSettings
   // 视频渲染全局默认档位（项目未覆盖时生效）
   render: RenderOptions
+  // 应用自更新：更新源覆盖 / 启动静默检查 / 已跳过版本
+  updater: UpdaterSettings
 }
 
 // settings:* 载荷与结果（settings:get 直接返回 AppSettings，不经 ok 包裹）
@@ -110,6 +123,38 @@ export interface SettingsSaveResult {
 // settings:save-render 载荷：只更新渲染默认档位，不动 customModel
 export interface SettingsSaveRenderPayload {
   render?: RenderOverride
+}
+// settings:save-updater 载荷：只更新更新源 / 自动检查开关
+export interface SettingsSaveUpdaterPayload {
+  updater?: Partial<UpdaterSettings>
+}
+
+// ============================================================
+// ③.5 应用自更新（src/main/updater.ts）
+// ============================================================
+// update:check 的三种非失败分支：none 已是最新 / available 有新版本 / skipped 该版本被用户跳过
+export type UpdateCheckState = 'none' | 'available' | 'skipped'
+export interface UpdateCheckResult {
+  state: UpdateCheckState
+  // 状态为 none / skipped 时也回带，便于 UI 显示「已是最新 1.0.0」
+  version: string
+  currentVersion: string
+}
+// update:progress 的进度阶段：
+// idle 尚未检查；checking 检查中；available 有新版本；skipped 该版本被用户跳过；
+// downloading 下载中；downloaded 已下载待重启安装；none 已是最新；error 出错
+export type UpdateStage = 'idle' | 'checking' | 'available' | 'skipped' | 'downloading' | 'downloaded' | 'none' | 'error'
+export interface UpdateProgressPayload {
+  stage: UpdateStage
+  // 目标版本（checking 阶段未知时为空串）
+  version: string
+  currentVersion: string
+  // downloading 阶段有效；其余阶段为 0
+  percent: number
+  transferred: number
+  total: number
+  bytesPerSecond: number
+  message: string
 }
 
 // ============================================================
@@ -442,6 +487,8 @@ export interface ProjectSetRenderPayload {
 }
 export interface ProjectSetAudioResult {
   audioFile: string
+  // 设置/移除背景音频时，若 index.html 里的注入音轨被同步改写则为 true（渲染层据此刷新预览）
+  htmlUpdated?: boolean
 }
 export interface ProjectSetVideoResult {
   videoFile: string
@@ -461,12 +508,13 @@ export interface ProjectOpenFolderOfResult {
   dir: string
 }
 
-// HTML 生成/修改的素材选择（三个键名与主进程 resolveMaterials 严格对应）：
+// HTML 生成/修改的素材选择（键名与主进程 resolveMaterials 严格对应）：
 // subtitleProject：'' = 不使用；'__current__' = 当前项目字幕；其他 = 指定带字幕的项目名
-// audioPath / videoPath：'' = 不使用；'__current__' = 当前项目素材
+// videoPath：'' = 不使用；'__current__' = 当前项目视频素材（自定义导入走 project:set-video，不由本载荷传路径）
+// 注：背景音频不是生成素材——它由应用按 project.audioFile 直接注入 HTML 的 <audio id="myv-bgm">，
+//     提示词只声明「不要写音轨标签」，模型不需要也无法处理音轨。
 export interface ProjectHtmlMaterials {
   subtitleProject?: string
-  audioPath?: string
   videoPath?: string
 }
 // project:generate-html / project:modify-html 线上载荷 = 项目名 + 需求描述 + 素材（preload 展开合并）
@@ -553,7 +601,7 @@ export interface VideoProgressPayload {
 // 用法：preload/index.ts 用 PreloadApi['<命名空间>'] 标注各 contextBridge 对象（实现被契约校验），
 //      preload/index.d.ts 用 `interface Window extends PreloadApi` 暴露给渲染层（消费方拿到同一签名）。
 // 因此「preload 实现」与「渲染层看到的 window.*」不会再各自漂移：改这里两端同时生效。
-// 命名空间与 IPC 频道的对应关系见 src/shared/ipc.ts（8 个命名空间 ↔ 7 组频道常量）。
+// 命名空间与 IPC 频道的对应关系见 src/shared/ipc.ts（9 个命名空间 ↔ 8 组频道常量）。
 export interface PreloadApi {
   electronAPI: {
     platform: string
@@ -582,7 +630,20 @@ export interface PreloadApi {
     save(customModel: CustomModelConfig): Promise<IpcResult<SettingsSaveResult>>
     // 渲染默认档位（settings.json 的 render 段）
     saveRender(render: RenderOverride): Promise<IpcResult<SettingsSaveResult>>
+    // 更新源与自动检查开关（settings.json 的 updater 段）
+    saveUpdater(updater: Partial<UpdaterSettings>): Promise<IpcResult<SettingsSaveResult>>
     test(customModel: CustomModelConfig): Promise<IpcResult>
+  }
+  // 应用自更新（electron-updater）：检查 / 下载 / 取消 / 重启安装 + 进度推送
+  updateTools: {
+    // 同步返回当前版本号（app.getVersion()），供设置页首屏显示
+    version(): string
+    check(): Promise<IpcResult<UpdateCheckResult>>
+    download(): Promise<IpcResult<{ version: string }>>
+    cancel(): Promise<IpcResult>
+    // 退出应用并运行安装程序（主进程先置 quitForUpdate 标志，避免与 window-all-closed 抢流程）
+    install(): Promise<IpcResult>
+    onProgress(callback: (data: UpdateProgressPayload) => void): void
   }
   voiceTools: {
     getConfig(): Promise<IpcResult<VoiceConfigResult>>

@@ -11,13 +11,13 @@
 | # | 文档 | 内容 | 适合谁 |
 |---|---|---|---|
 | 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构、`src/` 完整目录树、构建与打包、运行时数据目录、全局约定 | 第一次接触项目的人 |
-| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（71 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
-| 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程 11 个模块的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
-| 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：8 个命名空间、4 路进度通道的「单订阅」语义、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
+| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（78 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
+| 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程 12 个模块的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
+| 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：9 个命名空间、5 路进度通道的「单订阅」语义、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
 | 4 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) | Vue 渲染层：启动链路、无 router 的注册表导航、状态与通信约定、组件分层、页面↔主进程域对照、样式策略 | 改界面 / 加页面 |
-| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（7 组 71 个）与跨进程载荷类型、消费方与编译期归属、维护约定 | 动契约前必读 |
+| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（8 组 78 个）与跨进程载荷类型、消费方与编译期归属、维护约定 | 动契约前必读 |
 | 6 | [06-目录架构-src-agent](./06-目录架构-src-agent.md) | 独立实验脚本：为什么不进构建图、5 个工具、工作区防护、运行方式 | 想跑 Agent 样例 |
-| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，共 45 篇） | 需要具体实现细节时查阅 |
+| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，共 46 篇） | 需要具体实现细节时查阅 |
 
 ---
 
@@ -31,7 +31,7 @@
 
 > **粒度约定**（与根目录 `agents.md` 的规则 4 一致）：渲染层按「**每页一篇**（该页面自己的子组件与助手并入同一篇；代码侧对应 `src/renderer/src/pages/<PageName>/` 一页一目录、入口 `index.vue`）、**`assets.md` / `components.md` 目录级各一篇**、**`common.md` 公共方法与工具一篇**」组织；主进程、preload、shared、agent 与工程根配置按源文件逐篇。
 
-### 3.1 `src/main/`（主进程，11 篇）
+### 3.1 `src/main/`（主进程，12 篇）
 
 | 源文件 | 说明文档 |
 |---|---|
@@ -46,6 +46,7 @@
 | `src/main/video.ts` | [main/video.ts.md](./files/main/video.ts.md) |
 | `src/main/whisper.ts` | [main/whisper.ts.md](./files/main/whisper.ts.md) |
 | `src/main/vad.ts` | [main/vad.ts.md](./files/main/vad.ts.md) |
+| `src/main/updater.ts` | [main/updater.ts.md](./files/main/updater.ts.md) |
 
 ### 3.2 `src/preload/` 与 `src/shared/`（4 篇）
 
@@ -119,6 +120,7 @@
 |---|---|
 | 知道某个 IPC 频道是谁实现的 | [01-架构总览 §3.3](./01-架构总览.md) → 落到 [02-目录架构-src-main](./02-目录架构-src-main.md) |
 | 加一个新的跨进程接口 | [05-目录架构-src-shared §5](./05-目录架构-src-shared.md)（三处齐改清单） |
+| 发新版本 / 排查「检查更新失败」 | [main/updater.ts.md](./files/main/updater.ts.md)（发版三件套与更新源） |
 | 搞清楚「项目」在磁盘上长什么样 | [00-项目结构 §7](./00-项目结构.md) + [main/projects.ts.md](./files/main/projects.ts.md) |
 | 明白 HTML 是怎么被 Agent 生成的 | [01-架构总览 §5.1](./01-架构总览.md) + [main/htmlAgent.ts.md](./files/main/htmlAgent.ts.md) |
 | 查 whisper 模型档位与转录流程 | [main/whisper.ts.md](./files/main/whisper.ts.md) |

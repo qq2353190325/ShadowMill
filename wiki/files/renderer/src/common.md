@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `src/renderer/src/composables/useAppStore.ts` | 138 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写 |
 | `src/renderer/src/composables/useToast.ts` | 22 | 全局轻提示队列（自增 id + 2800ms 自动移除） |
-| `src/renderer/src/composables/useRenderProgress.ts` | 56 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行并生成中文进度文案 |
+| `src/renderer/src/composables/useRenderProgress.ts` | 92 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行并生成中文进度文案（只上屏用户看得懂的阶段） |
 | `src/renderer/src/composables/useRenderOptions.ts` | 41 | 视频渲染档位：全局默认载入（`settings.json` 的 `render`）+ 生效档位 + 项目级覆盖写入 |
 | `src/renderer/src/utils/render.ts` | 55 | 档位选项表与纯函数（规范化覆盖、解析生效档位、档位摘要文案） |
 | `src/renderer/src/utils/rate.ts` | 21 | 语速控件共享逻辑：0.5~2.0 播放速率同步到输入框与音频元素 |
@@ -113,21 +113,33 @@
 
 **渲染端（`App.vue`）**：`const toasts = useToasts();`，模板为 `<TransitionGroup tag="div" name="toast" class="toast-host">` 内 `v-for="t in toasts" :key="t.id"` 的 `.toast-item`，文本 `{{ t.msg }}`。`:key="t.id"` 依赖自增 id 才能正确区分多条内容相同的提示（数组索引做 key 会导致过渡与列表复用错乱）；样式 `.toast-host` / `.toast-item` 由 `App.vue` 的 `<style scoped>` 提供（自旧版 `app.js` 的内联样式移植）。
 
-**使用方**：`App.vue`（`useToasts()` 取队列并渲染宿主）；其余均为调用 `toast()`——`components/StepBar.vue`（创建项目成功/失败、内置示例只读提示）、`pages/HomePage/index.vue`（项目名校验、创建失败、创建成功）、`pages/ContentPage/index.vue`（只读拦截、保存成功/失败）、`pages/SubtitlePage/index.vue`（删除条目、复制、导出 SRT、保存、由脚本生成字幕）、`pages/HtmlGenPage/index.vue`（Agent 请求排队、只读拦截、生成/修改完成、导入导出、音频与视频素材设置）、`pages/TextTtsPage/SynthSection.vue`（试听、设为背景音频、只读拦截）、`pages/TextTtsPage/AlignSection.vue`（对齐合成忙、取消、试听失效、写回结果）、`pages/SubtitlePage/TranscribeSection.vue`（转录回填结果、只读拦截）。约定式写法：主进程返回 `res.ok === false` 时统一 `toast((res as { message?: string })?.message || '默认文案')`，并且取消类结果（`canceled`）通常**不**提示。
+**使用方**：`App.vue`（`useToasts()` 取队列并渲染宿主）；其余均为调用 `toast()`——`components/StepBar.vue`（创建项目成功/失败、内置示例只读提示）、`pages/HomePage/index.vue`（项目名校验、创建失败、创建成功）、`pages/ContentPage/index.vue`（只读拦截、保存成功/失败）、`pages/SubtitlePage/index.vue`（删除条目、复制、导出 SRT、保存、由脚本生成字幕）、`pages/HtmlGenPage/index.vue`（Agent 请求排队、只读拦截、生成/修改完成、导入导出、视频素材设置、背景音频选定与移除）、`pages/TextTtsPage/SynthSection.vue`（试听、设为背景音频、只读拦截）、`pages/TextTtsPage/AlignSection.vue`（对齐合成忙、取消、试听失效、写回结果）、`pages/SubtitlePage/TranscribeSection.vue`（转录回填结果、只读拦截）。约定式写法：主进程返回 `res.ok === false` 时统一 `toast((res as { message?: string })?.message || '默认文案')`，并且取消类结果（`canceled`）通常**不**提示。
 
 **注意事项**：**模块级单例**使所有页面共享同一队列，因此同一时刻可能叠多条提示（宿主用固定定位 + `TransitionGroup` 依次排布）；**2800ms 是硬编码常量**，没有配置项，如需按类型区分时长需要先扩展 `ToastItem`；**无去重**，连续调用 `toast('保存成功')` 会得到两条独立计时、独立消失的提示；**计时器不随组件卸载取消**，定时器闭包只捕获 `id`，页面切换后仍会执行过滤，但过滤是幂等的（id 已不存在时结果不变）故不会出错；`id` 用普通变量而非响应式，因为它只作为 DOM key 使用、不需要参与响应式追踪；`useToasts()` 返回 `typeof toasts` 即 `Ref<ToastItem[]>`，调用方在模板中写 `v-for="t in toasts"` 时由 Vue 自动解包，若在脚本中使用需要 `.value`；**不适用于需要用户确认的消息**——本模块是“一闪而过”的轻提示，阻塞式确认应使用对话框类能力，而不是在此扩展。
 
 ## 3. 渲染进度：composables/useRenderProgress.ts
 
-HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进程经 `video:progress` 频道回推到渲染层。这些日志里混着两类内容：**结构化事件行** `[Render:trace] {"phase":...,"status":...,"elapsedMs":...,"message":...}` 与**普通日志 / 进度条行**（各种人类可读输出，没有固定结构）。本文件的职责是把这条嘈杂的文本流压成一句人话，写入全局 `renderProgress.text`，由渲染档位所在的「HTML生成」页（`pages/HtmlGenPage/index.vue`，**发起渲染**）与「视频预览」页（`pages/VideoPreviewPage/index.vue`，预览侧）共同展示，例如 `渲染中 · 逐帧捕获（12s）：frame 240/600`；解析失败时**决不静默丢弃**，而是回退显示原文尾部，保证用户始终能看到“还在动”。关键设计是**跨 chunk 半行缓冲**：主进程推送的 `data.text` 可能把一行日志从中间截断，解析必须以“完整行”为单位。
+HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进程经 `video:progress` 频道回推到渲染层。这些日志里混着两类内容：**结构化事件行** `[Render:trace] {"phase":...,"status":...,"elapsedMs":...,"message":...}` 与**普通日志 / 进度条行**（各种人类可读输出，没有固定结构）。本文件的职责是把这条嘈杂的文本流压成一句人话，写入全局 `renderProgress.text`，由渲染档位所在的「HTML生成」页（`pages/HtmlGenPage/index.vue`，**发起渲染**）与「视频预览」页（`pages/VideoPreviewPage/index.vue`，预览侧）共同展示，例如 `渲染中 · 逐帧捕获（已用 45s · 帧 320/900）：快速捕获未通过校验，改用逐帧截图（会慢一些）`。
+
+**设计原则：宁可不刷新，也不显示用户看不懂的内容。** 推来的日志分三类，只有第一类能上屏：
+
+| 类别 | 例子 | 处理 |
+| --- | --- | --- |
+| 长阶段的 trace 事件 | `compile` / `audio_process` / `capture_streaming` | 查 `HF_PHASE_LABELS` 转中文后显示 |
+| CLI 内部微阶段的 trace | `pipeline` / `file_server` / `worker_resolution` / `capture_strategy` / `hdr_detection` | **不上屏**（对用户无意义，且只会显示成英文） |
+| CLI 普通输出 | `[initSession:screenshot] GSAP proxy flush complete (599ms)`、`[Browser:HTTP404] …`、进度条、lint 提示 | **不上屏**，文案保持上一条 |
+
+未登记的新阶段同样不上屏：宁可状态条不动，也不把英文术语丢给用户（CLI 升级新增阶段时需补 `HF_PHASE_LABELS`，见注意事项）。首次渲染的空白期由页面自己的占位文案兜着（「已提交渲染（标准 · 30fps，约 30 秒）...」/「试渲染中，请稍候（…）」）。
+
+关键设计是**跨 chunk 半行缓冲**：主进程推送的 `data.text` 可能把一行日志从中间截断，解析必须以“完整行”为单位。
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `renderProgress` | `reactive({ text: string })` | 全局进度文案单例，初值 `text: ''` |
-| `resetRenderProgress` | `() => void` | 页面挂载时复位：`text`、`hfLogBuf`、`hfLastLine` 全部清空 |
+| `resetRenderProgress` | `() => void` | 页面挂载时复位：`text` 与 `hfLogBuf` 清空 |
 | `initRenderProgress` | `() => void` | 订阅 `window.hfTools.onProgress`，每次收到 chunk 就解析并更新 `renderProgress.text` |
 
-**模块级私有状态**：`HF_PHASE_LABELS`（`Record<string, string>`，阶段英文名 → 中文名映射表）；`hfLogBuf`（`let hfLogBuf = ''`，跨 chunk 的半行缓冲，未以 `\n` 结束的残片留在这里等下一块拼上）；`hfLastLine`（`let hfLastLine = ''`，最近一条**完整**日志行，trace 解析失败时作为兜底素材）。
+**模块级私有状态**：`HF_PHASE_LABELS`（`Record<string, string>`，12 条：阶段英文名 → 中文名）；`HF_CAPTURE_PHASES`（`string[]`，3 条真正的逐帧捕获阶段名，只有它们才展示帧进度）；`HF_MESSAGE_LABELS`（`Record<string, string>`，2 条值得告诉用户的 trace 消息中文名）；`hfLogBuf`（`let hfLogBuf = ''`，跨 chunk 的半行缓冲，未以 `\n` 结束的残片留在这里等下一块拼上）。旧版的 `hfLastLine`（原文兜底素材）已随「不回显原始日志」一并删除。
 
 **`HF_PHASE_LABELS` 全量映射（12 条）**
 
@@ -148,27 +160,33 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 三种 `capture_*` 阶段共用同一中文名「逐帧捕获」，因为对用户而言它们都是“一帧一帧出画面”的同一环节，无需区分底层策略。
 
+**有意不上屏的内部阶段**：`pipeline`（流水线起止标记）、`file_server`（起本地文件服务器）、`worker_resolution`（决定并行 worker 数）、`capture_strategy`（选捕获策略）、`hdr_detection`（HDR 检测）——都是 CLI 内部决策，耗时极短且只有英文名，显示出来只会让状态条闪动并冒出看不懂的词。表里查不到的新阶段同理不显示。
+
+**`HF_MESSAGE_LABELS` 白名单（2 条）**：`drawElement self-verify failed; retrying with forceScreenshot` → 快速捕获未通过校验，改用逐帧截图（会慢一些）；`spawn failed; falling back to disk` → 并行捕获启动失败，改用磁盘模式。其余 trace 消息（心跳 `stage still running`、内部 `resolved` / `started` / `frames resolved` 等）一律不显示；唯一例外是 `status === 'error'` 的失败原因，照实显示（见下）。
+
 **`initRenderProgress()`**
 
 1. 调用 `window.hfTools.onProgress(callback)` 注册进度回调。preload 层对进度类频道实施**单订阅语义**（模块级保存回调、只注册一次 `ipcRenderer.on`），因此重复调用只会替换回调，不会叠加监听器；实际调用点是 `App.vue` 的 `onMounted`，全局只执行一次。
 2. **拼接缓冲**：`hfLogBuf += String((data && data.text) || '')`——对 `data` 与 `data.text` 双重兜底，非字符串值先 `String()` 化。
-3. **按行切分循环**：`while ((nl = hfLogBuf.indexOf('\n')) >= 0)`——取出 `hfLogBuf.slice(0, nl)` 并 `trim()` 得到当前行；`hfLogBuf = hfLogBuf.slice(nl + 1)` 吃掉已处理部分；若该行非空则更新 `hfLastLine = line`（空行被忽略，不会把上一行的信息冲掉）。循环结束时 `hfLogBuf` 里只剩**最后一个不完整行**，留给下一 chunk 继续拼——这就是半行缓冲的全部实现。
-4. **定位 trace**：`const tIdx = hfLastLine.lastIndexOf('[Render:trace]')`，用 `lastIndexOf` 而非 `indexOf`，以便同一行里出现多次时取最后一段。
-5. 若 `tIdx >= 0`，进入 `try`：`JSON.parse(hfLastLine.slice(tIdx + 14).trim())`（`14` 正是 `'[Render:trace]'` 的长度，即跳过标记本身；`trim()` 容忍标记与 JSON 之间的空格）→ `phase = HF_PHASE_LABELS[ev.phase] || String(ev.phase || '')`（映射不到时回退英文原名，不显示 `undefined`）→ `msg = String(ev.message || '').trim()` → `secs = isFinite(Number(ev.elapsedMs)) ? Math.round(Number(ev.elapsedMs) / 1000) : 0`（耗时毫秒转**整秒**，非法值视为 0）→ 拼装文案 `'渲染中 · ' + phase + (secs ? '（' + secs + 's）' : '') + (msg ? '：' + msg : '')`，其中 `secs` 为 0 时**整段括号省略**（不显示「（0s）」）、`msg` 为空时**整段冒号省略**，随后 `return` 提前结束本次回调。
-6. **失败兜底**：`JSON.parse` 抛错（被 `catch (e)` 吞掉）、或该行根本没有 `[Render:trace]` 标记时，执行 `renderProgress.text = '渲染中... ' + hfLastLine.slice(-160)`——只取最近完整行的**末尾 160 字符**，避免超长日志行把 UI 撑爆。
+3. **按行切分并只挑 trace**：`while ((nl = hfLogBuf.indexOf('\n')) >= 0)` 取出 `hfLogBuf.slice(0, nl)` 并 `trim()`；**只有含 `[Render:trace]` 的行**会覆盖式写入本次回调的局部变量 `trace`（因此一个 chunk 里有多行时取**最后一条 trace**），其余行（`[initSession:…]`、`[Browser:…]`、进度条）直接丢弃，空行忽略。循环结束时 `hfLogBuf` 里只剩**最后一个不完整行**，留给下一 chunk 继续拼——这就是半行缓冲的全部实现。旧版只认“最后一行”，若最后一行恰是噪音就会把前面真正的 trace 丢掉；改为“最后一条 trace 行”后不再漏更新。
+4. **无 trace 直接返回**：`if (!trace) return`——普通日志一律不上屏，`renderProgress.text` 保持上一条（首次渲染时保持空串，屏幕上是页面自己的占位文案）。
+5. **解析 JSON**：`JSON.parse(trace.slice(trace.lastIndexOf('[Render:trace]') + 14).trim())`——`14` 正是 `'[Render:trace]'` 的长度，即跳过标记本身；用 `lastIndexOf` 以便同一行里出现多次时取最后一段；整段放在 `try` 里，抛错就 `return`（**不再把原始日志显示给用户**）。
+6. **阶段闸门**：`key = String(ev.phase || '')` → 查 `HF_PHASE_LABELS[key]`；映射不到（内部微阶段、CLI 新增的未登记阶段）直接 `return`，不上屏。
+7. **消息闸门**：`msg` 先查 `HF_MESSAGE_LABELS[rawMsg]` 取中文名；`ev.status === 'error'` 是唯一例外——失败原因 `rawMsg.slice(0, 120)` 原样展示，便于定位（其余英文消息，如心跳 `stage still running`、内部 `resolved` / `started` / `frames resolved`，一律丢弃）。
+8. **元信息与拼装**：`secs = isFinite(Number(ev.elapsedMs)) ? Math.round(Number(ev.elapsedMs) / 1000) : 0`（毫秒转**整秒**，非法值视为 0；`elapsedMs` 是**自渲染流水线开始的总耗时**，不是本阶段耗时）；仅当阶段属于 `HF_CAPTURE_PHASES` 且 `totalFrames > 0`、`framesCompleted >= 0` 时再追加 `帧 a/b`。最终文案 `'渲染中 · ' + phase + （已用 Xs · 帧 a/b）+ （：msg）`：括号内两段用 ` · ` 连接，两段都缺时整段括号省略，`msg` 为空时冒号段省略，本次回调结束。
 
-**`resetRenderProgress()` 与调用时机**：`renderProgress.text = ''` 清空展示 → `hfLogBuf = ''` **丢弃未挂载期间缓冲的半行残片** → `hfLastLine = ''` 清掉旧行的兜底素材。语义对应旧版 `initHfPage` 清空 `#hf-status`：如果不重置 `hfLastLine`，用户进入视频页时会立刻看到上一次渲染的残句。调用时机：`initRenderProgress()` 在 `App.vue` 的 `onMounted` 全局只执行一次（订阅）；`resetRenderProgress()` 在**两个视频相关页面**挂载时执行——发起渲染的 `pages/HtmlGenPage/index.vue`（`onMounted` 清残留、`onRenderVideo` 结束覆盖 trace）与预览侧的 `pages/VideoPreviewPage/index.vue`（`onMounted` 与内置示例试渲染结束时调用）。
+**`resetRenderProgress()` 与调用时机**：`renderProgress.text = ''` 清空展示 → `hfLogBuf = ''` **丢弃未挂载期间缓冲的半行残片**。语义对应旧版 `initHfPage` 清空 `#hf-status`：不清 `hfLogBuf` 的话，上一轮渲染遗留的半行残片会被拼到新一轮第一行前面，解析出一条畸形 JSON（新实现下的表现是“首条进度丢失”，而不是“显示乱码”）。调用时机：`initRenderProgress()` 在 `App.vue` 的 `onMounted` 全局只执行一次（订阅）；`resetRenderProgress()` 在**两个视频相关页面**挂载时执行——发起渲染的 `pages/HtmlGenPage/index.vue`（`onMounted` 清残留、`onRenderVideo` 结束覆盖 trace）与预览侧的 `pages/VideoPreviewPage/index.vue`（`onMounted` 与内置示例试渲染结束时调用）。
 
 **展示侧有两处，语义不同**：
 
 - `pages/HtmlGenPage/index.vue`：`statusDisplay = computed(() => (rendering && renderProgress.text) ? renderProgress.text : status)` + `statusDisplayClass`（trace 接管时样式类返回 `''`）——**只有本页渲染中**才让全局 trace 顶掉本页状态文案。
 - `pages/VideoPreviewPage/index.vue`：`statusText = computed(() => renderProgress.text || localStatus.value)`，模板 `:class="statusClass"`——不做 `rendering` 判定，全局 trace 非空即优先显示（本页只在内置示例试渲染时发起渲染，因此实际也只在渲染期命中）。
 
-**注意事项**：**必须以完整行为单位解析**（`[Render:trace]` 行可能被 IPC 分块从任意位置截断，直接对每次 chunk 做 `JSON.parse` 会频繁失败）；**半行只在“收到换行”后才被消费**，若 CLI 的最后一行没有以 `\n` 结尾（进程结束时常见），它不会被计入 `hfLastLine`，也就不会参与解析——这是刻意取舍，避免解析半截 JSON；**兜底截断 160 字符**用 `slice(-160)` 取尾部而非头部，因为进度信息（百分比、帧号）通常在行尾；**`slice(tIdx + 14)` 的魔法数**与 `'[Render:trace]'.length` 绑定，若主进程日志标记改名，必须同步改 `lastIndexOf` 的字面量与偏移量两处；**`elapsedMs` 单位是毫秒、展示单位是整秒**，`Math.round` 四舍五入，因此 1499ms 显示 `1s`、1500ms 显示 `2s`；**非法 `phase` 不吞掉**，映射缺失时显示原始英文 key，便于排查主进程新增了未登记阶段；**`catch (e)` 为空块**，解析异常只用于“走兜底分支”，不打印错误避免刷屏，代价是排查解析问题需自行打断点；**单例与订阅次数**——`renderProgress` 是模块级 `reactive`，多个页面读同一份文本，但 `initRenderProgress()` 若被多处调用，最终生效的是**最后一次**传入的回调（preload 单订阅语义），不会重复处理同一 chunk。
+**注意事项**：**必须以完整行为单位解析**（`[Render:trace]` 行可能被 IPC 分块从任意位置截断，直接对每次 chunk 做 `JSON.parse` 会频繁失败）；**半行只在“收到换行”后才被消费**，若 CLI 的最后一行没有以 `\n` 结尾（进程结束时常见），它不会被本次解析计入——这是刻意取舍，避免解析半截 JSON；**“宁可不刷新”的代价**：若 CLI 一条 trace 都不发（例如人为调高日志级别）、或长时间停在未登记阶段，状态区会一直停在上一条文案（整场都无 trace 时停在本页占位文案），这是为“不显示术语”付的代价，判断为可接受；**唯一显示英文的出口是 `status === 'error'` 的失败原因**（截断 120 字），属刻意保留的诊断信息；**`slice(tIdx + 14)` 的魔法数**与 `'[Render:trace]'.length` 绑定，若日志标记改名，必须同步改 `indexOf` 判定与偏移量两处；**`elapsedMs` 是自流水线开始的总耗时**（CLI 另有 `durationMs` 表示本阶段耗时，本模块不使用），`Math.round` 四舍五入，因此 1499ms 显示 `已用 1s`、1500ms 显示 `已用 2s`；**帧进度只对三个 `capture_*` 显示**，`capture_calibration` 写的是探针帧、`framesCompleted` 恒为 0，报帧数会误导；**映射缺失既不吞也不显示**——查不到 `HF_PHASE_LABELS` 就整条不上屏，所以 HyperFrames 升级后若新增/改名阶段，界面上会“少一段进度”，需要补表（CLI 内部的 `pipeline` / `file_server` / `worker_resolution` / `capture_strategy` / `hdr_detection` 属有意不补）；**`catch (e)` 为空块**，解析异常只用于“放弃本条”，不打印错误避免刷屏，代价是排查解析问题需自行打断点；**单例与订阅次数**——`renderProgress` 是模块级 `reactive`，多个页面读同一份文本，但 `initRenderProgress()` 若被多处调用，最终生效的是**最后一次**传入的回调（preload 单订阅语义），不会重复处理同一 chunk。
 
 ## 4. 语速：utils/rate.ts
 
-试听已生成的配音时，用户需要临时调快/调慢播放速度（例如 1.5x 快速检查），但**磁盘上的音频文件不能被改动**。本模块据此提供三个纯函数，核心语义是「**只改播放速率，不改磁盘音频**」：这三个函数**只**触碰（a）输入框的 `value` 与（b）`audio.playbackRate` 这一个运行时属性，既不写文件、也不通知主进程、也不参与任何落盘/合成流程；因此用户调完语速后重新打开应用，音频文件仍是原始速度。
+试听**背景音频**（「预览」卡片里选定的项目背景音频：本地音频文件或「已生成音频」列表中的一份）时，用户需要临时调快/调慢播放速度（例如 1.5x 快速检查），但**磁盘上的音频文件不能被改动**。本模块据此提供三个纯函数，核心语义是「**只改播放速率，不改磁盘音频**」：这三个函数**只**触碰（a）输入框的 `value` 与（b）`audio.playbackRate` 这一个运行时属性，既不写文件、也不通知主进程、也不参与任何落盘/合成流程；因此用户调完语速后重新打开应用，音频文件仍是原始速度。
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
@@ -180,11 +198,11 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 **`rateClamp(v)`**：`Math.max(0.5, v)` 抬到下限 0.5 → `Math.min(2, ...)` 压到上限 2.0。上下限都是**硬编码字面量**，与本文件顶部注释「0.5~2.0」以及输入框 `title="播放语速 0.5~2.0（非法或空值自动回退 1x）"` 一一对应。它**不做 `NaN` 防护**：`Math.max(0.5, NaN)` 得 `NaN`，再 `Math.min(2, NaN)` 仍为 `NaN`；NaN 兜底由 `applyRate` / `stepRate` 负责。
 
-**`applyRate(el, audio = null)`**：`let v = parseFloat(el.value)` 从输入框当前文本解析浮点数（用户手输场景，如 `1.25`）→ `if (!isFinite(v)) v = 1`（空串、`"abc"`、`NaN`、`Infinity` 一律回退 `1` 即 1x 原速）→ `v = rateClamp(v)` 夹紧 → `el.value = String(v)` **把规范化结果写回输入框**，用户立刻看到被修正/夹紧后的值（输入 `5` 会变成 `2`，输入 `0.1` 会变成 `0.5`）→ `if (audio) audio.playbackRate = v`（仅在传入播放器时同步；音频元素尚未挂载/未选中时传 `null` 也不会报错）→ `return v`，调用方通常写成 `rateValue.value = String(applyRate(el, genAudioEl.value))`。
+**`applyRate(el, audio = null)`**：`let v = parseFloat(el.value)` 从输入框当前文本解析浮点数（用户手输场景，如 `1.25`）→ `if (!isFinite(v)) v = 1`（空串、`"abc"`、`NaN`、`Infinity` 一律回退 `1` 即 1x 原速）→ `v = rateClamp(v)` 夹紧 → `el.value = String(v)` **把规范化结果写回输入框**，用户立刻看到被修正/夹紧后的值（输入 `5` 会变成 `2`，输入 `0.1` 会变成 `0.5`）→ `if (audio) audio.playbackRate = v`（仅在传入播放器时同步；音频元素尚未挂载/未选中时传 `null` 也不会报错）→ `return v`，调用方通常写成 `rateValue.value = String(applyRate(el, audioEl.value))`。
 
 **`stepRate(el, audio, delta)`**：`parseFloat(el.value)` + `if (!isFinite(v)) v = 1`（与 `applyRate` 相同的兜底）→ `v = rateClamp(Math.round((v + delta) * 100) / 100)`，即**先加步长、再四舍五入到两位小数、最后夹紧**，先取整是为了消除浮点误差累积（`1.1 + 0.1` 会得到 `1.2000000000000002`，取整后是 `1.2`）→ `el.value = String(v)` 回写输入框 → `if (audio) audio.playbackRate = v` 同步播放器 → `return v`。`delta` 本身不做 `isFinite` 校验，约定由调用方传入有限的字面量（`0.1` / `-0.1`）。
 
-**使用方**：`pages/HtmlGenPage/index.vue`（`import { applyRate, stepRate }`；输入框 `rateEl` 配 `rateValue` 初值 `'1'`，`onRateInput` 调 `applyRate(el, genAudioEl.value)`，加减按钮调 `stepRate(el, genAudioEl.value, delta)`）；`pages/TextTtsPage/SynthSection.vue` 两处独立使用——合成结果试听（`resultRateValue` + `resultAudioEl`）与生成音频试听（`genRateValue` + `genAudioEl`），同样走 `applyRate` / `stepRate`。两个页面的模式完全一致：`<input ref="rateEl" :value="rateValue" ... @input="onRateInput">` + 一对 `+/-` 按钮，Vue 侧只保存显示字符串，**真值由本模块返回**。
+**使用方**：`pages/HtmlGenPage/index.vue`（`import { applyRate, stepRate }`；输入框 `rateEl` 配 `rateValue` 初值 `'1'`，`onRateInput` 调 `applyRate(el, audioEl.value)`，加减按钮调 `stepRate(el, audioEl.value, delta)`——`audioEl` 是「预览」卡片里**背景音频**的试听元素，随 `audioPreviewVisible` 显隐）；`pages/TextTtsPage/SynthSection.vue` 两处独立使用——合成结果试听（`resultRateValue` + `resultAudioEl`）与生成音频试听（`genRateValue` + `genAudioEl`），同样走 `applyRate` / `stepRate`。两个页面的模式完全一致：`<input ref="rateEl" :value="rateValue" ... @input="onRateInput">` + 一对 `+/-` 按钮，Vue 侧只保存显示字符串，**真值由本模块返回**。
 
 **注意事项**：**取值范围恒为 `0.5 ~ 2.0`**，修改上限/下限必须同时改 `rateClamp` 内的两个字面量与输入框 `title` 提示文案；**非法值回退 1 而不是回退到上一次有效值**，因为函数是无状态的、拿不到历史值；**`el` 是必需参数且会被就地修改**，本模块的“输入框”是唯一数据载体，Vue 里配合 `:value="rateValue"`（单向绑定）+ `@input` 回写，而不是 `v-model`，以避免双向绑定与函数内写值互相打架；**`audio` 可空是刻意的**，用户可能还没选中音频文件就先调语速，此时传 `null` 只更新输入框和返回值，等音频就绪后再调用一次即可生效；**`stepRate` 的 `audio` 没有默认值**，必须显式传 `null` 或元素，这是类型签名层面的有意区分（防止忘记传播放器）；**只影响播放，不影响产物**——`playbackRate` 是纯粹的客户端播放属性，不改变音频数据，因此语速试验可以随意做，不会污染项目产物；**浮点精度**：`stepRate` 用 `Math.round(x * 100) / 100` 固定两位小数，`applyRate` 则**保留用户输入的全部精度**（如 `1.333`），只在超界时夹紧；**不做四舍五入到 0.1 网格**，手动输入 `1.05` 是允许的，界面上并不强制对齐到步长。
 
@@ -208,7 +226,7 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 **典型调用形态**：页面脚本中 `import { escTxt } from '@renderer/utils/escape'`（跨目录导入统一走 `@renderer` 别名），再在拼接 HTML 字符串或绑定 `title` 时包裹外部数据，如 `'<b>' + escTxt(p.title || p.name) + '</b>'`、`:title="'打开项目 ' + escTxt(p.name)"`。执行链路：页面拿到主进程返回的原始字符串（含可能的 `<` 等字符）→ 调用 `escTxt(raw)` 得到实体化后的安全字符串 → 拼进 HTML 字符串 / 绑定到 `:title` / 用于 `v-html` → 浏览器解析时实体被还原为字面字符，标签注入失效。
 
-**调用方（已核对 import）**：`pages/HtmlGenPage/index.vue`（音频文件名 `appState.project.audioFile`、视频素材名等路径展示）、`pages/VideoPreviewPage/index.vue`（我的项目的视频产物路径 `videoPath`、内置示例的示例 HTML 路径 `htmlPath` 展示）、`pages/HomePage/index.vue`（项目名/标题：我的项目卡片、内置示例卡片的 `title` 与标题文本）、`pages/SoundCopyPage/index.vue`（音色条目名称、音色值、目标模型、附加说明、降级原因文案）、`pages/SettingsPage/WhisperSection.vue`（模型名称、文件名、描述、下载地址等说明文本）、`pages/TextTtsPage/AlignSection.vue`（对齐结果中的每句文本 `d.text`，含 `:title` 与文本节点两处）。使用场景高度集中在「**字幕/文本类内容 + 文件路径类内容**」——正是最可能包含 `<`、`&` 的数据来源（例如 SRT 文本里的 `<i>`、路径里的 `&`）。
+**调用方（已核对 import）**：`pages/HtmlGenPage/index.vue`（背景音频文件名 `appState.project.audioFile` 的展示；视频素材名改由 `<option>` 文本插值输出、不经 `escTxt`）、`pages/VideoPreviewPage/index.vue`（我的项目的视频产物路径 `videoPath`、内置示例的示例 HTML 路径 `htmlPath` 展示）、`pages/HomePage/index.vue`（项目名/标题：我的项目卡片、内置示例卡片的 `title` 与标题文本）、`pages/SoundCopyPage/index.vue`（音色条目名称、音色值、目标模型、附加说明、降级原因文案）、`pages/SettingsPage/WhisperSection.vue`（模型名称、文件名、描述、下载地址等说明文本）、`pages/TextTtsPage/AlignSection.vue`（对齐结果中的每句文本 `d.text`，含 `:title` 与文本节点两处）。使用场景高度集中在「**字幕/文本类内容 + 文件路径类内容**」——正是最可能包含 `<`、`&` 的数据来源（例如 SRT 文本里的 `<i>`、路径里的 `&`）。
 
 **注意事项**：**只转义 `& < >`**，这是“文本节点防注入”的最小充分集，不要把它当通用 HTML 过滤函数使用，它**不做**属性值转义、不剥离标签、不防 `javascript:` URL；**不做反转义**，没有对应的 `unescape`，如果拿到的是 HTML 实体文本却需要原文，需另行处理；**幂等性**——对已转义文本再次调用会二次转义（`&lt;` → `&amp;lt;`），因为 `&` 会被再处理一次，**切勿对同一值重复调用**；**入参类型是 `unknown`**，设计上允许传任何值（对象会被 `String()` 成 `[object Object]`），但不建议把结构化数据交给它，需要展示对象字段时先取字段再转义；**`null` / `undefined` 视为空串**，界面上表现为“该处无内容”而不是显示 `null`，调用方因此可以省掉前置空值判断；**它不能替代 Vue 的默认转义**——在 `{{ }}` 插值中 Vue 已自动转义，重复调用 `escTxt()` 会让用户看到 `&amp;` 之类的实体文本，本函数只用于**必须手工拼 HTML 字符串**的场合（如 `v-html`、动态 `title`、表格行拼接）；**源文件仅 4 行**，任何功能扩展（例如补引号转义）都会改变上述使用点的行为，需同时检查上表全部调用方。
 

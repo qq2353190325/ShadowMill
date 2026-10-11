@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程入口（装配器，副作用型模块）
-- **规模**：166 行
+- **规模**：172 行
 - **对外导出**：无 `export`（模块加载即执行协议特权声明与 IPC 监听，`app.whenReady()` 后完成装配）；内部包含 `previewMime(p)`、`createWindow()`、`getWindow()`、模块级 `let mainWindow`
 
 ## 1. 作用与职责
@@ -14,7 +14,7 @@
 - **预览协议宿主**：声明并实现自定义协议 `hgpreview`，让渲染层的预览 iframe 能读取 `userData\projects` 下的项目文件；dev 阶段渲染层来自 `http://localhost`，Chromium 会拦截 `file://` iframe（`Not allowed to load local resource`），因此必须走该协议。
 - **基础 IPC**：窗口控制（最小化 / 最大化切换 / 关闭）与剪贴板写入。
 - **业务域装配**：按固定顺序调用各业务模块的 `register(ctx)`，把窗口引用注入各域（供打开对话框时作为父窗口）。
-- 具体业务逻辑不在本文件实现，按域拆到 `src/main/` 下的 `hfEnv.ts`、`settings.ts`、`htmlAgent.ts`、`projects.ts`、`voice.ts`、`ttsAlign.ts`、`video.ts`、`whisper.ts`。
+- 具体业务逻辑不在本文件实现，按域拆到 `src/main/` 下的 `hfEnv.ts`、`settings.ts`、`htmlAgent.ts`、`projects.ts`、`voice.ts`、`ttsAlign.ts`、`video.ts`、`whisper.ts`、`updater.ts`。
 
 ## 2. 导出与关键实现
 
@@ -75,12 +75,13 @@ whenReady
   ├─ voice.register(ctx)
   ├─ ttsAlign.register(ctx)
   ├─ video.register(ctx)
-  └─ whisper.register(ctx)
+  ├─ whisper.register(ctx)
+  └─ updater.register(ctx)                // 最后注册；内部另安排 3s 后的启动静默检查
 ```
 
-顺序即数据依赖顺序；源码注释给出的依赖图：`settings ← htmlAgent ← projects ← voice ← ttsAlign`，`hfEnv ← video`，全图**无环**。`hfEnv.ts` 不注册 IPC，因此不在此列表中。
+顺序即数据依赖顺序；源码注释给出的依赖图：`settings ← htmlAgent ← projects ← voice ← ttsAlign`，`hfEnv ← video`，`settings ← updater`，全图**无环**。`hfEnv.ts` 不注册 IPC，因此不在此列表中。
 
-生命周期收尾：`app.on('activate')` 时若 `BrowserWindow.getAllWindows().length === 0` 则重新 `createWindow()`；`app.on('window-all-closed')` 时非 `darwin` 平台调用 `app.quit()`。
+生命周期收尾：`app.on('activate')` 时若 `BrowserWindow.getAllWindows().length === 0` 则重新 `createWindow()`；`app.on('window-all-closed')` 时先看 `updater.quitForUpdate()`——正在退出安装则直接返回（让 electron-updater 的安装器接管退出流程），否则非 `darwin` 平台调用 `app.quit()`。
 
 ## 4. 依赖与协作
 
@@ -93,7 +94,7 @@ whenReady
 | `node:fs` | `fs`（`existsSync` / `statSync` / `readFileSync` / `appendFileSync`） |
 | `../shared/ipc` | `IPC` 频道常量表 |
 | `../shared/types` | 类型 `RegisterCtx`（`import type`） |
-| `./settings`、`./projects`、`./voice`、`./ttsAlign`、`./video`、`./whisper` | 各业务域模块，全部以 `import * as` 引入并调用其 `register(ctx)` |
+| `./settings`、`./projects`、`./voice`、`./ttsAlign`、`./video`、`./whisper`、`./updater` | 各业务域模块，全部以 `import * as` 引入并调用其 `register(ctx)` |
 
 **被谁依赖 / 协作关系**
 
@@ -110,6 +111,7 @@ whenReady
 - **安全边界**：`path.resolve` + `startsWith(dir + path.sep)` 组合是防目录穿越的唯一防线；`full === dir` 放行但随后会被 `isFile()` 判否返回 404。每段单独 `decodeURIComponent`，注意编码后的斜杠在分段解码后才会显现。
 - **排障入口**：预览异常时看 `userData/preview-protocol.log`；日志函数自身失败不抛出。
 - **两种 IPC 语义不能混用**：窗口控制是 `ipcMain.on`（渲染层 `send`，单向、无返回值），剪贴板是 `ipcMain.handle`（渲染层 `invoke`，返回 `Promise<boolean>`）。`IPC.Window.MaximizedChange` 是主进程 → 渲染层的推送频道。
-- **`register(ctx)` 顺序有约束**：必须在 `createWindow()` 之后、且按 settings → projects → voice → ttsAlign → video → whisper 注册，避免跨域依赖缺位。
+- **`register(ctx)` 顺序有约束**：必须在 `createWindow()` 之后、且按 settings → projects → voice → ttsAlign → video → whisper → updater 注册，避免跨域依赖缺位。
+- **`window-all-closed` 要给更新安装让路**：`updater.quitForUpdate()` 为真时直接返回，否则 `app.quit()` 会与 electron-updater 调起的 NSIS 安装器抢退出流程（表现为「点了重启安装但没装上」）。
 - **窗口引用失效**：`closed` 后 `mainWindow = null`，所有 IPC 回调都先做空值判断，`maximize`/`unmaximize` 回调使用 `mainWindow?.` 可选链。
 - **输出布局**：主进程 `out/main/index.js`、preload `out/preload/index.js`、渲染层 `out/renderer/`；`__dirname` 相对定位依赖这一布局。

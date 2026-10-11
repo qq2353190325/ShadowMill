@@ -4,17 +4,18 @@
 
 - **所在目录**：src/main/
 - **类型**：设置存储模块（settings.json）
-- **规模**：223 行
-- **对外导出**：`register`、`readSettings`、`writeSettings`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceConfig`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`
+- **规模**：263 行
+- **对外导出**：`register`、`readSettings`、`writeSettings`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceConfig`、`getUpdaterSettings`、`saveUpdaterSettings`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`
 
 ## 1. 作用与职责
 
-本模块是主进程唯一的「全局设置」落盘入口，统一管理 `userData/settings.json` 的读取、合并与写入，并对外提供四类能力：
+本模块是主进程唯一的「全局设置」落盘入口，统一管理 `userData/settings.json` 的读取、合并与写入，并对外提供五类能力：
 
 1. **设置读写**：`readSettings` / `writeSettings`，以及按分区拆分的 getter / setter。
 2. **OpenAI 兼容客户端配置**：`customModel` 分区，供 HtmlAgent 等模块调用大模型。
 3. **视频渲染档位白名单**：`DEFAULT_RENDER` / `normalizeRenderOptions` / `pickRenderOverride`——**白名单只此一处**，`projects.ts`（项目级覆盖落盘）与 `video.ts`（渲染 CLI 参数）都复用，避免校验逻辑三处漂移。
-4. **IPC 注册**：`register(ctx)` 注册 `settings:get` / `settings:save` / `settings:save-render` / `settings:test` 四个频道。
+4. **应用自更新设置**：`updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`）由 `getUpdaterSettings` / `saveUpdaterSettings` 管理，`updater.ts` 读它决定更新源与启动检查。
+5. **IPC 注册**：`register(ctx)` 注册 `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` 五个频道。
 
 配置文件路径由 `settingsFile()` 计算：
 
@@ -36,6 +37,8 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `writeSettings` | `(s: AppSettings) => void` | 先 `mkdirSync(userData, { recursive: true })`，再以 `JSON.stringify(s, null, 2)` 写盘 |
 | `getCustomModel` | `() => CustomModelConfig` | 返回 `settings.customModel`，缺失时退回默认值 |
 | `getVoiceConfig` | `() => VoiceTTSConfig` | 返回与默认 `voiceTTS` 合并后的配置 |
+| `getUpdaterSettings` | `() => UpdaterSettings` | 返回规范化后的 `updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`） |
+| `saveUpdaterSettings` | `(patch?: Partial<UpdaterSettings>) => UpdaterSettings` | **按字段合并**写入（`{ skippedVersion: '1.0.2' }` 不会清掉 `feedUrl`），写盘并返回新值 |
 | `getWhisperModel` | `() => string` | 返回 `settings.whisper.modelId`，缺失返回 `''` |
 | `saveWhisperModel` | `(id: string) => string` | 写入 `whisper.modelId` 后回读返回 |
 | `getWhisperCustomModels` | `() => WhisperCustomModel[]` | 读取并**规范化**自定义 whisper 模型列表 |
@@ -43,7 +46,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `getVoiceProfiles` | `() => Record<string, VoiceProfile>` | 返回本地音色映射表副本 |
 | `saveVoiceProfile` | `(key, profile) => Record<string, VoiceProfile>` | 按 key 覆盖写入一条音色映射 |
 | `deleteVoiceProfile` | `(key) => Record<string, VoiceProfile>` | 按 key 删除一条音色映射 |
-| `register` | `(ctx?: RegisterCtx) => void` | 注册四个设置类 IPC；`ctx` 未被使用（源码中 `void ctx`） |
+| `register` | `(ctx?: RegisterCtx) => void` | 注册五个设置类 IPC；`ctx` 未被使用（源码中 `void ctx`） |
 
 ## 3. 关键流程
 
@@ -65,6 +68,9 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | | `customModels` | `[]` | 用户自定义 whisper 模型条目数组 |
 | `render` | `quality` | `'standard'` | 视频渲染全局默认质量（`draft` / `standard` / `high`） |
 | | `fps` | `30` | 视频渲染全局默认帧率（`24` / `30`） |
+| `updater` | `feedUrl` | `''` | 更新源地址覆盖；**留空即用打包时写入 `resources/app-update.yml` 的地址** |
+| | `autoCheck` | `true` | 启动后是否静默检查一次更新 |
+| | `skippedVersion` | `''` | 用户选择「跳过」的版本号；该版本不再提示 |
 
 ### 3.2 读取与默认值合并
 
@@ -73,6 +79,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 - `customModel`、`voiceTTS`、`whisper`：以默认值为底、以文件内容覆盖，因此新增字段能自动带上默认值。
 - `voiceProfiles`：**不做默认值合并**，只取文件中的值，缺失即 `{}`。
 - `render`：**不在 `Object.assign` 之列**，而是走 `normalizeRenderOptions(raw && raw.render)`——旧 settings.json（无 `render` 字段）落回 `standard` / `30`，已写入的脏值经白名单规范化，保证返回值恒为合法的 `{ quality, fps }`。
+- `updater`：同样走专用规范化函数 `normalizeUpdaterSettings(raw && raw.updater)`——旧 settings.json（无 `updater` 字段）落回 `{ feedUrl: '', autoCheck: true, skippedVersion: '' }`；`feedUrl` 只接受空串或 `http(s)://` 开头的地址，非法值**回退到 `fallback` 而不是清空**（避免用户手填的地址被一次误读抹掉），`autoCheck` 非布尔则回退，`skippedVersion` 非字符串则回退。
 - 整个 `try` 块包裹 `JSON.parse(fs.readFileSync(..., 'utf8'))`，文件不存在或 JSON 损坏时静默返回 `DEFAULT_SETTINGS()`。
 
 ### 3.3 whisper 自定义模型条目的规范化
@@ -84,13 +91,14 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 - `map`：`id` 缺省时由文件名派生 —— 去掉前缀 `ggml-`（`/^ggml-/i`）与后缀 `.bin`（`/\.bin$/i`），例如 `ggml-base-q5_1.bin → base-q5_1`；
 - 其余字段做类型兜底：`name`/`url`/`desc` 非字符串则为 `''`，`sizeMB` 用 `Number(...) || 0`。
 
-### 3.4 四个 IPC 的行为
+### 3.4 五个 IPC 的行为
 
 | 频道 | 处理函数要点 | 返回 |
 | --- | --- | --- |
 | `settings:get` | 直接 `readSettings()` | 完整 `AppSettings` |
 | `settings:save` | 先 `readSettings()`，**只覆盖 `customModel`**；四个字段逐个做类型校验（`baseUrl`/`modelId`/`apiKey` 非字符串则置 `''`，`enabled` 用 `!!` 强转）；其余分区原样保留 | `{ ok: true, settings: raw }` |
 | `settings:save-render` | 先 `readSettings()`，**只覆盖 `render`**：`cur.render = normalizeRenderOptions(Object.assign({}, cur.render, payload.render))`——在现有值上合并本次传入的字段后再整体规范化，因此只改质量不会把帧率顶掉 | `{ ok: true, settings: cur }` |
+| `settings:save-updater` | **只覆盖 `updater`**：调 `saveUpdaterSettings(payload.updater)`（内部对现有值做字段级合并 + 规范化 + 写盘），再 `readSettings()` 回读整份设置返回。因此「保存更新源」不会影响 `autoCheck`，反之亦然 | `{ ok: true, settings: readSettings() }` |
 | `settings:test` | 见下 | `{ ok: boolean, message: string }` |
 
 **`settings:test` 的成功判定**：先用 `getCustomModel()` 与 payload 中的 `customModel` 合并成待测配置 `m`，再依次判断：
@@ -102,7 +110,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 
 ## 4. 依赖与协作
 
-依赖：`electron`（`app` / `ipcMain`）、`node:path`、`node:fs`、`openai`、`../shared/ipc`（`IPC.Settings` 频道常量）、`../shared/types`（`AppSettings`、`RenderOptions` / `RenderOverride` / `RenderQuality` / `RenderFps` / `SettingsSaveRenderPayload` 等类型）。
+依赖：`electron`（`app` / `ipcMain`）、`node:path`、`node:fs`、`openai`、`../shared/ipc`（`IPC.Settings` 频道常量）、`../shared/types`（`AppSettings`、`RenderOptions` / `RenderOverride` / `RenderQuality` / `RenderFps` / `SettingsSaveRenderPayload` / `SettingsSaveUpdaterPayload` / `UpdaterSettings` 等类型）。
 
 被谁使用：
 
@@ -114,14 +122,15 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `src/main/htmlAgent.ts` | `import { getCustomModel }`，取自定义模型配置发起对话 |
 | `src/main/projects.ts` | `pickRenderOverride`——`project:set-render` 写 / 清除项目级渲染档位覆盖时做白名单过滤 |
 | `src/main/video.ts` | `pickRenderOverride`——把 `video:render` 载荷里显式给出的档位拼成 `--quality` / `--fps` 参数 |
-| `src/preload/index.ts` | 暴露 `window.settingsTools = { get, save, saveRender, test }`，分别 invoke `settings:get` / `settings:save` / `settings:save-render` / `settings:test` |
-| 渲染层设置页 `SettingsPage/index.vue` | 自定义模型分区通过 `window.settingsTools.get()` / `save()` / `test()` 读写；渲染默认档位经 `saveRenderDefaults()` 走 `saveRender()`（千问语音分区走 `window.voiceTools.saveConfig`） |
+| `src/preload/index.ts` | 暴露 `window.settingsTools = { get, save, saveRender, saveUpdater, test }`，分别 invoke `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` |
+| `src/main/updater.ts` | `import { getUpdaterSettings, saveUpdaterSettings }`——读 `feedUrl`（非空即覆盖打包内置更新源）、`autoCheck`（启动静默检查开关）、`skippedVersion`（跳过版本）；用户对已跳过版本点「下载更新」时清掉该标记 |
+| 渲染层设置页 `SettingsPage/index.vue` | 自定义模型分区通过 `window.settingsTools.get()` / `save()` / `test()` 读写；渲染默认档位经 `saveRenderDefaults()` 走 `saveRender()`；更新设置走 `saveUpdater()`（千问语音分区走 `window.voiceTools.saveConfig`） |
 | 渲染层 `composables/useRenderOptions.ts` | `settingsTools.get()` 读全局默认档位（`loadRenderDefaults()`）、`settingsTools.saveRender()` 保存（`saveRenderDefaults()`） |
 
 协作要点：
 
 - `voice.ts` 的 `voice:save-config` 复用本模块的 `readSettings` / `writeSettings`，自行做 `voiceTTS` 合并后整文件回写；因此 `voiceTTS` 与 `voiceProfiles` 的持久化入口在 `voice.ts`，而通用读写工具在本模块。
-- `settings:save` 只碰 `customModel`、`settings:save-render` 只碰 `render`、`voice:save-config` 只碰 `voiceTTS`，三者各管一个分区，互不覆盖。
+- **`settings:save` 只碰 `customModel`、`settings:save-render` 只碰 `render`、`settings:save-updater` 只碰 `updater`、`voice:save-config` 只碰 `voiceTTS`，四者各管一个分区，互不覆盖。**
 - 渲染档位的白名单与合并策略**只在 `normalizeRenderOptions` / `pickRenderOverride` 里定义一次**：`projects.ts` 用它过滤项目覆盖、`video.ts` 用它过滤渲染参数、渲染层 `utils/render.ts` 有一份同语义的纯函数实现（取值必须同步）。
 
 ## 5. 注意事项与实现要点

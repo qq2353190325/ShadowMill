@@ -77,12 +77,26 @@ AIGC:
 
 ### 5.3 按钮
 
-- 主要按钮：电子蓝→量子紫渐变底，冰白文字，hover 提升辉光强度
-- 次要按钮：透明底 + 1px 雾蓝描边
+- 主要按钮：电子蓝→量子紫渐变底，深色文字 `#03131a`；hover 换成更亮的同色渐变（`#33ddff → #a078ff`）并提升外发光
+- 次要按钮：透明底 + 1px 雾蓝描边；hover 半透明主色填充 + 主色辉光
+- **主按钮 hover 必须重写 `background`**：基础 `.hf-btn:hover:not(:disabled)`（特异性 0,3,0）高于 `.hf-btn-primary`（0,1,0），不重写渐变就会被那层半透明青色填充顶掉（整块变暗青绿）；也不要改用 `filter: brightness()` 代替
 
 ### 5.4 数据指标
 
 - 数值用等宽字体 + 电子蓝辉光，单位用雾蓝小字
+
+### 5.5 行内帮助（`?` 图标 + 悬浮说明）
+
+**图标放在动作按钮内部、每个动作各带一个**（落地见 `src/renderer/src/assets/main.css` 的 `.hg-help*`，以及 `pages/HtmlGenPage/index.vue` 动作行）。
+
+- 包裹层：`display: inline-flex` + `align-items: center` + `flex: none` + `margin-left: 6px` + `vertical-align: middle`
+- 图标：16px 圆形 `?`，字号 11px、字重 700，`color: currentColor` + `1px solid currentColor`（跟随按钮文字色：主按钮渐变底/深色字、次要按钮透明底/主色字都能看清），默认 `opacity: .75`
+- hover：`opacity: 1` + 底色 `rgba(255,255,255,.22)`
+- 说明气泡：320px 宽、`--radius-btn` 圆角、深色底 `rgba(11,18,32,.98)`、1px 半透明主色描边 `rgba(0,212,255,.35)` + `var(--glow-card)` 辉光、正文 12px / 行高 1.8
+- 定位：相对 `?` 绝对定位，**锚 `left: 0` 向右展开**（`bottom: calc(100% + 8px)`），`z-index: 30`
+- 因气泡位于 `<button>` 内，需重置按钮继承下来的排版：`font-weight: 400`、`text-align: left`、`white-space: normal`
+- 交互：默认 `opacity: 0` + `visibility: hidden` + `pointer-events: none`（不可聚焦、不挡点击），hover 时 `opacity: 1` + `visibility: visible`；`?` 上要 `@click.stop`（点它不触发按钮动作）
+- 过渡：图标 `opacity 0.2s ease, background 0.2s ease`、气泡 `opacity 0.2s ease`；正文里的关键词用主色加粗（`b { color: var(--color-primary); font-weight: 600 }`）
 
 ## 6. CSS 变量（可直接粘贴使用）
 

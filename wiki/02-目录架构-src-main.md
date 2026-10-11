@@ -10,14 +10,15 @@
 |---|---|---|---|
 | [index.ts](./files/main/index.ts.md) | 166 | **入口装配器**：生命周期、窗口、`hgpreview://` 协议、窗口控制与剪贴板 IPC | `window:*`、`app:copy-text` |
 | [hfEnv.ts](./files/main/hfEnv.ts.md) | 212 | 环境探测与内置依赖定位 + GSAP 本地化 / 导出外部化辅助（不注册 IPC） | — |
-| [settings.ts](./files/main/settings.ts.md) | 172 | 设置存储（`userData/settings.json`） | `settings:get/save/test` |
+| [settings.ts](./files/main/settings.ts.md) | 223 | 设置存储（`userData/settings.json`，含视频渲染默认档位） | `settings:get/save/test/save-render` |
 | [systemVoices.ts](./files/main/systemVoices.ts.md) | 63 | Qwen-TTS 内置系统音色静态表 | — |
 | [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 248 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用） | — |
-| [projects.ts](./files/main/projects.ts.md) | 757 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、音视频产物（项目结构再导出 `shared/types`） | `project:*`（24 handle + 1 推送） |
+| [projects.ts](./files/main/projects.ts.md) | 830 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、背景音轨注入（`<audio id="myv-bgm">`）、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、音视频产物（项目结构再导出 `shared/types`） | `project:*`（25 handle + 1 推送） |
 | [voice.ts](./files/main/voice.ts.md) | 533 | 千问语音：音色管理 + 文字生音频 | `voice:*`（15） |
 | [ttsAlign.ts](./files/main/ttsAlign.ts.md) | 332 | 字幕配音逐句合成与时间对齐（模式 A/B） | `voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
-| [video.ts](./files/main/video.ts.md) | 199 | HTML 预览外壳 + HyperFrames 转视频（渲染副本 GSAP 本地化） | `dialog:open-html`、`video:*` |
+| [video.ts](./files/main/video.ts.md) | 207 | HTML 预览外壳 + HyperFrames 转视频（渲染副本 GSAP 本地化；音轨来自页面内的 `<audio id="myv-bgm">`） | `dialog:open-html`、`video:*` |
 | [whisper.ts](./files/main/whisper.ts.md) | 704 | whisper.cpp 转录 + 识别模型下载/管理 | `whisper:*`（11 handle + 1 推送） |
+| [updater.ts](./files/main/updater.ts.md) | 378 | 应用自更新（electron-updater generic provider）：检查 / 下载 / 取消 / 退出安装 + 启动静默检查 + 忙碌态判定 | `update:*`（4 handle + 1 `on`/`sendSync` + 1 推送） |
 | [vad.ts](./files/main/vad.ts.md) | 122 | WAV 采样读取与静音裁剪（零依赖纯函数） | — |
 
 ---
@@ -35,7 +36,10 @@ voice.register(ctx)
 ttsAlign.register(ctx)
 video.register(ctx)
 whisper.register(ctx)
+updater.register(ctx)
 ```
+
+> `updater.register(ctx)` 是最后一步，除了注册 `update:*` 频道，还会在 3 秒后做一次「启动静默检查」（受 `settings.json` 的 `updater.autoCheck` 控制；dev 环境未提供 `dev-app-update.yml` 时跳过）。
 
 - `RegisterCtx`（`src/shared/types.ts`）只提供一个能力：拿到主窗口引用，使各域的 `dialog.showOpenDialog` / `showSaveDialog` 以主窗口为父，弹出模态对话框而非游离窗口。
 - `register` 是各域**唯一**的 IPC 注册入口：域内的 `ipcMain.handle` / `ipcMain.on` 全部集中在这一个函数体内，便于审阅整个域对外的接口面。
@@ -51,6 +55,7 @@ settings ──→ htmlAgent ──→ projects ──→ voice ──→ ttsAli
 hfEnv ──→ video / whisper / ttsAlign / projects
 vad   ──→ whisper
 systemVoices ──→ voice
+settings ──→ updater（读 updater.feedUrl / autoCheck / skippedVersion）
 shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 ```
 
@@ -62,6 +67,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 | `whisper / ttsAlign / video / projects → hfEnv` | 定位 CLI、Node 绝对路径、FFmpeg bin、chrome-headless-shell，以及 `isHyperframesComposition()` 合规校验；`projects` / `video` 另用 GSAP 本地化的 `localizeGsapHtml()` / `referencesLocalGsap()` / `copyGsapIntoProject()` |
 | `projects → htmlAgent` | `project:generate-html` / `project:modify-html` 调用 `chatWithCustomModel()`，并把 `onProgress` 映射为阶段文案推送给渲染层 |
 | `voice / whisper / htmlAgent → settings` | 读取 API Key、目标模型、当前识别模型与自定义模型列表；写回配置 |
+| `updater → settings` | 读 `updater.feedUrl`（非空即 `autoUpdater.setFeedURL` 覆盖打包内置地址）、`autoCheck`（启动静默检查开关）、`skippedVersion`（用户跳过的版本）；下载「跳过版本」的更新时清掉该标记 |
 
 `src/main/index.ts` 顶部的注释即为这份依赖图的权威描述（`settings ← htmlAgent ← projects ← voice ← ttsAlign`；`hfEnv ← video`；无环）。
 
@@ -90,7 +96,8 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 
 ### 4.3 `settings.ts` —— 设置存储
 
-- `userData/settings.json`，四分区：`customModel`（`baseUrl` / `modelId` / `apiKey` / `enabled`）、`voiceTTS`（`apiKey` / `targetModel` / `saveDir`）、`voiceProfiles`（本地音色映射，key 形如 `system:Cherry` / `custom:<voice_id>`）、`whisper`（`modelId` + `customModels[]`）。
+- `userData/settings.json`，五分区：`customModel`（`baseUrl` / `modelId` / `apiKey` / `enabled`）、`voiceTTS`（`apiKey` / `targetModel` / `saveDir`）、`voiceProfiles`（本地音色映射，key 形如 `system:Cherry` / `custom:<voice_id>`）、`whisper`（`modelId` + `customModels[]`）、`updater`（`feedUrl` / `autoCheck` / `skippedVersion`），另有视频渲染默认档位 `render`（`quality` / `fps`）。
+- 三个 `normalize*` 白名单函数各管一段：`normalizeRenderOptions()`（渲染档位，缺省字段回退 `DEFAULT_RENDER`）、`pickRenderOverride()`（只保留显式给出的合法项目覆盖）、`normalizeUpdaterSettings()`（更新设置，`feedUrl` 仅接受空串或 `http(s)://` 开头，非法值回退原值而非清空）。
 - `readSettings()` 做**逐分区浅合并**并静默容错（文件缺失/损坏回落到默认值）；写盘为整体覆盖。
 - `settings:test` 的成功判定刻意严格：配置三项非空后发起一次极小的 `chat.completions` 请求，**必须拿到模型返回的文本内容**才算连接成功，避免把「接口通了但模型不产出」误判为可用。
 - API Key 明文保存在本机 `userData/settings.json`，不经 IPC 外传。
@@ -113,8 +120,8 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 ### 4.6 `projects.ts` —— 项目化流水线（最大模块）
 
 - 项目实体：`userData/projects/<项目名>/`，元数据 `project.json`（`title` / `subtitle` / `subtitleCount` / `content` / `audioFile` / `videoMaterial` / `htmlPath` / `videoPath` / `createdAt` / `updatedAt`），旁挂 `subtitle.txt`、`index.html`、`index.preview.html`、`gsap.min.js`（按需从随包文件复制）、`audio/`、`video/`。
-- 对外能力（24 个 `handle` + 1 个推送）：项目 list / create / load / delete、字幕保存、内容脚本保存、HTML 生成 / 修改 / 读取 / 保存 / 预览 / 下载、任意产物导出、SRT 导出、项目目录与文件所在目录打开、音频与视频素材的挑选 / 设置 / 清除、从视频提取音轨、视频产物回写。
-- 关键内部设施：`projectDir()`（路径派生的唯一入口，也被 `hgpreview` 协议使用）、`parseSubtitle()`（解析 `[分:秒] 文本` 与纯文本行并统计条目数）、`normalizeContent()`（内容脚本字段兼容）、`scanProjects()`（列表与 `has*` 标记）、`buildContentBlock()` / `buildMaterialPrompt()`（拼装 Agent 提示词）、预览副本注入脚本 `HG_PREVIEW_CTRL`（`timelines()` 对 `__timelines` 的「数组 / 对象 / 缺失」三态兼容）、`progressText()`（Agent 进度 → 中文阶段文案）。
+- 对外能力（25 个 `handle` + 1 个推送）：项目 list / create / load / delete、字幕保存、内容脚本保存、HTML 生成 / 修改 / 读取 / 保存 / 预览 / 下载、任意产物导出、SRT 导出、项目目录与文件所在目录打开、音频与视频素材的挑选 / 设置 / 清除、从视频提取音轨、视频产物回写。其中 `set-audio` / `clear-audio` / `extract-video-audio` 会同步改写 HTML 里的注入音轨并回带 `htmlUpdated`。
+- 关键内部设施：`projectDir()`（路径派生的唯一入口，也被 `hgpreview` 协议使用）、`parseSubtitle()`（解析 `[分:秒] 文本` 与纯文本行并统计条目数）、`normalizeContent()`（内容脚本字段兼容）、`scanProjects()`（列表与 `has*` 标记）、`buildContentBlock()` / `buildMaterialPrompt()`（拼装 Agent 提示词）、背景音轨注入一组（`BGM_TAG_ID` / `insertHtmlSnippet()` / `stripInjectedBgm()` / `stripAudioOfFile()` / `applyBgmToHtml()`，共 6 处调用点）、预览副本注入脚本 `HG_PREVIEW_CTRL`（`timelines()` 对 `__timelines` 的「数组 / 对象 / 缺失」三态兼容，落位复用 `insertHtmlSnippet()`）、`progressText()`（Agent 进度 → 中文阶段文案）。
 - GSAP 本地化：生成 / 修改 / 保存（`project:save-html`）/ 预览副本四个写盘环节先 `hfEnv.localizeGsapHtml()` 改写 CDN 引用，再按需 `hfEnv.copyGsapIntoProject()` 把随包 `gsap.min.js` 复制进项目目录；其中**作者态三处（generate / modify / save-html）会用复制返回值做兜底**——复制失败就把引用换回 CDN（`hfEnv.externalizeGsapHtml()`），预览则忽略返回值、只在副本上改写，原件 `index.html` 保持原貌（渲染路径的第五处本地化见 4.9，同样忽略返回值）。反向地，`project:download-html` 与 `project:download-file` 的 `.html/.htm` 分支用 `externalizeGsapHtml()` 把 `./gsap.min.js` 换回固定版本 CDN 后再文本写出——导出的是单文件，否则放到别处会缺 `gsap.min.js` 导致动画不跑；其它扩展名仍保持字节复制。
 - 写 HTML 成功后会把**失效的旧视频产物置空**，并做 HyperFrames 合规校验，返回 `compatible` 供 UI 提示。
 
@@ -150,7 +157,18 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 - 转录链路：`prepareAudio()`（whisper 不能直接解码的格式先用内置 ffmpeg 转 wav，临时文件用后清理）→ VAD 起止静音裁剪 → `spawn whisper-cli.exe`（`-m 模型 -f 音频 -oj JSON --no-prints -pp`）→ 解析 JSON 的 `transcription.segments` → `opencc-js` 繁转简 → 转成 `[分:秒] 文本`。**不直接写项目文件**，由渲染层弹窗「替换现有 / 追加到末尾」后经 `project:save-subtitle` 落盘。
 - 进度两阶段：spawn 后先报「正在加载模型」（不确定态进度条），从 stderr 解析到 `progress = N%` 后进入「转录中 N%」。
 
-### 4.11 `vad.ts` —— 纯函数 VAD
+### 4.11 `updater.ts` —— 应用自更新
+
+- **更新源三级优先**：`settings.json` 的 `updater.feedUrl`（非空即 `setFeedURL({ provider: 'generic', url })` 覆盖）→ 打包时写入 `resources/app-update.yml` 的 `publish` 地址（由 `package.json` 的 `build.publish` 在 `npm run dist` 时生成）。
+- **依赖加载是防御式的**：`electron-updater` 用 `require()` 取 `autoUpdater`，整段包在 `try` 里并存下 `updaterLoadError`；缺依赖时所有 `update:*` 调用都返回 `{ ok: false, message }`，**不会让主进程启动崩掉**（打包白名单漏项这类问题因此表现为「功能不可用」而不是「应用打不开」）。
+- **下载策略**：`autoDownload = false`（安装包近 300 MB，只由用户点「下载更新」触发）、`autoInstallOnAppQuit = true`（已下载的更新在用户直接关窗时也会装上）。
+- **安装前拒绝长任务**：`installNow()` 在 `busy` 时返回「当前有任务正在进行（转录 / 渲染 / 配音）」并拒绝重启。`busy` 不改动任何业务模块——它由 `bindBusyTracking()` 监听 4 路进度通道（`whisper:progress` / `video:progress` / `voice:align-progress` / `project:html-progress`）的起止自动推导。
+- **与 `window-all-closed` 的配合**：`quitAndInstall()` 会触发窗口关闭，若入口的 `window-all-closed` 再 `app.quit()` 会与安装器抢退出流程，因此 `installNow()` 先置 `quitFlag`，入口据此直接 `return`（`updater.quitForUpdate()`）。
+- **`stage` 刻意放宽为 `string`**：阶段由 electron-updater 的事件回调跨函数写入，若标注成 `UpdateStage` 联合类型，TS 的控制流分析会把函数内最后一次赋值当成当前类型，导致后续全部比较被判成「不可能分支」（实测报 9 处 `TS2367`）；交出前由 `toStage()` 白名单收口成 `UpdateStage`。
+- **错误中文化**：`humanError()` 把 HTTP 404 / DNS / 校验失败等翻译成可操作的中文提示（如「更新源上没有找到 latest.yml，请确认已上传」）；所有事件与动作写 `userData/updater.log`，与 `preview-protocol.log` 同思路。
+- **dev 环境**：未打包时需根目录提供 `dev-app-update.yml` 且置 `forceDevUpdateConfig = true` 才会检查；没有该文件则跳过启动静默检查（该文件名已进 `.gitignore`）。
+
+### 4.12 `vad.ts` —— 纯函数 VAD
 
 - `readWavSamples()`：解析 16 bit PCM WAV（RIFF/WAVE，chunk 遍历含奇数长度补位、`dataLen` 截断、返回 `Int16Array` 交错样本）；无法识别时返回 `null`。
 - `vadTrimSegments(samples, rate, segs)`：基于 20 ms 窗口的噪声底分位与阈值（`thr = max(noiseFloor*3, 200)`）做前后静音裁剪，并用 `leadSilWin 0.4s` / `tailSilWin 0.15s` / `padSec 0.1` / `minDur 0.25` 等参数修正边界，四类异常输入原样返回。
@@ -166,7 +184,8 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 4. **进度回推节流**：下载与转录的高频进度按时间/百分比节流后再 `webContents.send`，避免刷爆 IPC。
 5. **路径安全**：所有项目内路径由 `projectDir()` 派生并做前缀校验；临时产物集中在 `userData` 下的工作目录或系统临时目录，用后清理。
 6. **持久化边界**：只有 `settings.ts` 与 `projects.ts` 直接写盘；其余模块通过它们落盘（如 `video.ts` 不回写 `project.json`，由渲染层调 `project:save-video`）。
-7. **载荷 / 结果类型全部来自 `src/shared/types.ts`**：`src/main/` 下已无本地声明的 payload / result / progress 接口，各 handler 的 `payload` 参数统一标注共享层的 `*Payload`（如 `ProjectAgentPayload`、`WhisperTranscribePayload`、`VoiceSynthPayload`），进度推送统一用 `HtmlProgressPayload` / `WhisperProgressPayload` / `AlignProgressPayload`；项目结构类型（`Scene` / `ContentScript` / `Project` / `SubtitleLine`）由 `projects.ts` 再导出。
+7. **载荷 / 结果类型全部来自 `src/shared/types.ts`**：`src/main/` 下已无本地声明的 payload / result / progress 接口，各 handler 的 `payload` 参数统一标注共享层的 `*Payload`（如 `ProjectAgentPayload`、`WhisperTranscribePayload`、`VoiceSynthPayload`、`SettingsSaveUpdaterPayload`），进度推送统一用 `HtmlProgressPayload` / `WhisperProgressPayload` / `AlignProgressPayload` / `UpdateProgressPayload`；项目结构类型（`Scene` / `ContentScript` / `Project` / `SubtitleLine`）由 `projects.ts` 再导出。（`updater.ts` 内部的 `UpdaterLike` 等是对 `electron-updater` 的最小结构描述，不是 IPC 载荷类型。）
+8. **运行时依赖必须同时进 `build.files` 白名单**：`package.json` 的 `build.files` 里有 `"!node_modules/**/*"`，所有运行时依赖都要显式重新包含（`openai` / `opencc-js` / `electron-updater` 及其 13 个传递依赖）。**新增 `dependencies` 后务必重新 `npm run dist` 并用 `npx asar list dist/win-unpacked/resources/app.asar` 验证**，否则该依赖在 dev 下正常、装成安装版后 `require` 直接失败。
 
 ---
 

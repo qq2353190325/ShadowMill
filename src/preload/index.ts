@@ -1,13 +1,20 @@
 // src/preload/index.ts —— 预加载脚本：通过 contextBridge 向渲染进程暴露安全 API
-// 8 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools）
-// 与 4 个进度推送通道的单订阅语义（重复注册仅替换回调，避免页面切换叠加监听）。
+// 9 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/updateTools）
+// 与 5 个进度推送通道的单订阅语义（重复注册仅替换回调，避免页面切换叠加监听）。
 // 类型契约：每个对象都以 PreloadApi['<命名空间>'] 标注（见 src/shared/types.ts ⑨ 节），
 //           渲染层拿到的 window.* 签名由 preload/index.d.ts 挂载同一份契约 —— 两处不会漂移。
 // 注意：sandboxed preload 必须编译为 CJS（全项目无 "type":"module"）；
 //       本文件的 import 由 electron-vite 打包内联，运行时仅依赖 require('electron')。
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc'
-import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, RenderOverride, WhisperProgressPayload } from '../shared/types'
+import type {
+  AlignProgressPayload,
+  HtmlProgressPayload,
+  PreloadApi,
+  RenderOverride,
+  UpdateProgressPayload,
+  WhisperProgressPayload
+} from '../shared/types'
 
 const electronAPI: PreloadApi['electronAPI'] = {
   platform: process.platform,
@@ -56,6 +63,8 @@ const settingsTools: PreloadApi['settingsTools'] = {
   save: (customModel) => ipcRenderer.invoke(IPC.Settings.Save, { customModel }),
   // 渲染默认档位（质量 / 帧率）：只更新 settings.json 的 render 段
   saveRender: (render) => ipcRenderer.invoke(IPC.Settings.SaveRender, { render }),
+  // 更新源与自动检查开关：只更新 settings.json 的 updater 段
+  saveUpdater: (updater) => ipcRenderer.invoke(IPC.Settings.SaveUpdater, { updater }),
   test: (customModel) => ipcRenderer.invoke(IPC.Settings.Test, { customModel })
 };
 contextBridge.exposeInMainWorld('settingsTools', settingsTools);
@@ -155,6 +164,25 @@ const projectTools: PreloadApi['projectTools'] = {
 };
 contextBridge.exposeInMainWorld('projectTools', projectTools);
 
+// 应用自更新（electron-updater generic provider）：检查 / 下载 / 取消 / 重启安装；进度经 update:progress 回推
+const updateTools: PreloadApi['updateTools'] = {
+  // 同步取版本号（主进程 app.getVersion()，极快，不阻塞首屏）
+  version: (): string => ipcRenderer.sendSync(IPC.Update.Version),
+  check: () => ipcRenderer.invoke(IPC.Update.Check),
+  download: () => ipcRenderer.invoke(IPC.Update.Download),
+  cancel: () => ipcRenderer.invoke(IPC.Update.Cancel),
+  install: () => ipcRenderer.invoke(IPC.Update.Install),
+  // 单订阅：重复注册仅替换回调，避免页面切换叠加监听
+  onProgress: (callback) => {
+    _updateProgressCb = callback;
+    if (!_updateProgressBound) {
+      _updateProgressBound = true;
+      ipcRenderer.on(IPC.Update.Progress, (_event, data) => { if (typeof _updateProgressCb === 'function') _updateProgressCb(data); });
+    }
+  }
+};
+contextBridge.exposeInMainWorld('updateTools', updateTools);
+
 // ===== 进度通道单订阅状态（模块级标志，避免页面切换叠加监听） =====
 let _htmlProgressCb: ((data: HtmlProgressPayload) => void) | null = null;
 let _htmlProgressBound = false;
@@ -162,3 +190,5 @@ let _whisperProgressCb: ((data: WhisperProgressPayload) => void) | null = null;
 let _whisperProgressBound = false;
 let _alignProgressCb: ((data: AlignProgressPayload) => void) | null = null;
 let _alignProgressBound = false;
+let _updateProgressCb: ((data: UpdateProgressPayload) => void) | null = null;
+let _updateProgressBound = false;

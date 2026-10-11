@@ -1,6 +1,6 @@
 # src/renderer/src/pages/VideoPreviewPage/（页面）
 
-> 视频预览：我的项目自动载入成品 MP4 内嵌播放；内置示例只读，保留 HTML 预览与 HyperFrames 试渲染。
+> 视频预览：我的项目自动载入成品 MP4 内嵌播放；内置示例只读，保留 HTML 预览与试渲染。
 
 - **覆盖文件**：`VideoPreviewPage/index.vue`（本目录唯一文件，199 行）
 - **所在目录**：`src/renderer/src/pages/VideoPreviewPage/`
@@ -17,7 +17,7 @@
 | 项目形态 | 本页行为 |
 |----------|----------|
 | 我的项目（非内置） | 进入即自动加载 `appState.project.videoPath`（配合 `videoExists`）→ `<video controls>` 播放 + 「重新加载」+ 「在文件夹中显示」；无成品时给出「去「HTML生成」页点「转视频」」的引导 |
-| 内置示例（只读） | 保留示例 HTML 预览（`hfTools.previewShell` 外壳 + iframe）+「HyperFrames 试渲染」+ 质量 / 帧率下拉（**只读项目不落盘，档位仅本次生效**）；渲染完成后用本页 `<video>` 播放结果 |
+| 内置示例（只读） | 保留示例 HTML 预览（`hfTools.previewShell` 外壳 + iframe）+「试渲染」+ 质量 / 帧率下拉（**只读项目不落盘，档位仅本次生效**）；渲染完成后用本页 `<video>` 播放结果 |
 
 | 职责 | 实现位置 |
 |------|----------|
@@ -50,7 +50,7 @@
 | `.card.hf-page` | 整页卡片容器，`margin-top:16px`；页面根元素为 `div` |
 | `.panel-title` | 标题按 `appState.isBuiltin` 二选一：`内置示例预览（只读）` / `视频预览` |
 | `.hf-toolbar`（我的项目） | `v-if="!appState.isBuiltin"`：`.hf-file` 显示 `escTxt(videoPath)` 或「尚无视频产物」+ `重新加载` 按钮（`:disabled="!videoPath"`，`@click="onReload"`） |
-| `.hf-toolbar`（内置示例第 1 行） | `v-else` 分支：`.hf-file` 显示 `escTxt(htmlPath)` 或「未找到示例 HTML」+ `重新加载预览`（`:disabled="!htmlPath"`）+ `HyperFrames 试渲染` 主按钮（`:disabled="!htmlPath \|\| rendering"`） |
+| `.hf-toolbar`（内置示例第 1 行） | `v-else` 分支：`.hf-file` 显示 `escTxt(htmlPath)` 或「未找到示例 HTML」+ `重新加载预览`（`:disabled="!htmlPath"`）+ `试渲染` 主按钮（`:disabled="!htmlPath \|\| rendering"`，`title`「把示例 HTML 渲染成 MP4（约 30 秒）」） |
 | `.hf-toolbar`（内置示例第 2 行） | 质量 / 帧率两个 `select.hf-select`（`v-model="quality"` / `v-model="fps"`，`:disabled="rendering"`，选项来自 `qualityOptions` / `fpsOptions`）+ 文案「本次档位：`renderOptionsText({ quality, fps })`（只读示例，不落盘）」 |
 | `.hf-tip`（内置示例） | `{{ qualityHint }}`：当前所选质量的说明（如「快速预览」的画质代价） |
 | `.hf-status` | 状态条，`:class="statusClass"`，文本为 `statusText` |
@@ -102,7 +102,7 @@
 
 ### 4.2 挂载初始化（`onMounted`）
 
-1. 先调 `resetRenderProgress()`：清空全局 `renderProgress.text` 及 `useRenderProgress.ts` 内的 `hfLogBuf` / `hfLastLine`，避免上一次渲染的 trace 残留到本页。本页只在**内置示例试渲染**（4.4）时发起渲染，我的项目形态下渲染由「HTML生成」页发起。
+1. 先调 `resetRenderProgress()`：清空全局 `renderProgress.text` 及 `useRenderProgress.ts` 内的跨 chunk 半行缓冲 `hfLogBuf`，避免上一次渲染的 trace 残留到本页。本页只在**内置示例试渲染**（4.4）时发起渲染，我的项目形态下渲染由「HTML生成」页发起。
 2. `appState.isBuiltin` 为真（内置示例）：`effectiveRenderOptions()` 取全局默认档位（只读项目没有项目级覆盖）写入 `quality` / `fps`；`htmlPath = appState.project.htmlPath || ''`，有路径则 `loadBuiltinPreview()`，否则写「未找到示例 HTML」+ `hf-error`；随后直接 `return`（不走成品加载）。
 3. 否则走 `syncProjectVideo()`（我的项目分支）。
 
@@ -126,8 +126,8 @@
 
 ### 4.5 状态文案的合并显示
 
-- 渲染期间：全局 `renderProgress.text` 由 `useRenderProgress.ts` 里 `App.vue` 挂载时注册的 `hfTools.onProgress` 回调持续写入（如「渲染中 · 逐帧捕获（12s）：...」），`statusText` 因此优先显示它。
-- 非渲染期间 / trace 已被清空时：`renderProgress.text === ''`，回退显示 `localStatus`。
+- 渲染期间：全局 `renderProgress.text` 由 `useRenderProgress.ts` 里 `App.vue` 挂载时注册的 `hfTools.onProgress` 回调持续写入（如「渲染中 · 逐帧捕获（已用 45s · 帧 320/900）」），`statusText` 因此优先显示它。只有 CLI 长阶段的 trace 才会写入；普通日志行与内部微阶段（`worker_resolution` 等）不写，此时状态条保持上一条文案。
+- 非渲染期间 / trace 已被清空时：`renderProgress.text === ''`，回退显示 `localStatus`（渲染刚点下、还没有任何长阶段 trace 时也走这条，即显示「试渲染中，请稍候（…，约 30 秒）...」）。
 - 本页用 `statusClass` 这个 ref（而非像「HTML生成」页那样再派生一个 `statusDisplayClass` computed）：状态类始终跟着本页分支走，与 trace 文案是否接管无关。
 - 试渲染结束时调的是 `resetRenderProgress()`（清文案 + 清半行缓冲），而不是旧页那种「只把 `renderProgress.text` 置空」。
 
@@ -166,7 +166,7 @@
 
 1. **iframe 的 `file:///` 拼接**：路径先 `replace(/\\/g, '/')` 再 `encodeURI`，最后前置 `file:///`；中文目录与空格依赖 `encodeURI` 处理，不要改成 `encodeURIComponent`。
 2. **预览外壳优先、直连兜底**：`previewShell` 失败或返回 `ok=false` 时静默回退到直接加载目标 HTML（此时可能无播放条、内容被裁剪）。`previewShell` 内部异常被 `catch` 吞掉，不会中断加载。
-3. **两种项目形态的工具栏互斥**：模板用 `v-if="!appState.isBuiltin"` / `v-else` 分流，因此「重新加载」（我的项目）与「重新加载预览 / HyperFrames 试渲染 / 档位下拉」（内置示例）不会同时出现。
+3. **两种项目形态的工具栏互斥**：模板用 `v-if="!appState.isBuiltin"` / `v-else` 分流，因此「重新加载」（我的项目）与「重新加载预览 / 试渲染 / 档位下拉」（内置示例）不会同时出现。
 4. **内置示例档位不落盘**：`quality` / `fps` 只读进 `renderVideo` 载荷，既不调 `saveProjectRenderOverride`（那是「HTML生成」页的行为），也不写 `settings.json`；离开本页即回到全局默认。
 5. **内置示例不回写产物**：试渲染成功后只更新本页 `videoPath` / `videoSrc` / `videoVisible`，不调 `projectTools.saveVideo`、不 `refreshProject()`，所以示例的「视频」节点永远不会点亮（`hasVideo` 依赖列表项 `hasVideo`，内置映射里恒为 `false`）。
 6. **状态类名三态**：`''`（进行中/初始）、`'hf-ok'`、`'hf-error'`，模板只做 `:class="statusClass"` 绑定。

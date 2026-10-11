@@ -9,7 +9,8 @@
 //   ttsAlign.ts  字幕配音逐句合成与时间对齐 + voice:synth-aligned / voice:align-cancel IPC
 //   video.ts     预览 / HyperFrames 转视频 + dialog:open-html / video:* IPC
 //   whisper.ts   whisper.cpp 字幕转录 + whisper:* IPC
-// 依赖图：settings ← htmlAgent ← projects ← voice ← ttsAlign；hfEnv ← video；无环。
+//   updater.ts   应用自更新（electron-updater generic provider）+ update:* IPC
+// 依赖图：settings ← htmlAgent ← projects ← voice ← ttsAlign；hfEnv ← video；updater ← settings；无环。
 // 打包输出 out/main/index.js；preload 输出 out/preload/index.js；渲染层输出 out/renderer/。
 import { app, BrowserWindow, Menu, ipcMain, clipboard, protocol } from 'electron'
 import path from 'node:path'
@@ -22,6 +23,7 @@ import * as voice from './voice'
 import * as ttsAlign from './ttsAlign'
 import * as video from './video'
 import * as whisper from './whisper'
+import * as updater from './updater'
 
 // ===== 预览文件协议 hgpreview://p/<encodeURIComponent(项目名)>/<相对路径> =====
 // dev 下渲染层来自 http://localhost，Chromium 会拦截 file:// iframe（Not allowed to load local resource），
@@ -151,6 +153,7 @@ app.whenReady().then(() => {
   ttsAlign.register(ctx)
   video.register(ctx)
   whisper.register(ctx)
+  updater.register(ctx)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -160,6 +163,9 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  // 更新安装：updater.installNow() 已调用 quitAndInstall（由 electron-updater 自己重启应用），
+  // 此处再 app.quit() 会与安装器抢退出流程，故直接返回
+  if (updater.quitForUpdate()) return
   if (process.platform !== 'darwin') {
     app.quit()
   }

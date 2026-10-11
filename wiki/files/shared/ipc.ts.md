@@ -1,11 +1,11 @@
 # src/shared/ipc.ts
 
-> 三端共享的 IPC 频道名常量表，八个命名空间的唯一真源
+> 三端共享的 IPC 频道名常量表，九个命名空间的唯一真源
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量（含派生类型）
-- **规模**：99 行
-- **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Settings / Voice / Whisper / Project / Video 七个分组）、`IpcChannel`（频道字面量联合类型）
+- **规模**：110 行
+- **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video 八个分组）、`IpcChannel`（频道字面量联合类型）
 
 ## 1. 作用与职责
 
@@ -13,16 +13,16 @@
 
 1. 消除主进程 `ipcMain.handle` / `ipcMain.on` 与 preload `ipcRenderer.invoke` / `send` / `on` 之间的"手写字符串魔数"重复 —— 两侧都 `import { IPC }`，拼写错误在编译期就能被发现。
 2. 用 `as const` 冻结字面量类型，再由 `IpcChannel` 派生出全部频道名的联合类型，可用于类型收窄或工具函数签名。
-3. 通过分组（Window / App / Settings / Voice / Whisper / Project / Video）让"哪个进程模块负责哪批频道"一目了然：分组名与 `src/main/*.ts` 的文件职责基本对应。
+3. 通过分组（Window / App / Update / Settings / Voice / Whisper / Project / Video）让"哪个进程模块负责哪批频道"一目了然：分组名与 `src/main/*.ts` 的文件职责基本对应。
 
-文件首行注释明确了硬约束：**频道名与现行实现逐一对应，禁止改动**。preload 的 8 个命名空间与渲染层全部调用都依赖这些字符串，任何一个字符的改动都会导致 invoke 无响应（`ipcMain.handle` 未命中时 Promise 会抛 "No handler registered"）。
+文件首行注释明确了硬约束：**频道名与现行实现逐一对应，禁止改动**。preload 的 9 个命名空间与渲染层全部调用都依赖这些字符串，任何一个字符的改动都会导致 invoke 无响应（`ipcMain.handle` 未命中时 Promise 会抛 "No handler registered"）。
 
 ## 2. 导出与关键实现
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `IPC` | `const` 对象（`as const`） | 七个分组的嵌套常量表，值为普通字符串字面量 |
-| `IpcChannel` | `export type` | `(typeof IPC)[keyof typeof IPC]`，即七个分组对象类型的并集（注意：类型粒度为"分组对象"，而非单个频道字符串） |
+| `IPC` | `const` 对象（`as const`） | 八个分组的嵌套常量表，值为普通字符串字面量 |
+| `IpcChannel` | `export type` | `(typeof IPC)[keyof typeof IPC]`，即八个分组对象类型的并集（注意：类型粒度为"分组对象"，而非单个频道字符串） |
 
 ### 2.1 Window 分组（窗口控制 + 状态回推）
 
@@ -43,12 +43,24 @@
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
-| `Settings.Get` | `settings:get` | 读取 `AppSettings`（含 customModel / voiceTTS / voiceProfiles / whisper / render） |
+| `Settings.Get` | `settings:get` | 读取 `AppSettings`（含 customModel / voiceTTS / voiceProfiles / whisper / render / updater） |
 | `Settings.Save` | `settings:save` | 保存自定义模型配置（OpenAI 兼容端点） |
 | `Settings.SaveRender` | `settings:save-render` | 保存视频渲染**默认档位**（只更新 `render` 段，不动 customModel） |
+| `Settings.SaveUpdater` | `settings:save-updater` | 保存**更新设置**（只更新 `updater` 段：`feedUrl` / `autoCheck` / `skippedVersion`） |
 | `Settings.Test` | `settings:test` | 用给定 `CustomModelConfig` 发起一次连通性测试 |
 
-### 2.4 Voice 分组（voice.js / ttsAlign.js）
+### 2.4 Update 分组（updater.ts，应用自更新）
+
+| 常量 | 频道名 | 用途 |
+| --- | --- | --- |
+| `Update.Check` | `update:check` | renderer → main，`invoke`，检查更新（读更新源 `latest.yml`） |
+| `Update.Download` | `update:download` | renderer → main，`invoke`，下载安装包（`autoDownload = false`，仅用户触发） |
+| `Update.Cancel` | `update:cancel` | renderer → main，`invoke`，取消下载 |
+| `Update.Install` | `update:install` | renderer → main，`invoke`，退出并运行安装器 |
+| `Update.Version` | `update:version` | renderer → main，**`sendSync`（全工程唯一的同步频道）**，只回当前版本号字符串 |
+| `Update.Progress` | `update:progress` | main → renderer，推送更新阶段 / 下载进度（`UpdateProgressPayload`） |
+
+### 2.5 Voice 分组（voice.js / ttsAlign.js）
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
@@ -71,7 +83,7 @@
 | `Voice.AlignCancel` | `voice:align-cancel` | renderer → main，`send`，取消正在进行的对齐任务 |
 | `Voice.AlignProgress` | `voice:align-progress` | main → renderer，推送对齐进度（单订阅） |
 
-### 2.5 Whisper 分组（whisper.js / whisper.ts）
+### 2.6 Whisper 分组（whisper.js / whisper.ts）
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
@@ -88,7 +100,7 @@
 | `Whisper.Transcribe` | `whisper:transcribe` | 执行字幕转录，返回 segments |
 | `Whisper.Progress` | `whisper:progress` | main → renderer，推送转录进度（单订阅） |
 
-### 2.6 Project 分组（projects.js / projects.ts）
+### 2.7 Project 分组（projects.js / projects.ts）
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
@@ -119,7 +131,7 @@
 | `Project.SaveHtml` | `project:save-html` | 保存手工编辑后的 HTML |
 | `Project.HtmlProgress` | `project:html-progress` | main → renderer，推送 HTML 生成/修改进度（单订阅） |
 
-### 2.7 Video 分组（video.js / video.ts）
+### 2.8 Video 分组（video.js / video.ts）
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
@@ -158,7 +170,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 ### 3.2 `as const` 与 `IpcChannel`
 
 - `export const IPC = { ... } as const` 使每个属性成为**只读的字面量类型**（如 `'window:minimize'` 而非 `string`），赋值给其他变量时不会意外放宽。
-- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video'` 七个键，取 `[keyof ...]` 后得到的是**七个分组对象类型**的并集，而不是 71 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
+- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video'` 八个键，取 `[keyof ...]` 后得到的是**八个分组对象类型**的并集，而不是 78 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
 
 ### 3.3 三种通道方向约定
 

@@ -13,11 +13,22 @@ export const IPC = {
   App: {
     CopyText: 'app:copy-text'
   },
+  // 应用自更新（updater.js，electron-updater generic provider）
+  Update: {
+    Check: 'update:check',
+    Download: 'update:download',
+    Cancel: 'update:cancel',
+    Install: 'update:install',
+    // 同步取当前版本号（sendSync）：设置页首屏要立刻显示「当前版本 x.y.z」，不等异步检查
+    Version: 'update:version',
+    Progress: 'update:progress'
+  },
   // 设置（settings.js）
   Settings: {
     Get: 'settings:get',
     Save: 'settings:save',
     SaveRender: 'settings:save-render',
+    SaveUpdater: 'settings:save-updater',
     Test: 'settings:test'
   },
   // 千问语音（voice.js / ttsAlign.js）

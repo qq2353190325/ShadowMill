@@ -14,7 +14,7 @@
 - **项目化管理**：每个「项目」对应 `userData/projects/<项目名>/` 一个目录，统一存放 `project.json`、`subtitle.txt`、`index.html`、`audio/`、`video/`；内置示例项目在 `video-projects/`（只读）。
 - **本机完成重活**：语音识别（whisper.cpp）与视频渲染（HyperFrames + FFmpeg）均在本机 CPU 运行，不消耗 API 额度；HTML 动画页面由用户自配置的 OpenAI 兼容模型 Agent 流式生成/修改。
 - **技术栈**：Electron 31 + Vue 3 + electron-vite 5 + TypeScript（全量 TS；main/preload 输出 CJS）；无 vue-router / pinia，导航用页面注册表 + `goPage()`，全局状态为模块级 `reactive` 单例。
-- **源码分层**：`src/main`（主进程 11 个模块）· `src/preload`（8 个命名空间的桥接层）· `src/renderer`（Vue 界面：外壳 / 9 页面 / 设计系统）· `src/shared`（IPC 频道常量与跨进程类型）· `src/agent`（独立实验脚本，不进构建图、不打包）。
+- **源码分层**：`src/main`（主进程 12 个模块）· `src/preload`（9 个命名空间的桥接层）· `src/renderer`（Vue 界面：外壳 / 9 页面 / 设计系统）· `src/shared`（IPC 频道常量与跨进程类型）· `src/agent`（独立实验脚本，不进构建图、不打包）。
 - **运行**：`npm install` → `npm run dev`（开发）/ `npm run build`（构建）/ `npm run typecheck`（类型检查）；打包用 `npm run pack` 或 `npm run dist`。
 
 ## 二、wiki 地址
@@ -25,7 +25,7 @@
 |---|---|
 | 知识库索引（阅读顺序 + 逐文件文档总表） | [`wiki/README.md`](wiki/README.md) |
 | 项目结构（技术栈、目录树、构建打包、运行时目录） | [`wiki/00-项目结构.md`](wiki/00-项目结构.md) |
-| 架构总览（进程模型、IPC 契约 69 频道、数据流、安全边界） | [`wiki/01-架构总览.md`](wiki/01-架构总览.md) |
+| 架构总览（进程模型、IPC 契约 78 频道、数据流、安全边界） | [`wiki/01-架构总览.md`](wiki/01-架构总览.md) |
 | 目录架构 · 主进程 | [`wiki/02-目录架构-src-main.md`](wiki/02-目录架构-src-main.md) |
 | 目录架构 · 桥接层 | [`wiki/03-目录架构-src-preload.md`](wiki/03-目录架构-src-preload.md) |
 | 目录架构 · 渲染层 | [`wiki/04-目录架构-src-renderer.md`](wiki/04-目录架构-src-renderer.md) |
@@ -49,7 +49,7 @@
 
 ## 四、关键约定
 
-1. **IPC 契约不改**：频道名集中在 `src/shared/ipc.ts`，载荷格式与 `src/preload/index.ts` 的 8 个命名空间方法一一对应；新增接口需主进程 `register()`、`shared/ipc.ts`、preload 三处齐改。
+1. **IPC 契约不改**：频道名集中在 `src/shared/ipc.ts`，载荷格式与 `src/preload/index.ts` 的 9 个命名空间方法一一对应；新增接口需主进程 `register()`、`shared/ipc.ts`、preload 三处齐改。
 2. **preload 必须 CJS**：全工程不设 `"type": "module"`（仅 `src/agent/package.json` 单独声明 ESM）。
 3. **改代码前先查 wiki 索引**：动任何源码前，先看 [`wiki/README.md`](wiki/README.md) 的索引定位受影响的文档，再动手；改完同步更新对应文档，避免文档与代码漂移。
 4. **wiki 文档粒度**：渲染层——**每个页面一篇**（该页面自己的子组件与助手并入同一篇，代码侧对应 `src/renderer/src/pages/<PageName>/` 一页一目录、入口 `index.vue`，代码与文档同构）、**目录级一篇**（`wiki/files/renderer/src/assets.md` 覆盖 `assets/`、`wiki/files/renderer/src/components.md` 覆盖 `components/`）、**公共方法与工具一篇**（`wiki/files/renderer/src/common.md`，覆盖 composables / utils / 页面注册表）；主进程、preload、shared 仍按源文件逐篇。

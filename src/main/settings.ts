@@ -1,7 +1,7 @@
 // src/main/settings.ts
 // 设置存储（userData/settings.json）与 OpenAI 兼容客户端工具
-// 提供：readSettings / writeSettings / getCustomModel / getVoiceConfig
-//       以及 settings:get / settings:save / settings:save-render / settings:test IPC
+// 提供：readSettings / writeSettings / getCustomModel / getVoiceConfig / getUpdaterSettings
+//       以及 settings:get / settings:save / settings:save-render / settings:save-updater / settings:test IPC
 //       + whisper 当前模型档位与自定义模型列表（getWhisperModel / saveWhisperModel / getWhisperCustomModels / saveWhisperCustomModels）
 //       + 视频渲染档位的白名单校验（DEFAULT_RENDER / normalizeRenderOptions / pickRenderOverride，供 projects.ts / video.ts 复用）
 // 依赖：app / ipcMain / fs / path / openai
@@ -19,6 +19,8 @@ import type {
   RenderOverride,
   RenderQuality,
   SettingsSaveRenderPayload,
+  SettingsSaveUpdaterPayload,
+  UpdaterSettings,
   VoiceProfile,
   VoiceTTSConfig,
   WhisperCustomModel
@@ -49,12 +51,27 @@ function pickRenderOverride(raw: unknown): RenderOverride {
   return out;
 }
 
+// ===== 应用自更新设置：与渲染档位同思路，非法/缺省字段一律回退默认 =====
+// feedUrl 不做 URL 合法性校验（内网地址形态多），仅 trim 且要求 http(s) 开头，避免把本地路径塞进来；
+// autoCheck 缺省即 true（旧用户升级上来默认开启启动静默检查）；skippedVersion 为空串表示没有跳过任何版本。
+function normalizeUpdaterSettings(raw: unknown, fallback?: UpdaterSettings): UpdaterSettings {
+  const base = fallback || { feedUrl: '', autoCheck: true, skippedVersion: '' };
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw as Record<string, unknown> : {};
+  const rawUrl = typeof src.feedUrl === 'string' ? src.feedUrl.trim() : '';
+  const feedUrl = (rawUrl === '' || /^https?:\/\//i.test(rawUrl)) ? rawUrl : base.feedUrl;
+  const autoCheck = typeof src.autoCheck === 'boolean' ? src.autoCheck : base.autoCheck;
+  const skippedVersion = typeof src.skippedVersion === 'string' ? src.skippedVersion.trim() : base.skippedVersion;
+  return { feedUrl, autoCheck, skippedVersion };
+}
+
 const DEFAULT_SETTINGS = (): AppSettings => ({
   customModel: { baseUrl: '', modelId: '', apiKey: '', enabled: false },
   voiceTTS: { apiKey: '', targetModel: 'qwen-audio-3.0-tts-flash', saveDir: '' },
   voiceProfiles: {}, // 本地音色映射：key 形如 "system:Cherry" / "custom:<voice_id>"，值为 { key, name, voice, targetModel, type }
   whisper: { modelId: '', customModels: [] }, // 语音识别（whisper.cpp）：modelId 为当前使用档位，customModels 为用户自定义模型条目
-  render: Object.assign({}, DEFAULT_RENDER) // 视频渲染全局默认档位（项目未覆盖时生效）
+  render: Object.assign({}, DEFAULT_RENDER), // 视频渲染全局默认档位（项目未覆盖时生效）
+  // 应用自更新：feedUrl 留空即用打包时 app-update.yml 里的地址；autoCheck 为启动后静默检查
+  updater: { feedUrl: '', autoCheck: true, skippedVersion: '' }
 });
 
 function readSettings(): AppSettings {
@@ -67,7 +84,9 @@ function readSettings(): AppSettings {
       voiceProfiles: Object.assign({}, (raw && raw.voiceProfiles) || {}),
       whisper: Object.assign({}, base.whisper, (raw && raw.whisper) || {}),
       // 渲染档位：旧 settings.json（无 render 字段）落回默认；已写入的值经白名单规范化
-      render: normalizeRenderOptions(raw && raw.render)
+      render: normalizeRenderOptions(raw && raw.render),
+      // 更新设置：旧 settings.json（无 updater 字段）落回默认；逐字段做类型收敛
+      updater: normalizeUpdaterSettings(raw && raw.updater)
     };
   } catch (e) {
     return DEFAULT_SETTINGS();
@@ -84,6 +103,19 @@ function getCustomModel(): CustomModelConfig {
 function getVoiceConfig(): VoiceTTSConfig {
   const s = readSettings();
   return Object.assign({}, DEFAULT_SETTINGS().voiceTTS, (s && s.voiceTTS) || {});
+}
+// ===== 应用自更新设置：持久化在 settings.json 的 updater 段（updater.ts 依赖本函数读 feedUrl / autoCheck）=====
+function getUpdaterSettings(): UpdaterSettings {
+  const s = readSettings();
+  return normalizeUpdaterSettings(s && s.updater);
+}
+// 只更新传入的字段：saveUpdaterSettings({ skippedVersion: '1.0.2' }) 不会清掉 feedUrl
+function saveUpdaterSettings(patch?: Partial<UpdaterSettings>): UpdaterSettings {
+  const cur = readSettings();
+  const merged = Object.assign({}, cur.updater, patch || {});
+  cur.updater = normalizeUpdaterSettings(merged);
+  writeSettings(cur);
+  return cur.updater;
 }
 // ===== 语音识别（whisper.cpp）当前模型档位：持久化在 settings.json 的 whisper.modelId =====
 function getWhisperModel(): string {
@@ -165,6 +197,12 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, settings: cur };
   });
 
+  // 更新源与自动检查开关（普通用户一般不用填）：只更新 updater 段，不动 customModel / render
+  ipcMain.handle(IPC.Settings.SaveUpdater, (_event, payload?: SettingsSaveUpdaterPayload) => {
+    saveUpdaterSettings((payload && payload.updater) || {});
+    return { ok: true, settings: readSettings() };
+  });
+
   // 测试连接：用当前（或传入的待测）配置发起一次最小对话，必须拿到模型返回文本才算成功
   ipcMain.handle(IPC.Settings.Test, async (_event, payload?: { customModel?: Partial<CustomModelConfig> }) => {
     const m = Object.assign({}, getCustomModel(), (payload && payload.customModel) || {});
@@ -212,6 +250,8 @@ export {
   pickRenderOverride,
   getCustomModel,
   getVoiceConfig,
+  getUpdaterSettings,
+  saveUpdaterSettings,
   getWhisperModel,
   saveWhisperModel,
   getWhisperCustomModels,

@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（项目化流水线 + project:* IPC）
-- **规模**：772 行
+- **规模**：828 行
 - **对外导出**：
   - 函数/常量：`register`、`scanProjects`、`projectsRoot`、`projectDir`、`projectFilePath`、`readProject`、`writeProject`、`ensureProject`、`parseSubtitle`、`normalizeContent`、`copyAudioIntoProject`、`copyVideoIntoProject`
   - 类型（**再导出**，定义在 `src/shared/types.ts`）：`Scene`、`ContentScript`、`Project`、`SubtitleLine` —— 本文件用 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'` 转发，因此 `projects.Project` / `from './projects'` 的既有引用面不变
@@ -14,10 +14,11 @@
 
 1. **项目容器管理**：把「字幕 → 内容脚本 → HTML → 视频」全链路状态收敛到 `userData\projects\<项目名>\project.json`，提供建/读/写/扫/删。
 2. **字幕解析**：把用户书写的字幕文本解析成带秒级（可含毫秒小数）起止时间的结构化行，供时间轴对齐（`ttsAlign.ts`）与 HTML 生成使用。
-3. **HTML 生成与修改**：把手写字幕、内容脚本、背景音频、视频素材拼装成提示词，调用自定义模型 Agent（`htmlAgent`）产出/改造 `index.html`，并做 HyperFrames 合规校验。
-4. **素材归置**：外部音频/视频复制进项目目录（`audio/`、`video/`）并以相对引用记录，保证 HTML 内相对路径与预览、转视频一致可用。
-5. **GSAP 本地化与导出外部化**：生成 / 修改 / 保存 / 预览四个写盘环节把 HTML 里的 GSAP CDN 引用改写为项目内 `./gsap.min.js`（`hfEnv.localizeGsapHtml`），并在需要时把随包 `vendor/gsap/gsap.min.js` 复制进项目目录（`hfEnv.copyGsapIntoProject`）——三个**作者态**写盘点（generate / modify / save-html）还会用复制返回值做兜底：复制失败就把引用换回 CDN（`hfEnv.externalizeGsapHtml`），宁可联网也不引用不存在的文件。两个导出频道同样反向调用 `externalizeGsapHtml`，保证导出的单个 HTML 文件放到别处也能独立打开。
-6. **IPC 网关**：在 `register(ctx)` 中注册全部 `project:*` 频道，供渲染层完成项目列表、生成、预览、导出、素材选择、产物回写等操作。
+3. **HTML 生成与修改**：把手写字幕、内容脚本、视频素材拼装成提示词，调用自定义模型 Agent（`htmlAgent`）产出/改造 `index.html`，并做 HyperFrames 合规校验。**背景音频不再是生成素材**（不进提示词、也不交给 Agent）：音轨由本文件按 `project.audioFile` 确定性注入 HTML，见第 3.5 节与 5.11。
+4. **背景音轨注入**：`applyBgmToHtml()` 按 `project.audioFile` 重写 `index.html` 里固定 id 的 `<audio id="myv-bgm" src="audio/…" autoplay loop>`（幂等）；共 6 处调用点（`set-audio` / `clear-audio` / `extract-video-audio` / `generate-html` / `modify-html` / `save-html`），保证预览副本与转视频用的原件都带音轨。
+5. **素材归置**：外部音频/视频复制进项目目录（`audio/`、`video/`）并以相对引用记录，保证 HTML 内相对路径与预览、转视频一致可用。
+6. **GSAP 本地化与导出外部化**：生成 / 修改 / 保存 / 预览四个写盘环节把 HTML 里的 GSAP CDN 引用改写为项目内 `./gsap.min.js`（`hfEnv.localizeGsapHtml`），并在需要时把随包 `vendor/gsap/gsap.min.js` 复制进项目目录（`hfEnv.copyGsapIntoProject`）——三个**作者态**写盘点（generate / modify / save-html）还会用复制返回值做兜底：复制失败就把引用换回 CDN（`hfEnv.externalizeGsapHtml`），宁可联网也不引用不存在的文件。两个导出频道同样反向调用 `externalizeGsapHtml`，保证导出的单个 HTML 文件放到别处也能独立打开。
+7. **IPC 网关**：在 `register(ctx)` 中注册全部 `project:*` 频道，供渲染层完成项目列表、生成、预览、导出、素材选择、产物回写等操作。
 
 ## 2. 数据结构
 
@@ -50,7 +51,7 @@
 | `htmlPath` | `string` | 是 | `index.html` 的**绝对路径**（空串表示未生成） |
 | `videoPath` | `string` | 是 | 转视频产物路径（HTML 变更后会被置空表示失效） |
 | `videoMaterial` | `string` | 否 | **视频素材**相对引用（`video/xxx`，与成品 `videoPath` 严格区分） |
-| `audioFile` | `string` | 是 | 背景音频相对引用（`audio/xxx`，空串表示无） |
+| `audioFile` | `string` | 是 | 背景音频相对引用（`audio/xxx`，空串表示无）；同时是注入 HTML 音轨（`<audio id="myv-bgm">`）的唯一来源，见 3.5 |
 | `content` | `ContentScript` | 是 | 内容脚本（`style` + `scenes`） |
 | `createdAt` | `string` | 是 | ISO 时间字符串 |
 | `updatedAt` | `string` | 否 | 每次 `writeProject` 自动刷新为 ISO 时间，列表按此倒序 |
@@ -82,8 +83,14 @@
 | `buildAgentPrompt(parts)` | 否 | `parts.filter(Boolean).join('\n')`，拼接提示词片段 |
 | `buildContentBlock(content)` | 否 | 由 `content` 生成「内容脚本」提示块；无有效场景（旁白全空）返回 `''`，老项目因此回退原流程 |
 | `HG_PREVIEW_CTRL` | 否 | 注入预览副本的播放控制脚本源码（IIFE 字符串常量） |
-| `resolveMaterials(name, proj, payload: ProjectAgentPayload)` | 否 | 解析 `subtitleProject` / `audioPath` / `videoPath` 三个选择项，返回 `{ subtitleText, audioRef, videoRef }`（载荷类型取自 `shared/types.ts`，此前为 `Record<string, unknown>`） |
-| `buildMaterialPrompt(prompt, proj, mats, extra)` | 否 | 生成/修改共用的提示词装配：`extra`（修改时为当前 HTML 源码）在最前，随后需求、内容脚本、字幕、背景音乐、视频素材 |
+| `BGM_TAG_ID` | 否 | 注入音轨标签的固定 id 常量 `'myv-bgm'`——保证重复设置不叠出多条音轨（见 3.5） |
+| `insertHtmlSnippet(html, snippet)` | 否 | 把片段插到文档末尾：优先 `</body>` 前，其次 `</head>` 后，都没有则拼最前。`IPC.Project.PreviewHtml` 原先内联的同一段 if/else 已改为调用本助手（行为不变） |
+| `escapeRegExp(s)` | 否 | 转义正则元字符（供 `stripAudioOfFile` 把音频文件名安全拼进正则） |
+| `stripInjectedBgm(html)` | 否 | 按 `BGM_TAG_ID` 摘掉本应用注入的音轨标签（幂等） |
+| `stripAudioOfFile(html, audioRef)` | 否 | 摘掉引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入），避免与新标签双份播放 |
+| `applyBgmToHtml(name, proj?)` | 否 | 按 `proj.audioFile` 重写 `index.html` 的音轨；无 HTML 时静默返回 `false`，内容无变化不写盘；返回 `true` = 文件被改写（见 3.5） |
+| `resolveMaterials(proj, payload: ProjectAgentPayload)` | 否 | 解析 `subtitleProject` / `videoPath` 两个选择项，返回 `{ subtitleText, videoRef }`（**两个选择项都只是「要不要带上」，都不带路径**：视频的自定义导入走 `project:set-video`，音频则由 `applyBgmToHtml` 注入 HTML、完全不经过本函数；形参里原先不再使用的 `name` 已删除，两个调用点都写作 `resolveMaterials(proj, payload \|\| {})`；载荷类型取自 `shared/types.ts`，此前为 `Record<string, unknown>`） |
+| `buildMaterialPrompt(prompt, proj, mats, extra)` | 否 | 生成/修改共用的提示词装配：`extra`（修改时为当前 HTML 源码）在最前，随后需求、内容脚本、字幕、【音轨】声明、视频素材（`mats` 形参已收窄为 `{ subtitleText, videoRef }`） |
 | `progressText(info)` | 否 | 把 `AgentProgress.stage` 转为中文进度文案（连接/推理/生成/重试/完成） |
 | `register(ctx?)` | 是 | 注册全部 `project:*` IPC；`ctx.getWindow` 用于给各类对话框提供父窗口 |
 
@@ -115,12 +122,12 @@
 | `subtitleProject` | `''` / 缺省 | 不使用字幕 |
 | `subtitleProject` | `'__current__'` | 使用当前项目 `proj.subtitle` |
 | `subtitleProject` | 其他字符串（项目名） | 读取该项目字幕作为本次素材 |
-| `audioPath` | `''` / 缺省 | 不使用音频 |
-| `audioPath` | `'__current__'` | 沿用 `proj.audioFile` |
-| `audioPath` | 存在的文件绝对路径 | `copyAudioIntoProject` 复制后取相对引用 |
-| `videoPath` | `''` / 缺省 | 不使用视频素材 |
+| `videoPath` | `''` / 缺省（含其他任何值） | 不使用视频素材 |
 | `videoPath` | `'__current__'` | 沿用 `proj.videoMaterial` |
-| `videoPath` | 存在的文件绝对路径 | `copyVideoIntoProject` 复制后取相对引用 |
+
+**视频只判 `'__current__'`**：实现就是一行 `const videoRef = payload.videoPath === '__current__' ? (proj.videoMaterial || '') : '';`——**外部绝对路径不再在这里复制进项目**（原 `copyVideoIntoProject` 分支已删除），自定义导入统一走 `project:set-video`（复制进 `video/` 并登记 `proj.videoMaterial`，见 §4 的 `project:set-video` 行）；因此本函数既不看文件是否存在，也不改动项目目录。
+
+**音频选择项已删除**：`ProjectAgentPayload` 不再有 `audioPath`（`shared/types.ts` 的 `ProjectHtmlMaterials` 同步删字段），`resolveMaterials` 也不再返回 `audioRef`。背景音频不是生成素材——它由 `applyBgmToHtml` 按 `project.audioFile` 直接写进 HTML，提示词里只声明「不要写音轨标签」（见 3.5）。`copyAudioIntoProject` 仍由 `project:set-audio` 使用。
 
 ### 3.4 `progressText` 文案映射
 
@@ -131,6 +138,33 @@
 | `writing` | AI 正在生成 HTML…（已输出 N 字符） |
 | `retry` | 本次输出为空，正在升档重试… |
 | `done` | 模型输出完成，正在写入文件… |
+
+### 3.5 背景音轨注入（`BGM_TAG_ID` + 5 个助手）
+
+**动机**：旧版把 `<audio autoplay loop>` 写进提示词、让模型照着写，结果模型经常漏写、写错路径或与页面动画打架；现在改为**主进程确定性注入**——音频不再是生成素材，Agent 侧只被要求「不要写音轨标签」。
+
+常量为 `BGM_TAG_ID = 'myv-bgm'`（注入标签的固定 id），五个助手都是文件内私有函数（源码位置：`HG_PREVIEW_CTRL` 之后、「素材选择结果」注释之前）：
+
+| 助手 | 行为 |
+| --- | --- |
+| `insertHtmlSnippet(html, snippet)` | `lastIndexOf('</body>')` 命中则插在它前面；否则退回 `lastIndexOf('</head>') + 7`（即 `</head>` 之后）；两者都没有则把片段拼在文档最前。注释说明原因：模型输出可能被截断而缺 `</body>`，此时直接拼在文件末尾会落进未闭合的 `<script>`，导致整页 SyntaxError（`fitStage` / 时间轴全失效）。`IPC.Project.PreviewHtml` 里原来内联的同一段 if/else 已改为调用本助手，**行为不变** |
+| `escapeRegExp(s)` | `String(s).replace(/[.*+?^${}()\|[\]\\]/g, '\\$&')`，把音频文件名安全拼进正则 |
+| `stripInjectedBgm(html)` | 用 `'<audio\\b[^>]*\\bid=["\']myv-bgm["\'][^>]*>(?:[\\s\\S]*?</audio>)?'`（`gi`）全量替换为空——摘掉本应用注入的标签（幂等） |
+| `stripAudioOfFile(html, audioRef)` | 先 `path.basename(audioRef)` 取文件名（空则原样返回），再用转义后的文件名拼正则，摘掉 `src` 里含该文件名的**任意** `<audio>`——清理旧版由模型按提示词写入的历史标签，避免与新标签双份播放 |
+| `applyBgmToHtml(name, proj?)` | 见下面的算法 |
+
+`applyBgmToHtml(name, proj?)`（返回 `boolean`）：
+
+1. `projectFilePath(name, 'index.html')` 不存在 → 直接 `false`（还没生成 HTML 时静默跳过，调用方无需分支）。
+2. `proj` 缺省时 `readProject(name)`；`audioRef = (p && p.audioFile) \|\| ''`。
+3. 读原文 `before` → `stripInjectedBgm(before)`；若 `audioRef` 非空再 `stripAudioOfFile(html, audioRef)`（**先摘后插**，保证幂等）。
+4. 若 `audioRef` 非空，`insertHtmlSnippet(html, '<audio id="myv-bgm" src="' + audioRef + '" autoplay loop></audio>')`——`autoplay + loop` 与旧提示词要求一致（音轨通常短于整条时间轴）。
+5. `html === before` → 返回 `false`（**内容无变化不写盘**，避免无谓的 mtime 抖动）；否则 `writeFileSync` 后返回 `true`。
+6. 整个读改写包在 `try/catch` 中，异常一律 `false`（不抛异常、不阻断调用方主流程）。
+
+**为什么标签要带固定 id**：`set-audio` / `extract-video-audio` 会被反复调用（换音频），固定 id 让「先摘再插」成为幂等操作，否则 HTML 里会随每次设置叠出一条音轨。
+
+**为什么音轨不交给 Agent**：模型重写整页时可能整段丢掉注入标签，且提示词里的素材块越多越容易顾此失彼；改为「模型只声明、主进程负责写」，并在生成/修改写盘后再补一次注入（见 5.11）。
 
 ## 4. IPC 频道一览
 
@@ -143,8 +177,8 @@
 | `project:load` | `name?: string`（裸字符串） | `Project` \| `null` | 无名字返回 `null`；否则 `readProject(name) || ensureProject(name)`（不落盘） |
 | `project:save-subtitle` | `ProjectSaveSubtitlePayload`（`{ name?, subtitle?, title? }`） | `{ ok, project }` | 写 `subtitle.txt`（utf8）；`title` 非空才覆盖；同步 `subtitle` 与 `subtitleCount` |
 | `project:save-content` | `ProjectSaveContentPayload`（`{ name?, content? }`） | `{ ok, project }` | 经 `normalizeContent` 归一化后整体保存 `content` |
-| `project:generate-html` | `ProjectAgentPayload`（`{ name, prompt, subtitleProject?, audioPath?, videoPath? }`） | `{ ok, htmlPath, compatible, message }` | 解析素材 → 装配提示词 → `chatWithCustomModel` → `extractHtmlFromReply` → `hfEnv.localizeGsapHtml` 本地化 → 引用本地时 `copyGsapIntoProject`，**复制失败则 `externalizeGsapHtml` 退回 CDN** → 写 `index.html`；置空 `videoPath` |
-| `project:modify-html` | 同 `project:generate-html`（同一 `ProjectAgentPayload`） | `{ ok, htmlPath, compatible, message }` | 需已有 `index.html`；把当前源码作为 `extra` 前置，Agent 输出完整新 HTML 后**同样先本地化、再按复制结果决定是否退回 CDN**，最后覆盖 |
+| `project:generate-html` | `ProjectAgentPayload`（`{ name, prompt, subtitleProject?, videoPath? }`，**已无 `audioPath`**） | `{ ok, htmlPath, compatible, message }` | 解析素材（字幕 / 视频）→ 装配提示词 → `chatWithCustomModel` → `extractHtmlFromReply` → `hfEnv.localizeGsapHtml` 本地化 → 引用本地时 `copyGsapIntoProject`，**复制失败则 `externalizeGsapHtml` 退回 CDN** → 写 `index.html` → **`applyBgmToHtml` 补注入音轨**；置空 `videoPath` |
+| `project:modify-html` | 同 `project:generate-html`（同一 `ProjectAgentPayload`） | `{ ok, htmlPath, compatible, message }` | 需已有 `index.html`；把当前源码作为 `extra` 前置，Agent 输出完整新 HTML 后**同样先本地化、再按复制结果决定是否退回 CDN**，覆盖写盘后**再 `applyBgmToHtml` 补回音轨**（模型重写时可能整段丢掉注入标签） |
 | `project:download-html` | `name?: string`（裸字符串） | `{ ok, savedPath }` / `{ ok:false, canceled:true }` | 「另存为」导出项目 `index.html`（默认文件名 `<name>.html`）：读原文 → `hfEnv.externalizeGsapHtml` 把 `./gsap.min.js` 换回固定版本 CDN → **文本写出**（不再 `copyFileSync`），理由见 5.9 |
 | `project:download-file` | `ProjectDownloadFilePayload`（`{ srcPath?, defaultName? }`） | `{ ok, savedPath }` / `{ ok:false, canceled:true }` | 导出任意存在文件（内置示例 HTML 的**只读导出**入口）；源文件扩展名匹配 `/\.html?$/i` 时同样走「读取 → `externalizeGsapHtml` → 文本写出」，其它扩展名保持 `fs.copyFileSync` 字节复制；`defaultName` 非法字符会被替换 |
 | `project:export-srt` | `ProjectExportSrtPayload`（`{ name?, srt? }`） | `{ ok, savedPath }` | 内容为空则拒绝；否则写 `.srt` 文件（utf8） |
@@ -154,15 +188,15 @@
 | `project:save-video` | `ProjectSetVideoPayload`（`{ name?, videoPath? }`，与 `set-video` 同形复用一个类型） | `{ ok, project }` | 视频渲染完成后回写产物路径（点亮链路「视频」节点） |
 | `project:set-render` | `ProjectSetRenderPayload`（`{ name?, render?: RenderOverride \| null }`） | `{ ok, project }` | 写 / 清除**项目级渲染档位覆盖**：`render` 传 `null`（或字段全非法）即删除 `proj.render`，回到跟随 `settings.json` 的全局默认 |
 | `project:pick-audio` | 无 | 绝对路径 \| `null` | 打开文件选择框（`mp3/wav/m4a/aac/ogg/flac/mp4`），取消返回 `null` |
-| `project:set-audio` | `ProjectSetAudioPayload`（`{ name?, audioPath? }`） | `{ ok, audioFile }` | 校验文件存在 → 复制进 `audio/` → 写入 `proj.audioFile` |
-| `project:clear-audio` | `ProjectNamePayload`（`{ name: string }`） | `{ ok }` | 仅清空 `proj.audioFile` 引用（保留音频文件，避免误删） |
+| `project:set-audio` | `ProjectSetAudioPayload`（`{ name?, audioPath? }`） | `{ ok, audioFile, htmlUpdated }` | 校验文件存在 → 复制进 `audio/` → 写入 `proj.audioFile` → `applyBgmToHtml` 立即重写 HTML 音轨；`htmlUpdated` = 是否真的改写了 `index.html` |
+| `project:clear-audio` | `ProjectNamePayload`（`{ name: string }`） | `{ ok, htmlUpdated }` | 仅清空 `proj.audioFile` 引用（保留音频文件，避免误删），并由 `applyBgmToHtml` 把 HTML 里注入的 `<audio>` 一并摘掉（否则成片仍有声、与项目状态不符） |
 | `project:pick-video` | 无 | 绝对路径 \| `null` | 打开文件选择框（`mp4/webm/mov/mkv/m4v/avi`） |
 | `project:set-video` | `ProjectSetVideoPayload`（`{ name?, videoPath? }`） | `{ ok, videoFile, abs }` | 复制进 `video/` → 写 `proj.videoMaterial`；`abs` 为项目内绝对路径供预览 |
 | `project:clear-video` | `ProjectNamePayload`（`{ name: string }`） | `{ ok }` | 仅清空 `proj.videoMaterial` 引用（保留视频文件） |
-| `project:extract-video-audio` | `name?: string`（裸字符串） | `{ ok, audioFile }` | 用内置 ffmpeg 从 `videoMaterial` 提取音轨为 `audio/<同名>.m4a`（AAC 192k）并设为背景音频 |
+| `project:extract-video-audio` | `name?: string`（裸字符串） | `{ ok, audioFile, htmlUpdated }` | 用内置 ffmpeg 从 `videoMaterial` 提取音轨为 `audio/<同名>.m4a`（AAC 192k）并设为背景音频，随后 `applyBgmToHtml` 立即注入 HTML（提取出的原声同样走音轨路线） |
 | `project:read-html` | `name?: string`（裸字符串） | `{ ok, html }` | 读取当前 `index.html` 源码供编辑器载入 |
-| `project:preview-html` | `name?: string`（裸字符串） | `{ ok, previewPath }` | 生成去掉 CSP、**对副本做 GSAP 本地化**、注入 `HG_PREVIEW_CTRL` 的 `index.preview.html` 副本 |
-| `project:save-html` | `ProjectSaveHtmlPayload`（`{ name?, html? }`） | `{ ok, htmlPath, compatible }` | 先 `hfEnv.localizeGsapHtml` 改写 CDN 引用（**合规校验也用改写后的 `localHtml`**），再在引用本地时 `copyGsapIntoProject`、**复制失败则 `externalizeGsapHtml` 退回 CDN**，然后覆盖保存编辑器中的 HTML；置空 `videoPath` 表示旧视频失效 |
+| `project:preview-html` | `name?: string`（裸字符串） | `{ ok, previewPath }` | 生成去掉 CSP、**对副本做 GSAP 本地化**、注入 `HG_PREVIEW_CTRL` 的 `index.preview.html` 副本；注入片段落位复用的是音轨注入同一助手 `insertHtmlSnippet()` |
+| `project:save-html` | `ProjectSaveHtmlPayload`（`{ name?, html? }`） | `{ ok, htmlPath, compatible }`（**未新增 `htmlUpdated`**） | 先 `hfEnv.localizeGsapHtml` 改写 CDN 引用（**合规校验也用改写后的 `localHtml`**），再在引用本地时 `copyGsapIntoProject`、**复制失败则 `externalizeGsapHtml` 退回 CDN**，然后覆盖保存编辑器中的 HTML；置空 `videoPath` 表示旧视频失效；随后调 `applyBgmToHtml` 把音轨补回（手改 / 粘贴进来的 HTML 可能没有音轨）。该频道目前在渲染层**没有调用方**（预留接口） |
 | `project:html-progress` | 主→渲染推送：`Object.assign({}, info, { text })`（线上形状即 `HtmlProgressPayload`） | — | 生成/修改过程中由 `event.sender.send` 推送 Agent 进度（`sender.isDestroyed()` 时不发送） |
 
 ## 5. 关键流程
@@ -179,14 +213,14 @@
 ### 5.2 生成 HTML（`project:generate-html`）
 
 1. 校验 `name` 与 `prompt.trim()`，任一为空直接失败。
-2. `ensureProject(name)` 取项目（无则用默认值），`resolveMaterials` 处理字幕/音频/视频素材（外部素材此时被复制进项目目录）。
-3. `buildMaterialPrompt('用户需求：' + prompt.trim(), proj, mats, [])` 装配提示词：需求 → 内容脚本块 → 字幕块 → 背景音乐块 → 视频素材块。
+2. `ensureProject(name)` 取项目（无则用默认值），`resolveMaterials(proj, payload || {})` 处理字幕 / 视频素材——**两者都只是「要不要带上」，都不带路径**：视频的自定义导入走 `project:set-video`，**音频不在这里解析**（`payload.audioPath` 已随字段删除，音轨由 `applyBgmToHtml` 注入 HTML）。
+3. `buildMaterialPrompt('用户需求：' + prompt.trim(), proj, mats, [])` 装配提示词：需求 → 内容脚本块 → 字幕块 → 【音轨】声明行（固定文案：音轨由应用在渲染前自动注入 `<audio id="myv-bgm">`，请勿写入 / 修改 / 删除任何 `<audio>` 标签，也不要为音轨预留页面元素）→ 视频素材块。
 4. 构造 `onProgress`，把 `progressText(info)` 的结果经 `project:html-progress` 推给发起窗口。
 5. `await chatWithCustomModel(userPrompt, { onProgress, meta: { project: name, action: 'generate' } })`。
 6. `extractHtmlFromReply(reply)` 抽出 HTML 后交给 `hfEnv.localizeGsapHtml()`（把 GSAP CDN 引用改写为 `./gsap.min.js`；随包文件缺失则原样返回）；`trim()` 为空返回「模型未返回内容，请检查自定义模型配置」。
 7. **GSAP 落位 + 兜底**：`if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = hfEnv.externalizeGsapHtml(html);` —— 引用本地时先复制随包 `gsap.min.js`（幂等）；复制失败（返回 `false`）就把引用换回 CDN，避免引用一个不存在的文件。随后写 `projectDir(name)/index.html`（utf8），置 `proj.htmlPath = htmlPath` 绝对路径。
 8. **`proj.videoPath = ''`**：HTML 刷新后旧视频失效，避免链路误显示成品。
-9. `writeProject(proj)` 落盘，`isHyperframesComposition(html)` 做合规校验。
+9. `writeProject(proj)` 落盘，**再调 `applyBgmToHtml(name, proj)` 按当前背景音频补注入音轨**（模型侧已明确不写 `<audio>`），然后 `isHyperframesComposition(html)` 做合规校验。
 10. 返回 `{ ok: true, htmlPath, compatible, message }`；不合规时提示缺 `data-composition-id / __timelines / gsap`，预览可用但转视频前需调整。
 11. 异常统一捕获为 `{ ok: false, message: 'Agent 调用失败：' + 错误信息 }`。
 
@@ -194,21 +228,19 @@
 
 1. 校验 `name` 与需求描述。
 2. `projectFilePath(name, 'index.html')` 不存在则返回「该项目还没有 HTML，请先生成」。
-3. 读取当前源码 `curHtml`，`resolveMaterials` 重新解析素材（可在改造时换素材）。
+3. 读取当前源码 `curHtml`，`resolveMaterials(proj, payload || {})` 重新解析素材（字幕 / 视频素材，可在改造时换素材；视频同样只判 `''` / `'__current__'`）。
 4. 提示词把 `['当前项目的 index.html 源码如下：', '```html', curHtml, '```', '']` 作为 `extra` 置于最前，再附需求「在此基础上改造后输出完整新 HTML」。
 5. 调用 Agent（`meta.action = 'modify'`），同样支持 `project:html-progress` 进度推送。
-6. 抽取 HTML 并先经 `hfEnv.localizeGsapHtml()` 本地化、再走同一套兜底（`if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(projDir)) html = hfEnv.externalizeGsapHtml(html);`）；随后**覆盖** `index.html`，更新 `htmlPath`、置空 `videoPath`、`writeProject` 并返回合规校验结果（`compatible` 基于最终写盘的 HTML）。
+6. 抽取 HTML 并先经 `hfEnv.localizeGsapHtml()` 本地化、再走同一套兜底（`if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(projDir)) html = hfEnv.externalizeGsapHtml(html);`）；随后**覆盖** `index.html`，更新 `htmlPath`、置空 `videoPath`、`writeProject`，**再调 `applyBgmToHtml(name, proj)` 补回音轨**（模型重写时可能整段丢掉注入标签），最后返回合规校验结果（`compatible` 基于最终写盘的 HTML）。
 
 ### 5.4 预览副本 `index.preview.html` 的生成
 
 1. `project:preview-html` 中确认 `index.html` 存在。
 2. 读取源码，用 `/<meta[^>]*content-security-policy[^>]*>/gi` 删除 CSP meta（**仅副本**，保证注入脚本可执行）。
 3. **对副本做 GSAP 本地化**：`html = hfEnv.localizeGsapHtml(html)`；若结果引用 `./gsap.min.js`（`hfEnv.referencesLocalGsap`）则 `hfEnv.copyGsapIntoProject(path.dirname(htmlPath))`——只改副本、不去动原件；`gsap.min.js` 落在项目目录，因此原件里的相对引用同样成立。
-4. 组装 `<script>` + `HG_PREVIEW_CTRL` + `</scr' + 'ipt>` 注入片段。
-5. 定位 `</body>`（`lastIndexOf`）并插到其前面。
-6. 若无 `</body>`（模型输出被截断），则插到 `</head>` 之后；连 `</head>` 也没有时插到文档最前——避免拼在文件末尾落入未闭合 `<script>` 导致整页脚本 SyntaxError。
-7. `htmlPath.replace(/\.html$/i, '.preview.html')` 得到 `index.preview.html` 并写盘，返回 `previewPath`。
-8. 预览副本与原件**同目录**，相对素材引用仍有效；下载与转视频始终使用原件 `index.html`。
+4. 组装 `<script>` + `HG_PREVIEW_CTRL` + `</scr' + 'ipt>` 注入片段，调用 `insertHtmlSnippet(html, ctrl)` 落位（**与音轨注入复用同一助手**）：优先插到 `</body>`（`lastIndexOf`）前；无 `</body>`（模型输出被截断）时插到 `</head>` 之后；连 `</head>` 也没有时插到文档最前——避免拼在文件末尾落入未闭合 `<script>` 导致整页脚本 SyntaxError。该落位逻辑此前是本频道内联的 if/else，现已抽成助手，**行为不变**。
+5. `htmlPath.replace(/\.html$/i, '.preview.html')` 得到 `index.preview.html` 并写盘，返回 `previewPath`。
+6. 预览副本与原件**同目录**，相对素材引用仍有效（包括原件里的 `<audio id="myv-bgm">`）；下载与转视频始终使用原件 `index.html`。
 
 ### 5.5 字幕保存与条目统计（`project:save-subtitle`）
 
@@ -224,7 +256,7 @@
 2. `ensureProject(name)` → `proj.videoPath = String(videoPath)`。
 3. `writeProject(proj)`，返回项目对象；渲染层据此点亮链路「视频」节点。
 4. 与素材字段区分：`videoMaterial` 是参与 HTML 制作的输入素材，`videoPath` 是流水线产出成品。
-5. `project:extract-video-audio` 则反向从 `videoMaterial` 提取音轨：用 `hfEnv.BUILTIN_RESOURCES.ffmpeg` 执行 `-hide_banner -loglevel error -y -i <video> -vn -ac 2 -c:a aac -b:a 192k <out>`；失败或产物为空都会清理文件并返回中文错误，成功后 `proj.audioFile = 'audio/' + outName`。
+5. `project:extract-video-audio` 则反向从 `videoMaterial` 提取音轨：用 `hfEnv.BUILTIN_RESOURCES.ffmpeg` 执行 `-hide_banner -loglevel error -y -i <video> -vn -ac 2 -c:a aac -b:a 192k <out>`；失败或产物为空都会清理文件并返回中文错误，成功后 `proj.audioFile = 'audio/' + outName`、`writeProject`，然后 `applyBgmToHtml` 立即把这条音轨注入 HTML，返回 `{ ok, audioFile, htmlUpdated }`。
 
 ### 5.7 目录穿越防护
 
@@ -276,6 +308,23 @@
 4. `writeProject(proj)` 并返回 `{ ok: true, project }`，渲染层据此立即刷新 `appState.project.render` 与「是否显示恢复默认档位」。
 5. 字段校验语义：只接受白名单内的显式值（`quality` ∈ `draft/standard/high`、`fps` ∈ `24/30`），任何非法值被丢弃——因此「只改质量」不会把帧率写成默认值。
 
+### 5.11 背景音轨的六处调用点（`applyBgmToHtml`）
+
+音轨注入不是一次性动作，而是「任何可能改动 `index.html` 或 `project.audioFile` 的写操作之后都必须补一次」：
+
+| 调用点 | 时机 | 为什么需要 |
+| --- | --- | --- |
+| `project:set-audio` | `writeProject` 之后 | 选定 / 更换背景音频：立刻让预览可听、转视频带上 |
+| `project:clear-audio` | `writeProject` 之后 | 移除音频：把注入的 `<audio>` 一并摘掉，否则成片仍有声 |
+| `project:extract-video-audio` | `writeProject` 之后 | 提取出的原声同样立即注入（保留原声路线） |
+| `project:generate-html` | 写完 `index.html` + `writeProject` 之后 | 新 HTML 落盘后补音轨（模型侧被要求不写 `<audio>`） |
+| `project:modify-html` | 覆盖写盘 + `writeProject` 之后 | 模型重写时可能整段丢掉注入标签，必须补回 |
+| `project:save-html` | `writeProject` 之后 | 手改 / 粘贴进来的 HTML 可能没有音轨，按项目当前背景音频补回（与生成 / 修改同一套规则） |
+
+- 前 3 处把 `applyBgmToHtml` 的返回值作为 `htmlUpdated` 返回给渲染层（`project:set-audio` / `project:extract-video-audio` 同时保留 `audioFile`）；**`project:save-html` 有意不改返回结构**，仍是 `{ ok, htmlPath, compatible }`。
+- 后 3 处（generate / modify / save-html）忽略返回值：HTML 刚写过，调用方本就按 `htmlPath` / `compatible` 处理。
+- 3 个音频频道改写 HTML 后，渲染层会重载预览（`HtmlGenPage` 的 `afterAudioChange` → `loadFrame()`），因此预览副本始终与原件一致。
+
 ## 6. 依赖与协作
 
 **本模块 import：**
@@ -310,10 +359,10 @@
 5. **失败处理风格**：所有 IPC 返回 `{ ok, message }` 而不抛异常；Agent 与 ffmpeg 的异常被包装成中文错误文案；`readProject` 解析失败静默返回 `null`；`copyAudioIntoProject` / `copyVideoIntoProject` 复制失败返回 `''` 由调用方报错。
 6. **进度推送安全**：发送前判断 `sender.isDestroyed()`，避免窗口销毁后 `send` 抛错。
 7. **字段兼容与向后兼容**：`subtitleCount`、`videoMaterial`、`updatedAt` 均为可选字段；老项目没有 `content` 或 `content.scenes` 为空时，`buildContentBlock` 返回 `''`，流程回退为「仅按用户需求 + 字幕」生成；`normalizeContent` 对非法输入一律收敛为空内容脚本并自动补 `id`。
-8. **素材 vs 成品**：`audioFile` / `videoMaterial` 是相对引用（`audio/xxx`、`video/xxx`，与 HTML 同目录系，保证预览与渲染都能解析），`htmlPath` / `videoPath` 是绝对路径；清空音频/视频只清引用不删文件，避免误删素材。
+8. **素材 vs 成品**：`audioFile` / `videoMaterial` 是相对引用（`audio/xxx`、`video/xxx`，与 HTML 同目录系，保证预览与渲染都能解析），`htmlPath` / `videoPath` 是绝对路径；清空音频/视频只清引用不删文件，避免误删素材——但**清空音频会同步摘掉 HTML 里注入的 `<audio>`**，因为音轨是 HTML 的一部分（见 5.11）。
 9. **HTML 变更即令视频失效**：生成、修改、直接保存 HTML 三处都会把 `videoPath` 置空，防止链路状态误报。
 10. **合规检查只提示不阻断**：`compatible` 为 `false` 时仍返回 `ok: true` 并允许预览，仅在 `message` 中提示转视频前需调整（缺 `data-composition-id` / `__timelines` / `gsap`）。
-11. **预览副本专供应用内预览**：CSP 剥离与脚本注入只作用于 `index.preview.html`，原件始终保持模型产出的原貌。
+11. **预览副本专供应用内预览**：CSP 剥离与脚本注入只作用于 `index.preview.html`，原件始终保持模型产出的原貌；注入音轨则相反——它写进**原件** `index.html`（预览副本从原件派生，因此自动带上）。
 12. **ffmpeg 依赖内置资源**：`hfEnv.BUILTIN_RESOURCES.ffmpeg` 缺失时 `project:extract-video-audio` 直接返回「未找到内置 ffmpeg（resources/ffmpeg/bin）」；提取失败会删除半成品 `.m4a`。
 13. **结构类型只在 `shared/types.ts` 定义一处**：本文件已删掉本地的 `Scene` / `ContentScript` / `Project` / `SubtitleLine` interface，改为第 38 行的 `export type { … } from '../shared/types'`；因此 `from './projects'` 取到这些类型的既有代码（如 `ttsAlign.ts` 的 `type SubtitleLine`、`projects.Project` 形式的引用）字段完全同源。修改字段请改共享层，不要在本文件重建 interface（否则又会出现两份会漂移的定义）。
 14. **handler 载荷全部有契约类型**：原先多处写作 `Record<string, unknown>` 或省略类型，现统一为 `Project*Payload`。注意 `ProjectNamePayload.name` 是**必填** `string`（用于 `clear-audio` / `clear-video`），而 `ProjectSaveSubtitlePayload` / `ProjectSetAudioPayload` / `ProjectSetVideoPayload` 等字段全部可选，运行时依旧保留 `payload && payload.name` 式的判空写法。
@@ -322,3 +371,4 @@
 17. **预览只在副本上改写**：`project:preview-html` 的 CSP 剥离与 GSAP 改写都作用于 `index.preview.html`，原件 `index.html` 保持原貌；但 `gsap.min.js` 是落在**项目目录**（原件与副本共用），所以原件的相对引用也成立。该处**不参与作者态的复制失败兜底**（返回值被忽略）：若出现「`gsap.min.js` 复制失败、但 HTML 本身写得进去」的偏门情形，作者态三处会把原件退回 CDN，而预览副本在 `localizeGsapHtml` 之后又会引 `./gsap.min.js`（复制同样失败），此时预览可能取不到该文件。
 18. **`./hfEnv` 已改为命名空间导入**：`import * as hfEnv from './hfEnv'`，全文以 `hfEnv.` 前缀引用（如 `hfEnv.BUILTIN_RESOURCES.ffmpeg`、`hfEnv.isHyperframesComposition(...)`、`hfEnv.localizeGsapHtml(...)`），原解构导入已取消。
 19. **内置示例并非完全离线**：`video-projects/*/index.html` 除 GSAP 外仍从 CDN 引 `@hyperframes/core` 与 `@hyperframes/shader-transitions`，本轮只本地化了 GSAP；示例仅在渲染路径由 HyperFrames CLI 自带运行时兜底，预览/独立打开仍需网络。
+20. **音轨注入的三条不变量**：① 标签 id 固定为 `myv-bgm`，注入前先 `stripInjectedBgm`，重复设置不会叠出多条音轨；② 引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入）由 `stripAudioOfFile` 摘掉，避免双份播放；③ 没有 `index.html` 时 `applyBgmToHtml` 静默返回 `false`——因此「先生成音频、后生成 HTML」的顺序不会报错，音频会在下次生成 / 修改时随 HTML 一起补上。三个音频频道改写 HTML 后渲染层需重载预览才能听到（`HtmlGenPage` 已按 `htmlUpdated` 语义统一重载）。

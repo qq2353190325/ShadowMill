@@ -286,8 +286,66 @@ const HG_PREVIEW_CTRL = [
   '})();'
 ].join('\n');
 
-// 素材选择结果（生成/修改共用）：字幕 / 音频 / 视频引用
-function resolveMaterials(name: string, proj: Project, payload: ProjectAgentPayload): { subtitleText: string; audioRef: string; videoRef: string } {
+// ===== 背景音轨：由主进程确定性注入 HTML（不再交给 Agent 写 <audio>）=====
+// 选定 / 更换 / 移除背景音频后，主进程按 project.audioFile 重写 index.html 里的 <audio>：
+// 预览副本（PreviewHtml 由 index.html 生成）与转视频（video.ts 直接把 index.html 所在目录交给
+// HyperFrames CLI）因此都能拿到音轨；音轨提取与混流由 CLI 内部完成（trace 阶段 audio_process），
+// 应用侧不做任何 ffmpeg 混音。标签带固定 id，保证重复设置不会叠出多条音轨。
+const BGM_TAG_ID = 'myv-bgm';
+
+// 把一段 HTML 片段插到文档末尾（优先 </body>，其次 </head>，都没有则拼在最前）。
+// 模型输出可能被截断而缺 </body>：此时若直接拼到文件末尾，会落进未闭合的 <script> 导致整页 SyntaxError。
+function insertHtmlSnippet(html: string, snippet: string): string {
+  const bodyEnd = html.lastIndexOf('</body>');
+  if (bodyEnd >= 0) return html.slice(0, bodyEnd) + snippet + html.slice(bodyEnd);
+  const headEnd = html.lastIndexOf('</head>');
+  return headEnd >= 0 ? html.slice(0, headEnd + 7) + snippet + html.slice(headEnd + 7) : snippet + html;
+}
+
+function escapeRegExp(s: string): string {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 去掉本应用注入的音轨标签（幂等）
+function stripInjectedBgm(html: string): string {
+  return html.replace(new RegExp('<audio\\b[^>]*\\bid=["\']' + BGM_TAG_ID + '["\'][^>]*>(?:[\\s\\S]*?</audio>)?', 'gi'), '');
+}
+
+// 去掉引用同一个项目音频文件的历史标签（旧版由模型按提示词写入的 <audio>），避免与新标签双份播放
+function stripAudioOfFile(html: string, audioRef: string): string {
+  const base = path.basename(audioRef);
+  if (!base) return html;
+  const re = new RegExp('<audio\\b[^>]*src=["\'][^"\']*' + escapeRegExp(base) + '[^"\']*["\'][^>]*>(?:[\\s\\S]*?</audio>)?', 'gi');
+  return html.replace(re, '');
+}
+
+// 按项目当前 audioFile 重写 HTML 音轨；无 HTML（还没生成）时静默跳过。
+// 返回 true = index.html 被改写（调用方可据此刷新预览 / 给提示）。
+function applyBgmToHtml(name: string, proj?: Project): boolean {
+  const htmlPath = projectFilePath(name, 'index.html');
+  if (!fs.existsSync(htmlPath)) return false;
+  const p = proj || readProject(name);
+  const audioRef = (p && p.audioFile) || '';
+  try {
+    const before = fs.readFileSync(htmlPath, 'utf8');
+    let html = stripInjectedBgm(before);
+    if (audioRef) html = stripAudioOfFile(html, audioRef);
+    if (audioRef) {
+      // 与旧的提示词要求一致：autoplay + loop（音轨通常短于整条时间轴）
+      html = insertHtmlSnippet(html, '<audio id="' + BGM_TAG_ID + '" src="' + audioRef + '" autoplay loop></audio>');
+    }
+    if (html === before) return false;
+    fs.writeFileSync(htmlPath, html, 'utf8');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// 素材选择结果（生成/修改共用）：字幕 / 视频引用
+// 两者都只是「要不要带上」，都不带路径：视频的自定义导入走 project:set-video（复制进项目 video/ 并登记），
+// 音频则由 applyBgmToHtml 注入 HTML，完全不经过这里。
+function resolveMaterials(proj: Project, payload: ProjectAgentPayload): { subtitleText: string; videoRef: string } {
   // 字幕：'' = 不使用；'__current__' = 当前项目字幕；其他 = 指定带字幕的项目名
   let subtitleText = '';
   const subSel = payload.subtitleProject;
@@ -296,27 +354,19 @@ function resolveMaterials(name: string, proj: Project, payload: ProjectAgentPayl
     const src = readProject(subSel);
     subtitleText = (src && src.subtitle) || '';
   }
-  // 音频：'' = 不使用；'__current__' = 当前项目背景音频；其他 = 外部音频绝对路径（复制进本项目 audio/ 后按相对引用）
-  let audioRef = '';
-  const audSel = payload.audioPath;
-  if (audSel === '__current__') audioRef = proj.audioFile || '';
-  else if (audSel && typeof audSel === 'string' && fs.existsSync(audSel)) audioRef = copyAudioIntoProject(name, audSel);
-  // 视频素材：语义同音频（复制进本项目 video/ 后按相对引用），供 Agent 作为页面内容片段嵌入
-  let videoRef = '';
-  const vidSel = payload.videoPath;
-  if (vidSel === '__current__') videoRef = proj.videoMaterial || '';
-  else if (vidSel && typeof vidSel === 'string' && fs.existsSync(vidSel)) videoRef = copyVideoIntoProject(name, vidSel);
-  return { subtitleText, audioRef, videoRef };
+  // 视频素材：'' = 不使用；'__current__' = 当前项目视频素材
+  const videoRef = payload.videoPath === '__current__' ? (proj.videoMaterial || '') : '';
+  return { subtitleText, videoRef };
 }
 
 // 构造 Agent 用户提示（生成与修改共用；extra 置于最前——修改场景为「当前 HTML 源码」段）
-function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText: string; audioRef: string; videoRef: string }, extra: string[]): string {
+function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText: string; videoRef: string }, extra: string[]): string {
   return buildAgentPrompt([
     ...extra,
     prompt,
     buildContentBlock(proj.content),
     mats.subtitleText ? '\n【项目字幕】每行格式为 [开始-结束] 文本，时间为秒、可带小数（毫秒精度，如 17.920）：该条字幕必须在开始时间出现、在结束时间前完成淡出，严格按此窗口显示，不得挂到下一条开始；GSAP 时间轴直接用这些小数秒定位（如 tl.to(el,{...},17.920)）；仅 [开始] 无结束时间的行自行按语义安排节奏。\n' + mats.subtitleText : '',
-    mats.audioRef ? '\n【背景音乐】项目内音频文件：' + mats.audioRef + '，请在 HTML 中通过 <audio autoplay loop> 引用为音轨。' : '',
+    '\n【音轨】背景音轨由应用在渲染前自动注入（<audio id="myv-bgm">），请勿写入、修改或删除任何 <audio> 标签，也不要为音轨预留页面元素。',
     mats.videoRef ? '\n【视频素材】项目内视频文件：' + mats.videoRef + '，请将该视频作为页面内容的一部分嵌入（<video src="' + mats.videoRef + '" autoplay muted loop playsinline>），并用 GSAP 时间轴编排其入场/出场与播放时段。' : ''
   ]);
 }
@@ -393,7 +443,7 @@ function register(ctx?: RegisterCtx): void {
     if (!prompt.trim()) return { ok: false, message: '需求描述为空' };
 
     const proj = ensureProject(name);
-    const mats = resolveMaterials(name, proj, payload || {});
+    const mats = resolveMaterials(proj, payload || {});
     const userPrompt = buildMaterialPrompt('用户需求：' + prompt.trim(), proj, mats, []);
 
     try {
@@ -415,6 +465,8 @@ function register(ctx?: RegisterCtx): void {
       proj.htmlPath = htmlPath;
       proj.videoPath = ''; // HTML 刷新后旧视频失效
       writeProject(proj);
+      // 新 HTML 落盘后按项目当前背景音频注入音轨（模型侧已明确不写 <audio>）
+      applyBgmToHtml(name, proj);
       const compatible = hfEnv.isHyperframesComposition(html);
       return {
         ok: true,
@@ -441,7 +493,7 @@ function register(ctx?: RegisterCtx): void {
 
     const proj = ensureProject(name);
     const curHtml = fs.readFileSync(htmlPath, 'utf8');
-    const mats = resolveMaterials(name, proj, payload || {});
+    const mats = resolveMaterials(proj, payload || {});
     const userPrompt = buildMaterialPrompt(
       '用户需求（在此基础上改造后输出完整新 HTML）：' + prompt.trim(),
       proj,
@@ -465,6 +517,8 @@ function register(ctx?: RegisterCtx): void {
       proj.htmlPath = htmlPath;
       proj.videoPath = '';
       writeProject(proj);
+      // 修改后的 HTML 同样补回音轨（模型重写时可能整段丢掉注入标签）
+      applyBgmToHtml(name, proj);
       const compatible = hfEnv.isHyperframesComposition(html);
       return {
         ok: true,
@@ -616,7 +670,9 @@ function register(ctx?: RegisterCtx): void {
     const proj = ensureProject(name);
     proj.audioFile = audioFile;
     writeProject(proj);
-    return { ok: true, audioFile: proj.audioFile };
+    // 音频一变，立刻重写 HTML 音轨：预览即刻可听，转视频也一定带上
+    const htmlUpdated = applyBgmToHtml(name, proj);
+    return { ok: true, audioFile: proj.audioFile, htmlUpdated };
   });
 
   // 移除当前项目音频引用（保留音频文件，避免误删资源）
@@ -626,7 +682,9 @@ function register(ctx?: RegisterCtx): void {
     const proj = ensureProject(name);
     proj.audioFile = '';
     writeProject(proj);
-    return { ok: true };
+    // 移除音轨：把 HTML 里注入的 <audio> 一并摘掉（否则成片仍有声，与项目状态不符）
+    const htmlUpdated = applyBgmToHtml(name, proj);
+    return { ok: true, htmlUpdated };
   });
 
   // ===== 项目视频素材：让生成的 HTML 可嵌入视频片段（作为页面内容的一部分） =====
@@ -672,7 +730,7 @@ function register(ctx?: RegisterCtx): void {
     if (!name) return { ok: false, message: '缺少项目名' };
     const proj = ensureProject(name);
     const videoRef = proj.videoMaterial || '';
-    if (!videoRef) return { ok: false, message: '该项目没有视频素材，请先在下方「选择视频文件」' };
+    if (!videoRef) return { ok: false, message: '该项目没有视频素材：请先在「HTML生成」页的「视频素材」里选「选择本地视频文件…」导入' };
     const videoPath = path.join(projectDir(name), videoRef);
     if (!fs.existsSync(videoPath)) return { ok: false, message: '视频素材文件不存在：' + videoRef };
     const ffmpeg = hfEnv.BUILTIN_RESOURCES.ffmpeg;
@@ -698,7 +756,9 @@ function register(ctx?: RegisterCtx): void {
     }
     proj.audioFile = 'audio/' + outName;
     writeProject(proj);
-    return { ok: true, audioFile: proj.audioFile };
+    // 提取出的原声同样立刻注入 HTML（保留原声路线）
+    const htmlUpdated = applyBgmToHtml(name, proj);
+    return { ok: true, audioFile: proj.audioFile, htmlUpdated };
   });
 
   // 读取项目当前 HTML 源码（供编辑器载入）
@@ -720,15 +780,9 @@ function register(ctx?: RegisterCtx): void {
     html = hfEnv.localizeGsapHtml(html);
     if (hfEnv.referencesLocalGsap(html)) hfEnv.copyGsapIntoProject(path.dirname(htmlPath));
     const ctrl = '<script>' + HG_PREVIEW_CTRL + '</scr' + 'ipt>';
-    const bodyEnd = html.lastIndexOf('</body>');
-    if (bodyEnd >= 0) {
-      html = html.slice(0, bodyEnd) + ctrl + html.slice(bodyEnd);
-    } else {
-      // 模型输出被截断、缺 </body>：注入到 </head>（或文档最前）作为独立 script，
-      // 若仍拼在文件末尾会进入未闭合的 <script>，令整段页面脚本 SyntaxError（fitStage/时间轴全失效）
-      const headEnd = html.lastIndexOf('</head>');
-      html = headEnd >= 0 ? html.slice(0, headEnd + 7) + ctrl + html.slice(headEnd + 7) : ctrl + html;
-    }
+    // 注入到 </body> 前；模型输出被截断缺 </body> 时落到 </head>（或文档最前）作为独立 script，
+    // 否则会拼进未闭合的 <script>，令整段页面脚本 SyntaxError（fitStage/时间轴全失效）
+    html = insertHtmlSnippet(html, ctrl);
     const previewPath = htmlPath.replace(/\.html$/i, '.preview.html');
     fs.writeFileSync(previewPath, html, 'utf8');
     return { ok: true, previewPath };
@@ -752,6 +806,8 @@ function register(ctx?: RegisterCtx): void {
     // HTML 改动后旧视频不再匹配 → 标记失效
     proj.videoPath = '';
     writeProject(proj);
+    // 手改/粘贴进来的 HTML 可能没有音轨：按项目当前背景音频补回（与生成/修改路径同一套规则）
+    applyBgmToHtml(name, proj);
     return { ok: true, htmlPath, compatible: hfEnv.isHyperframesComposition(localHtml) };
   });
 }

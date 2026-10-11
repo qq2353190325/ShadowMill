@@ -438,8 +438,8 @@ body {
   border: none;
 }
 
-.hf-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.15);
+.hf-btn-primary:hover:not(:disabled) { /* 必须自带 background：基础 .hf-btn:hover 的特异性更高，不重写渐变会被它的半透明青色填充顶掉 */
+  background: linear-gradient(135deg, #33ddff, #a078ff);
 }
 
 .hf-file {
@@ -714,6 +714,74 @@ body {
   display: flex;
   gap: var(--space-3);
   margin-top: var(--space-4);
+}
+
+/* ===== 行内帮助：? 图标 + 悬浮说明（放在按钮内部：每个动作各带一个 ?） ===== */
+.hg-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.hg-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  /* 跟随按钮文字色：主按钮（渐变底 / 深色字）与次要按钮（透明底 / 主色字）都能看清 */
+  color: currentColor;
+  border: 1px solid currentColor;
+  opacity: 0.75;
+  cursor: help;
+  user-select: none;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.hg-help:hover .hg-help-icon {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.hg-help-pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: 320px;
+  padding: 10px 12px;
+  border-radius: var(--radius-btn);
+  background: rgba(11, 18, 32, 0.98);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  box-shadow: var(--glow-card);
+  color: var(--text-primary);
+  font-size: 12px;
+  /* 气泡在 <button> 内：重置按钮继承下来的字重 / 对齐 / 换行，避免被按钮样式带偏 */
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.8;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.hg-help:hover .hg-help-pop {
+  opacity: 1;
+  visibility: visible;
+}
+
+.hg-help-pop b {
+  color: var(--color-primary);
+  font-weight: 600;
 }
 
 .hgen-tip {

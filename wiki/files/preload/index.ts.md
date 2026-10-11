@@ -1,12 +1,12 @@
 # src/preload/index.ts
 
-> 通过 contextBridge 向渲染层暴露 8 个命名空间的预加载桥接层
+> 通过 contextBridge 向渲染层暴露 9 个命名空间的预加载桥接层
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
 - **规模**：164 行
-- **对外导出**：本文件不产生模块导出；其作用是把 8 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`
-- **类型契约**：8 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
+- **对外导出**：本文件不产生模块导出；其作用是把 9 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、`updateTools`
+- **类型契约**：9 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
 ## 1. 作用与职责
 
@@ -14,7 +14,7 @@
 
 1. 用 `contextBridge.exposeInMainWorld` 把固定命名的 API 对象挂到渲染层的 `window` 上，使渲染层（Vue 页面）无需开启 `nodeIntegration` 即可调用主进程能力。
 2. 为每个方法绑定一个来自 `IPC` 常量的频道名，`invoke` 用于请求-响应，`send` 用于单向通知。
-3. 对进度推送频道实施**单订阅语义**：模块级保存回调并仅注册一次 `ipcRenderer.on`，重复注册只替换回调，避免页面切换时监听器不断叠加 —— 实际覆盖 `project:html-progress` / `whisper:progress` / `voice:align-progress` 三路；`hfTools.onProgress`（`video:progress`）仍是直接转发的 `ipcRenderer.on`，没有单订阅包装（详见 3.2）。
+3. 对进度推送频道实施**单订阅语义**：模块级保存回调并仅注册一次 `ipcRenderer.on`，重复注册只替换回调，避免页面切换时监听器不断叠加 —— 实际覆盖 `project:html-progress` / `whisper:progress` / `voice:align-progress` / `update:progress` 四路；`hfTools.onProgress`（`video:progress`）仍是直接转发的 `ipcRenderer.on`，没有单订阅包装（详见 3.2）。
 
 由于 preload 运行在 sandbox 环境且全项目无 `"type":"module"`，本文件必须被编译为 **CJS**；`import` 由 electron-vite 打包内联，运行时仅依赖 `require('electron')`。
 
@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `settingsTools` | `get` | `settings:get` | 读取 `AppSettings` |
 | `settingsTools` | `save` | `settings:save` | 传 `{ customModel }` 保存自定义模型配置 |
 | `settingsTools` | `saveRender` | `settings:save-render` | 传 `{ render }` 保存视频渲染默认档位（`RenderOverride`） |
+| `settingsTools` | `saveUpdater` | `settings:save-updater` | 传 `{ updater }` 保存更新设置（`Partial<UpdaterSettings>`：`feedUrl` / `autoCheck` / `skippedVersion`） |
 | `settingsTools` | `test` | `settings:test` | 传 `{ customModel }` 测试连通性 |
 | `voiceTools` | `getConfig` | `voice:get-config` | 取语音配置（apiKey / targetModel / saveDir） |
 | `voiceTools` | `getSaveDir` | `voice:get-save-dir` | 传 `{ saveDir?, defaultOut?, projectName? }` 解析保存目录 |
@@ -98,27 +99,33 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `projectTools` | `load` | `project:load` | 参数为裸字符串 `name` |
 | `projectTools` | `saveSubtitle` | `project:save-subtitle` | `{ name, subtitle, title }` |
 | `projectTools` | `saveContent` | `project:save-content` | `{ name, content }` |
-| `projectTools` | `generateHtml` | `project:generate-html` | `{ name, prompt, ...materials }` 展开合并 |
-| `projectTools` | `modifyHtml` | `project:modify-html` | `{ name, prompt, ...materials }` 展开合并 |
+| `projectTools` | `generateHtml` | `project:generate-html` | `{ name, prompt, ...materials }` 展开合并（`materials` = `ProjectHtmlMaterials`：`subtitleProject` / `videoPath`，**已无 `audioPath`**；音轨由主进程注入 HTML） |
+| `projectTools` | `modifyHtml` | `project:modify-html` | `{ name, prompt, ...materials }` 展开合并（同上） |
 | `projectTools` | `downloadHtml` | `project:download-html` | 参数为裸字符串 `name` |
 | `projectTools` | `downloadFile` | `project:download-file` | `{ srcPath, defaultName }` |
 | `projectTools` | `exportSrt` | `project:export-srt` | `{ name, srt }` |
 | `projectTools` | `readHtml` | `project:read-html` | 参数为裸字符串 `name` |
-| `projectTools` | `saveHtml` | `project:save-html` | `{ name, html }` |
+| `projectTools` | `saveHtml` | `project:save-html` | `{ name, html }`；**目前渲染层没有调用方（预留接口）** |
 | `projectTools` | `previewHtml` | `project:preview-html` | 参数为裸字符串 `name` |
 | `projectTools` | `pickAudio` | `project:pick-audio` | 选择项目音频 |
-| `projectTools` | `setAudio` | `project:set-audio` | `{ name, audioPath }` |
-| `projectTools` | `clearAudio` | `project:clear-audio` | `{ name }` |
+| `projectTools` | `setAudio` | `project:set-audio` | `{ name, audioPath }`；返回 `IpcResult<ProjectSetAudioResult>`，成功分支带 `audioFile` 与可选 `htmlUpdated`（是否同步改写了 `index.html` 的注入音轨） |
+| `projectTools` | `clearAudio` | `project:clear-audio` | `{ name }`；主进程实际返回 `{ ok, htmlUpdated }`（是否摘掉了 HTML 里的注入音轨），但契约写作 `IpcResult`（无载荷） |
 | `projectTools` | `pickVideo` | `project:pick-video` | 选择项目视频 |
 | `projectTools` | `setVideo` | `project:set-video` | `{ name, videoPath }` |
 | `projectTools` | `clearVideo` | `project:clear-video` | `{ name }` |
-| `projectTools` | `extractVideoAudio` | `project:extract-video-audio` | 参数为裸字符串 `name` |
+| `projectTools` | `extractVideoAudio` | `project:extract-video-audio` | 参数为裸字符串 `name`；返回 `IpcResult<ProjectSetAudioResult>`（`audioFile` + 可选 `htmlUpdated`，提取出的原声会立即注入 HTML） |
 | `projectTools` | `openFolder` | `project:open-folder` | 参数为裸字符串 `name` |
 | `projectTools` | `openFolderOf` | `project:open-folder-of` | 参数为裸字符串 `dirOrFile` |
 | `projectTools` | `delete` | `project:delete` | 参数为裸字符串 `name` |
 | `projectTools` | `saveVideo` | `project:save-video` | `{ name, videoPath }` |
 | `projectTools` | `setRender` | `project:set-render` | `{ name, render }`；`render` 传 `null` 清除项目级档位覆盖 |
 | `projectTools` | `onHtmlProgress` | `project:html-progress` | HTML 生成/修改进度订阅（单订阅） |
+| `updateTools` | `version` | `update:version` | **同步**返回当前版本号字符串（`sendSync`），供设置页首屏显示 |
+| `updateTools` | `check` | `update:check` | 检查更新，返回 `{ ok, state: 'none' \| 'available' \| 'skipped', version, currentVersion }` |
+| `updateTools` | `download` | `update:download` | 下载安装包（`autoDownload = false`，仅用户触发） |
+| `updateTools` | `cancel` | `update:cancel` | 取消下载 |
+| `updateTools` | `install` | `update:install` | 退出并运行安装器（本机有转录 / 渲染 / 配音任务时拒绝） |
+| `updateTools` | `onProgress` | `update:progress` | 更新阶段 / 下载进度订阅（单订阅） |
 
 ## 3. 关键流程或结构
 
@@ -128,9 +135,10 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | --- | --- | --- |
 | 请求-响应 | `ipcRenderer.invoke(channel, payload)` | `settings:get`、`project:list` |
 | 单向通知 | `ipcRenderer.send(channel)` | `window:minimize`、`voice:align-cancel` |
-| 主进程推送 | `ipcRenderer.on(channel, handler)` | `window:maximized-change`、`video:progress` |
+| 同步取值 | `ipcRenderer.sendSync(channel)` | `update:version`（全工程唯一的同步频道，只回版本号字符串） |
+| 主进程推送 | `ipcRenderer.on(channel, handler)` | `window:maximized-change`、`video:progress`、`update:progress` |
 
-### 3.2 4 个进度通道与单订阅语义
+### 3.2 5 个进度通道与单订阅语义
 
 | 通道 | 订阅方法 | 相关模块级状态 |
 | --- | --- | --- |
@@ -138,6 +146,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `project:html-progress` | `projectTools.onHtmlProgress` | `_htmlProgressCb`、`_htmlProgressBound` |
 | `whisper:progress` | `whisperTools.onProgress` | `_whisperProgressCb`、`_whisperProgressBound` |
 | `voice:align-progress` | `voiceTools.onAlignProgress` | `_alignProgressCb`、`_alignProgressBound` |
+| `update:progress` | `updateTools.onProgress` | `_updateProgressCb`、`_updateProgressBound` |
 
 单订阅的实现模式（以 HTML 进度为例）：
 
@@ -159,7 +168,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | --- | --- | --- |
 | 依赖 | `electron` | 仅使用 `contextBridge` 与 `ipcRenderer` |
 | 依赖 | `../shared/ipc` | 引入 `IPC` 常量对象，所有频道名均取自此处，不写字面量 |
-| 依赖（仅类型） | `../shared/types` | `PreloadApi`（8 个对象的契约类型）、`AlignProgressPayload`、`HtmlProgressPayload`、`WhisperProgressPayload`（进度回调载荷） |
+| 依赖（仅类型） | `../shared/types` | `PreloadApi`（9 个对象的契约类型）、`AlignProgressPayload`、`HtmlProgressPayload`、`RenderOverride`、`UpdateProgressPayload`、`WhisperProgressPayload`（进度回调载荷） |
 | 被构建使用 | `electron.vite.config.ts` → `preload` 段 | 打包为 out/preload 产物，由主进程 `webPreferences.preload` 加载 |
 | 被消费 | 渲染层全部页面 | 契约由 `src/shared/types.ts` ⑨ 节的 `PreloadApi` 定义、经 `src/preload/index.d.ts` 挂到 `window`，`window.*` 调用遍布 `src/renderer/src/pages/`、`src/renderer/src/composables/`、`src/renderer/src/App.vue` |
 | 对端实现 | `src/main/*.ts` | `ipcMain.handle` / `ipcMain.on` 的注册方，频道名与本文件逐一对应 |
@@ -167,9 +176,9 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 ## 5. 注意事项与实现要点
 
 - **频道名不得硬编码**：本文件所有频道都通过 `IPC.Xxx.Yyy` 取用，禁止改成字符串字面量，否则与 `src/main/*.ts` 的注册方脱钩。
-- **方法名与参数顺序是对外契约**：唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi` —— 本文件的 8 个对象都以 `PreloadApi['<命名空间>']` 标注（实现侧被校验），渲染层经 `index.d.ts` 的 `interface Window extends PreloadApi {}` 拿到同一份签名；改契约请改共享层，不要在任一侧另行声明。
-- **`send` 与 `invoke` 不可混用**：`windowControls` 的三个窗口操作和 `voiceTools.cancelAlign` 是 `send`（无返回值），其余基本是 `invoke`；把 `send` 改成 `invoke` 需要主进程同步改成 `ipcMain.handle`。
+- **方法名与参数顺序是对外契约**：唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi` —— 本文件的 9 个对象都以 `PreloadApi['<命名空间>']` 标注（实现侧被校验），渲染层经 `index.d.ts` 的 `interface Window extends PreloadApi {}` 拿到同一份签名；改契约请改共享层，不要在任一侧另行声明。
+- **`send` 与 `invoke` 不可混用**：`windowControls` 的三个窗口操作和 `voiceTools.cancelAlign` 是 `send`（无返回值），`updateTools.version` 是 `sendSync`（同步有返回值，主进程用 `ipcMain.on` + `event.returnValue`），其余基本是 `invoke`。
 - **payload 透传**：`whisperTools.addModel/updateModel/removeModel/transcribe` 与 `voiceTools.synthAligned` 原样透传对象载荷（类型分别为 `WhisperAddModelPayload` / `WhisperUpdateModelPayload` / `{ id: string }` / `WhisperTranscribePayload` / `VoiceAlignPayload`），不在 preload 做字段校验，字段合法性由主进程负责；`voiceTools.synth` / `create` 则把位置参数组装成共享层定义的载荷对象后 `invoke`。
-- **`generateHtml` / `modifyHtml` 的对象展开**：使用 `{ name, prompt, ...(materials || {}) }`，因此 `materials` 的键会与 `name` / `prompt` 平铺在同一层，`materials` 中不要出现同名键。
-- **单订阅的副作用**：`onHtmlProgress` / `onProgress` / `onAlignProgress` 均无法"注销"回调；页面卸载后旧回调仍被引用，若回调里访问已销毁的组件状态需自行容错。
+- **`generateHtml` / `modifyHtml` 的对象展开**：使用 `{ name, prompt, ...(materials || {}) }`，因此 `materials` 的键会与 `name` / `prompt` 平铺在同一层，`materials` 中不要出现同名键。`materials` 现为 `ProjectHtmlMaterials`（`subtitleProject` / `videoPath`），`audioPath` 已删除；对应的 `ProjectAgentPayload` 因此也不再携带音频选择。
+- **单订阅的副作用**：`onHtmlProgress` / `whisperTools.onProgress` / `onAlignProgress` / `updateTools.onProgress` 均无法"注销"回调；页面卸载后旧回调仍被引用，若回调里访问已销毁的组件状态需自行容错。
 - **`process` 可用性**：preload 在 sandbox 下仍可读取 `process.platform` 与 `process.versions`，但不可假设 `process.env`、文件系统等其他 Node 能力可用。

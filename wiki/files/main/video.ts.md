@@ -75,7 +75,7 @@
 3. **定位 CLI**：`hfEnv.findHyperframesCli()`（内置 `hyperframes.mjs` 优先，回退环境变量 `HYPERFRAMES_CLI`）；找不到返回「未找到 hyperframes CLI……」。
 4. **定位 Node**：`hfEnv.findNode()`（内置 Node 优先，回退系统且要求主版本 >= 22，返回绝对路径）；找不到返回「未找到系统 Node.js（HyperFrames 要求 >= 22）」。
 5. **搭建临时项目目录**：`path.join(app.getPath('userData'), 'hf-projects', 'html-video-' + Date.now())` 并 `mkdirSync({ recursive: true })`。
-6. **复制素材**：读取 HTML 源目录，若存在 `index.html` / `output.mp4` 之外的兄弟文件（`hasAssets`）则 `fs.cpSync(srcDir, projDir, { recursive: true })` 整体复制（保证 `audio/` 等资源随行）；否则只 `fs.copyFileSync` 目标 HTML 为 `projDir/index.html`。复制异常返回「复制 HTML 失败：…」。
+6. **复制素材**：读取 HTML 源目录，若存在 `index.html` / `output.mp4` 之外的兄弟文件（`hasAssets`）则 `fs.cpSync(srcDir, projDir, { recursive: true })` 整体复制（保证 `audio/`、`video/` 等资源随行）；否则只 `fs.copyFileSync` 目标 HTML 为 `projDir/index.html`。复制异常返回「复制 HTML 失败：…」。
 7. **渲染副本 GSAP 本地化**（在把 HTML 复制进渲染工作目录之后、启动渲染之前；**只改副本，不动用户原件**）：读取 `projDir/index.html`，交 `hfEnv.localizeGsapHtml()` 改写后写回；`hfEnv.referencesLocalGsap(localized)` 为真时 `hfEnv.copyGsapIntoProject(projDir)` 把随包 `gsap.min.js` 放进渲染目录。整段包在 `try/catch` 中，**本地化失败不阻断渲染**（在线时仍可由 CDN 加载）。
 8. **确定输出路径**：`outMp4 = path.join(projDir, 'output.mp4')`。
 9. **构造环境变量**：
@@ -93,7 +93,7 @@
 `video:render` 只负责产出并返回 `outputVideo` 绝对路径，**渲染进程侧由两个页面分工**：
 
 - **发起方 `src/renderer/src/pages/HtmlGenPage/index.vue`**（「转视频」按钮，`onRenderVideo()`）：`res.ok` 后先写状态文案，再调用 `window.projectTools.saveVideo(appState.currentName, res.outputVideo)`（`project:save-video`）把产物回写 `project.json`，随后 `await refreshProject()` 让 `videoExists` / `videoPath` 生效，最后 toast 引导去「视频预览」页。它**不**自己播放视频。
-- **播放侧 `src/renderer/src/pages/VideoPreviewPage/index.vue`**：进入页面时按 `appState.project.videoExists && videoPath` 自动把产物喂给 `<video controls>` 播放（`file:///` URL），并提供「在文件夹中显示」（`hfTools.showInFolder`）；内置示例的「HyperFrames 试渲染」也在该页，但**不回写项目**（示例只读，产物只进本页播放器）。
+- **播放侧 `src/renderer/src/pages/VideoPreviewPage/index.vue`**：进入页面时按 `appState.project.videoExists && videoPath` 自动把产物喂给 `<video controls>` 播放（`file:///` URL），并提供「在文件夹中显示」（`hfTools.showInFolder`）；内置示例的「试渲染」按钮也在该页，但**不回写项目**（示例只读，产物只进本页播放器）。
 
 ## 4. 依赖与协作
 
@@ -131,6 +131,7 @@
 - **Node 必须解析成绝对路径**：模块自身不拼 node 路径，全部交给 `hfEnv.findNode()`，避免 `spawn('node')` 在部分环境 ENOENT；`child.on('error')` 文案里也会带上解析结果便于排查。
 - **环境变量注入而非依赖系统 PATH**：`HYPERFRAMES_FFMPEG_PATH` / `HYPERFRAMES_FFPROBE_PATH` / `PRODUCER_HEADLESS_SHELL_PATH` 均为显式注入，`HYPERFRAMES_CLI` 是 CLI 缺失时的可选回退。这些变量名与 `hfEnv.ts` 的读取逻辑一一对应。
 - **资源整体复制策略**：目录里只要存在 `index.html` / `output.mp4` 之外的文件就整目录复制，代价是可能复制进大体积无用文件，换来音频等素材必然随行。
+- **音轨来源与混流分工**：本模块**不写 `<audio>`、也不做任何 ffmpeg 混音**。音轨是项目 `index.html` 里由主进程（`projects.ts` 的 `applyBgmToHtml`）注入的 `<audio id="myv-bgm" src="audio/…" autoplay loop>`；渲染时它随整目录复制进工作目录，**音轨提取与混入 MP4 全部发生在 HyperFrames CLI 内部**（trace 阶段 `audio_process`，渲染层只把该阶段翻成「处理音轨」）。因此「页面有音轨但成片没声音」应查注入标签是否存在，而不是查本模块。
 - **产物落在 userData 而非项目目录**：视频输出在 `userData/hf-projects/html-video-<时间戳>/output.mp4`，是否回写项目由渲染层调用 `project:save-video` 决定。
 - **`done` 幂等**：`finished` 标志位防止 `error` 与 `close` 双触发导致 Promise 重复 settle。
 - **进度不解析、只透传**：主进程原样转发子进程 stdout/stderr 文本，`[Render:trace]` 一类的语义解析在渲染层完成。
