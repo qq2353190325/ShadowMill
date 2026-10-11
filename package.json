@@ -1,7 +1,7 @@
 {
-  "name": "my-app",
+  "name": "shadowmill",
   "version": "0.0.2",
-  "description": "Electron 项目：左侧菜单 + 右侧内容区布局（五节点音视频创作流水线）",
+  "description": "ShadowMill（影坊）：Electron 桌面应用，以「项目」为粒度的一站式音视频创作流水线",
   "main": "out/main/index.js",
   "scripts": {
     "start": "electron-vite preview",
@@ -21,8 +21,8 @@
     "vite": "^7.3.6"
   },
   "build": {
-    "appId": "com.marvis.avpipeline",
-    "productName": "MarvisStudio",
+    "appId": "com.shadowmill.app",
+    "productName": "ShadowMill",
     "electronVersion": "31.7.7",
     "electronDownload": {
       "mirror": "https://npmmirror.com/mirrors/electron/"
@@ -64,7 +64,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/MarvisStudio/"
+        "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/"
       }
     ],
     "extraResources": [

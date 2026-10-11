@@ -1,9 +1,10 @@
 <template>
   <div>
     <section class="hero">
-      <span class="hero-tag">CYBER UI · 深空科技</span>
+      <span class="hero-tag">影坊 · SHADOWMILL</span>
       <h1>一站式音视频创作流水线</h1>
       <p>以“项目”为单位贯通：内容脚本 → 配音 → 字幕 → HTML → 视频，一键生成。</p>
+      <p class="hero-sub">CYBER UI · 深空科技 视觉主题 · 语音识别与视频渲染均在本机完成</p>
     </section>
     <div class="flow-pipeline" id="home-flow">
       <template v-for="(n, i) in flowDefs" :key="n.page">

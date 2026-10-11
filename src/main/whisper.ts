@@ -193,7 +193,7 @@ function modelFilePath(id: string): string {
 // 兼容重定向的流式下载：http(s) 3xx 跟随（最多 5 跳），边下边写 .part，onProgress 节流回推
 function httpGetFollow(url: string, redirects: number): Promise<import('node:http').IncomingMessage> {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'MarvisStudio/1.0' } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': 'ShadowMill/1.0' } }, (res) => {
       const code = res.statusCode || 0;
       if (code >= 300 && code < 400 && res.headers.location) {
         res.resume();

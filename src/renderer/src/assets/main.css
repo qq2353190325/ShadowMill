@@ -304,6 +304,14 @@ body {
   color: var(--text-secondary);
 }
 
+/* hero 参数行：说明视觉主题与本机处理特性，比正文小一档、更淡一档 */
+.hero-sub {
+  margin-top: 6px;
+  font-size: 12px !important;
+  letter-spacing: 1px;
+  opacity: 0.75;
+}
+
 /* ===== 流水线节点卡片 ===== */
 .flow-pipeline {
   display: flex;

@@ -1,4 +1,4 @@
-// src/main/index.ts —— MarvisStudio 主进程入口（装配器）
+// src/main/index.ts —— ShadowMill（影坊）主进程入口（装配器）
 // 职责：app 生命周期、createWindow、窗口控制 IPC，以及业务域模块的 import + register 装配。
 // 业务逻辑按域拆至 src/main/ 下：
 //   hfEnv.ts     环境探测与 HyperFrames 资源定位（纯函数）
@@ -25,15 +25,80 @@ import * as video from './video'
 import * as whisper from './whisper'
 import * as updater from './updater'
 
+// ===== userData 目录迁移：my-app → shadowmill =====
+// 应用名（package.json 的 name）决定 userData 目录名，改名会让老用户的数据目录"看起来消失"
+// （项目、设置、识别模型全在里面）。这里在**任何模块读写 userData 之前**做一次搬迁：
+//   %APPDATA%\my-app  →  %APPDATA%\shadowmill
+// 安全策略（任一不满足就放弃搬迁，绝不动老目录）：
+//   ① 开发态也执行（不然 `npm run dev` 会看到"项目全没了"）；需要保留旧目录做对照时，
+//      用环境变量 MIGRATE_USER_DATA=0 单次关闭；
+//   ② 新目录已存在 ⇒ 视为已迁移过（或全新安装），不覆盖；
+//   ③ 逐项搬迁：目标已存在同名项则跳过该项，只搬不会覆盖数据的部分；
+//   ④ 整件事包在 try/catch 里，失败只记一条日志，绝不影响启动。
+// 能这么做的前提：新版首次启动**必然**看到"新目录不存在 + 老目录存在"，此时两个目录里都还没有
+// 本进程写入的任何文件（打点日志路径也是迁移之后才解析的），所以搬迁不会与自身写入打架。
+// 名字故意写死成字面量（而不是读 package.json）：迁移后代码就不再引用旧名，
+// 将来二次改名时，只需把这里的 oldName 换成新名字即可。
+const LEGACY_APP_NAME = 'my-app';
+const APP_NAME = app.getName(); // 取自 package.json 的 name
+const USER_DATA_DIR = app.getPath('userData'); // %APPDATA%\<APP_NAME>
+
+function migrateLegacyUserData(): void {
+  try {
+    if (process.env['MIGRATE_USER_DATA'] === '0') return;
+    if (APP_NAME === LEGACY_APP_NAME) return;
+    const base = path.dirname(USER_DATA_DIR);
+    if (path.basename(USER_DATA_DIR).toLowerCase() !== APP_NAME.toLowerCase()) return; // 无法从目录名推导 ⇒ 放弃
+    const oldDir = path.join(base, LEGACY_APP_NAME);
+    const newDir = USER_DATA_DIR;
+    if (!fs.existsSync(oldDir) || fs.existsSync(newDir)) return;
+    fs.mkdirSync(newDir, { recursive: true });
+    let moved = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const entry of fs.readdirSync(oldDir)) {
+      const src = path.join(oldDir, entry);
+      const dst = path.join(newDir, entry);
+      try {
+        if (fs.existsSync(dst)) { skipped++; continue; }
+        fs.renameSync(src, dst); // 同一分区内的目录改名是原子操作，不下沉拷贝
+        moved++;
+      } catch (e) {
+        // 跨分区 / 目录被占用：退化为递归拷贝，失败则单独计数（不牵连其它项）
+        try {
+          fs.cpSync(src, dst, { recursive: true, errorOnExist: false });
+          fs.rmSync(src, { recursive: true, force: true });
+          moved++;
+        } catch (e2) {
+          failed++;
+        }
+      }
+    }
+    // 老目录已空则删掉；若仍有失败项则保留，便于人工取回
+    try {
+      if (fs.readdirSync(oldDir).length === 0) fs.rmdirSync(oldDir);
+    } catch (e) { /* 留着重试也无妨 */ }
+    fs.appendFileSync(
+      path.join(newDir, 'startup.log'),
+      new Date().toISOString() + ' userData 迁移 ' + LEGACY_APP_NAME + ' → ' + APP_NAME +
+        '：搬迁 ' + moved + ' 项，跳过 ' + skipped + ' 项，失败 ' + failed + ' 项\n',
+      'utf8'
+    );
+  } catch (e) { /* 迁移失败不影响启动；老数据仍在 %APPDATA%\my-app */ }
+}
+migrateLegacyUserData();
+
 // ===== 启动时序打点（userData/startup.log）=====
 // 首屏慢（「只有背景很久」）时用来定位时间花在哪一段：进程启动 → 主进程模块加载 → app ready
 // → 建窗 → 页面开始加载 → DOM ready → 加载完成 → 首帧（ready-to-show）。
 // 每行：ISO 时间 + 距**进程启动**的毫秒数 + 阶段；写盘用 appendFileSync（每次启动几行，<1ms），
 // 文件超过 64KB 自动清一次，避免长期使用无限增长。打点失败一律静默——它不能影响启动。
+// 路径在迁移之后解析一次并缓存：否则前面几行打点会把新目录提前建出来，让迁移误判为"已迁移过"。
 const BOOT_AT = Date.now() - Math.round(process.uptime() * 1000) // 进程启动时刻（用 uptime 反推，含 Electron 自身引导耗时）
+const STARTUP_LOG = path.join(USER_DATA_DIR, 'startup.log');
 function bootLog(stage: string): void {
   try {
-    const file = path.join(app.getPath('userData'), 'startup.log');
+    const file = STARTUP_LOG;
     try {
       if (fs.statSync(file).size > 64 * 1024) fs.rmSync(file);
     } catch (e) { /* 日志不存在：首次启动的正常情形 */ }

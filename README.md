@@ -9,7 +9,7 @@ AIGC:
     ReservedCode2: n/C5UHkbt+XC6mkpM4VL9VQRQd3Dsoc+VZMHRkeuxPkaoSGJCTttJ/VxjAbsAfX0tg/SXnwD7YjPAQBajvZysJP/9v6lZdO+bUuF2cQaPPsZI+azcbIzv8Sdj84OVjSuy+uPuP7HC4KjfrB2KGVYFYWKmtFZR3OOcddmxIJ5i3grX3KOkEGru7E7hFI=
 ---
 
-# MarvisStudio（我的应用）—— 一站式音视频创作流水线
+# 影坊（ShadowMill）—— 一站式音视频创作流水线
 
 基于 **Electron + Vue 3 + electron-vite + TypeScript** 的桌面应用，以「项目」为粒度，把 **内容脚本 → 配音 → 字幕 → HTML 动画 → 视频** 五个创作节点串成一条完整流水线。每个项目对应本地一个目录，字幕既可由脚本旁白生成，也可用**内置 whisper.cpp 在本机把音频转录成字幕**；视频由 **HyperFrames + FFmpeg 在本机渲染**——语音识别与视频渲染都不消耗 API 额度。
 
@@ -252,7 +252,7 @@ npm run dist       # build + electron-builder --win（NSIS 安装包）
 - **对齐配音**：单句最多加速到 1.15 倍，超出靠顺延；末句无槽位、不加速也不顺延；同一时刻只允许一个对齐任务，取消是句间软中断（当前句的合成请求不会被打断）。
 - **本地音频格式**：whisper-cli 原生只支持 flac/mp3/ogg/wav（其它格式会先自动转码）；克隆音色上传的本地音频 Base64 后需小于 10 MB；VAD 只解析 16 bit PCM WAV。
 - **API Key 以明文保存在本机 `userData/settings.json`**，仅主进程读取，不会外传；如需更高安全性可后续接入 Electron `safeStorage` 加密。
-- **首次启动偏慢属于正常现象**：安装包内含完整 Electron 运行时与内置资源（约 1 GB 安装体积），安装后第一次启动时 Windows Defender 会扫描新落盘的 `MarvisStudio.exe`，加上磁盘冷缓存，可能出现十几秒的等待。**这段等待不再是「只有背景」**：窗口一出现就是品牌底色，页面首帧即显示启动画面（logo + 扫描条 + 「正在启动…」），Vue 挂载后自动淡出。应用自身的启动开销也已压缩——`electron-updater` 与 `openai` 两个大模块改为懒加载、启动时不再重复拉取项目数据。
-- **排查启动耗时**：`%APPDATA%\my-app\startup.log` 每次启动追加几行，每行形如 `2026-10-12T01:02:19.780Z +4200ms window created`——`+NNNms` 是距进程启动的毫秒数，可直接看出时间花在「主进程模块加载 / 建窗 / 页面加载」哪一段。（更新日志在同目录 `updater.log`，预览协议日志在 `preview-protocol.log`。）
+- **首次启动偏慢属于正常现象**：安装包内含完整 Electron 运行时与内置资源（约 1 GB 安装体积），安装后第一次启动时 Windows Defender 会扫描新落盘的 `ShadowMill.exe`，加上磁盘冷缓存，可能出现十几秒的等待。**这段等待不再是「只有背景」**：窗口一出现就是品牌底色，页面首帧即显示启动画面（logo + 扫描条 + 「正在启动…」），Vue 挂载后自动淡出。应用自身的启动开销也已压缩——`electron-updater` 与 `openai` 两个大模块改为懒加载、启动时不再重复拉取项目数据。
+- **排查启动耗时**：`%APPDATA%\shadowmill\startup.log` 每次启动追加几行，每行形如 `2026-10-12T01:02:19.780Z +4200ms window created`——`+NNNms` 是距进程启动的毫秒数，可直接看出时间花在「主进程模块加载 / 建窗 / 页面加载」哪一段。（更新日志在同目录 `updater.log`，预览协议日志在 `preview-protocol.log`。）旧版本（`MarvisStudio` / npm 包名 `my-app`）的 `%APPDATA%\my-app\` 会在首次启动时**自动迁移**到 `%APPDATA%\shadowmill\`（开发态同样迁移；需要保留旧目录做对照时，用 `MIGRATE_USER_DATA=0` 启动一次即可跳过）。
 
 *（内容由AI生成，仅供参考）*

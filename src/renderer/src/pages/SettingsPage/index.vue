@@ -110,7 +110,7 @@
         <div class="hf-modal-body">
           <div class="hgen-row">
             <label class="sel-label" style="flex:none;width:56px">更新源</label>
-            <input v-model="feedDraft" class="hgen-input" style="flex:1" placeholder="如 https://my-bucket.oss-cn-beijing.aliyuncs.com/MarvisStudio/" />
+            <input v-model="feedDraft" class="hgen-input" style="flex:1" placeholder="如 https://my-bucket.oss-cn-beijing.aliyuncs.com/shadowmill/" />
           </div>
           <div class="hgen-row">
             <label class="sel-label" style="flex:none;width:56px">启动检查</label>

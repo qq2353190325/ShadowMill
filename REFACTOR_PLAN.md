@@ -1,4 +1,4 @@
-# Vue3 + electron-vite + TypeScript 全面重构计划（MarvisStudio）
+# Vue3 + electron-vite + TypeScript 全面重构计划（ShadowMill）
 
 ## Context
 
@@ -115,7 +115,7 @@ npx electron-vite build      # 三端构建成功
 1. package.json：`main: out/main/index.js`；files → `["out/**/*","video-projects/**/*","README.md","!node_modules/**/*","node_modules/openai/**/*","node_modules/opencc-js/**/*","!*.js.map"]`；extraResources/asar/win/nsis/镜像不动；scripts：`start: electron-vite preview`、`pack: npm run build && npx electron-builder --dir`、`dist: npm run build && npx electron-builder --win`。
 2. 删全部旧渲染层文件（清单见上）。
 3. 门禁：typecheck + build + `grep -rn "window\.App\|window\.__" src/` 零命中 + pack 成功 + `npx asar list` 确认 out/video-projects/openai/opencc-js 在位 + resources 四目录体积与迁移前一致（726M）。
-4. **用户验证点③**：运行 `dist/win-unpacked/MarvisStudio.exe` —— 上次项目上下文保留、全流程可用。**验证点④（可选）**：`npm run dist` 安装包验证。
+4. **用户验证点③**：运行 `dist/win-unpacked/ShadowMill.exe` —— 上次项目上下文保留、全流程可用。**验证点④（可选）**：`npm run dist` 安装包验证。
 
 ## 风险与缓解（要点）
 

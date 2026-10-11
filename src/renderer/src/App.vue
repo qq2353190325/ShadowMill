@@ -5,7 +5,7 @@
       <svg class="titlebar-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
         <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
       </svg>
-      <span class="titlebar-title">我的应用</span>
+      <span class="titlebar-title">影坊</span>
     </div>
     <div class="titlebar-controls">
       <button class="win-btn" title="最小化" @click="winMinimize">
