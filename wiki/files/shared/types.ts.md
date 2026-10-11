@@ -4,8 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：619 行
-- **对外导出**：按 9 个小节组织，共 90 个导出 —— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置 11 个 ④ 音色与配音 26 个 ⑤ 语音识别 13 个 ⑥ 项目与字幕 23 个 ⑦ 预览 / 转视频 5 个 ⑧ 进度推送 8 个 ⑨ `PreloadApi` 1 个
+- **规模**：651 行
+- **对外导出**：按 9 个小节组织，共 96 个导出 —— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置 16 个 ④ 音色与配音 26 个 ⑤ 语音识别 13 个 ⑥ 项目与字幕 24 个 ⑦ 预览 / 转视频 5 个 ⑧ 进度推送 8 个 ⑨ `PreloadApi` 1 个
 
 ## 1. 作用与职责
 
@@ -24,10 +24,10 @@
 | --- | --- | --- |
 | ① 通用 IPC 结果 | `IpcFail`、`IpcResult<T>` | `PreloadApi` 全体成员、各主进程模块的返回结构 |
 | ② 主进程装配上下文 | `RegisterCtx` | `src/main/*.ts` 的 `register(ctx)` |
-| ③ 设置 | `settings.json` 的 schema 与 `settings:*` / `voice:save-config` 载荷 | `src/main/settings.ts`、设置页、配音页 |
+| ③ 设置 | `settings.json` 的 schema（含渲染档位 `render`）与 `settings:*` / `voice:save-config` 载荷 | `src/main/settings.ts`、设置页、配音页 |
 | ④ 音色与配音 | 系统音色、克隆音色、音色映射、合成/对齐载荷与结果 | `src/main/voice.ts`、`src/main/ttsAlign.ts` |
 | ⑤ 语音识别 | whisper 模型状态、转录载荷与结果 | `src/main/whisper.ts` |
-| ⑥ 项目与字幕 | `project.json`、字幕行、项目列表项、HTML 生成载荷 | `src/main/projects.ts` |
+| ⑥ 项目与字幕 | `project.json`（含渲染档位覆盖 `render`）、字幕行、项目列表项、HTML 生成载荷 | `src/main/projects.ts` |
 | ⑦ 预览 / 转视频 | 内置示例项目项、预览外壳与渲染载荷/结果 | `src/main/video.ts` |
 | ⑧ 进度推送 | 4 路 main → renderer 推送的载荷 | `src/main/*.ts` 推送方 + `src/preload/index.ts` 订阅方 |
 | ⑨ `window.*` API 契约 | `PreloadApi`（8 个命名空间） | `src/preload/index.ts`、`src/preload/index.d.ts`、渲染层全部 `window.*` 调用 |
@@ -66,10 +66,15 @@
 | `VoiceProfileInput` | `interface` | 保存映射的入参：`key` / `voice` / `targetModel` + 可选 `name` / `type`（主进程按 `voice` 回填 `name`，按 `'system'` 之外一律归 `'custom'`） |
 | `WhisperCustomModel` | `interface` | whisper 自定义模型条目：`id` / `name` / `file` / `url` / `sizeMB` / `desc`（`id` 由文件名派生） |
 | `WhisperSettings` | `interface` | whisper 分区：`modelId` / `customModels: WhisperCustomModel[]` |
-| `AppSettings` | `interface` | 设置文件根结构：`customModel` / `voiceTTS` / `voiceProfiles` / `whisper` |
+| `AppSettings` | `interface` | 设置文件根结构：`customModel` / `voiceTTS` / `voiceProfiles` / `whisper` / `render` |
 | `SettingsSavePayload` | `interface` | `settings:save` 线上载荷：`{ customModel: CustomModelConfig }` |
 | `SettingsTestPayload` | `interface` | `settings:test` 线上载荷：形状与 `SettingsSavePayload` 相同 |
 | `SettingsSaveResult` | `interface` | `settings:save` 成功分支：`{ settings: AppSettings }`（`voice:save-config` 复用同一结果形状） |
+| `RenderQuality` | `type` | 渲染质量字面量联合：`'draft' \| 'standard' \| 'high'` |
+| `RenderFps` | `type` | 渲染帧率字面量联合：`24 \| 30` |
+| `RenderOptions` | `interface` | **完整**渲染档位 `{ quality: RenderQuality; fps: RenderFps }`（`settings.json` 的 `render` 段与生效档位都用它） |
+| `RenderOverride` | `type` | `Partial<RenderOptions>`——**项目级覆盖**：字段可缺省，缺省项跟随全局默认 |
+| `SettingsSaveRenderPayload` | `interface` | `settings:save-render` 线上载荷：`{ render?: RenderOverride }`（只更新 `render` 段，不动 `customModel`） |
 
 | 归属 | 字段 | 类型 | 说明 |
 | --- | --- | --- | --- |
@@ -95,6 +100,7 @@
 | `AppSettings` | `voiceTTS` | `VoiceTTSConfig` | 语音 TTS 配置 |
 | `AppSettings` | `voiceProfiles` | `Record<string, VoiceProfile>` | 音色映射表，键即 `VoiceProfile.key` |
 | `AppSettings` | `whisper` | `WhisperSettings` | whisper 分区 |
+| `AppSettings` | `render` | `RenderOptions` | 视频渲染**全局默认档位**（项目未覆盖时生效；读取时经 `normalizeRenderOptions` 规范化） |
 | `SettingsSaveResult` | `settings` | `AppSettings` | 保存后的完整设置（主进程回带） |
 
 ### 2.4 ④ 音色与配音（`voice.ts` / `ttsAlign.ts`）
@@ -194,6 +200,7 @@
 | `ProjectHtmlMaterials` | `interface` | HTML 生成/修改的素材选择：`subtitleProject?` / `audioPath?` / `videoPath?` |
 | `ProjectAgentPayload` | `interface` | `extends ProjectHtmlMaterials` + `name` / `prompt`（`generateHtml` / `modifyHtml` 线上载荷） |
 | `ProjectHtmlResult` | `interface` | `{ htmlPath, compatible, message? }` |
+| `ProjectSetRenderPayload` | `interface` | `project:set-render` 线上载荷：`{ name?: string; render?: RenderOverride \| null }`——`render` 传 `null`（或字段全非法）表示清除项目覆盖、回到跟随全局默认 |
 
 | 归属 | 字段 | 类型 | 说明 |
 | --- | --- | --- | --- |
@@ -203,6 +210,7 @@
 | `Project` | `videoMaterial` | 可选 `string` | 视频**素材**相对引用（`video/xxx`，与成品 `videoPath` 严格区分） |
 | `Project` | `audioFile` | `string` | 背景音频 / 生成语音相对引用（`audio/xxx`，空串表示无） |
 | `Project` | `content` | `ContentScript` | 内容脚本 |
+| `Project` | `render` | 可选 `RenderOverride` | 视频渲染档位的**项目级覆盖**（字段缺省即跟随全局默认；`render` 为空覆盖时该字段被删除） |
 | `Project` | `createdAt` / `updatedAt` | `string` / 可选 `string` | 创建与更新时间（ISO 字符串） |
 | `SubtitleLine` | `n` / `time` / `end` | `number` / `number` / `number \| null` | 序号、起始秒、结束秒（`null` 表示无结束时间） |
 | `ProjectMeta` | `name` / `title` / `updatedAt` | `string` | 项目名、标题、更新时间 |
@@ -222,7 +230,7 @@
 | `BuiltinProjectEntry` | `interface` | `video:list-projects` 结果项（内置只读示例）：`name` + `html`（`index.html` 绝对路径） |
 | `VideoPreviewShellPayload` | `interface` | `{ htmlPath? }` |
 | `VideoPreviewShellResult` | `interface` | `{ shellPath }` |
-| `VideoRenderPayload` | `interface` | `{ htmlPath? }` |
+| `VideoRenderPayload` | `interface` | `extends RenderOverride`，即 `{ htmlPath?: string; quality?: RenderQuality; fps?: RenderFps }`——档位字段缺省/非法时主进程不拼对应 CLI 参数 |
 | `VideoRenderResult` | `type` | 渲染结果联合：成功 `{ ok: true; outputVideo: string; projectDir: string }`，失败 `{ ok: false; message: string; compatible?: boolean }` |
 
 `VideoRenderResult` **不是** `IpcResult<T>` 的实例：它的失败分支 `message` 必填，且成功分支不复用 `IpcFail` 联合；失败分支的 `compatible: false` 表示 HTML 未通过 HyperFrames 合规校验（渲染层据此区分「环境错误」与「HTML 不合规」）。
@@ -258,10 +266,10 @@
 | `appTools` | 1 | `copyText` | `Promise<boolean>`（不走 `IpcResult`） |
 | `windowControls` | 4 | `minimize`、`toggleMaximize`、`close`、`onMaximizedChange` | 前三者 `void`（`send` 单向）；`onMaximizedChange(cb: (isMaximized: boolean) => void)` |
 | `hfTools` | 6 | `openHtml`、`listProjects`、`previewShell`、`renderVideo`、`showInFolder`、`onProgress` | `openHtml` → `Promise<string \| null>`；`listProjects` → `Promise<BuiltinProjectEntry[]>`；`previewShell` → `Promise<IpcResult<VideoPreviewShellResult>>`；`renderVideo` → `Promise<VideoRenderResult>`；`showInFolder` → `Promise<void>`；`onProgress(cb: (data: VideoProgressPayload) => void)` |
-| `settingsTools` | 3 | `get`、`save`、`test` | `get` → `Promise<AppSettings>`（**不经 `ok` 包裹**）；`save(customModel)` → `Promise<IpcResult<SettingsSaveResult>>`；`test(customModel)` → `Promise<IpcResult>` |
+| `settingsTools` | 4 | `get`、`save`、`saveRender`、`test` | `get` → `Promise<AppSettings>`（**不经 `ok` 包裹**）；`save(customModel)` → `Promise<IpcResult<SettingsSaveResult>>`；`saveRender(render)` → `Promise<IpcResult<SettingsSaveResult>>`（preload 包装为 `{ render }`）；`test(customModel)` → `Promise<IpcResult>` |
 | `voiceTools` | 18 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` | 见下 |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` | 见下 |
-| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`downloadFile`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`onHtmlProgress` | 见下 |
+| `projectTools` | 26 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`downloadFile`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下 |
 
 `voiceTools` 逐个签名（含未单独命名的内联载荷）：
 
@@ -299,7 +307,7 @@
 | `whisperTools` | `transcribe(payload: WhisperTranscribePayload)` | `Promise<IpcResult<WhisperTranscribeResult>>` |
 | `whisperTools` | `onProgress(cb)` | `void`，回调 `(data: WhisperProgressPayload) => void`（单订阅） |
 | `projectTools` | `list()` | `Promise<ProjectMeta[]>`（**不走 `IpcResult`**） |
-| `projectTools` | `create` / `saveSubtitle` / `saveContent` / `saveVideo` | `Promise<IpcResult<ProjectSaveResult>>` |
+| `projectTools` | `create` / `saveSubtitle` / `saveContent` / `saveVideo` / `setRender` | `Promise<IpcResult<ProjectSaveResult>>`（`setRender(name, render \| null)` 传 `null` 即清除项目级渲染档位覆盖） |
 | `projectTools` | `load(name)` | `Promise<Project \| null>`（**不走 `IpcResult`**；项目名为空时主进程返回 `null`，见 §5） |
 | `projectTools` | `generateHtml` / `modifyHtml(name, prompt, materials?: ProjectHtmlMaterials)` | `Promise<IpcResult<ProjectHtmlResult>>` |
 | `projectTools` | `downloadHtml` / `downloadFile` / `exportSrt` | `Promise<IpcResult<ProjectDownloadResult>>` |

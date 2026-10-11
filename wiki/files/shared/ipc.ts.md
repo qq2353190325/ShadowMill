@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量（含派生类型）
-- **规模**：97 行
+- **规模**：99 行
 - **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Settings / Voice / Whisper / Project / Video 七个分组）、`IpcChannel`（频道字面量联合类型）
 
 ## 1. 作用与职责
@@ -43,8 +43,9 @@
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
-| `Settings.Get` | `settings:get` | 读取 `AppSettings`（含 customModel / voiceTTS / voiceProfiles / whisper） |
+| `Settings.Get` | `settings:get` | 读取 `AppSettings`（含 customModel / voiceTTS / voiceProfiles / whisper / render） |
 | `Settings.Save` | `settings:save` | 保存自定义模型配置（OpenAI 兼容端点） |
+| `Settings.SaveRender` | `settings:save-render` | 保存视频渲染**默认档位**（只更新 `render` 段，不动 customModel） |
 | `Settings.Test` | `settings:test` | 用给定 `CustomModelConfig` 发起一次连通性测试 |
 
 ### 2.4 Voice 分组（voice.js / ttsAlign.js）
@@ -105,6 +106,7 @@
 | `Project.OpenFolderOf` | `project:open-folder-of` | 打开某个绝对路径（文件或目录）所在目录 |
 | `Project.Delete` | `project:delete` | 删除项目 |
 | `Project.SaveVideo` | `project:save-video` | 把渲染产物视频路径写回项目 |
+| `Project.SetRender` | `project:set-render` | 写 / 清除项目级渲染档位覆盖（`render` 传 `null` 即回到跟随全局默认） |
 | `Project.PickAudio` | `project:pick-audio` | 选择项目音频 |
 | `Project.SetAudio` | `project:set-audio` | 写入项目音频 |
 | `Project.ClearAudio` | `project:clear-audio` | 清除项目音频 |
@@ -156,7 +158,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 ### 3.2 `as const` 与 `IpcChannel`
 
 - `export const IPC = { ... } as const` 使每个属性成为**只读的字面量类型**（如 `'window:minimize'` 而非 `string`），赋值给其他变量时不会意外放宽。
-- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video'` 七个键，取 `[keyof ...]` 后得到的是**七个分组对象类型**的并集，而不是 69 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
+- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video'` 七个键，取 `[keyof ...]` 后得到的是**七个分组对象类型**的并集，而不是 71 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
 
 ### 3.3 三种通道方向约定
 

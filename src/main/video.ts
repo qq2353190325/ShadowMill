@@ -3,13 +3,14 @@
 // 提供：dialog:open-html / video:list-projects / video:preview-shell /
 //       video:show-in-folder / video:render（含 video:progress 推送）
 // 依赖：hfEnv(BUILTIN_RESOURCES / findHyperframesCli / findNode / findFfmpegBin /
-//       isHyperframesComposition) / dialog / shell
+//       isHyperframesComposition) / settings(渲染档位白名单) / dialog / shell
 import { app, ipcMain, dialog, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import * as hfEnv from './hfEnv'
+import { pickRenderOverride } from './settings'
 import { IPC } from '../shared/ipc'
 import type {
   RegisterCtx,
@@ -20,6 +21,7 @@ import type {
 
 // 载荷与结果类型统一取自 shared/types.ts（⑦ 节），此处不再重复声明：
 // RenderPayload / PreviewShellPayload / RenderResult（见 VideoRenderPayload / VideoPreviewShellPayload / VideoRenderResult）
+// 渲染档位（质量 / 帧率）也在 VideoRenderPayload 内：只接受白名单内的显式值，缺省不传参数、走 CLI 默认（standard / 30）
 
 function register(ctx?: RegisterCtx): void {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
@@ -137,6 +139,18 @@ function register(ctx?: RegisterCtx): void {
         resolve({ ok: false, message: '复制 HTML 失败：' + ((e as Error).message || String(e)) });
         return;
       }
+
+      // GSAP 本地化（仅改渲染副本，不动用户原件）：老项目 HTML 仍引 CDN 时，离线渲染会因 gsap 未定义而失败。
+      // 有随包 gsap.min.js 时把副本里的 CDN 引用改写为 ./gsap.min.js 并把文件放进渲染目录。
+      try {
+        const copyHtml = path.join(projDir, 'index.html');
+        if (fs.existsSync(copyHtml)) {
+          const localized = hfEnv.localizeGsapHtml(fs.readFileSync(copyHtml, 'utf8'));
+          fs.writeFileSync(copyHtml, localized, 'utf8');
+          if (hfEnv.referencesLocalGsap(localized)) hfEnv.copyGsapIntoProject(projDir);
+        }
+      } catch (e) { /* 本地化失败不阻断渲染：在线时仍可由 CDN 加载 */ }
+
       const outMp4 = path.join(projDir, 'output.mp4');
 
       const env: Record<string, string | undefined> = { ...process.env };
@@ -150,7 +164,13 @@ function register(ctx?: RegisterCtx): void {
         env.PRODUCER_HEADLESS_SHELL_PATH = hfEnv.BUILTIN_RESOURCES.chromeShell;
       }
 
-      const child = spawn(nodeCmd, [hfCli, 'render', '-o', outMp4], {
+      // 渲染档位：只把载荷里显式给出的合法值拼进 CLI 参数（缺省交给 CLI 自己的默认 standard / 30）
+      const renderArgs = [hfCli, 'render', '-o', outMp4];
+      const renderOpts = pickRenderOverride(payload);
+      if (renderOpts.quality) renderArgs.push('--quality', renderOpts.quality);
+      if (renderOpts.fps) renderArgs.push('--fps', String(renderOpts.fps));
+
+      const child = spawn(nodeCmd, renderArgs, {
         cwd: projDir,
         env
       });

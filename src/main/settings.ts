@@ -1,22 +1,60 @@
 // src/main/settings.ts
 // 设置存储（userData/settings.json）与 OpenAI 兼容客户端工具
 // 提供：readSettings / writeSettings / getCustomModel / getVoiceConfig
-//       以及 settings:get / settings:save / settings:test IPC
+//       以及 settings:get / settings:save / settings:save-render / settings:test IPC
 //       + whisper 当前模型档位与自定义模型列表（getWhisperModel / saveWhisperModel / getWhisperCustomModels / saveWhisperCustomModels）
+//       + 视频渲染档位的白名单校验（DEFAULT_RENDER / normalizeRenderOptions / pickRenderOverride，供 projects.ts / video.ts 复用）
 // 依赖：app / ipcMain / fs / path / openai
 import { app, ipcMain } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import OpenAI from 'openai'
 import { IPC } from '../shared/ipc'
-import type { AppSettings, CustomModelConfig, RegisterCtx, VoiceProfile, VoiceTTSConfig, WhisperCustomModel } from '../shared/types'
+import type {
+  AppSettings,
+  CustomModelConfig,
+  RegisterCtx,
+  RenderFps,
+  RenderOptions,
+  RenderOverride,
+  RenderQuality,
+  SettingsSaveRenderPayload,
+  VoiceProfile,
+  VoiceTTSConfig,
+  WhisperCustomModel
+} from '../shared/types'
 
 const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.json')
+
+// ===== 视频渲染档位（普通用户只有质量 + 帧率两项）=====
+// 白名单只此一处：projects.ts（项目覆盖落盘）、video.ts（渲染参数）都复用这里，避免校验三处漂移。
+const DEFAULT_RENDER: RenderOptions = { quality: 'standard', fps: 30 };
+const RENDER_QUALITIES: RenderQuality[] = ['draft', 'standard', 'high'];
+const RENDER_FPS: RenderFps[] = [24, 30];
+
+// 完整档位：非法/缺省字段一律回退 fallback
+function normalizeRenderOptions(raw: unknown, fallback: RenderOptions = DEFAULT_RENDER): RenderOptions {
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw as Record<string, unknown> : {};
+  const quality = RENDER_QUALITIES.indexOf(src.quality as RenderQuality) >= 0 ? src.quality as RenderQuality : fallback.quality;
+  const fps = RENDER_FPS.indexOf(Number(src.fps) as RenderFps) >= 0 ? Number(src.fps) as RenderFps : fallback.fps;
+  return { quality, fps };
+}
+
+// 仅保留显式给出的合法字段：没给 ≠ 要默认值（项目覆盖与「未选档位就不传参数」都靠它）
+function pickRenderOverride(raw: unknown): RenderOverride {
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw as Record<string, unknown> : {};
+  const out: RenderOverride = {};
+  if (RENDER_QUALITIES.indexOf(src.quality as RenderQuality) >= 0) out.quality = src.quality as RenderQuality;
+  if (RENDER_FPS.indexOf(Number(src.fps) as RenderFps) >= 0) out.fps = Number(src.fps) as RenderFps;
+  return out;
+}
+
 const DEFAULT_SETTINGS = (): AppSettings => ({
   customModel: { baseUrl: '', modelId: '', apiKey: '', enabled: false },
   voiceTTS: { apiKey: '', targetModel: 'qwen-audio-3.0-tts-flash', saveDir: '' },
   voiceProfiles: {}, // 本地音色映射：key 形如 "system:Cherry" / "custom:<voice_id>"，值为 { key, name, voice, targetModel, type }
-  whisper: { modelId: '', customModels: [] } // 语音识别（whisper.cpp）：modelId 为当前使用档位，customModels 为用户自定义模型条目
+  whisper: { modelId: '', customModels: [] }, // 语音识别（whisper.cpp）：modelId 为当前使用档位，customModels 为用户自定义模型条目
+  render: Object.assign({}, DEFAULT_RENDER) // 视频渲染全局默认档位（项目未覆盖时生效）
 });
 
 function readSettings(): AppSettings {
@@ -27,7 +65,9 @@ function readSettings(): AppSettings {
       customModel: Object.assign({}, base.customModel, (raw && raw.customModel) || {}),
       voiceTTS: Object.assign({}, base.voiceTTS, (raw && raw.voiceTTS) || {}),
       voiceProfiles: Object.assign({}, (raw && raw.voiceProfiles) || {}),
-      whisper: Object.assign({}, base.whisper, (raw && raw.whisper) || {})
+      whisper: Object.assign({}, base.whisper, (raw && raw.whisper) || {}),
+      // 渲染档位：旧 settings.json（无 render 字段）落回默认；已写入的值经白名单规范化
+      render: normalizeRenderOptions(raw && raw.render)
     };
   } catch (e) {
     return DEFAULT_SETTINGS();
@@ -117,6 +157,14 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, settings: raw };
   });
 
+  // 渲染默认档位（普通用户两项：质量 + 帧率）：只更新 render 段，不动 customModel
+  ipcMain.handle(IPC.Settings.SaveRender, (_event, payload?: SettingsSaveRenderPayload) => {
+    const cur = readSettings();
+    cur.render = normalizeRenderOptions(Object.assign({}, cur.render, (payload && payload.render) || {}));
+    writeSettings(cur);
+    return { ok: true, settings: cur };
+  });
+
   // 测试连接：用当前（或传入的待测）配置发起一次最小对话，必须拿到模型返回文本才算成功
   ipcMain.handle(IPC.Settings.Test, async (_event, payload?: { customModel?: Partial<CustomModelConfig> }) => {
     const m = Object.assign({}, getCustomModel(), (payload && payload.customModel) || {});
@@ -159,6 +207,9 @@ export {
   register,
   readSettings,
   writeSettings,
+  DEFAULT_RENDER,
+  normalizeRenderOptions,
+  pickRenderOverride,
   getCustomModel,
   getVoiceConfig,
   getWhisperModel,

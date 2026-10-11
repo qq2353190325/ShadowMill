@@ -11,11 +11,11 @@
 | # | 文档 | 内容 | 适合谁 |
 |---|---|---|---|
 | 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构、`src/` 完整目录树、构建与打包、运行时数据目录、全局约定 | 第一次接触项目的人 |
-| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（69 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
+| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（71 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
 | 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程 11 个模块的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
 | 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：8 个命名空间、4 路进度通道的「单订阅」语义、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
 | 4 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) | Vue 渲染层：启动链路、无 router 的注册表导航、状态与通信约定、组件分层、页面↔主进程域对照、样式策略 | 改界面 / 加页面 |
-| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（7 组 69 个）与跨进程载荷类型、消费方与编译期归属、维护约定 | 动契约前必读 |
+| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（7 组 71 个）与跨进程载荷类型、消费方与编译期归属、维护约定 | 动契约前必读 |
 | 6 | [06-目录架构-src-agent](./06-目录架构-src-agent.md) | 独立实验脚本：为什么不进构建图、5 个工具、工作区防护、运行方式 | 想跑 Agent 样例 |
 | 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，共 45 篇） | 需要具体实现细节时查阅 |
 
@@ -23,7 +23,7 @@
 
 ## 二、项目一句话
 
-五节点音视频创作流水线：**音色管理 → 文字生音频 → 文字转字幕 → 字幕生成 HTML → 转成视频**，以「项目」为粒度组织产物；语音识别（whisper.cpp）与视频渲染（HyperFrames + FFmpeg）均在本机完成，HTML 动画由用户自配置的 OpenAI 兼容模型 Agent 流式生成。
+五节点音视频创作流水线：**音色管理 → 文字生音频 → 文字转字幕 → 字幕生成 HTML（含转视频）→ 视频预览**，以「项目」为粒度组织产物；语音识别（whisper.cpp）与视频渲染（HyperFrames + FFmpeg）均在本机完成，HTML 动画由用户自配置的 OpenAI 兼容模型 Agent 流式生成。
 
 ---
 
@@ -66,14 +66,14 @@
 | `src/App.vue`（外壳） | [renderer/src/App.vue.md](./files/renderer/src/App.vue.md) |
 | `src/assets/`（设计系统：`main.css`） | [renderer/src/assets.md](./files/renderer/src/assets.md) |
 | `src/components/`（通用组件：`StepBar.vue`） | [renderer/src/components.md](./files/renderer/src/components.md) |
-| **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress}.ts`、`src/utils/{escape,rate,time}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
+| **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress,useRenderOptions}.ts`、`src/utils/{escape,rate,time,render}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
 | `src/pages/HomePage/index.vue` | [renderer/src/pages/HomePage.md](./files/renderer/src/pages/HomePage.md) |
 | `src/pages/AboutPage/index.vue` | [renderer/src/pages/AboutPage.md](./files/renderer/src/pages/AboutPage.md) |
 | `src/pages/ContentPage/index.vue` | [renderer/src/pages/ContentPage.md](./files/renderer/src/pages/ContentPage.md) |
 | `src/pages/TextTtsPage/`（入口 `index.vue` **+** `SynthSection.vue` / `AlignSection.vue` / `helpers.ts`） | [renderer/src/pages/TextTtsPage.md](./files/renderer/src/pages/TextTtsPage.md) |
 | `src/pages/SubtitlePage/`（入口 `index.vue` **+** `TranscribeSection.vue` / `helpers.ts`） | [renderer/src/pages/SubtitlePage.md](./files/renderer/src/pages/SubtitlePage.md) |
 | `src/pages/HtmlGenPage/index.vue` | [renderer/src/pages/HtmlGenPage.md](./files/renderer/src/pages/HtmlGenPage.md) |
-| `src/pages/VideoPage/index.vue` | [renderer/src/pages/VideoPage.md](./files/renderer/src/pages/VideoPage.md) |
+| `src/pages/VideoPreviewPage/index.vue` | [renderer/src/pages/VideoPreviewPage.md](./files/renderer/src/pages/VideoPreviewPage.md) |
 | `src/pages/SoundCopyPage/index.vue` | [renderer/src/pages/SoundCopyPage.md](./files/renderer/src/pages/SoundCopyPage.md) |
 | `src/pages/SettingsPage/`（入口 `index.vue` **+** `WhisperSection.vue`） | [renderer/src/pages/SettingsPage.md](./files/renderer/src/pages/SettingsPage.md) |
 
@@ -123,6 +123,6 @@
 | 明白 HTML 是怎么被 Agent 生成的 | [01-架构总览 §5.1](./01-架构总览.md) + [main/htmlAgent.ts.md](./files/main/htmlAgent.ts.md) |
 | 查 whisper 模型档位与转录流程 | [main/whisper.ts.md](./files/main/whisper.ts.md) |
 | 改界面 / 加页面 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) → 对应页面文档（§3.3） |
-| 找全局状态 / 提示 / 进度 / 语速 / 注册表 | [renderer/src/common.md](./files/renderer/src/common.md) |
+| 找全局状态 / 提示 / 进度 / 渲染档位 / 语速 / 注册表 | [renderer/src/common.md](./files/renderer/src/common.md) |
 | 看设计系统有哪些 CSS 变量与类 | [renderer/src/assets.md](./files/renderer/src/assets.md) |
 | 改配色 / 字体 / 组件风格 | [界面设计规范](../src/renderer/agents.md) |

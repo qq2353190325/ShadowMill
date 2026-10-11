@@ -44,10 +44,26 @@
         <div class="hgen-tip">生成 / 修改 HTML 时使用所选素材：字幕逐条设计动画、音频作为音轨注入、视频作为页面片段嵌入。留空 = 跳过对应素材，仅按需求描述生成。项目里还没有的素材，可在下方「自定义素材」导入。</div>
       </div>
       <div class="hgen-actions">
-        <button class="hf-btn hf-btn-primary" @click="runAgent('generate')">生成 HTML</button>
-        <button class="hf-btn" title="基于当前 HTML 按项目需求修改并覆盖" @click="onModify">修改 HTML</button>
+        <button class="hf-btn hf-btn-primary" :disabled="rendering" @click="runAgent('generate')">生成 HTML</button>
+        <button class="hf-btn" :disabled="rendering" title="基于当前 HTML 按项目需求修改并覆盖" @click="onModify">修改 HTML</button>
         <button class="hf-btn" title="下载当前项目 HTML 到本地" @click="onDownload">下载 HTML</button>
+        <!-- 转视频只剩这一个按钮：HTML 就绪后即可渲染（成品到「视频预览」页看） -->
+        <button v-if="!appState.isBuiltin" class="hf-btn hf-btn-primary" :disabled="!hasHtml || rendering" title="用 HyperFrames 把当前项目 HTML 渲染为 MP4（约 30 秒）" @click="onRenderVideo">转视频</button>
       </div>
+      <div v-if="!appState.isBuiltin" class="hgen-row" style="margin-top:12px">
+        <span class="sel-label" style="flex:none;width:auto">渲染档位</span>
+        <label class="sel-label" style="flex:none">质量</label>
+        <select v-model="quality" class="hgen-select" style="flex:none;width:150px" :disabled="rendering" @change="onOptionChange">
+          <option v-for="o in qualityOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <label class="sel-label" style="flex:none">帧率</label>
+        <select v-model="fps" class="hgen-select" style="flex:none;width:130px" :disabled="rendering" @change="onOptionChange">
+          <option v-for="o in fpsOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <span class="hf-file" style="flex:1">{{ optionNote }}</span>
+        <button v-if="overridden" class="hf-btn" :disabled="rendering" @click="onResetOptions">恢复默认档位</button>
+      </div>
+      <div v-if="!appState.isBuiltin" class="hgen-tip">{{ qualityHint }}「转视频」用 HyperFrames 把当前 HTML 渲染为 MP4（约 30 秒，档位对本项目生效）；渲染完成到「视频预览」页查看成品。</div>
     </div>
     <div class="card hgen-panel" style="margin-top:16px">
       <div class="panel-title"><span class="dot"></span>自定义素材 · 导入为项目素材（可选）</div>
@@ -90,7 +106,7 @@
     </div>
     <div class="card hgen-panel" style="margin-top:16px">
       <div class="panel-title"><span class="dot"></span>预览</div>
-      <div class="hf-status" :class="statusClass">{{ status }}</div>
+      <div class="hf-status" :class="statusDisplayClass">{{ statusDisplay }}</div>
       <div v-show="showThink" style="margin-top:10px;padding:10px 12px;border:1px solid rgba(0,212,255,.22);border-radius:8px;background:rgba(0,212,255,.05)">
         <div style="font-size:12px;color:#00D4FF;margin-bottom:6px">AI 思考过程（实时）</div>
         <pre ref="thinkPreEl" style="margin:0;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;font-size:12px;line-height:1.7;color:rgba(255,255,255,.82)">{{ thinkText }}</pre>
@@ -114,10 +130,20 @@
 // 预览 postMessage 监听改为 onMounted/onBeforeUnmount 成对（原模块级 once-guard 删除）；
 // 原 renderMeta/fill*List 的 DOM 重建改为 computed + v-for 响应式。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { RenderFps, RenderQuality } from '@shared/types'
 import { appState, hasHtml, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { escTxt } from '@renderer/utils/escape'
 import { applyRate, stepRate } from '@renderer/utils/rate'
+import { renderProgress, resetRenderProgress } from '@renderer/composables/useRenderProgress'
+import {
+  FALLBACK_RENDER,
+  RENDER_FPS_OPTIONS,
+  RENDER_QUALITY_OPTIONS,
+  isRenderOverridden,
+  renderOptionsText
+} from '@renderer/utils/render'
+import { effectiveRenderOptions, renderDefaults, saveProjectRenderOverride } from '@renderer/composables/useRenderOptions'
 import StepBar from '@renderer/components/StepBar.vue'
 
 // ===== 生成/修改 =====
@@ -246,7 +272,7 @@ function syncPreview(): void {
     frameSrc.value = '';
     emptyVisible.value = true;
     emptyText.value = appState.isBuiltin
-      ? '内置示例项目为只读：自带示例 HTML，可到「视频生成」页查看效果；生成请先在顶部「工作项目」切换到「我的项目」。'
+      ? '内置示例项目为只读：自带示例 HTML，可到「视频预览」页查看效果；生成请先在顶部「工作项目」切换到「我的项目」。'
       : '尚未生成 HTML。';
   }
 }
@@ -255,6 +281,7 @@ function syncPreview(): void {
 let agentRunning = false;
 async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
   if (agentRunning) { toast('上一个请求还在处理中，请稍候'); return; }
+  if (rendering.value) { toast('正在渲染视频，请等它结束再生成 / 修改 HTML'); return; }
   if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
   const p = prompt.value.trim();
   if (!p) { toast('请先填写需求描述（上方提示词输入框）'); return; }
@@ -301,6 +328,86 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
 function onModify(): void {
   if (!appState.project?.htmlExists) { toast('还没有 HTML，先「生成 HTML」'); return; }
   runAgent('modify');
+}
+
+// ===== 转视频（整个视频环节就这一个按钮，成品到「视频预览」页看）=====
+// 成品 MP4 由主进程写到 userData/hf-projects/... 并回写当前项目，之后到「视频预览」页查看。
+const rendering = ref(false);
+const qualityOptions = RENDER_QUALITY_OPTIONS;
+const fpsOptions = RENDER_FPS_OPTIONS;
+const quality = ref<RenderQuality>(FALLBACK_RENDER.quality);
+const fps = ref<RenderFps>(FALLBACK_RENDER.fps);
+
+// 当前项目的覆盖值（内置示例只读，不参与覆盖）
+const projectOverride = computed(() => (appState.isBuiltin ? null : (appState.project && appState.project.render) || null));
+const overridden = computed(() => isRenderOverridden(renderDefaults, projectOverride.value));
+const optionNote = computed(() => (appState.isBuiltin
+  ? '内置示例（只读）：档位仅本次生效'
+  : (overridden.value ? '本项目自定义档位' : '跟随设置页默认：' + renderOptionsText(renderDefaults))));
+// 当前所选质量的说明（选「快速预览」时明确提示画质代价）
+const qualityHint = computed(() => {
+  const hit = RENDER_QUALITY_OPTIONS.find((o) => o.value === quality.value);
+  return hit ? hit.hint + '；' : '';
+});
+
+// 状态区文案：渲染中优先显示全局 trace（[Render:trace] 解析结果），其余时候显示本页状态
+const statusDisplay = computed(() => ((rendering.value && renderProgress.text) ? renderProgress.text : status.value));
+const statusDisplayClass = computed(() => ((rendering.value && renderProgress.text) ? '' : statusClass.value));
+
+// 用「项目覆盖 > 全局默认」的有效档位刷新下拉显示
+function syncFromEffective(): void {
+  const eff = effectiveRenderOptions();
+  quality.value = eff.quality;
+  fps.value = eff.fps;
+}
+
+// 下拉改动 → 写入当前项目的覆盖（内置示例不落盘，仅本次生效）
+async function onOptionChange(): Promise<void> {
+  const res = await saveProjectRenderOverride({ quality: quality.value, fps: fps.value });
+  if (!res.ok && res.message) toast(res.message);
+}
+
+// 恢复默认档位：清除项目覆盖，回到跟随设置页默认
+async function onResetOptions(): Promise<void> {
+  const res = await saveProjectRenderOverride(null);
+  if (res.ok) syncFromEffective();
+  else if (res.message) toast(res.message);
+}
+
+async function onRenderVideo(): Promise<void> {
+  if (appState.isBuiltin) { toast('内置示例项目为只读，请先在顶部「工作项目」切换到「我的项目」'); return; }
+  if (rendering.value) return;
+  if (agentRunning) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
+  const htmlPath = appState.project && appState.project.htmlPath;
+  if (!htmlPath || !(appState.project && appState.project.htmlExists)) { toast('还没有 HTML，请先「生成 HTML」'); return; }
+  const options = { quality: quality.value, fps: fps.value };
+  status.value = '已提交渲染（' + renderOptionsText(options) + '，约 30 秒）...';
+  statusClass.value = '';
+  rendering.value = true;
+  try {
+    const res = await window.hfTools.renderVideo(htmlPath, options);
+    resetRenderProgress(); // 本地完成/失败文案覆盖全局 trace 残留
+    if (res.ok) {
+      status.value = '视频已生成（' + renderOptionsText(options) + '）：' + res.outputVideo;
+      statusClass.value = 'hf-ok';
+      // 回写视频产物到当前项目（「视频预览」页据此自动加载）
+      await window.projectTools.saveVideo(appState.currentName, res.outputVideo);
+      await refreshProject();
+      toast('视频已生成，可到「视频预览」页查看');
+    } else {
+      status.value = (res as { message?: string }).message || '渲染失败';
+      statusClass.value = 'hf-error';
+      toast(status.value);
+    }
+  } catch (e) {
+    // IPC 层异常（主进程不可用等）：不静默吞掉，也不让 trace 残留继续占着状态区
+    resetRenderProgress();
+    status.value = '渲染失败：' + (((e as Error) && (e as Error).message) || String(e));
+    statusClass.value = 'hf-error';
+    toast(status.value);
+  } finally {
+    rendering.value = false;
+  }
 }
 
 // ===== 下载 HTML =====
@@ -454,6 +561,8 @@ onMounted(() => {
   status.value = '';
   statusClass.value = '';
   thinkText.value = '';
+  resetRenderProgress();   // 清掉上一次渲染的 trace 残留（渲染中若再次进入本页，随后仍会被新 trace 覆盖）
+  syncFromEffective();     // 渲染档位显示：项目覆盖 > 设置页全局默认
   // 生成/修改过程实时显示：主进程流式推送 AI 推理/输出阶段（preload 单订阅：切页即替换，与现行为一致）
   window.projectTools.onHtmlProgress((info) => {
     if (!info) return;

@@ -7,13 +7,14 @@
 // 提供：scanProjects / projectDir / projectFilePath / readProject / writeProject /
 //       ensureProject / parseSubtitle / copyAudioIntoProject（供 voice 引用）+ 全部 project:* IPC
 // 依赖：htmlAgent(chatWithCustomModel / extractHtmlFromReply) /
-//       hfEnv(isHyperframesComposition) / dialog / shell
+//       hfEnv(isHyperframesComposition) / settings(渲染档位白名单) / dialog / shell
 import { app, ipcMain, dialog, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './htmlAgent'
-import { BUILTIN_RESOURCES, isHyperframesComposition } from './hfEnv'
+import * as hfEnv from './hfEnv'
+import { pickRenderOverride } from './settings'
 import { IPC } from '../shared/ipc'
 import type {
   ContentScript,
@@ -26,6 +27,7 @@ import type {
   ProjectSaveHtmlPayload,
   ProjectSaveSubtitlePayload,
   ProjectSetAudioPayload,
+  ProjectSetRenderPayload,
   ProjectSetVideoPayload,
   RegisterCtx,
   Scene,
@@ -242,7 +244,14 @@ const HG_PREVIEW_CTRL = [
   '  if (window.__hgPreviewCtrl) return;',
   '  window.__hgPreviewCtrl = true;',
   '  var timelines = function () {',
-  '    try { if (window.__timelines && window.__timelines.length) return window.__timelines.slice(); } catch (e) {}',
+  '    var out = [];',
+  '    try {',
+  '      var t = window.__timelines;',
+  // HyperFrames 契约：__timelines 是「以 composition id 为键的对象」；旧版生成物可能是数组，两种都收
+  '      if (Object.prototype.toString.call(t) === "[object Array]") out = t.slice();',
+  '      else if (t && typeof t === "object") { for (var k in t) { if (t[k]) out.push(t[k]); } }',
+  '    } catch (e) {}',
+  '    if (out.length) return out;',
   '    try { if (window.gsap) return [window.gsap.globalTimeline]; } catch (e) {}',
   '    return [];',
   '  };',
@@ -394,16 +403,19 @@ function register(ctx?: RegisterCtx): void {
         if (text && !sender.isDestroyed()) sender.send(IPC.Project.HtmlProgress, Object.assign({}, info, { text }));
       };
       const reply = await chatWithCustomModel(userPrompt, { onProgress, meta: { project: name, action: 'generate' } });
-      const html = extractHtmlFromReply(reply);
+      // GSAP 本地化：模型若仍写了 CDN 地址则改写为 ./gsap.min.js，并把随包文件复制进项目（离线可渲染）
+      let html = hfEnv.localizeGsapHtml(extractHtmlFromReply(reply));
       if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
       const dir = projectDir(name);
       fs.mkdirSync(dir, { recursive: true });
+      // 随包 gsap.min.js 不可用（缺失 / 未随包）时退回 CDN 引用，避免页面引用了 ./gsap.min.js 却缺文件、动画完全不跑
+      if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = hfEnv.externalizeGsapHtml(html);
       const htmlPath = path.join(dir, 'index.html');
       fs.writeFileSync(htmlPath, html, 'utf8');
       proj.htmlPath = htmlPath;
       proj.videoPath = ''; // HTML 刷新后旧视频失效
       writeProject(proj);
-      const compatible = isHyperframesComposition(html);
+      const compatible = hfEnv.isHyperframesComposition(html);
       return {
         ok: true,
         htmlPath,
@@ -444,13 +456,16 @@ function register(ctx?: RegisterCtx): void {
         if (text && !sender.isDestroyed()) sender.send(IPC.Project.HtmlProgress, Object.assign({}, info, { text }));
       };
       const reply = await chatWithCustomModel(userPrompt, { onProgress, meta: { project: name, action: 'modify' } });
-      const html = extractHtmlFromReply(reply);
+      // GSAP 本地化：同生成分支（改写 CDN 引用 + 随包文件落位；随包缺失则退回 CDN）
+      let html = hfEnv.localizeGsapHtml(extractHtmlFromReply(reply));
       if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
+      const projDir = path.dirname(htmlPath);
+      if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(projDir)) html = hfEnv.externalizeGsapHtml(html);
       fs.writeFileSync(htmlPath, html, 'utf8');
       proj.htmlPath = htmlPath;
       proj.videoPath = '';
       writeProject(proj);
-      const compatible = isHyperframesComposition(html);
+      const compatible = hfEnv.isHyperframesComposition(html);
       return {
         ok: true,
         htmlPath,
@@ -475,7 +490,9 @@ function register(ctx?: RegisterCtx): void {
       filters: [{ name: 'HTML 文件', extensions: ['html'] }]
     }) : undefined;
     if (!save) return { ok: false, canceled: true };
-    fs.copyFileSync(htmlPath, save);
+    // 导出的是「单个 HTML 文件」：把项目内的 ./gsap.min.js 相对引用换回 CDN 地址，
+    // 否则导出后在别处打开会缺 gsap.min.js（同目录没有该文件）导致动画完全不跑。
+    fs.writeFileSync(save, hfEnv.externalizeGsapHtml(fs.readFileSync(htmlPath, 'utf8')), 'utf8');
     return { ok: true, savedPath: save };
   });
 
@@ -518,7 +535,12 @@ function register(ctx?: RegisterCtx): void {
       filters: [{ name: 'HTML 文件', extensions: ['html'] }]
     }) : undefined;
     if (!save) return { ok: false, canceled: true };
-    fs.copyFileSync(src, save);
+    // HTML 走文本写出（导出单个文件时把 ./gsap.min.js 换回 CDN 地址，理由同 DownloadHtml）；其它文件保持字节复制
+    if (/\.html?$/i.test(src)) {
+      fs.writeFileSync(save, hfEnv.externalizeGsapHtml(fs.readFileSync(src, 'utf8')), 'utf8');
+    } else {
+      fs.copyFileSync(src, save);
+    }
     return { ok: true, savedPath: save };
   });
 
@@ -553,6 +575,19 @@ function register(ctx?: RegisterCtx): void {
     if (!name || !videoPath) return { ok: false, message: '参数缺失' };
     const proj = ensureProject(name);
     proj.videoPath = String(videoPath);
+    writeProject(proj);
+    return { ok: true, project: proj };
+  });
+
+  // 视频渲染档位的项目级覆盖（普通用户两项：质量 + 帧率）
+  // render 传 null 或字段全非法 → 清除覆盖、回到跟随全局默认（settings.json 的 render）
+  ipcMain.handle(IPC.Project.SetRender, (_event, payload?: ProjectSetRenderPayload) => {
+    const name = payload && payload.name;
+    if (!name) return { ok: false, message: '缺少项目名' };
+    const proj = ensureProject(name);
+    const override = (payload && payload.render === null) ? {} : pickRenderOverride(payload && payload.render);
+    if (Object.keys(override).length) proj.render = override;
+    else delete proj.render;
     writeProject(proj);
     return { ok: true, project: proj };
   });
@@ -640,7 +675,7 @@ function register(ctx?: RegisterCtx): void {
     if (!videoRef) return { ok: false, message: '该项目没有视频素材，请先在下方「选择视频文件」' };
     const videoPath = path.join(projectDir(name), videoRef);
     if (!fs.existsSync(videoPath)) return { ok: false, message: '视频素材文件不存在：' + videoRef };
-    const ffmpeg = BUILTIN_RESOURCES.ffmpeg;
+    const ffmpeg = hfEnv.BUILTIN_RESOURCES.ffmpeg;
     if (!fs.existsSync(ffmpeg)) return { ok: false, message: '未找到内置 ffmpeg（resources/ffmpeg/bin）' };
     const stem = path.basename(videoPath).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_');
     const outName = stem + '.m4a';
@@ -681,6 +716,9 @@ function register(ctx?: RegisterCtx): void {
     let html = fs.readFileSync(htmlPath, 'utf8');
     // 预览副本去除 CSP 限制（仅副本），保证注入的控制脚本可执行
     html = html.replace(/<meta[^>]*content-security-policy[^>]*>/gi, '');
+    // GSAP 本地化（仅副本，不动原件）：老项目仍引 CDN 时也能离线预览
+    html = hfEnv.localizeGsapHtml(html);
+    if (hfEnv.referencesLocalGsap(html)) hfEnv.copyGsapIntoProject(path.dirname(htmlPath));
     const ctrl = '<script>' + HG_PREVIEW_CTRL + '</scr' + 'ipt>';
     const bodyEnd = html.lastIndexOf('</body>');
     if (bodyEnd >= 0) {
@@ -704,14 +742,17 @@ function register(ctx?: RegisterCtx): void {
     if (!String(html).trim()) return { ok: false, message: 'HTML 内容为空' };
     const dir = projectDir(name);
     fs.mkdirSync(dir, { recursive: true });
+    // GSAP 本地化：手改/粘贴进来仍带 CDN 地址的 HTML 也统一改写为项目内引用（随包缺失则退回 CDN）
+    let localHtml = hfEnv.localizeGsapHtml(html);
+    if (hfEnv.referencesLocalGsap(localHtml) && !hfEnv.copyGsapIntoProject(dir)) localHtml = hfEnv.externalizeGsapHtml(localHtml);
     const htmlPath = path.join(dir, 'index.html');
-    fs.writeFileSync(htmlPath, html, 'utf8');
+    fs.writeFileSync(htmlPath, localHtml, 'utf8');
     const proj = ensureProject(name);
     proj.htmlPath = htmlPath;
     // HTML 改动后旧视频不再匹配 → 标记失效
     proj.videoPath = '';
     writeProject(proj);
-    return { ok: true, htmlPath, compatible: isHyperframesComposition(html) };
+    return { ok: true, htmlPath, compatible: hfEnv.isHyperframesComposition(localHtml) };
   });
 }
 

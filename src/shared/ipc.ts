@@ -17,6 +17,7 @@ export const IPC = {
   Settings: {
     Get: 'settings:get',
     Save: 'settings:save',
+    SaveRender: 'settings:save-render',
     Test: 'settings:test'
   },
   // 千问语音（voice.js / ttsAlign.js）
@@ -71,6 +72,7 @@ export const IPC = {
     OpenFolderOf: 'project:open-folder-of',
     Delete: 'project:delete',
     SaveVideo: 'project:save-video',
+    SetRender: 'project:set-render',
     PickAudio: 'project:pick-audio',
     SetAudio: 'project:set-audio',
     ClearAudio: 'project:clear-audio',

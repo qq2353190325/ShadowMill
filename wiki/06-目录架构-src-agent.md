@@ -18,7 +18,7 @@
 | 维度 | 事实 |
 |---|---|
 | 构建 | `electron.vite.config.ts` 只有 `main` / `preload` / `renderer` 三段，**没有 agent 段**，它不参与任何 bundle |
-| 打包 | `package.json` 的 `build.files` 白名单只含 `out/**`、`video-projects/**`、`README.md`、`node_modules/openai`、`node_modules/opencc-js`，`src/agent` 不在其中 |
+| 打包 | `package.json` 的 `build.files` 白名单只含 `out/**`、`video-projects/**`、`vendor/**`、`README.md`、`node_modules/openai`、`node_modules/opencc-js`，`src/agent` 不在其中 |
 | 引用 | 全仓无任何模块 `import` 它；它也不 import 工程内其它文件（只依赖 `openai` 与 Node 内置模块） |
 | 类型检查 | 由 `tsconfig.agent.json` 单独覆盖（`include: src/agent/**/*.ts`，`noEmit: true`），与主工程的三份配置分开管理 |
 | 模块体系 | 根 `package.json` 刻意不声明 `"type": "module"`（主进程/preload 需 CJS）；本目录用**目录级** `package.json` 单独声明 ESM，二者互不影响 |

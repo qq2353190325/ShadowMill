@@ -30,7 +30,7 @@
 | 「我的项目」区 | `panel-title` + 新建输入区 + 项目卡片列表；`v-if="appState.myProjects.length"` 渲染卡片，否则显示 `builtin-empty` 空态文案 |
 | 新建输入区 | `input.hgen-input`（`v-model="newName"`，`@keydown.enter="createMy"`）+ 主按钮「新建项目」（`@click="createMy"`） |
 | `div.my-card` | 我的项目卡片：标题取 `p.title || p.name`（经 `escTxt`），副行拼接 `HTML✓ / 视频✓ / 字幕✓`；`@click="openMy(i)"` |
-| 内置示例区 | 无内置示例时显示「暂无内置示例项目」；否则 `panel-title` 带「只读 · 可预览 / 转视频」提示 + `builtin-card` 列表（`@click="openBuiltin(i)"`） |
+| 内置示例区 | 无内置示例时显示「暂无内置示例项目」；否则 `panel-title` 带「只读 · 可预览 / 试渲染」提示 + `builtin-card` 列表（`@click="openBuiltin(i)"`，卡片小字「点击打开示例预览 / 试渲染」） |
 
 ### 关键样式类
 
@@ -66,7 +66,9 @@
 | `02` | 配音 | `text-tts` | `hasAudio` |
 | `03` | 字幕 | `subtitle` | `hasSubtitle` |
 | `04` | HTML生成 | `html-gen` | `hasHtml` |
-| `05` | 转成视频 | `video-gen` | `hasVideo` |
+| `05` | 视频预览 | `video-preview` | `hasVideo` |
+
+该表的 `t` 是节点标题，节点的描述文本 `d` 为：`01` 编写旁白与画面分镜，定义全局风格；`02` 由脚本旁白合成为自然语音；`03` 由旁白派生对齐的同步字幕；`04` 由脚本整体生成精美的 HTML 动画；`05` 查看 / 定位导出的视频成品（转视频在 HTML生成页）。
 
 ### 函数
 
@@ -74,7 +76,7 @@
 | --- | --- |
 | `createMy()` | 取 `newName.value.trim()`；为空则 `toast('请输入项目名')` 返回。调用 `window.projectTools.create(nm)`，失败时 `toast(res.message || '创建失败')`。成功后清空输入、`refreshProject()` → `switchProject(nm, false)` → `goPage('home')`，并提示「已创建并切换到项目「nm」」 |
 | `openMy(i)` | 从 `appState.myProjects[Number(i)]` 取项目，`switchProject(p.name, false)` 后 `goPage('html-gen')` |
-| `openBuiltin(i)` | 从 `appState.builtinProjects[Number(i)]` 取内置项目，`switchProject(b.name, true)` 后 `goPage('video-gen')` |
+| `openBuiltin(i)` | 从 `appState.builtinProjects[Number(i)]` 取内置项目，`switchProject(b.name, true)` 后 `goPage('video-preview')`（内置示例只读，进「视频预览」页预览示例 HTML 或试渲染） |
 
 > 三个函数均为 `async`，且返回值标注为 `Promise<void>`；`window.projectTools.create` 的结果按 `{ ok, message }` 结果对象解构判断。
 
@@ -91,9 +93,9 @@
 
 | 交互 | 是否切换项目 | 目标页 key |
 | --- | --- | --- |
-| 点击流水线 `flow-node` | 否 | `n.page`，即 `content` / `text-tts` / `subtitle` / `html-gen` / `video-gen` |
+| 点击流水线 `flow-node` | 否 | `n.page`，即 `content` / `text-tts` / `subtitle` / `html-gen` / `video-preview` |
 | 点击 `my-card`（我的项目） | `switchProject(p.name, false)` | `html-gen` |
-| 点击 `builtin-card`（内置示例） | `switchProject(b.name, true)` | `video-gen` |
+| 点击 `builtin-card`（内置示例） | `switchProject(b.name, true)` | `video-preview` |
 | 新建项目成功 | `switchProject(nm, false)` | `home` |
 
 其中 `goPage` 内部顺序为：`activeMenu = key` → `await refreshProject()` → 替换 `currentPage` → `pageNavKey++`（强制目标页重挂载，使各页 `onMounted` 重新加载当前项目数据）。

@@ -9,14 +9,14 @@
 | 文件 | 行数 | 角色 | 注册的 IPC 域 |
 |---|---|---|---|
 | [index.ts](./files/main/index.ts.md) | 166 | **入口装配器**：生命周期、窗口、`hgpreview://` 协议、窗口控制与剪贴板 IPC | `window:*`、`app:copy-text` |
-| [hfEnv.ts](./files/main/hfEnv.ts.md) | 138 | 环境探测与内置依赖定位（纯函数，不注册 IPC） | — |
+| [hfEnv.ts](./files/main/hfEnv.ts.md) | 212 | 环境探测与内置依赖定位 + GSAP 本地化 / 导出外部化辅助（不注册 IPC） | — |
 | [settings.ts](./files/main/settings.ts.md) | 172 | 设置存储（`userData/settings.json`） | `settings:get/save/test` |
 | [systemVoices.ts](./files/main/systemVoices.ts.md) | 63 | Qwen-TTS 内置系统音色静态表 | — |
-| [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 246 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用） | — |
-| [projects.ts](./files/main/projects.ts.md) | 731 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、音视频产物（项目结构再导出 `shared/types`） | `project:*`（24 handle + 1 推送） |
+| [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 248 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用） | — |
+| [projects.ts](./files/main/projects.ts.md) | 757 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、音视频产物（项目结构再导出 `shared/types`） | `project:*`（24 handle + 1 推送） |
 | [voice.ts](./files/main/voice.ts.md) | 533 | 千问语音：音色管理 + 文字生音频 | `voice:*`（15） |
 | [ttsAlign.ts](./files/main/ttsAlign.ts.md) | 332 | 字幕配音逐句合成与时间对齐（模式 A/B） | `voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
-| [video.ts](./files/main/video.ts.md) | 187 | HTML 预览外壳 + HyperFrames 转视频 | `dialog:open-html`、`video:*` |
+| [video.ts](./files/main/video.ts.md) | 199 | HTML 预览外壳 + HyperFrames 转视频（渲染副本 GSAP 本地化） | `dialog:open-html`、`video:*` |
 | [whisper.ts](./files/main/whisper.ts.md) | 704 | whisper.cpp 转录 + 识别模型下载/管理 | `whisper:*`（11 handle + 1 推送） |
 | [vad.ts](./files/main/vad.ts.md) | 122 | WAV 采样读取与静音裁剪（零依赖纯函数） | — |
 
@@ -59,7 +59,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 | `voice → projects` | 复用 `copyAudioIntoProject()` 把合成音频复制进项目 `audio/` 并写 `project.json` |
 | `ttsAlign → voice` | 复用 `synthOne()`（单句合成）、`resolveVoiceModel()`（音色→模型解析）、`voiceFriendlyError()`（错误友好化） |
 | `whisper → vad` | 转录前用 `vadTrimSegments()` 裁掉起止静音；用 `toVadSamples()`（走 `hfEnv` 的 ffmpeg）统一采样率 |
-| `whisper / ttsAlign / video / projects → hfEnv` | 定位 CLI、Node 绝对路径、FFmpeg bin、chrome-headless-shell，以及 `isHyperframesComposition()` 合规校验 |
+| `whisper / ttsAlign / video / projects → hfEnv` | 定位 CLI、Node 绝对路径、FFmpeg bin、chrome-headless-shell，以及 `isHyperframesComposition()` 合规校验；`projects` / `video` 另用 GSAP 本地化的 `localizeGsapHtml()` / `referencesLocalGsap()` / `copyGsapIntoProject()` |
 | `projects → htmlAgent` | `project:generate-html` / `project:modify-html` 调用 `chatWithCustomModel()`，并把 `onProgress` 映射为阶段文案推送给渲染层 |
 | `voice / whisper / htmlAgent → settings` | 读取 API Key、目标模型、当前识别模型与自定义模型列表；写回配置 |
 
@@ -78,7 +78,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 - **窗口**：单窗口 `1200×800`（最小 `800×600`）、`titleBarStyle: 'hidden'`、`Menu.setApplicationMenu(null)`、`contextIsolation: true` / `nodeIntegration: false`、preload 指向 `../preload/index.js`；dev 走 `process.env.ELECTRON_RENDERER_URL`，prod 走 `loadFile('../renderer/index.html')`。
 - **IPC**：`window:minimize` / `window:toggle-maximize` / `window:close`（`on`），`app:copy-text`（`handle`，渲染层 sandbox 无 clipboard 模块），最大化状态经 `window:maximized-change` 回推。
 
-### 4.2 `hfEnv.ts` —— 环境探测与资源定位（纯函数）
+### 4.2 `hfEnv.ts` —— 环境探测与资源定位（+ GSAP 本地化 / 导出外部化）
 
 - 汇总 `BUILTIN_RESOURCES`：资源根在打包态取 `process.resourcesPath`、开发态取 `path.join(app.getAppPath(), 'resources')`，据此派生 node / ffmpegBin / ffmpeg / ffprobe / HyperFrames CLI / chrome-headless-shell 等路径。
 - 定位函数均为**多候选回退**：
@@ -86,6 +86,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
   - FFmpeg：遍历 WinGet 安装目录下的 `Gyan.FFmpeg*` → `*full_build*` → `bin\ffmpeg.exe`。
   - HyperFrames CLI：内置路径优先，其次环境变量 `HYPERFRAMES_CLI`。
 - `isHyperframesComposition(raw)`：转视频前的合规校验（`data-composition-id` 与 GSAP `__timelines` 结构等正则同时命中才算合法）。
+- GSAP 本地化 / 导出外部化一组（`findLocalGsap()` / `hasGsapCdnRef()` / `referencesLocalGsap()` / `localizeGsapHtml()` / `externalizeGsapHtml()` / `copyGsapIntoProject()`）：定位随包 `vendor/gsap/gsap.min.js`，把 HTML 里的 GSAP CDN 引用改写为 `./gsap.min.js`，并按需把该文件幂等复制进项目目录，使 composition 离线也能预览/渲染；导出单文件时反向把 `./gsap.min.js` 换回固定版本 CDN（`GSAP_CDN_PINNED`），避免导出物缺同目录文件而动画不跑。随包文件缺失时 `localizeGsapHtml` 退化为原样返回，`externalizeGsapHtml` 不受影响。该组函数带文件系统写操作，源码头部注释已明确声明本模块**不再是「纯函数」**（只复制随包的 gsap.min.js，不碰业务数据）。`copyGsapIntoProject` 的返回值被 `projects.ts` 的作者态三处用作「复制失败即退回 CDN」的判据。
 
 ### 4.3 `settings.ts` —— 设置存储
 
@@ -111,9 +112,10 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 
 ### 4.6 `projects.ts` —— 项目化流水线（最大模块）
 
-- 项目实体：`userData/projects/<项目名>/`，元数据 `project.json`（`title` / `subtitle` / `subtitleCount` / `content` / `audioFile` / `videoMaterial` / `htmlPath` / `videoPath` / `createdAt` / `updatedAt`），旁挂 `subtitle.txt`、`index.html`、`index.preview.html`、`audio/`、`video/`。
+- 项目实体：`userData/projects/<项目名>/`，元数据 `project.json`（`title` / `subtitle` / `subtitleCount` / `content` / `audioFile` / `videoMaterial` / `htmlPath` / `videoPath` / `createdAt` / `updatedAt`），旁挂 `subtitle.txt`、`index.html`、`index.preview.html`、`gsap.min.js`（按需从随包文件复制）、`audio/`、`video/`。
 - 对外能力（24 个 `handle` + 1 个推送）：项目 list / create / load / delete、字幕保存、内容脚本保存、HTML 生成 / 修改 / 读取 / 保存 / 预览 / 下载、任意产物导出、SRT 导出、项目目录与文件所在目录打开、音频与视频素材的挑选 / 设置 / 清除、从视频提取音轨、视频产物回写。
-- 关键内部设施：`projectDir()`（路径派生的唯一入口，也被 `hgpreview` 协议使用）、`parseSubtitle()`（解析 `[分:秒] 文本` 与纯文本行并统计条目数）、`normalizeContent()`（内容脚本字段兼容）、`scanProjects()`（列表与 `has*` 标记）、`buildContentBlock()` / `buildMaterialPrompt()`（拼装 Agent 提示词）、预览副本注入脚本 `HG_PREVIEW_CTRL`、`progressText()`（Agent 进度 → 中文阶段文案）。
+- 关键内部设施：`projectDir()`（路径派生的唯一入口，也被 `hgpreview` 协议使用）、`parseSubtitle()`（解析 `[分:秒] 文本` 与纯文本行并统计条目数）、`normalizeContent()`（内容脚本字段兼容）、`scanProjects()`（列表与 `has*` 标记）、`buildContentBlock()` / `buildMaterialPrompt()`（拼装 Agent 提示词）、预览副本注入脚本 `HG_PREVIEW_CTRL`（`timelines()` 对 `__timelines` 的「数组 / 对象 / 缺失」三态兼容）、`progressText()`（Agent 进度 → 中文阶段文案）。
+- GSAP 本地化：生成 / 修改 / 保存（`project:save-html`）/ 预览副本四个写盘环节先 `hfEnv.localizeGsapHtml()` 改写 CDN 引用，再按需 `hfEnv.copyGsapIntoProject()` 把随包 `gsap.min.js` 复制进项目目录；其中**作者态三处（generate / modify / save-html）会用复制返回值做兜底**——复制失败就把引用换回 CDN（`hfEnv.externalizeGsapHtml()`），预览则忽略返回值、只在副本上改写，原件 `index.html` 保持原貌（渲染路径的第五处本地化见 4.9，同样忽略返回值）。反向地，`project:download-html` 与 `project:download-file` 的 `.html/.htm` 分支用 `externalizeGsapHtml()` 把 `./gsap.min.js` 换回固定版本 CDN 后再文本写出——导出的是单文件，否则放到别处会缺 `gsap.min.js` 导致动画不跑；其它扩展名仍保持字节复制。
 - 写 HTML 成功后会把**失效的旧视频产物置空**，并做 HyperFrames 合规校验，返回 `compatible` 供 UI 提示。
 
 ### 4.7 `voice.ts` —— 千问语音
@@ -136,7 +138,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 
 - 频道：`dialog:open-html`、`video:list-projects`（内置示例项目）、`video:preview-shell`、`video:render`、`video:show-in-folder`，以及推送 `video:progress`。
 - 预览外壳：生成 `_hf_preview_shell.html`（本地 hivePlayer 优先、CDN 兜底）。
-- 渲染流程：合规校验 → `findHyperframesCli()` / `resolveNodePath()` → 建工作目录 `userData/hf-projects/html-video-<时间戳>/` 并整体复制素材 → 注入环境（FFmpeg bin 进 `PATH`，另设 `HYPERFRAMES_FFMPEG_PATH` / `HYPERFRAMES_FFPROBE_PATH` / `PRODUCER_HEADLESS_SHELL_PATH`）→ `spawn node <hf-cli> render -o output.mp4` → stdout/stderr 经 `video:progress` 实时回推 → 进程 `close` 判定成功并返回输出路径。
+- 渲染流程：合规校验 → `findHyperframesCli()` / `resolveNodePath()` → 建工作目录 `userData/hf-projects/html-video-<时间戳>/` 并整体复制素材 → **对渲染副本再本地化一次 GSAP（`localizeGsapHtml` + 按需 `copyGsapIntoProject`，包在 try/catch 中、失败不阻断）** → 注入环境（FFmpeg bin 进 `PATH`，另设 `HYPERFRAMES_FFMPEG_PATH` / `HYPERFRAMES_FFPROBE_PATH` / `PRODUCER_HEADLESS_SHELL_PATH`）→ `spawn node <hf-cli> render -o output.mp4` → stdout/stderr 经 `video:progress` 实时回推 → 进程 `close` 判定成功并返回输出路径。
 - 产物回写由渲染层经 `project:save-video` 完成（主进程 `video.ts` 不写 `project.json`）。
 
 ### 4.10 `whisper.ts` —— 本地转录与模型管理

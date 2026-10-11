@@ -76,11 +76,25 @@ export interface WhisperSettings {
   customModels: WhisperCustomModel[]
 }
 
+// ===== 视频渲染档位（普通用户只暴露这两项：质量 + 帧率）=====
+// 质量 draft|standard|high；帧率 24|30（HyperFrames CLI 还支持 60，属专业档位，本轮不暴露）。
+// 主进程按白名单校验后才拼 --quality / --fps（见 video.ts / settings.ts），非法值一律忽略。
+export type RenderQuality = 'draft' | 'standard' | 'high'
+export type RenderFps = 24 | 30
+export interface RenderOptions {
+  quality: RenderQuality
+  fps: RenderFps
+}
+// 项目级覆盖：字段可缺省，缺省项跟随全局默认（settings.json 的 render）
+export type RenderOverride = Partial<RenderOptions>
+
 export interface AppSettings {
   customModel: CustomModelConfig
   voiceTTS: VoiceTTSConfig
   voiceProfiles: Record<string, VoiceProfile>
   whisper: WhisperSettings
+  // 视频渲染全局默认档位（项目未覆盖时生效）
+  render: RenderOptions
 }
 
 // settings:* 载荷与结果（settings:get 直接返回 AppSettings，不经 ok 包裹）
@@ -92,6 +106,10 @@ export interface SettingsTestPayload {
 }
 export interface SettingsSaveResult {
   settings: AppSettings
+}
+// settings:save-render 载荷：只更新渲染默认档位，不动 customModel
+export interface SettingsSaveRenderPayload {
+  render?: RenderOverride
 }
 
 // ============================================================
@@ -356,6 +374,8 @@ export interface Project {
   videoMaterial?: string
   audioFile: string
   content: ContentScript
+  // 视频渲染档位的项目级覆盖：字段缺省即跟随全局默认（settings.json 的 render）
+  render?: RenderOverride
   createdAt: string
   updatedAt?: string
 }
@@ -415,6 +435,11 @@ export interface ProjectSetVideoPayload {
   name?: string
   videoPath?: string
 }
+// project:set-render 载荷：render 传 null（或字段全非法）表示清除项目覆盖、回到跟随全局默认
+export interface ProjectSetRenderPayload {
+  name?: string
+  render?: RenderOverride | null
+}
 export interface ProjectSetAudioResult {
   audioFile: string
 }
@@ -472,7 +497,8 @@ export interface VideoPreviewShellResult {
   shellPath: string
 }
 
-export interface VideoRenderPayload {
+// 渲染档位随载荷下发（渲染层已把「项目覆盖 > 全局默认」合并成有效值）；缺省则不传参数、走 CLI 默认
+export interface VideoRenderPayload extends RenderOverride {
   htmlPath?: string
 }
 // 渲染结果：失败分支的 compatible=false 表示 HTML 未通过 HyperFrames 合规校验
@@ -546,13 +572,16 @@ export interface PreloadApi {
     openHtml(): Promise<string | null>
     listProjects(): Promise<BuiltinProjectEntry[]>
     previewShell(htmlPath: string): Promise<IpcResult<VideoPreviewShellResult>>
-    renderVideo(htmlPath: string): Promise<VideoRenderResult>
+    // options 为渲染档位（质量 / 帧率）；缺省项不下发，由主进程交给 CLI 默认（standard / 30）
+    renderVideo(htmlPath: string, options?: RenderOverride): Promise<VideoRenderResult>
     showInFolder(filePath: string): Promise<void>
     onProgress(callback: (data: VideoProgressPayload) => void): void
   }
   settingsTools: {
     get(): Promise<AppSettings>
     save(customModel: CustomModelConfig): Promise<IpcResult<SettingsSaveResult>>
+    // 渲染默认档位（settings.json 的 render 段）
+    saveRender(render: RenderOverride): Promise<IpcResult<SettingsSaveResult>>
     test(customModel: CustomModelConfig): Promise<IpcResult>
   }
   voiceTools: {
@@ -615,6 +644,8 @@ export interface PreloadApi {
     openFolderOf(dirOrFile: string): Promise<IpcResult<ProjectOpenFolderOfResult>>
     delete(name: string): Promise<IpcResult>
     saveVideo(name: string, videoPath: string): Promise<IpcResult<ProjectSaveResult>>
+    // 渲染档位的项目级覆盖；render 传 null 清除覆盖、回到跟随全局默认
+    setRender(name: string, render: RenderOverride | null): Promise<IpcResult<ProjectSaveResult>>
     onHtmlProgress(callback: (data: HtmlProgressPayload) => void): void
   }
 }

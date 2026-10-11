@@ -1,10 +1,12 @@
 // composables/useAppStore.ts —— 全局项目状态（原 window.App 的 AppState + refreshProject/switchProject/saveProjectCtx）
 // 模块级 reactive 单例；localStorage key 'myapp.projectCtx' 与结构不变（prod file:// 同源，上下文自动延续）。
 import { computed, reactive, ref } from 'vue'
-import type { ProjectMeta } from '@shared/types'
+import type { ProjectMeta, RenderOverride } from '@shared/types'
+import { pickRenderOverride } from '@renderer/utils/render'
 
-// ===== 页面键（与菜单 data-page 一致） =====
-export type PageKey = 'home' | 'about' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'video-gen' | 'sound-copy' | 'settings'
+// ===== 页面键（与菜单 data-page 一致）======
+// 视频环节的页面键是 video-preview（页名「视频预览」）：转视频动作已并入「HTML生成」页，本页只做预览。
+export type PageKey = 'home' | 'about' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'video-preview' | 'sound-copy' | 'settings'
 
 // ===== 项目状态结构（与主进程 project.json 字段对应） =====
 export interface ProjectState {
@@ -19,6 +21,8 @@ export interface ProjectState {
   videoExists: boolean
   subtitleCount: number
   content: { style: string; scenes: { id: string; narration: string; visual: string; durHint: string }[] }
+  // 视频渲染档位的项目级覆盖（字段缺省 = 跟随全局默认；见 composables/useRenderOptions.ts）
+  render?: RenderOverride
 }
 export interface BuiltinProject {
   name: string
@@ -120,7 +124,9 @@ export async function refreshProject(): Promise<void> {
     htmlExists: !!(entry && entry.hasHtml),
     videoExists: !!(entry && entry.hasVideo),
     subtitleCount: loaded.subtitleCount || 0,
-    content: loaded.content || { style: '', scenes: [] }
+    content: loaded.content || { style: '', scenes: [] },
+    // 渲染档位覆盖：只保留合法字段，脏数据/缺省一律归为空覆盖（= 跟随全局默认）
+    render: pickRenderOverride(loaded.render)
   };
 }
 

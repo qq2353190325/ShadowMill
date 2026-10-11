@@ -24,8 +24,8 @@
 | `App.vue` | 全局骨架 `#app` / `.layout`、`.titlebar*`、`.win-btn`、`.sidebar` / `.menu*`、`.content`；自身另有 `<style scoped>` 定义 `.toast-*` |
 | `pages/HomePage/index.vue` | `.hero*`、`.flow-pipeline` / `.flow-node*`、`.metric-*` |
 | `components/StepBar.vue` | `.project-bar`、`.step-chain`、`.step-node`、`.step-arrow` |
-| `pages/HtmlGenPage/index.vue` | `.hgen-*`、`.panel-title` / `.panel-title-sm`、`.proj-*`、`.hg-prev-*`、`.empty-hint` |
-| `pages/VideoPage/index.vue`（视频生成） | `.hf-toolbar`、`.hf-btn*`、`.hf-frame`、`.hf-video*`、`.hf-status` |
+| `pages/HtmlGenPage/index.vue` | `.hgen-*`、`.panel-title` / `.panel-title-sm`、`.proj-*`、`.hg-prev-*`、`.empty-hint`、`.hf-*`（转视频按钮 `hf-btn` / `hf-btn-primary`、档位行 `hf-select` / `hf-file`、状态条 `hf-status`） |
+| `pages/VideoPreviewPage/index.vue`（视频预览） | `.hf-toolbar`、`.hf-btn*`、`.hf-frame`、`.hf-video*`、`.hf-status` |
 | `pages/SubtitlePage/index.vue` / `pages/SubtitlePage/TranscribeSection.vue` | `.model-*`、`.whisper-*`、`.sub-list` / `.sub-row` 等字幕编辑器类、`.hf-modal-*` |
 | `pages/TextTtsPage/index.vue` / `pages/TextTtsPage/{SynthSection,AlignSection}.vue` | `.hf-tabs` / `.hf-tab`、`.align-*`、`.sub-textarea`、`.hgen-tip` |
 | `pages/SoundCopyPage/index.vue`（音色管理） | 无专有前缀，复用 `.panel-title`、`.hgen-tip`、`.hf-btn`、`.hgen-input`、`.empty-hint` |
@@ -103,7 +103,7 @@
 | 首页 Hero 横幅 L241–305 | `.hero`、`.hero::after`、`@keyframes heroScan`、`.hero-tag`、`.hero h1`、`@keyframes heroFlow`、`.hero p` | 16px 圆角双色渐变；`::after` 斜向扫描光带 4s 循环；`h1` 三色渐变文字 200% 背景位移动画 6s 循环 |
 | 流水线节点卡片 L307–369 | `.flow-pipeline`、`.flow-node`、`.flow-node:hover`、`.flow-node-index`、`.flow-node h3`、`.flow-node p`、`.flow-arrow` | flex 等分节点；hover 上浮 4px 并叠加双层辉光；序号块用 JetBrains Mono + 内阴影 |
 | 数据指标卡 L371–402 | `.metric-grid`、`.metric-card`、`.metric-value`、`.metric-label` | 4 列 grid；指标卡描边/辉光改用数据绿；数值 26px 等宽字体 |
-| 预览 / HyperFrames 转视频（视频生成） L404–521 | `.hf-toolbar`、`.hf-btn`、`.hf-btn:hover:not(:disabled)`、`.hf-btn:disabled`、`.hf-btn-primary`、`.hf-file`、`.hf-select`、`.hf-status` / `.hf-ok` / `.hf-error`、`.hf-frame`、`.hf-video-wrap`、`.hf-video`、`.hf-video-actions`、`.hf-tip` | 全应用主按钮体系：`.hf-btn` 描边蓝，`.hf-btn-primary` 蓝紫渐变 + 深色文字；`.hf-frame` 固定 16/9；`.hf-file` 单行省略号；状态文字按 `.hf-ok` / `.hf-error` 变色发光 |
+| 预览 / HyperFrames 转视频 L404–521 | `.hf-toolbar`、`.hf-btn`、`.hf-btn:hover:not(:disabled)`、`.hf-btn:disabled`、`.hf-btn-primary`、`.hf-file`、`.hf-select`、`.hf-status` / `.hf-ok` / `.hf-error`、`.hf-frame`、`.hf-video-wrap`、`.hf-video`、`.hf-video-actions`、`.hf-tip` | 全应用主按钮体系：`.hf-btn` 描边蓝，`.hf-btn-primary` 蓝紫渐变 + 深色文字；`.hf-frame` 固定 16/9；`.hf-file` 单行省略号；状态文字按 `.hf-ok` / `.hf-error` 变色发光。现由 `pages/VideoPreviewPage/index.vue`（工具栏 / iframe / 内嵌播放器）与 `pages/HtmlGenPage/index.vue`（转视频按钮、渲染档位行、状态条）共同使用 |
 | 项目链路状态条（贯通各页，两行：上流程链 / 下工作项目切换） L523–605 | `.project-bar`、`.project-bar-row`、`.step-chain`、`.step-node`、`.step-node.clickable`、`.step-node .step-dot`、`.step-node.done`、`.step-node.active-now`、`@keyframes stepPulse`、`.step-arrow` | 胶囊节点 + 圆点状态机：灰点（未开始）/ 绿点（完成）/ 蓝点脉冲（进行中）；`.clickable` 才可点，hover 变主色 |
 | 配音页 Tab 切换 L607–636 | `.hf-tabs`、`.hf-tab`、`.hf-tab:hover`、`.hf-tab.active` | 999px 胶囊 Tab；选中态蓝底 + `0 0 10px` 辉光 |
 | HTML 生成页 L638–732 | `.hgen-grid`、`.hgen-panel .panel-title`、`.hgen-panel .panel-title .dot`、`.hgen-subtitle`、`.hgen-input`、`.hgen-select`、`.hgen-row`、`.hgen-actions`、`.hgen-tip`、`.hgen-tip code` | 左右两栏 grid；面板标题带发光小圆点；`.hgen-subtitle` 为 260px 高可纵向拉伸文本域，`#0A1120` 深底；`:focus` 变主色描边 + 辉光 |
@@ -124,7 +124,7 @@
 | （注释）转录无百分比进度：不确定态条纹滑动 L1307–1311 | `.whisper-bar.indeterminate .whisper-bar-fill` | 宽度锁定 38%（`!important`）+ 1.1s 往返平移动画 |
 | 字幕配音（逐句对齐）：结果明细 L1312–1363 | `.align-row`、`.align-idx`、`.align-txt`、`.align-time`、`.align-dur`、`.align-badge` / `.ok` / `.warn`、`@keyframes whisper-slide` | 单行结果行：序号 / 文本（省略号截断）/ 时间 / 时长；徽标区分正常与告警（橙） |
 
-> 说明：任务清单中的 **toast**（`.toast-host` / `.toast-item`）与 **音色管理**页并无本文件专有选择器。toast 样式定义在 `src/renderer/src/App.vue` 的 `<style scoped>` 中；音色管理页（`pages/SoundCopyPage/index.vue`）直接复用本文件的 `.card`、`.panel-title`、`.hgen-tip`、`.hf-btn`、`.hgen-input` 等通用类，未新增前缀。视频生成相关样式即上表的 `hf-*` 节（注释标题为「预览 / HyperFrames 转视频」）。
+> 说明：任务清单中的 **toast**（`.toast-host` / `.toast-item`）与 **音色管理**页并无本文件专有选择器。toast 样式定义在 `src/renderer/src/App.vue` 的 `<style scoped>` 中；音色管理页（`pages/SoundCopyPage/index.vue`）直接复用本文件的 `.card`、`.panel-title`、`.hgen-tip`、`.hf-btn`、`.hgen-input` 等通用类，未新增前缀。预览 / 转视频相关样式即上表的 `hf-*` 节（`main.css` 注释标题为「预览 / HyperFrames 转视频」，自第 404 行起），该节现由 `pages/VideoPreviewPage/index.vue`（预览 / 试渲染）与 `pages/HtmlGenPage/index.vue`（「转视频」按钮与渲染档位行）共同使用。
 
 ### 3.1 关键实现片段
 
@@ -194,7 +194,7 @@ step-node 的三态状态机（L574–599）：
 ## 5. 依赖与协作
 
 - **唯一全局入口**：`src/renderer/src/main.ts` 第 4 行 `import './assets/main.css'`，在 `createApp(App).mount('#app')` 之前引入，因此所有页面组件默认继承这套全局类与变量。
-- **组件样式现状**：全项目 15 个 `.vue` 文件中，**只有 `App.vue` 带 `<style scoped>`**（内含 `.toast-*`）；`pages/HomePage/index.vue`、`pages/HtmlGenPage/index.vue`、`pages/SubtitlePage/index.vue`、`pages/TextTtsPage/index.vue`、`pages/VideoPage/index.vue`、`pages/SettingsPage/index.vue`、`pages/SoundCopyPage/index.vue`、`pages/ContentPage/index.vue`、`pages/AboutPage/index.vue`、`components/StepBar.vue` 及 `pages/SubtitlePage/`、`pages/TextTtsPage/`、`pages/SettingsPage/` 下的子组件均**没有 style 块**，完全依赖本文件的类名与变量。
+- **组件样式现状**：全项目 15 个 `.vue` 文件中，**只有 `App.vue` 带 `<style scoped>`**（内含 `.toast-*`）；`pages/HomePage/index.vue`、`pages/HtmlGenPage/index.vue`、`pages/SubtitlePage/index.vue`、`pages/TextTtsPage/index.vue`、`pages/VideoPreviewPage/index.vue`、`pages/SettingsPage/index.vue`、`pages/SoundCopyPage/index.vue`、`pages/ContentPage/index.vue`、`pages/AboutPage/index.vue`、`components/StepBar.vue` 及 `pages/SubtitlePage/`、`pages/TextTtsPage/`、`pages/SettingsPage/` 下的子组件均**没有 style 块**，完全依赖本文件的类名与变量。
 - **与 scoped 样式的配合**：Vue 的 scoped 只给组件自身模板元素加 `data-v-*` 属性，本文件作为全局样式**不受影响**，可继续为组件内元素提供基础样式；反过来，本文件的选择器无法命中 scoped 组件内部的深层结构，因此组件内的微调应写在组件自己的 scoped 块中。
 - **变量是组件行内样式的桥梁**：多个组件直接在模板 `style` 属性中引用本文件变量（如 `style="color:var(--text-secondary)"`），因此修改变量值即可全局换肤。
 - **类名复用是主要协作方式**：新页面优先复用 `.card`、`.panel-title`、`.hf-btn`、`.hf-btn-primary`、`.hgen-input`、`.hgen-tip`、`.empty-hint` 等既有类，而非新增样式块。

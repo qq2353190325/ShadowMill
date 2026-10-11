@@ -1,12 +1,12 @@
 # src/renderer/src/pages/SettingsPage/（页面）
 
-> 设置页：自定义模型与千问语音配置，并挂载语音识别模型区块。
+> 设置页：自定义模型、千问语音与视频渲染默认档位，并挂载语音识别模型区块。
 
 - **覆盖文件**：
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `src/renderer/src/pages/SettingsPage/index.vue` | 145 | 页面主体：自定义模型卡片、千问语音卡片，第三张卡片挂载子组件 |
+| `src/renderer/src/pages/SettingsPage/index.vue` | 208 | 页面主体：自定义模型卡片、千问语音卡片、视频渲染默认档位卡片，第四张卡片挂载子组件 |
 | `src/renderer/src/pages/SettingsPage/WhisperSection.vue` | 274 | 页面子组件：语音识别模型区块（原 `pages/settings/whisper.js` 的 `window.__settings.initWhisper`） |
 
 - **类型**：页面 + 页面子组件（均为 SFC，`<script setup lang="ts">`）
@@ -15,15 +15,16 @@
 
 ## 1. 结构总览
 
-根节点下依次三张 `.card.hgen-panel`（第 2、3 张 `margin-top:16px`，第 1 张无上边距）：
+根节点下依次四张 `.card.hgen-panel`（后三张 `margin-top:16px`，第 1 张无上边距）：
 
 | 卡片 | 内容 | 归属 |
 |------|------|------|
 | 1 | 「自定义模型（OpenAI 兼容）」：Base URL / 模型 ID / API Key / 启用 + 保存 / 测试连接 | 父组件 |
 | 2 | 「千问语音（音色管理 & 文字生音频）」：API Key + 目标模型下拉 + 保存 | 父组件 |
-| 3 | 「语音识别模型（whisper.cpp 字幕转录）」：仅标题与 `.hgen-tip` 长说明 | `<WhisperSection />` |
+| 3 | 「视频渲染默认档位」：质量 / 帧率下拉 + 保存渲染默认档位 + 状态条 + 当前质量说明 | 父组件 |
+| 4 | 「语音识别模型（whisper.cpp 字幕转录）」：仅标题与 `.hgen-tip` 长说明 | `<WhisperSection />` |
 
-自定义模型开启后「HTML 生成 / 修改」页改用该模型；千问语音配置供「音色管理」「文字生音频」使用；卡片 3 供字幕页「从音频生成字幕」本机离线识别（不消耗 API 额度）。
+自定义模型开启后「HTML 生成 / 修改」页改用该模型；千问语音配置供「音色管理」「文字生音频」使用；卡片 3 是「HTML生成」页「转视频」的全局默认档位（项目级覆盖优先于它）；卡片 4 供字幕页「从音频生成字幕」本机离线识别（不消耗 API 额度）。
 
 ## 2. SettingsPage/index.vue
 
@@ -39,8 +40,11 @@
 | API Key 行（卡片 2） | `v-model="vApiKey"`、`type="password"`，placeholder「sk-...（DASHSCOPE_API_KEY）」 |
 | 目标模型行 | `v-model="vModel"` 的 `<select>`，`v-for="m in voiceModels"`、`:value="m.id"`、显示 `m.label` |
 | `.hgen-actions` / `.hf-status`（卡片 2） | `保存千问语音配置` → `onSaveVoice`；`:class="vStatusClass"`、`{{ vStatus }}` |
+| 质量 / 帧率行（卡片 3） | 两个 `select.hgen-select`：`v-model="rQuality"` / `v-model="rFps"`，选项来自 `qualityOptions`（`RENDER_QUALITY_OPTIONS`）与 `fpsOptions`（`RENDER_FPS_OPTIONS`） |
+| `.hgen-actions` / `.hf-status`（卡片 3） | `保存渲染默认档位`（主按钮 → `onSaveRender`）；`:class="rStatusClass"`、`{{ rStatus }}`；下方 `.hgen-tip` 显示 `{{ qualityHint }}`（当前所选质量的说明） |
+| `.hgen-tip`（卡片 3 顶部） | 原文：「「HTML生成」页点「转视频」时的默认档位，普通使用只需在这两项中选择。单个项目可在「HTML生成」页的「渲染档位」单独覆盖（项目覆盖优先于这里的默认）。质量 draft 编码最快但文字边缘可能有压缩痕迹，仅用于快速确认内容；降低帧率不会缩短成片时长，只是采样更稀、渲染更快。」|
 
-卡片 3 说明由父组件提供：模型按「id ↔ 文件名」枚举登记、枚举外文件视为未知模型、模型不随应用打包、下载源为 HuggingFace 国内镜像 hf-mirror.com（规避 GitHub 直链超时）。
+卡片 4 说明由父组件提供：模型按「id ↔ 文件名」枚举登记、枚举外文件视为未知模型、模型不随应用打包、下载源为 HuggingFace 国内镜像 hf-mirror.com（规避 GitHub 直链超时）。
 
 ### 2.2 状态与类型
 
@@ -52,6 +56,10 @@
 | `vApiKey` / `vModel` | `ref('')` | 千问语音 API Key、目标模型 id |
 | `voiceModels` | `ref<VoiceModelView[]>([])` | 候选项，元素 `{ id, label, isDefault? }` |
 | `vStatus` / `vStatusClass` | `ref('')` | 卡片 2 状态文案与样式类 |
+| `qualityOptions` / `fpsOptions` | 常量 | 直接引用 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` |
+| `rQuality` / `rFps` | `ref<RenderQuality>` / `ref<RenderFps>` | 卡片 3 的全局默认档位，初值取 `FALLBACK_RENDER`（`standard` / `30`） |
+| `rStatus` / `rStatusClass` | `ref('')` | 卡片 3 状态文案与样式类 |
+| `qualityHint` | `computed<string>` | 当前所选质量档位的 `hint`（找不到时为空串） |
 
 `interface VoiceModelView { id: string; label: string; isDefault?: boolean }`。
 
@@ -60,21 +68,25 @@
 | 名称 | 说明 |
 |------|------|
 | `setStatus` / `setVStatus(text, kind)` | 分别写 `status`/`statusClass`、`vStatus`/`vStatusClass`，文案取 `text \|\| ''` |
+| `setRStatus(text, kind)` | 写卡片 3 的 `rStatus` / `rStatusClass`，同样 `text \|\| ''` |
 | `collectCustomModel()` | 返回 `{ baseUrl, modelId, apiKey, enabled }`，三个字符串字段均 `.trim()`，`enabled` 取布尔值 |
 | `onSave()` | 校验通过后 `await window.settingsTools.save(customModel)` |
 | `onTest()` | `await window.settingsTools.test(collectCustomModel())` |
 | `onSaveVoice()` | `await window.voiceTools.saveConfig({ apiKey: vApiKey.value.trim(), targetModel: vModel.value })` |
+| `onSaveRender()` | `await saveRenderDefaults({ quality: rQuality.value, fps: rFps.value })`（`useRenderOptions.ts`，内部走 `settingsTools.saveRender` → `settings:save-render`）；成功提示「渲染默认档位已保存：质量标签 · N fps」`hf-ok`，失败 `res.message \|\| '保存失败'` `hf-error` |
 | `onMounted(async cb)` | 配置回填（见 2.4） |
 
 ### 2.4 关键流程
 
-**挂载回填**：① `settingsTools.get()` → `s.customModel || {}` 回填 `baseUrl`/`modelId`/`apiKey`/`enabled = !!m.enabled`，异常写 `setStatus('读取配置失败：' + message, 'hf-error')`；② `await window.voiceTools.listModels().catch(() => ({ ok: false, models: [] } as any))`，取 `mm.models || []` 写入 `voiceModels`（失败即空数组，不抛错）；③ 再次 `settingsTools.get()` → `s.voiceTTS || {}` 回填 `vApiKey`，`v.targetModel` 存在且候选列表含同 id 时选中它，否则有候选项时优先 `isDefault === true`、再退到 `voiceModels[0]`，异常写 `setVStatus('读取千问语音配置失败', 'hf-error')`。② 必须先于 `vModel` 回填，否则 `some(...)` 失效直接落默认项。
+**挂载回填**：① `settingsTools.get()` → `s.customModel || {}` 回填 `baseUrl`/`modelId`/`apiKey`/`enabled = !!m.enabled`，异常写 `setStatus('读取配置失败：' + message, 'hf-error')`；② `await window.voiceTools.listModels().catch(() => ({ ok: false, models: [] } as any))`，取 `mm.models || []` 写入 `voiceModels`（失败即空数组，不抛错）；③ 再次 `settingsTools.get()` → `s.voiceTTS || {}` 回填 `vApiKey`，`v.targetModel` 存在且候选列表含同 id 时选中它，否则有候选项时优先 `isDefault === true`、再退到 `voiceModels[0]`，异常写 `setVStatus('读取千问语音配置失败', 'hf-error')`。② 必须先于 `vModel` 回填，否则 `some(...)` 失效直接落默认项；④ 第三次 `settingsTools.get()` → `const r = (s && s.render) || FALLBACK_RENDER`，仅当值在 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` 白名单内才写入 `rQuality` / `rFps`（异常静默忽略，读取失败沿用内置默认 `standard` / `30`）。
 
 **保存自定义模型**：`collectCustomModel()` 后若 `baseUrl`/`modelId`/`apiKey` 任一为空 → `setStatus('配置不完整：Base URL / Model ID / API Key 均需填写', 'hf-error')` 并中止（不发任何 IPC）；否则成功提示「配置已保存，可开始使用自定义模型生成 HTML」`hf-ok`，失败显示 `res.message || '保存失败'` `hf-error`。
 
 **测试连接**：先置「正在测试连接...」（样式类清空，保持中性），用**当前表单内容**（不要求已保存）调 `settingsTools.test`，成功 `res.message || '连接成功'`、失败 `res.message || '测试失败'`。
 
 **保存千问语音**：无前置校验，直接提交，成功提示「千问语音配置已保存，可在「音色管理」「文字生音频」中使用」`hf-ok`，失败 `res.message || '保存失败'` `hf-error`。
+
+**保存渲染默认档位**（`onSaveRender`）：无前置校验（下拉值必然合法），经 `saveRenderDefaults({ quality, fps })` 提交；该函数内部调 `window.settingsTools.saveRender(next)`（`settings:save-render`），成功后用返回的 `res.settings.render` 就地刷新模块级单例 `renderDefaults`——因此保存后无需重启或刷新页面，「HTML生成」页的 `optionNote`（「跟随设置页默认：…」）立刻反映新值。失败时取 `res.message || '保存失败'`。
 
 ## 3. SettingsPage/WhisperSection.vue
 
@@ -154,20 +166,24 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 
 | 来源 | 名称 | 用途 |
 |------|------|------|
-| `vue`（页面） | `onMounted`、`ref` | 响应式与挂载回填 |
+| `vue`（页面） | `computed`、`onMounted`、`ref` | 响应式、派生的档位说明与挂载回填 |
+| `@shared/types`（页面） | `type RenderFps`、`type RenderQuality` | 卡片 3 两个下拉的类型标注 |
+| `@renderer/utils/render`（页面） | `FALLBACK_RENDER`、`RENDER_FPS_OPTIONS`、`RENDER_QUALITY_OPTIONS`、`renderQualityLabel` | 档位选项表、内置默认档位与保存成功文案里的质量标签 |
+| `@renderer/composables/useRenderOptions`（页面） | `saveRenderDefaults` | 保存全局默认档位（内部刷新 `renderDefaults` 单例） |
 | `./WhisperSection.vue`（页面） | `WhisperSection` | 语音识别模型区块子组件 |
 | `vue`（子组件） | `computed`、`onMounted`、`ref` | 派生文案、进度订阅与状态 |
 | `@renderer/utils/escape`（子组件） | `escTxt` | 模型文本（名称、文件名、说明、URL、`localFile`）的 HTML 转义 |
 
-页面**未**引入 `useToast`、`escTxt`，提示全部走 `status` / `vStatus` 状态条；子组件不 import 任何组件或 composable，也不接收 / 抛出事件。`sizeMB`、`speed`、`localBytes`、`barPercent`、`barText` 未转义（由本组件生成或来自主进程数值）。
+页面**未**引入 `useToast`、`escTxt`，提示全部走 `status` / `vStatus` / `rStatus` 三条状态条；子组件不 import 任何组件或 composable，也不接收 / 抛出事件。`sizeMB`、`speed`、`localBytes`、`barPercent`、`barText` 未转义（由本组件生成或来自主进程数值）。
 
 ### 4.2 preload 方法汇总
 
 | preload 调用 | IPC 频道 | 说明 |
 |--------------|----------|------|
-| `window.settingsTools.get()` | `settings:get` | 读取 `AppSettings`（页面两次调用：`customModel`、`voiceTTS`） |
+| `window.settingsTools.get()` | `settings:get` | 读取 `AppSettings`（页面三次调用：`customModel`、`voiceTTS`、`render`） |
 | `window.settingsTools.save(customModel)` | `settings:save` | preload 包装为 `{ customModel }` |
 | `window.settingsTools.test(customModel)` | `settings:test` | preload 包装为 `{ customModel }`，用当前表单内容测试 |
+| `window.settingsTools.saveRender(render)` | `settings:save-render` | preload 包装为 `{ render }`；经 `saveRenderDefaults` 调用，只更新 `render` 段 |
 | `window.voiceTools.saveConfig({ apiKey, targetModel })` | `voice:save-config` | preload 包装为 `{ voiceTTS }` |
 | `window.voiceTools.listModels()` | `voice:list-models` | 候选模型（`id`、`label`、可选 `isDefault`），异常被 `.catch()` 吞掉 |
 | `window.whisperTools.status()` | `whisper:status` | 返回 `{ ok, cli, modelsDir, langs, models, unknownFiles, usedBytes, currentModelId }` |
@@ -188,7 +204,7 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 
 1. **千问语音读取入口是 `settingsTools.get()`**：页面从返回值的 `voiceTTS` 回填，**未调用** `window.voiceTools.getConfig()`；`voiceTools.getConfig` / `voiceTools.pickDir` 由「音色管理」「文字生音频」等页面使用。
 2. 本页**没有**「自定义保存目录」表单项（只有 API Key 与目标模型），保存目录由使用侧经 `voiceTools.getSaveDir`、`voiceTools.pickDir` 处理。
-3. **`settingsTools.get()` 调用两次**，各自在独立 `try` 中，失败分别写 `status` / `vStatus`，互不影响。
+3. **`settingsTools.get()` 调用三次**，各自在独立 `try` 中，失败分别写 `status` / `vStatus`（第三次仅静默回落内置默认），互不影响。
 4. **`vModel` 回填条件**：只有候选列表含该 id 才采用已保存值，否则回落 `isDefault` 项或第一项，避免已下线模型 id 导致下拉空选。
 5. **`onSaveVoice` 无前置校验**：空 API Key 也会提交，合法性由主进程判断并回传 `message`；**API Key 落盘位置**界面明确为「仅保存在本机 userData/settings.json」，两个输入框均 `type="password"`，不做额外脱敏。
 6. **状态类名沿用全局约定**：`''` / `'hf-ok'` / `'hf-error'`，与 `hf-status` 样式配套，三处状态条（卡片 1、卡片 2、子组件表单）共用。
@@ -200,3 +216,5 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 12. **whisper-cli.exe 缺失是硬阻塞**：`cliTip` 以警告橙显示放置路径；缺该文件时转录无法进行（主进程 `whisper:transcribe` 同样校验并返回提示）。
 13. **子组件只暴露「打开模型目录」一个入口**：即 `openDir('models')`；`cliTip` 文案提到的「旁的位置」实指 whisper 资源目录，界面无对应按钮（主进程支持 `openDir('cli')`）。
 14. **提示优先级与删除语义**：`actRemove` 先取 `res.message`（主进程会说明本地模型文件仍保留），无 message 才按 `ok` 给简短文案；`actDelete` / `actRemove` 均无二次确认弹窗——前者删本地模型文件，后者只删登记条目。
+15. **渲染默认档位是「全局默认」而非唯一真源**：真正生效的档位是「项目覆盖（`project.json` 的 `render`）> 此处保存的全局默认 > 内置默认」；本页只写全局默认（`settings:save-render`），项目级覆盖由「HTML生成」页的档位下拉经 `project:set-render` 写入，两处互不覆盖。
+16. **渲染默认档位不需要 `onMounted` 之外的状态同步**：`saveRenderDefaults()` 成功后就地刷新 `composables/useRenderOptions.ts` 的模块级 `renderDefaults` 单例，因此本页保存后其他页面（尤其「HTML生成」页的 `optionNote`）立即看到新默认值，无需再次 `get()`。

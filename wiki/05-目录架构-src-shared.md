@@ -8,8 +8,8 @@
 
 | 文件 | 行数 | 角色 |
 |---|---|---|
-| [ipc.ts](./files/shared/ipc.ts.md) | 97 | IPC 频道名常量（7 个分组、69 个频道）+ `IpcChannel` 类型 |
-| [types.ts](./files/shared/types.ts.md) | 619 | 跨进程载荷类型（9 小节、90 个导出）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`、`RegisterCtx`、设置、音色与配音、语音识别、项目与字幕、预览/转视频、进度推送，以及 `PreloadApi`（`window.*` 契约唯一真源） |
+| [ipc.ts](./files/shared/ipc.ts.md) | 99 | IPC 频道名常量（7 个分组、71 个频道）+ `IpcChannel` 类型 |
+| [types.ts](./files/shared/types.ts.md) | 651 | 跨进程载荷类型（9 小节、96 个导出）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`、`RegisterCtx`、设置（含渲染档位）、音色与配音、语音识别、项目与字幕、预览/转视频、进度推送，以及 `PreloadApi`（`window.*` 契约唯一真源） |
 
 ---
 
@@ -21,10 +21,10 @@
 |---|---|---|
 | `Window` | 4 | `window:minimize`、`window:toggle-maximize`、`window:close`、`window:maximized-change` |
 | `App` | 1 | `app:copy-text` |
-| `Settings` | 3 | `settings:get`、`settings:save`、`settings:test` |
+| `Settings` | 4 | `settings:get`、`settings:save`、`settings:save-render`、`settings:test` |
 | `Voice` | 18 | `voice:get-config`、`voice:get-save-dir`、`voice:save-config`、`voice:pick-audio`、`voice:create`、`voice:list-system-voices`、`voice:list-models`、`voice:get-profiles`、`voice:save-profile`、`voice:delete-profile`、`voice:list`、`voice:list-all`、`voice:pick-dir`、`voice:list-generated`、`voice:synth`、`voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | `Whisper` | 12 | `whisper:status`、`whisper:download`、`whisper:delete`、`whisper:set-current`、`whisper:add-model`、`whisper:update-model`、`whisper:remove-model`、`whisper:open-dir`、`whisper:project-audio`、`whisper:pick-audio`、`whisper:transcribe`、`whisper:progress` |
-| `Project` | 25 | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:download-file`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-video`、`project:set-video`、`project:clear-video`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、`project:html-progress` |
+| `Project` | 26 | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:download-file`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-video`、`project:set-video`、`project:clear-video`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、`project:html-progress` |
 | `Video` | 6 | `dialog:open-html`、`video:list-projects`、`video:preview-shell`、`video:show-in-folder`、`video:render`、`video:progress` |
 
 两个容易踩的点：

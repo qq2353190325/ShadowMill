@@ -33,6 +33,7 @@
     "files": [
       "out/**/*",
       "video-projects/**/*",
+      "vendor/**/*",
       "README.md",
       "!node_modules/**/*",
       "node_modules/openai/**/*",

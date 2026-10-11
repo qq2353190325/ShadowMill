@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块
-- **规模**：246 行
+- **规模**：248 行
 - **对外导出**：`HTML_AGENT_SYSTEM`、`extractHtmlFromReply`、`chatWithCustomModel`，以及类型 `AgentProgress`、`AgentOpts`
 
 ## 1. 作用与职责
@@ -51,7 +51,7 @@
 | 序号 | 约束要点 |
 |------|----------|
 | 1 | 直接输出完整 HTML 文档，以 `<!DOCTYPE html>` 开头，含 `<head>` 与 `<body>` |
-| 2 | 满足 HyperFrames composition 规范：根容器带 `data-composition-id`；用 `gsap.min.js`（jsdelivr）引入 GSAP；时间轴登记进 `window.__timelines` 数组 |
+| 2 | 满足 HyperFrames composition 规范（与 HyperFrames 官方文档/内置示例对齐）：① 动画根容器带 `data-composition-id`（如 `<div data-composition-id="main">`）；② 用 `<script src="./gsap.min.js"></script>` 引入 GSAP——该文件由应用随项目提供，**禁止改用任何 CDN 地址**，也不再钉版本号；③ 时间轴一律 `gsap.timeline({ paused: true })` 创建（起播由渲染器与预览控制负责，不自动播放）；④ 时间轴登记到**以 composition id 为键的对象**上：`window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;`，键必须与 `data-composition-id` 完全一致，**不要写成数组** |
 | 3 | 视觉风格：深空科技 / Cyber UI（`#0B1220` 深色背景、`#00D4FF` 电子蓝辉光、玻璃拟态、霓虹渐变） |
 | 4 | 若用户提供字幕，按字幕条目逐条依次播放入场动画 |
 | 5 | 字幕时间轴严格按提供的起止时间执行；秒可带小数，GSAP 直接按小数秒定位，禁止四舍五入或重排；无结束时间的行自行安排节奏 |
@@ -119,13 +119,13 @@
 | `node:fs` | `fs`（默认导入） | `mkdirSync` / `appendFileSync` |
 | `openai` | `OpenAI`（默认导入） | 首选流式客户端；运行时以 `typeof OpenAI === 'function'` 判断可用性 |
 | `./settings` | `getCustomModel` | 读取自定义模型配置 |
-| `../shared/types` | `type HtmlAgentProgress` | 进度载荷的真实定义（第 53 行以 `export type AgentProgress = HtmlAgentProgress` 再导出，本地不再声明 interface） |
+| `../shared/types` | `type HtmlAgentProgress` | 进度载荷的真实定义（以 `export type AgentProgress = HtmlAgentProgress` 再导出，本地不再声明 interface） |
 
 ### 4.2 被谁使用
 
 | 使用方 | 用法 |
 |--------|------|
-| `src/main/projects.ts` | 第 15 行导入 `chatWithCustomModel`、`extractHtmlFromReply`、类型 `AgentProgress`；`project:generate-html` 分支（约 408–409 行）与 `project:modify-html` 分支（约 458–459 行）调用「模型调用 → 提取 HTML」 |
+| `src/main/projects.ts` | 导入 `chatWithCustomModel`、`extractHtmlFromReply`、类型 `AgentProgress`；`project:generate-html` 与 `project:modify-html` 两个分支调用「模型调用 → `extractHtmlFromReply` 提取 HTML」，随后由 `hfEnv.localizeGsapHtml()` 把 CDN 引用改写为 `./gsap.min.js` 并落盘 |
 | `src/main/projects.ts` 进度链路 | `onProgress` 回调把 `AgentProgress` 交给 `progressText` 生成文案，再带 `text` 字段经 IPC 频道 `project:html-progress`（`IPC.Project.HtmlProgress`）推给渲染进程 |
 | `src/renderer/src/pages/HtmlGenPage/index.vue` | 通过 `window.projectTools.onHtmlProgress` 接收进度并展示 `thinkText` |
 | `src/main/settings.ts` | `IPC.Settings.Save` / `IPC.Settings.Test` 维护与验证 `customModel` 配置 |
@@ -143,5 +143,7 @@
 - **日志失败不影响主流程**：`logConversation` 内部 try/catch 且注释 `/* ignore */`，日志写失败不会中断生成。
 - **usage 诊断**：最终错误信息在 `last.usage` 存在时附加 `（usage: {...}）`，便于判断是配额、网络还是模型策略问题。
 - **`stream_options: { include_usage: true }`**：两条路径都显式开启，末块才会回传 prompt/completion/reasoning token 统计。
-- **本模块不写项目文件**：返回值仍是原始 `content`，HTML 落盘、HyperFrames 合规检查（`isHyperframesComposition`）与项目状态更新都在 `projects.ts` 完成。
+- **本模块不写项目文件**：返回值仍是原始 `content`，HTML 落盘、GSAP 本地化（`localizeGsapHtml` / `copyGsapIntoProject`）、HyperFrames 合规检查（`isHyperframesComposition`）与项目状态更新都在 `projects.ts` 完成。
+- **提示词第 2 条是与 HyperFrames 官方文档对齐的「生成契约」**：本地引用 `./gsap.min.js`（无 CDN、无版本号）、`gsap.timeline({ paused: true })`、`window.__timelines` 为「以 composition id 为键的对象」（键 = `data-composition-id`）。但合规校验 `hfEnv.isHyperframesComposition()` 仍只做三个文本特征的正则匹配，**不校验 `__timelines` 究竟是数组还是对象**——因此历史生成物（数组形态）依旧判为合规，预览控制脚本 `HG_PREVIEW_CTRL` 对「对象 / 数组 / 缺失」三种形态都做了兼容。
+- **提示词不保证模型照做**：模型仍可能输出 CDN 引用或数组形态。CDN 引用由 `projects.ts` 在写盘前用 `localizeGsapHtml()` 兜底改写；数组形态则靠预览控制脚本的三态枚举与渲染侧的 HyperFrames 运行时兼容，提示词本身不做校验。
 - **进度类型只在共享层定义**：本地不再声明 `AgentProgress` interface，而是 `export type AgentProgress = HtmlAgentProgress`（`shared/types.ts` ⑧ 节）。`AgentOpts.onProgress` 与内部 `emit` 都用这个别名标注，因此改阶段取值会同时影响 `projects.ts` 的 `progressText` 与进度推送形状——导出名 `AgentProgress` 本身保持不变。

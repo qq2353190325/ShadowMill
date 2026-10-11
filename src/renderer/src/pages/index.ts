@@ -9,7 +9,7 @@ import ContentPage from './ContentPage/index.vue'
 import TextTtsPage from './TextTtsPage/index.vue'
 import SubtitlePage from './SubtitlePage/index.vue'
 import HtmlGenPage from './HtmlGenPage/index.vue'
-import VideoPage from './VideoPage/index.vue'
+import VideoPreviewPage from './VideoPreviewPage/index.vue'
 import SoundCopyPage from './SoundCopyPage/index.vue'
 import SettingsPage from './SettingsPage/index.vue'
 
@@ -20,7 +20,7 @@ export const pages: Record<PageKey, Component> = {
   'text-tts': TextTtsPage,
   subtitle: SubtitlePage,
   'html-gen': HtmlGenPage,
-  'video-gen': VideoPage,
+  'video-preview': VideoPreviewPage,
   'sound-copy': SoundCopyPage,
   settings: SettingsPage
 };

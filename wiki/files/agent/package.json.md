@@ -84,5 +84,5 @@ E:\my\package.json              （无 "type" → 默认 CJS，Electron 主进�
 - **作用域仅限本目录**：它不会改变 `src/main/`、`src/preload/` 的 CJS 语义，也不影响 Electron 产物。
 - **不可删除**：删除后 Node 会回退到根 `package.json`（无 `type`）按 CJS 解析，`src/agent/index.ts` 中的 `import.meta.url` 将直接报错（`import.meta` 仅在 ESM 中可用）。
 - **`.ts` 的类型擦除运行依赖 Node 22.6+**：`node --experimental-strip-types` 属于较新能力，旧版 Node 请改用 `tsx` 或先编译。
-- **不进打包 `files` 白名单**：electron-builder 的 `files` 只列 `out/**/*`、`video-projects/**/*`、`README.md` 及两个依赖目录，`src/agent/` 不在其中，不会被分发。
+- **不进打包 `files` 白名单**：electron-builder 的 `files` 只列 `out/**/*`、`video-projects/**/*`、`vendor/**/*`、`README.md` 及两个依赖目录，`src/agent/` 不在其中，不会被分发。
 - **与 `tsconfig.agent.json` 的 `noEmit: true` 配合**：类型检查不产出文件；文件头注释里的 `npx tsc && node dist/agent/index.js` 方式需另用允许 emit 的配置。

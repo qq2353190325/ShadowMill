@@ -1,6 +1,6 @@
 <template>
   <div class="project-bar" data-roled="1">
-    <!-- 第一行：五节点流水线（内容脚本 → 配音 → 字幕 → HTML → 视频） -->
+    <!-- 第一行：五节点流水线（内容脚本 → 配音 → 字幕 → HTML → 视频预览；转视频动作在 HTML 节点页内） -->
     <div class="project-bar-row">
       <div class="step-chain">
         <span class="step-node clickable" :class="[isPage('content') ? 'active-now' : '', contentDone ? 'done' : '']" @click="goPage('content')"><span class="step-dot"></span>内容脚本</span>
@@ -11,7 +11,7 @@
         <span class="step-arrow">→</span>
         <span class="step-node clickable" :class="[isPage('html-gen') ? 'active-now' : '', htmlDone ? 'done' : '']" @click="goPage('html-gen')"><span class="step-dot"></span>HTML</span>
         <span class="step-arrow">→</span>
-        <span class="step-node clickable" :class="[isPage('video-gen') ? 'active-now' : '', videoDone ? 'done' : '']" @click="goPage('video-gen')"><span class="step-dot"></span>视频</span>
+        <span class="step-node clickable" :class="[isPage('video-preview') ? 'active-now' : '', videoDone ? 'done' : '']" @click="goPage('video-preview')"><span class="step-dot"></span>视频预览</span>
       </div>
     </div>
     <!-- 第二行：工作项目切换 / 新建 / 打开目录 -->

@@ -46,11 +46,11 @@
       <div v-else class="builtin-empty" style="color:var(--text-secondary,#8CA3C7);font-size:13px;margin-top:12px;">暂无项目，在上方输入名称新建一个（也可先点下方内置示例体验流程）。</div>
     </div>
 
-    <!-- 内置示例快捷入口：点击即选中该内置项目并进入「视频生成」页 -->
+    <!-- 内置示例快捷入口：点击即选中该内置项目并进入「视频预览」页 -->
     <div style="margin-top:var(--space-5);">
       <div v-if="!appState.builtinProjects.length" class="builtin-empty" style="color:var(--text-secondary,#8CA3C7);font-size:13px;">暂无内置示例项目</div>
       <template v-else>
-        <div class="panel-title"><span class="dot"></span>内置示例<b style="font-weight:500;color:var(--text-secondary,#8CA3C7);font-size:12px;margin-left:8px;">只读 · 可预览 / 转视频</b></div>
+        <div class="panel-title"><span class="dot"></span>内置示例<b style="font-weight:500;color:var(--text-secondary,#8CA3C7);font-size:12px;margin-left:8px;">只读 · 可预览 / 试渲染</b></div>
         <div class="builtin-grid" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;">
           <div
             v-for="(b, i) in appState.builtinProjects"
@@ -61,7 +61,7 @@
             @click="openBuiltin(i)"
           >
             <b style="color:#00D4FF;">{{ escTxt(b.title) }}</b>
-            <div style="margin-top:var(--space-1);font-size:12px;color:var(--text-secondary,#8CA3C7);">点击打开预览 / 转视频</div>
+            <div style="margin-top:var(--space-1);font-size:12px;color:var(--text-secondary,#8CA3C7);">点击打开示例预览 / 试渲染</div>
           </div>
         </div>
       </template>
@@ -88,7 +88,7 @@ const flowDefs = computed(() => [
   { idx: '02', t: '配音', d: '由脚本旁白合成为自然语音', page: 'text-tts' as PageKey, done: hasAudio.value },
   { idx: '03', t: '字幕', d: '由旁白派生对齐的同步字幕', page: 'subtitle' as PageKey, done: hasSubtitle.value },
   { idx: '04', t: 'HTML生成', d: '由脚本整体生成精美的 HTML 动画', page: 'html-gen' as PageKey, done: hasHtml.value },
-  { idx: '05', t: '转成视频', d: '合并素材，导出最终视频成品', page: 'video-gen' as PageKey, done: hasVideo.value }
+  { idx: '05', t: '视频预览', d: '查看 / 定位导出的视频成品（转视频在 HTML生成页）', page: 'video-preview' as PageKey, done: hasVideo.value }
 ]);
 
 const newName = ref('');
@@ -116,6 +116,6 @@ async function openBuiltin(i: number): Promise<void> {
   const b = appState.builtinProjects[Number(i)];
   if (!b) return;
   await switchProject(b.name, true);
-  await goPage('video-gen');
+  await goPage('video-preview');
 }
 </script>

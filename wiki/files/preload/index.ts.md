@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
-- **规模**：159 行
+- **规模**：164 行
 - **对外导出**：本文件不产生模块导出；其作用是把 8 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`
 - **类型契约**：8 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
@@ -56,11 +56,12 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `hfTools` | `openHtml` | `dialog:open-html` | 选择 HTML 文件，返回 `Promise<string \| null>` |
 | `hfTools` | `listProjects` | `video:list-projects` | 列出可渲染项目，`{ name, html }[]` |
 | `hfTools` | `previewShell` | `video:preview-shell` | 传 `{ htmlPath }`，生成预览壳 |
-| `hfTools` | `renderVideo` | `video:render` | 传 `{ htmlPath }`，HyperFrames 转视频 |
+| `hfTools` | `renderVideo` | `video:render` | 传 `{ htmlPath, ...档位 }`（`quality` / `fps` 可缺省），HyperFrames 转视频 |
 | `hfTools` | `showInFolder` | `video:show-in-folder` | 在文件管理器中定位产物 |
 | `hfTools` | `onProgress` | `video:progress` | 渲染进度订阅，数据形如 `{ text }` |
 | `settingsTools` | `get` | `settings:get` | 读取 `AppSettings` |
 | `settingsTools` | `save` | `settings:save` | 传 `{ customModel }` 保存自定义模型配置 |
+| `settingsTools` | `saveRender` | `settings:save-render` | 传 `{ render }` 保存视频渲染默认档位（`RenderOverride`） |
 | `settingsTools` | `test` | `settings:test` | 传 `{ customModel }` 测试连通性 |
 | `voiceTools` | `getConfig` | `voice:get-config` | 取语音配置（apiKey / targetModel / saveDir） |
 | `voiceTools` | `getSaveDir` | `voice:get-save-dir` | 传 `{ saveDir?, defaultOut?, projectName? }` 解析保存目录 |
@@ -116,6 +117,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `projectTools` | `openFolderOf` | `project:open-folder-of` | 参数为裸字符串 `dirOrFile` |
 | `projectTools` | `delete` | `project:delete` | 参数为裸字符串 `name` |
 | `projectTools` | `saveVideo` | `project:save-video` | `{ name, videoPath }` |
+| `projectTools` | `setRender` | `project:set-render` | `{ name, render }`；`render` 传 `null` 清除项目级档位覆盖 |
 | `projectTools` | `onHtmlProgress` | `project:html-progress` | HTML 生成/修改进度订阅（单订阅） |
 
 ## 3. 关键流程或结构

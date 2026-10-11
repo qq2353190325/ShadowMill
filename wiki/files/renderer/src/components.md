@@ -12,7 +12,7 @@
 
 本组件是原 `window.App.renderStepBar` 的组件化替代物。原实现依赖 `[data-slot]` 占位注入机制，现已废弃：各页面模板顶部直接放 `<StepBar :page="..."/>` 即等效。它提供两块能力：
 
-1. **第一行：五节点流水线可视化**——「内容脚本 → 配音 → 字幕 → HTML → 视频」的链路进度，节点既是状态指示器（`done` / `active-now`）又是跳转入口（可点击）。
+1. **第一行：五节点流水线可视化**——「内容脚本 → 配音 → 字幕 → HTML → 视频预览」的链路进度，节点既是状态指示器（`done` / `active-now`）又是跳转入口（可点击）。注意第 5 个节点是**预览**环节：真正发起渲染的「转视频」按钮在「HTML生成」节点页内（源码顶部注释即写明「内容脚本 → 配音 → 字幕 → HTML → 视频预览；转视频动作在 HTML 节点页内」）。
 2. **第二行：工作项目切换器**——所有节点页共用的全局项目入口：下拉切换「我的项目 / 内置示例」、新建项目、打开当前项目所在目录。
 
 组件的状态判定**不自己计算**，而是直接引用 `useAppStore` 的 `computed`（`hasContent` / `hasAudio` / `hasSubtitle` / `hasHtml` / `hasVideo`），因此项目切换后状态自动同步。
@@ -40,7 +40,7 @@
 | 2 | 配音 | `goPage('text-tts')` | `isPage('text-tts') \|\| isPage('sound-copy')` | `audioDone`（`hasAudio`） |
 | 3 | 字幕 | `goPage('subtitle')` | `isPage('subtitle')` | `subDone`（`hasSubtitle`） |
 | 4 | HTML | `goPage('html-gen')` | `isPage('html-gen')` | `htmlDone`（`hasHtml`） |
-| 5 | 视频 | `goPage('video-gen')` | `isPage('video-gen')` | `videoDone`（`hasVideo`） |
+| 5 | 视频预览 | `goPage('video-preview')` | `isPage('video-preview')` | `videoDone`（`hasVideo`） |
 
 要点：
 
@@ -121,7 +121,7 @@
 | 依赖 | `@renderer/composables/useToast` | `toast(msg)` 轻提示 |
 | 依赖（preload 桥） | `window.projectTools.create` / `openFolder` / `openFolderOf` | 新建项目、打开项目目录、打开指定路径所在目录；类型由 `src/shared/types.ts` ⑨ 节的 `PreloadApi` 定义、经 `src/preload/index.d.ts` 的 `interface Window extends PreloadApi` 暴露给渲染层 |
 | 依赖（样式） | `assets/main.css` | `.project-bar` / `.project-bar-row` / `.step-chain` / `.step-node` / `.step-node.clickable` / `.step-dot` / `.done` / `.active-now` / `.step-arrow` / `@keyframes stepPulse`，以及公共控件 `.hf-select` / `.hf-btn` / `.hgen-input` |
-| 被使用 | 各页面组件（内容脚本 / 配音 / 字幕 / HTML / 视频 / 音色复刻等） | 页面模板顶部 `<StepBar :page="..."/>` |
+| 被使用 | 各页面组件（内容脚本 / 配音 / 字幕 / HTML / 视频预览 / 音色复刻等） | 页面模板顶部 `<StepBar :page="..."/>` |
 | 间接协作 | `src/renderer/src/App.vue` | 菜单跳转改变 `currentPage`，页面重挂载后由新页面重新传入 `page` prop，从而更新高亮 |
 
 ## 5. 注意事项与实现要点

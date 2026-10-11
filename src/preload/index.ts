@@ -7,7 +7,7 @@
 //       本文件的 import 由 electron-vite 打包内联，运行时仅依赖 require('electron')。
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '../shared/ipc'
-import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, WhisperProgressPayload } from '../shared/types'
+import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, RenderOverride, WhisperProgressPayload } from '../shared/types'
 
 const electronAPI: PreloadApi['electronAPI'] = {
   platform: process.platform,
@@ -41,7 +41,8 @@ const hfTools: PreloadApi['hfTools'] = {
   openHtml: (): Promise<string | null> => ipcRenderer.invoke(IPC.Video.OpenHtml),
   listProjects: () => ipcRenderer.invoke(IPC.Video.ListProjects),
   previewShell: (htmlPath: string) => ipcRenderer.invoke(IPC.Video.PreviewShell, { htmlPath }),
-  renderVideo: (htmlPath: string) => ipcRenderer.invoke(IPC.Video.Render, { htmlPath }),
+  // 渲染档位（质量 / 帧率）随载荷下发；缺省项不下发，由主进程交给 CLI 默认（standard / 30）
+  renderVideo: (htmlPath: string, options?: RenderOverride) => ipcRenderer.invoke(IPC.Video.Render, Object.assign({ htmlPath }, options || {})),
   showInFolder: (filePath: string): Promise<void> => ipcRenderer.invoke(IPC.Video.ShowInFolder, filePath),
   onProgress: (callback: (data: { text: string }) => void): void => {
     ipcRenderer.on(IPC.Video.Progress, (_event, data: { text: string }) => callback(data));
@@ -53,6 +54,8 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 const settingsTools: PreloadApi['settingsTools'] = {
   get: () => ipcRenderer.invoke(IPC.Settings.Get),
   save: (customModel) => ipcRenderer.invoke(IPC.Settings.Save, { customModel }),
+  // 渲染默认档位（质量 / 帧率）：只更新 settings.json 的 render 段
+  saveRender: (render) => ipcRenderer.invoke(IPC.Settings.SaveRender, { render }),
   test: (customModel) => ipcRenderer.invoke(IPC.Settings.Test, { customModel })
 };
 contextBridge.exposeInMainWorld('settingsTools', settingsTools);
@@ -139,6 +142,8 @@ const projectTools: PreloadApi['projectTools'] = {
   openFolderOf: (dirOrFile: string) => ipcRenderer.invoke(IPC.Project.OpenFolderOf, dirOrFile),
   delete: (name: string) => ipcRenderer.invoke(IPC.Project.Delete, name),
   saveVideo: (name: string, videoPath: string) => ipcRenderer.invoke(IPC.Project.SaveVideo, { name, videoPath }),
+  // 渲染档位的项目级覆盖（render 传 null 清除覆盖、回到跟随全局默认）
+  setRender: (name: string, render: RenderOverride | null) => ipcRenderer.invoke(IPC.Project.SetRender, { name, render }),
   // HTML 生成/修改过程进度（单订阅：重复注册仅替换回调，避免页面切换叠加监听）
   onHtmlProgress: (callback) => {
     _htmlProgressCb = callback;

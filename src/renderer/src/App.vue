@@ -66,6 +66,7 @@ import { activeMenu, appState, refreshProject, type PageKey } from './composable
 import { currentPage, goPage, pageNavKey } from './pages'
 import { useToasts } from './composables/useToast'
 import { initRenderProgress } from './composables/useRenderProgress'
+import { loadRenderDefaults } from './composables/useRenderOptions'
 
 const toasts = useToasts();
 const contentEl = ref<HTMLElement | null>(null);
@@ -77,7 +78,7 @@ const menuItems: { key: PageKey; label: string; title: string }[] = [
   { key: 'text-tts', label: '配音', title: '配音（文字生音频）' },
   { key: 'subtitle', label: '字幕生成', title: '字幕生成' },
   { key: 'html-gen', label: 'HTML生成', title: 'HTML生成' },
-  { key: 'video-gen', label: '视频生成', title: '视频生成' },
+  { key: 'video-preview', label: '视频预览', title: '视频预览（转视频入口在 HTML生成页）' },
   { key: 'about', label: '关于', title: '关于' },
   { key: 'settings', label: '设置', title: '设置' }
 ];
@@ -101,7 +102,8 @@ async function initApp(): Promise<void> {
       appState.isBuiltin = !!saved.builtin;
     }
   } catch (e) { /* ignore */ }
-  await refreshProject();
+  // 项目列表与渲染默认档位并行载入（档位读取失败不影响启动，落回内置默认）
+  await Promise.all([refreshProject(), loadRenderDefaults()]);
   goPage('home');
 }
 

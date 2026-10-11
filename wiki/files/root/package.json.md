@@ -4,7 +4,7 @@
 
 - **位置**：工程根
 - **类型**：npm 清单（同时承载 electron-builder 的 `build` 段）
-- **规模**：72 行
+- **规模**：73 行
 
 ## 1. 作用与职责
 
@@ -67,7 +67,7 @@
 | `electronVersion` | `31.7.7` | 打包时下载/使用的 Electron 版本，与 `devDependencies.electron` 对齐 |
 | `electronDownload.mirror` | `https://npmmirror.com/mirrors/electron/` | Electron 二进制下载镜像（国内网络加速） |
 | `directories.output` | `dist` | 所有打包产物输出目录（与 `.gitignore` 的 `dist/` 对应） |
-| `asar` | `true` | 将应用代码打包为 `app.asar` 单文件（`out/**` 等被塞进 asar；extraResources 除外） |
+| `asar` | `true` | 将应用代码打包为 `app.asar` 单文件（`out/**`、`vendor/**` 等被塞进 asar；extraResources 除外） |
 | `compression` | `normal` | 压缩级别 normal（非 `store` 非 `maximum`），体积与打包耗时的折中 |
 | `win.target` | `[{ target: "nsis", arch: ["x64"] }]` | 仅出 Windows x64 的 NSIS 安装包 |
 | `nsis.oneClick` | `false` | 走图形化安装向导（而非一键静默安装） |
@@ -82,6 +82,7 @@
 "files": [
   "out/**/*",
   "video-projects/**/*",
+  "vendor/**/*",
   "README.md",
   "!node_modules/**/*",
   "node_modules/openai/**/*",
@@ -94,6 +95,7 @@
 | --- | --- |
 | `out/**/*` | electron-vite 的三端构建产物（main/preload/renderer），应用代码主体 |
 | `video-projects/**/*` | 用户项目数据目录（工程 / 字幕 / HTML / 视频），随包携带初始内容 |
+| `vendor/**/*` | 随包携带的第三方运行时；当前只有 `vendor/gsap/gsap.min.js`（GSAP 3.14.2，72,779 字节 ≈ 71.07 KB），供 HTML composition 离线引用 `./gsap.min.js`，由 `src/main/hfEnv.ts` 的 `findLocalGsap()` 定位；导出的单个 HTML 则由 `hfEnv.externalizeGsapHtml()` 换回同版本的 CDN 地址（`GSAP_CDN_PINNED`） |
 | `README.md` | 说明文档，便于用户直接看到 |
 | `!node_modules/**/*` | **先整体排除** node_modules（体积控制），避免把整个依赖树塞进 asar |
 | `node_modules/openai/**/*` | 再把 openai **单独捞回来** |
@@ -118,6 +120,7 @@
 | `tsconfig.json` | 只是 solution 根，不被任何脚本直接使用（`tsc -b` 未被调用） |
 | `.gitignore` | 忽略 `node_modules/`、`dist/`、`out/`、`resources/`，与本文件的依赖目录、打包输出、extraResources 源一一对应 |
 | `resources/` | `extraResources.from` 的源目录；`.gitignore` 排除它是因为里面是 ffmpeg 等大体积运行时 |
+| `vendor/gsap/` | `files` 白名单中 `vendor/**/*` 的源目录；`vendor/gsap/README.md` 记录版本、来源、sha512/SHA256 与更新步骤。该目录**未被 `.gitignore` 忽略**（受版本控制），与 `resources/` 的处理方式正好相反 |
 | `src/preload/index.d.ts` | 渲染层类型契约，与 `dependencies.vue` 一起支撑 renderer 的类型检查 |
 
 ## 5. 注意事项与实现要点
@@ -126,7 +129,7 @@
 
 - `electron.vite.config.ts` 在 main/preload 里都启用了 `externalizeDepsPlugin()`，该插件会把 `dependencies` 中的包**排除出 bundle**，让产物保留运行时 `require('openai')` / `require('opencc-js')`。
 - 既然代码没有把这两个库内联进 `out/`，打包后就必须在 asar 内**能找到真实的包文件**，否则运行时报 `Cannot find module`。
-- 但 `files` 第 4 条 `!node_modules/**/*` 已经把 node_modules 整体排除，所以必须用**更具体的模式按顺序重新包含**回来——数组顺序即匹配顺序，后写的包含规则生效。
+- 但 `files` 中的 `!node_modules/**/*` 已经把 node_modules 整体排除，所以必须用**更具体的模式按顺序重新包含**回来——数组顺序即匹配顺序，后写的包含规则生效。
 - 只捞这两个包（及其依赖树），而不是放开整个 `node_modules`，是为了在可用性与体积之间取平衡。
 - 对照：`vue` 也在 `dependencies` 里，但它是被 Vite **打进** renderer bundle 的，不需要在 asar 里保留 `node_modules/vue`。
 
@@ -144,3 +147,5 @@
 - package.json 根**无 `"type": "module"`**：根部默认 CommonJS。`src/agent/` 下有独立的 `{"type":"module"}` 标记，仅让该子目录按 ESM 解析。
 - `pack` 与 `dist` 都带 `npm run build` 前置，但**不**包含 `typecheck`——类型检查需要单独执行。
 - `build.files` 中的 `video-projects/**/*` 属于用户数据，随包分发时要注意不要夹带私人素材。
+- **`vendor/**/*` 进 asar，而不是走 `extraResources`**：`vendor/gsap/gsap.min.js` 只被主进程**按字节读取与复制**（`fs.readFileSync` / `fs.copyFileSync`），不需要 `spawn` 执行，因此放进 asar 即可；`hfEnv.findLocalGsap()` 用 `app.getAppPath()` 定位它（dev = 项目根，打包后 = `app.asar` 根），两种形态都能命中。配套的一对改写：项目内 `index.html` 用 `./gsap.min.js` 本地引用（`localizeGsapHtml`），**导出/下载单个 HTML 时**用 `externalizeGsapHtml` 换回固定版本 CDN——因此随包文件只服务打包后的离线预览/渲染，导出物本身不携带它。
+- **`vendor/` 未被 `.gitignore` 忽略且不应忽略**：它是分发给最终用户的运行资源，必须随源码入库（否则新环境克隆后 GSAP 本地化会静默退化为 CDN 加载）。更新步骤见 `vendor/gsap/README.md`；升级时 `hfEnv.ts` 的 `GSAP_CDN_PINNED` 必须同步改版本号。

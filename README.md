@@ -24,9 +24,9 @@ AIGC:
 ### 1.1 五个创作节点
 
 ```
-① 音色管理   →   ② 配音        →   ③ 字幕            →   ④ 字幕生成 HTML     →   ⑤ 转成视频
-（克隆音色）      （文字生音频 /     （手写 / 脚本生成 /    （自定义模型 Agent      （HyperFrames
-                  逐句对齐配音）      whisper 本机转录）     流式生成，可预览）      渲染 MP4）
+① 音色管理   →   ② 配音        →   ③ 字幕            →   ④ 字幕生成 HTML     →   ⑤ 视频预览
+（克隆音色）      （文字生音频 /     （手写 / 脚本生成 /    （自定义模型 Agent      （播放 / 定位
+                  逐句对齐配音）      whisper 本机转录）     流式生成 + 转视频）     成品 MP4）
 ```
 
 | 节点 | 页面 | 要点 |
@@ -36,14 +36,14 @@ AIGC:
 | ② 配音 | 配音 | 「TTS 合成」与「字幕配音（逐句对齐）」两个 Tab |
 | ③ 字幕 | 字幕生成 | 条目编辑器、`[分:秒]` / `[开始-结束]` 时间轴、SRT 双向编辑与导出、whisper 转录 |
 | ④ HTML | HTML生成 | 提示词驱动 Agent 流式生成 / 修改，内嵌 1920×1080 等比预览 |
-| ⑤ 视频 | 视频生成 | 预览项目 HTML，一键后台渲染 MP4，完成后内嵌播放 |
-| — 设置 | 设置 | 自定义模型 / 千问语音 / 语音识别模型三块配置 |
+| ⑤ 视频 | 视频预览 | 播放 / 定位已渲染的成品 MP4；**「转视频」按钮在 ④ HTML生成页**（含质量 / 帧率档位） |
+| — 设置 | 设置 | 自定义模型 / 千问语音 / 语音识别模型 / 视频渲染默认档位四块配置 |
 
 ### 1.2 项目化与链路状态
 
 - 每个项目 = `userData/projects/<项目名>/` 一个目录，统一存放 `project.json`、`subtitle.txt`、`index.html`、`audio/`、`video/`。
 - 首页「我的项目」卡片按 `HTML✓ / 视频✓ / 字幕✓` 标注进度；顶部 **step-bar** 实时显示五节点完成状态，点击可跳转；step-bar 第二行内置**工作项目切换器**（我的项目 / 内置示例）、**新建项目**、**打开目录**，所有节点页都能直接切换。
-- 内置示例项目在 `video-projects/`（**只读**）：`person-video`、`walk-video`，可预览与转视频，编辑类操作会引导切换到「我的项目」。
+- 内置示例项目在 `video-projects/`（**只读**）：`person-video`、`walk-video`，可在「视频预览」页预览示例 HTML 并试渲染，编辑类操作会引导切换到「我的项目」。
 
 ### 1.3 内容脚本
 
@@ -80,12 +80,16 @@ AIGC:
 - 用**需求描述（提示词）**驱动自定义模型 Agent：可生成，也可在已有 HTML 上「修改 HTML」；生成期间实时显示阶段进度与 **AI 思考过程**原文。
 - **项目素材**可选配并注入提示词：字幕（当前项目 / 其它含字幕项目）、背景音频、视频素材（Agent 会以 `<video>` 引入并用 GSAP 编排播放时段）。
 - **预览**：内嵌 iframe 按 1920×1080 等比缩放，带暂停 / 播放 / 重播与进度条。
-- 可**下载 HTML** 到本地任意位置；HTML 变更后旧的视频产物自动失效。
+- 可**下载 HTML** 到本地任意位置（导出的是单个文件，会把项目内的 `./gsap.min.js` 相对引用换回固定版本 CDN 地址，保证导出物在别处联网即可独立打开）；HTML 变更后旧的视频产物自动失效。
+- **转视频**：动作行的「转视频」按钮把当前项目 `index.html` 交给 HyperFrames 后台渲染成 MP4，完成后把产物路径回写项目并提示到「视频预览」页查看；渲染进度实时回推为中文阶段文案。
+- **渲染档位**：动作行下方可选**质量**（快速预览 / 标准 / 高画质）与**帧率**（30 / 24）；默认档位在设置页配置，单个项目可在本行覆盖（出现「恢复默认档位」按钮即表示当前项目有自定义档位）。
 - 「自定义素材」区可导入 / 移除背景音频、从已生成音频中设为背景音频、导入 / 移除视频素材，或把视频**原声提取为背景音频**（ffmpeg 转 AAC 192k）。
 
-### 1.7 转成视频
+### 1.7 视频预览
 
-复用项目 `index.html`，调用 HyperFrames CLI 在后台渲染 MP4，渲染日志实时回推为中文阶段文案；完成后页面内嵌播放，并支持「在文件夹中显示」定位产物、路径回写项目并点亮「视频」节点。也可手动「选择 HTML 文件」预览任意本地 HTML。
+- 进入「视频预览」页即自动加载当前项目已渲染的成品 MP4 并内嵌播放；「重新加载」重新读盘（同一路径重新渲染后也能刷新），「在文件夹中显示」在系统文件管理器中定位产物。
+- 尚无成品时按项目状态给出引导：已有 HTML → 提示到「HTML生成」页点「转视频」；还没有 HTML → 提示先生成 HTML。
+- **内置示例项目（只读）**：本页提供示例 HTML 预览（预览外壳 + 等比缩放）与「HyperFrames 试渲染」，档位只在本次会话生效、不写入项目，试渲染结果直接在页内播放。
 
 ### 1.8 设置
 
@@ -94,6 +98,7 @@ AIGC:
 | 自定义模型（OpenAI 兼容） | Base URL / 模型 ID / API Key / 启用 | HTML 生成与修改的唯一模型入口；「测试连接」**必须拿到模型文本输出**才算成功 |
 | 千问语音 | API Key / 目标模型 | 音色管理、文字生音频与逐句对齐配音依赖它；候选模型表内置 7 条 |
 | 语音识别模型（whisper.cpp） | 内置 4 档 + 自定义模型 | 下载 / 删除 / 设为当前 / 本地占用统计；可打开模型目录；模型文件不随包分发 |
+| 视频渲染默认档位 | 质量 / 帧率 | 「转视频」的全局默认档位（`settings.json` 的 `render` 段）；单个项目可在「HTML生成」页覆盖，覆盖优先于此处 |
 
 内置识别档位（**id 与文件名严格一一对应**，`base` 与 `base-q5_1` 是两个独立档位）：
 
@@ -121,10 +126,18 @@ src/
 ├─ main/       主进程 11 个模块（index 装配器 + 10 个业务/工具域，统一 register(ctx) 模式）
 │              index · hfEnv · settings · systemVoices · htmlAgent · projects · voice · ttsAlign · video · whisper · vad
 ├─ preload/    index.ts（8 个 contextBridge 命名空间）+ index.d.ts（window.* 类型）
-├─ shared/     ipc.ts（7 组 69 个频道常量）· types.ts（跨进程载荷与 window API 契约）
+├─ shared/     ipc.ts（7 组 71 个频道常量）· types.ts（跨进程载荷与 window API 契约）
 ├─ renderer/   Vue 界面：index.html · src/{main.ts, App.vue, assets/main.css, components/, composables/, utils/, pages/}
-│              pages/ 一页一目录 9 页：Home · Content · TextTts · Subtitle · HtmlGen · Video · SoundCopy · Settings · About
+│              pages/ 一页一目录 9 页：Home · Content · TextTts · Subtitle · HtmlGen · VideoPreview · SoundCopy · Settings · About
 └─ agent/      独立 ESM 实验脚本（不进构建图、不打包）
+```
+
+仓库顶层另有随应用分发的静态资源：
+
+```
+vendor/gsap/gsap.min.js   # 随包 GSAP 3.14.2（离线渲染/预览用），经 build.files 打进 asar
+resources/                # 内置运行时（node / ffmpeg / hyperframes+chrome / whisper），走 extraResources，约 715 MB
+video-projects/           # 内置只读示例项目（person-video / walk-video）
 ```
 
 - **IPC 契约单一真源**：频道名集中在 `src/shared/ipc.ts`；所有载荷、结果与进度推送类型集中在 `src/shared/types.ts`；`window.*` 的签名由 `types.ts` 的 `PreloadApi` 统一定义——preload 实现按 `PreloadApi['<命名空间>']` 标注，渲染层通过 `preload/index.d.ts` 挂载同一份契约，两端不会各自漂移。
@@ -134,9 +147,9 @@ src/
 
 ```
 userData/
-├─ settings.json                 # customModel / voiceTTS / voiceProfiles / whisper 四个分区
+├─ settings.json                 # customModel / voiceTTS / voiceProfiles / whisper / render 五个分区
 ├─ projects/<项目名>/
-│  ├─ project.json               # 项目元数据：title/subtitle/htmlPath/videoPath/audioFile/videoMaterial/content…
+│  ├─ project.json               # 项目元数据：title/subtitle/htmlPath/videoPath/audioFile/videoMaterial/content/render…
 │  ├─ subtitle.txt               # 字幕文本（[开始-结束] 文本，毫秒精度）
 │  ├─ index.html                 # Agent 生成的 HyperFrames composition
 │  ├─ index.preview.html         # 预览副本（剥离 CSP + 注入播放控制脚本）
@@ -159,7 +172,8 @@ userData/
 - **模型管理**：id 与文件名严格一一对应，不做前缀 / 模糊归属推断；下载走国内镜像、边下边写 `.part`、完成后同目录原子改名，断网或中断不会留下「看似已下载」的坏档。
 - **HTML 生成流式反馈**：按 `connecting → thinking → writing → retry → done` 分阶段回推（300 ms 节流），实时滚动展示模型思考原文（末 2 万字符）；推理模型把配额耗在思考阶段导致输出为空或被截断时，自动按 **32768 → 65536** 升档重试；每次生成/修改的完整会话写入 `html-agent/chat.jsonl`（含每档尝试的思考全文、`finish_reason`、`usage` 与各阶段耗时），供事后分析。
 - **HTML 合规校验**：转视频前要求源码同时命中 `data-composition-id` / `__timelines` / `gsap` 三个特征（启发式文本匹配）；生成侧只提示不阻断，转视频侧是硬门槛。
-- **转视频**：把 Node 解析为真实绝对路径（规避 nvm shim / WindowsApps alias），把内置 FFmpeg 的 bin 注入渲染进程 `PATH`，并指定内置 chrome-headless-shell，避免渲染时重新下载浏览器。
+- **GSAP 本地化（离线可用）**：生成的 HTML 统一以 `<script src="./gsap.min.js"></script>` 引入 GSAP，文件由随包携带的 `vendor/gsap/gsap.min.js`（3.14.2）提供——生成 / 保存 / 预览 / 渲染四个环节都会把残留的 CDN 引用改写为项目内相对引用并复制该文件（渲染与预览只改副本，不动原件）。时间轴按 HyperFrames 契约写成 `gsap.timeline({ paused: true })` 并登记为**以 composition id 为键的对象**（`window.__timelines["<id>"] = tl`），预览控制脚本同时兼容旧生成物的数组形态。
+- **转视频**：把 Node 解析为真实绝对路径（规避 nvm shim / WindowsApps alias），把内置 FFmpeg 的 bin 注入渲染进程 `PATH`，并指定内置 chrome-headless-shell，避免渲染时重新下载浏览器；质量 / 帧率档位随 `video:render` 载荷传入，主进程按白名单拼 `--quality` / `--fps`（缺省走 CLI 默认 `standard` / `30`）。
 - **预览协议 `hgpreview://`**：dev 下渲染层来自 http 源，Chromium 会拦截 `file://` iframe，故预览统一走自定义协议 `hgpreview://p/<项目名>/<相对路径>`；主进程把 URL 映射回项目目录内的文件，并做目录穿越校验（解析后必须位于该项目目录内），显式给出 MIME、`Cache-Control: no-store`，失败落盘日志便于排查。
 
 ---
@@ -169,10 +183,10 @@ userData/
 1. **内容脚本**：写全局风格与逐场景旁白 / 画面 / 时长（可选，但建议——它是后续三步的共同内容源）。
 2. **配音**：文字生音频合成语音；或用「逐句对齐」按字幕生成对齐配音。（可选节点）
 3. **字幕**：手写条目、`[分:秒]` 定时、由脚本旁白生成，或用 whisper 从音频转录；可导出 / 复制 SRT。保存后点亮「字幕」节点。
-4. **HTML 生成**：在提示词框描述想要的效果（可附带字幕 / 背景音频 / 视频素材），Agent 生成或修改 `index.html` 并刷新预览；满意后可下载 HTML。
-5. **转成视频**：预览项目 HTML 并一键转换，完成后内嵌播放并显示产物位置，路径回写项目、点亮「视频」节点。
+4. **HTML 生成**：在提示词框描述想要的效果（可附带字幕 / 背景音频 / 视频素材），Agent 生成或修改 `index.html` 并刷新预览；满意后可下载 HTML，也可直接点「转视频」（质量 / 帧率档位可选）把当前 HTML 渲染成 MP4。
+5. **视频预览**：进入「视频预览」页查看成品——内嵌播放、重新加载、在文件夹中显示；产物路径已由上一步回写项目、点亮「视频」节点。
 
-整条链路围绕同一个「项目」实体共享状态，避免「选 HTML 文件」这类割裂操作。
+整条链路围绕同一个「项目」实体共享状态，不再有「选 HTML 文件」这类割裂操作。
 
 ---
 
@@ -207,6 +221,7 @@ npm run dist       # build + electron-builder --win（NSIS 安装包）
 - **HyperFrames CLI**：优先用内置 `resources/hyperframes/`（含 chrome-headless-shell），也可用环境变量 `HYPERFRAMES_CLI` 指定。
 - **FFmpeg / FFprobe**：内置 `resources/ffmpeg/bin/`，同时会探测 WinGet 安装的 `Gyan.FFmpeg` 并注入 `PATH`。
 - **whisper-cli.exe**：内置 `resources/whisper/`（含依赖 DLL）；**识别模型文件不随包分发**，在应用内按需下载。
+- **GSAP**：随包 `vendor/gsap/gsap.min.js`（3.14.2），无需联网；版本与更新步骤见 `vendor/gsap/README.md`。
 
 **首次使用配置**（设置页）
 
@@ -225,14 +240,15 @@ npm run dist       # build + electron-builder --win（NSIS 安装包）
 - **② 配音**：TTS 合成（保存位置三选一、载入脚本旁白、试听与语速调节、历史音频复用、设为背景音频）+ **字幕配音逐句对齐**（双模式、加速/顺延、进度与取消、结果明细、写回项目）。
 - **③ 字幕**：条目编辑器（时间轴自动接续）、逐条编辑 / SRT 双向、复制字幕、导出 SRT、由脚本旁白生成、whisper 本机转录（替换 / 追加、两阶段进度）。
 - **语音识别模型管理**：内置 4 档 + 自定义模型的下载 / 删除 / 设为当前 / 占用统计，镜像下载与原子落盘。
-- **④ 字幕生成 HTML**：Agent 流式生成 / 修改、思考过程实时展示、输出为空自动升档重试、素材注入、1920×1080 等比预览与播放控制、下载 HTML、会话记录落盘。
-- **⑤ 转成视频**：合规校验、预览外壳、HyperFrames 后台渲染与中文进度文案、内嵌播放、在文件夹中显示、产物回写。
+- **④ 字幕生成 HTML**：Agent 流式生成 / 修改、思考过程实时展示、输出为空自动升档重试、素材注入、1920×1080 等比预览与播放控制、下载 HTML、**转视频（含质量 / 帧率档位）**、会话记录落盘。
+- **生成契约与 HyperFrames 对齐 + GSAP 本地化**：提示词要求 `gsap.timeline({ paused: true })` 与「以 composition id 为键的 `__timelines` 对象」（与官方文档、内置示例一致）；GSAP 改为随包 `vendor/gsap/gsap.min.js` + 项目内相对引用，生成 / 保存 / 预览 / 渲染四环节自动改写残留 CDN 引用，预览控制脚本同时兼容旧生成物的数组形态。
+- **⑤ 视频预览与转视频**：合规校验、预览外壳、HyperFrames 后台渲染与中文进度文案、**渲染档位（设置页全局默认 + 项目级覆盖）**、成品内嵌播放与「在文件夹中显示」、产物回写项目；内置示例可在同一页试渲染。
 - **项目化**：创建 / 切换 / 删除、字幕与内容脚本保存、背景音频与视频素材管理（含提取原声）、内置只读示例、`hgpreview://` 预览协议。
 - **工程化**：TypeScript 全量覆盖（`npm run typecheck` 全绿）、IPC 载荷类型集中在 `shared/types.ts` 并作为 `window.*` 的单一真源、CSP/sandbox/contextIsolation 安全边界、electron-builder 打包配置完备（内置运行时经 `extraResources` 携带）。
 
 ### 已知限制与说明
 
-- **生成的 HTML 依赖外网 CDN 引入 GSAP**（提示词要求 `cdn.jsdelivr.net/npm/gsap`），完全离线环境下预览 / 渲染可能失败。
+- **内置示例的预览仍依赖网络**：`video-projects/` 下的两个示例除 GSAP 外还从 CDN 引 `@hyperframes/core` 与 `@hyperframes/shader-transitions`（本轮只本地化了 GSAP）。**转视频不受影响**（HyperFrames CLI 自带并注入自己的运行时），但完全离线时示例的页面内预览可能不完整。
 - **识别模型不随包分发**：首次转录前必须在设置页下载模型，`whisper-cli.exe` 缺失会直接阻塞转录。
 - **VAD 静音裁剪无开关**：阈值与窗口为固定常量，背景噪声较大时可能整体不生效（保守行为）。
 - **对齐配音**：单句最多加速到 1.15 倍，超出靠顺延；末句无槽位、不加速也不顺延；同一时刻只允许一个对齐任务，取消是句间软中断（当前句的合成请求不会被打断）。

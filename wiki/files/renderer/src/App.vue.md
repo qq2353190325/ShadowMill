@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/renderer/src/`
 - **类型**：根组件（单文件组件，`<script setup lang="ts">` + `<style scoped>`）
-- **规模**：152 行（模板 59 行 / 脚本 55 行 / 样式 38 行）
+- **规模**：154 行（模板 59 行 / 脚本 55 行 / 样式 38 行，另含 2 行空行分隔）
 - **对外导出**：默认导出组件对象（经 `env.d.ts` 的 `*.vue` 声明被 `main.ts` 导入）；**无 props、无 emits**，全部状态来自 composables 与 preload 桥
 
 ## 1. 作用与职责
@@ -15,7 +15,7 @@
 2. **左侧文字菜单**：8 个菜单项由 `menuItems` 数组 `v-for` 渲染，点击调用 `goPage(item.key)`。
 3. **右侧页面容器**：用 `<component :is="currentPage" :key="pageNavKey" />` 渲染 `pages` 注册表中的当前页面组件。
 4. **Toast 宿主**：`TransitionGroup` 渲染 `useToasts()` 的队列，并提供 `.toast-host` / `.toast-item` 的 scoped 样式。
-5. **全局启动**：`onMounted` 中订阅窗口最大化状态、初始化渲染进度监听、恢复上次项目上下文并进入首页。
+5. **全局启动**：`onMounted` 中订阅窗口最大化状态、初始化渲染进度监听、恢复上次项目上下文、并行载入项目列表与渲染默认档位并进入首页。
 
 ## 2. 结构说明
 
@@ -43,7 +43,7 @@
 | 3 | `text-tts` | 配音 | 配音（文字生音频） |
 | 4 | `subtitle` | 字幕生成 | 字幕生成 |
 | 5 | `html-gen` | HTML生成 | HTML生成 |
-| 6 | `video-gen` | 视频生成 | 视频生成 |
+| 6 | `video-preview` | 视频预览 | 视频预览（转视频入口在 HTML生成页） |
 | 7 | `about` | 关于 | 关于 |
 | 8 | `settings` | 设置 | 设置 |
 
@@ -60,7 +60,7 @@
 | `winMinimize()` | `function(): void` | 调 `window.windowControls.minimize()` |
 | `winToggleMaximize()` | `function(): void` | 调 `window.windowControls.toggleMaximize()` |
 | `winClose()` | `function(): void` | 调 `window.windowControls.close()` |
-| `initApp()` | `async function(): Promise<void>` | 恢复项目上下文 → `refreshProject()` → `goPage('home')` |
+| `initApp()` | `async function(): Promise<void>` | 恢复项目上下文 → `Promise.all([refreshProject(), loadRenderDefaults()])` → `goPage('home')` |
 | `watch(currentPage, ...)` | 侦听器 | 页面切换后 `contentEl.value.scrollTop = 0` |
 | `onMounted(...)` | 生命周期钩子 | 订阅最大化状态、`initRenderProgress()`、`void initApp()` |
 
@@ -71,7 +71,7 @@
 1. **订阅窗口状态**：`window.windowControls.onMaximizedChange((v: boolean) => { isMaximized.value = v; })`——主进程在窗口 `maximize`/`unmaximize` 事件中推送布尔值，用于切换最大化按钮图标。
 2. **初始化渲染进度**：`initRenderProgress()` 注册 `window.hfTools.onProgress` 回调（HyperFrames 渲染进度解析，结果写入 `renderProgress.text`，供视频页展示）。预加载层为单订阅语义，重复注册只替换回调。
 3. **恢复项目上下文**：`localStorage.getItem('myapp.projectCtx')`，`JSON.parse` 后若存在且含 `name`，则写回 `appState.currentName = saved.name`、`appState.isBuiltin = !!saved.builtin`。整段包在 `try/catch` 中，解析失败（脏数据/非 JSON）静默忽略（`catch (e) { /* ignore */ }`）。
-4. **刷新项目**：`await refreshProject()` 拉取「我的项目」(`projectTools.list`) 与内置示例 (`hfTools.listProjects`)，并加载当前项目详情。
+4. **刷新项目 + 载入渲染默认档位**：`await Promise.all([refreshProject(), loadRenderDefaults()])`——前者拉取「我的项目」(`projectTools.list`) 与内置示例 (`hfTools.listProjects`) 并加载当前项目详情，后者读 `settingsTools.get()` 的 `render` 段写入 `composables/useRenderOptions.ts` 的 `renderDefaults`（源码注释：项目列表与渲染默认档位并行载入，档位读取失败不影响启动，落回内置默认 `standard` / `30`）。
 5. **进入首页**：`goPage('home')` 设置 `activeMenu`、再次 `refreshProject()`、切换 `currentPage`、递增 `pageNavKey`。
 6. 调用处使用 `void initApp();`：显式丢弃 Promise，避免未捕获 rejection 警告，同时让 `onMounted` 保持同步返回。
 
@@ -98,6 +98,7 @@
 | 依赖 | `./pages` | `currentPage`、`goPage`、`pageNavKey` |
 | 依赖 | `./composables/useToast` | `useToasts()` 取 Toast 队列 |
 | 依赖 | `./composables/useRenderProgress` | `initRenderProgress()` |
+| 依赖 | `./composables/useRenderOptions` | `loadRenderDefaults()`（启动时与 `refreshProject()` 并行载入全局渲染默认档位） |
 | 依赖（preload 桥） | `window.windowControls` | `minimize` / `toggleMaximize` / `close` / `onMaximizedChange`；类型见 `src/preload/index.d.ts` |
 | 依赖（preload 桥） | `window.hfTools.onProgress` | 经 `initRenderProgress()` 间接使用 |
 | 被使用 | `src/renderer/src/main.ts` | `createApp(App).mount('#app')` |
@@ -113,3 +114,4 @@
 - **颜色为字面量而非变量**：`.toast-item` 中写死 `#E6F1FF`、`rgba(11, 18, 32, .95)`、`rgba(0, 212, 255, .5)`，与主题变量同值但未引用变量，改主题时需同步此处。
 - **启动逻辑幂等性**：`onMounted` 只执行一次，但 `goPage('home')` 会再次 `refreshProject()`，即首次启动会有两次项目列表拉取（`initApp` 内一次 + `goPage` 内一次），属于现有实现，非缺陷但需知晓。
 - **删除项目的兜底在 store 层**：若 localStorage 记的项目已不存在，由 `refreshProject()` 回退到 `myProjects[0]` 或 `'demo-project'`，本组件不做校验。
+- **渲染默认档位只在这里读一次**：`loadRenderDefaults()` 把 `settings.json` 的 `render` 段写入模块级 `renderDefaults`（`useRenderOptions.ts`）；页面只读该单例与 `effectiveRenderOptions()`，不各自读设置。设置页保存后由 `saveRenderDefaults()` 就地更新，因此无需重启或刷新本组件。
