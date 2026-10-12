@@ -1,12 +1,12 @@
 # src/renderer/src/pages/SettingsPage/（页面）
 
-> 设置页：自定义模型、千问语音、视频渲染默认档位与应用更新，并挂载语音识别模型区块。
+> 设置页：自定义模型（Base URL / 模型 ID 走服务商预设下拉、可切手填）、千问语音、视频渲染默认档位与应用更新，并挂载语音识别模型区块。
 
 - **覆盖文件**：
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `src/renderer/src/pages/SettingsPage/index.vue` | 578 | 页面主体：左侧分类导航 + 自定义模型卡片、千问语音卡片、视频渲染默认档位卡片、应用更新卡片，末张卡片挂载子组件；分类记忆键取 `@renderer/constants` |
+| `src/renderer/src/pages/SettingsPage/index.vue` | 653 | 页面主体：左侧分类导航 + 自定义模型卡片、千问语音卡片、视频渲染默认档位卡片、应用更新卡片，末张卡片挂载子组件；分类记忆键与服务商预设表均取 `@renderer/constants` |
 | `src/renderer/src/pages/SettingsPage/WhisperSection.vue` | 274 | 页面子组件：语音识别模型区块（原 `pages/settings/whisper.js` 的 `window.__settings.initWhisper`） |
 
 - **类型**：页面 + 页面子组件（均为 SFC，`<script setup lang="ts">`）
@@ -19,7 +19,7 @@
 
 | 卡片 | 内容 | 归属 |
 |------|------|------|
-| 1 | 「自定义模型（OpenAI 兼容）」：Base URL / 模型 ID / API Key / 启用 + 保存 / 测试连接 | 父组件 |
+| 1 | 「自定义模型」：Base URL（预设下拉 / 手填二选一）/ 模型 ID（同）/ API Key / 启用 + 保存 / 测试连接 | 父组件 |
 | 2 | 「千问语音（音色管理 & 文字生音频）」：API Key + 目标模型下拉 + 保存 | 父组件 |
 | 3 | 「视频渲染默认档位」：质量 / 帧率下拉 + 保存渲染默认档位 + 状态条 + 当前质量说明 | 父组件 |
 | 4 | 「应用更新」：当前版本 + 检查更新 / 自定义更新源（弹窗）/ 下载 / 取消 / 重启安装 + 状态条 + **详情折叠（查看详情 · 收起详情）与常驻的「打开日志目录」** + 跳过版本 | 父组件 |
@@ -33,11 +33,13 @@
 
 | 区块 | 关键点 |
 |------|--------|
-| Base URL / 模型 ID 行 | `v-model="baseUrl"`，placeholder「https://api.openai.com/v1（需以 /v1 结尾，按服务商实际提供）」；`v-model="modelId"`，placeholder「如 gpt-4o-mini / deepseek-chat」 |
+| 卡片 1 顶部 `.hgen-tip` | 原文（改写后）：「配置「HTML 生成 / 修改」使用的模型服务。只支持 OpenAI 格式的端点，Anthropic 格式暂不支持。Base URL 与模型 ID 可从常见服务商直接选，也可手填自己的服务地址；填好 API Key 并勾选「启用」后，HTML 生成页就用这个模型工作。API Key 只保存在本电脑。」**措辞约定**：这段是给使用者看的——不出现 `userData/settings.json` 这类内部路径、不写「OpenAI 兼容模式」这类无信息量的标签（见 §5.24）；但**要写影响决策的限制**，「只支持 OpenAI 格式的端点，Anthropic 格式暂不支持」就是典型（自建网关 / 中转站用户只看手填框、看不到下拉，必须从文字上知道；**这句话也是下拉里不再列 Anthropic 灰项的理由**——见 §5.23）。安全说明用「只保存在本电脑」。卡片标题也据此简化为「自定义模型」（去掉「（OpenAI 兼容）」——协议限制改由这段文字承担）。 |
+| **Base URL 行**（卡片 1） | **二选一渲染**：`v-if="!baseUrlCustom"` → `HfSelect`（`:model-value="baseUrl"`、`:groups="baseUrlGroups"`、`@change="onBaseUrlPick"`，**不用 `v-model`**）；`v-else` → `<input v-model="baseUrl" class="hgen-input" style="flex:1" placeholder="https://…/v1（OpenAI 兼容，需含版本段）">` + 「从列表选」按钮（`@click="baseUrlCustom = false"`，切回下拉态；手填值保留） |
+| **模型 ID 行**（卡片 1） | 同上的二选一：`v-if="!modelCustom"` → `HfSelect`（`:model-value="modelId"`、`:groups="modelGroups"`、`@change="onModelPick"`）；`v-else` → `<input v-model="modelId" … placeholder="如 deepseek-flash / qwen3.8-max">` + 「从列表选」（`@click="modelCustom = false"`） |
 | API Key 行（卡片 1） | `v-model="apiKey"`、`type="password"`，placeholder「sk-...」 |
 | 启用行 | `v-model="enabled"`、`type="checkbox"`，文字「使用自定义模型生成 / 修改 HTML」 |
 | `.hgen-actions`（卡片 1） | `保存配置`（主按钮 → `onSave`）、`测试连接`（`onTest`） |
-| `.hf-status`（卡片 1） | `:class="statusClass"`，`{{ status }}` |
+| `.hf-status`（卡片 1） | `:class="statusClass"`、`{{ status }}` |
 | API Key 行（卡片 2） | `v-model="vApiKey"`、`type="password"`，placeholder「sk-...（DASHSCOPE_API_KEY）」 |
 | 目标模型行 | `HfSelect`（`v-model="vModel"`、`:groups="voiceModelGroups"`），选项来自 `voiceModels`（`:value="m.id"`、显示 `m.label`） |
 | `.hgen-actions` / `.hf-status`（卡片 2） | `保存千问语音配置` → `onSaveVoice`；`:class="vStatusClass"`、`{{ vStatus }}` |
@@ -58,11 +60,23 @@
 
 ### 2.2 状态与类型
 
+**自定义模型（含新增的下拉预设状态）**：
+
 | 名称 | 类型 | 说明 |
 |------|------|------|
 | `baseUrl` / `modelId` / `apiKey` | `ref('')` | 自定义模型三项文本 |
 | `enabled` | `ref(false)` | 是否启用自定义模型生成 / 修改 HTML |
 | `status` / `statusClass` | `ref('')` | 卡片 1 状态文案与样式类（`''` / `'hf-ok'` / `'hf-error'`） |
+| `CUSTOM_VALUE` | 常量 `'__custom__'` | **哨兵值**：下拉里「自定义…（手动填写）」那一项的 `value`，不属于任何真实地址 / 模型名（见 §5.20） |
+| `baseUrlCustom` / `modelCustom` | `ref(false)` | 该行是否处于**手填态**：`false` 渲染 `HfSelect`、`true` 渲染 `<input>` + 「从列表选」。用户点「自定义…」置 `true`，「从列表选」按钮置 `false`；`onMounted` 还会按已保存值是否命中预设初始化（见 2.4） |
+| `currentProvider` | `computed<ProviderPreset \| null>` | 当前 `baseUrl` 命中了 `MODEL_PROVIDERS` 里哪家服务商（`p.baseUrls.includes(baseUrl.value)` 全等匹配），没命中为 `null`；模型下拉的候选跟着它联动 |
+| `baseUrlGroups` | `computed<HfSelectGroup[]>` | Base URL 下拉的分组选项，见 §2.3 |
+| `modelGroups` | `computed<HfSelectGroup[]>` | 模型 ID 下拉的分组选项，见 §2.3 |
+
+**其余状态**：
+
+| 名称 | 类型 | 说明 |
+|------|------|------|
 | `vApiKey` / `vModel` | `ref('')` | 千问语音 API Key、目标模型 id |
 | `voiceModels` | `ref<VoiceModelView[]>([])` | 候选项，元素 `{ id, label, isDefault? }` |
 | `vStatus` / `vStatusClass` | `ref('')` | 卡片 2 状态文案与样式类 |
@@ -99,12 +113,32 @@ interface UpdateCheckReply {
 }
 ```
 
+#### 2.2.1 两个下拉的选项来源
+
+两个 `computed<HfSelectGroup[]>`（`HfSelectGroup` 见 [components.md](./components.md)：`{ label: string; options: { value; label; title?; disabled? }[] }`），数据源是 `@renderer/constants` 的 `MODEL_PROVIDERS`（**导入的第一项，另一个是原有的 `STORAGE_KEY_SETTINGS_SECTION`**）。注意 `HfSelectOption` 的 `disabled` 是**组件本身的能力**（渲染成不可点选的行，见 [components.md](./components.md)），本页这两个下拉现在都不传它——预设表里已经没有灰项了（§5.23）。
+
+**`baseUrlGroups`** —— 先按服务商分组平铺预设：
+
+- 每条 `MODEL_PROVIDERS` 一组（`label` 取 `p.label`），组内每条 `baseUrls` 一个选项（**`baseUrls` 是纯 URL 字符串数组**，见 [constants.ts.md](./constants.ts.md) §3.1）；
+- **选项文字就是 URL 本身**：`options: p.baseUrls.map((u) => ({ value: u, label: u }))`——不拼接 `note`、不传 `title`、不传 `disabled`（源码注释：「Base URL 没有需要额外解释的地方，加了反而是噪音」）。预设表里每家的 `baseUrls` 都只有一条，所以每个服务商组下只有一个可选项，**没有需要用户分辨的候选**（早前的 `url + '（' + note + '）'` 拼接与 Anthropic 灰项已删除，见 §5.23）；
+- **已保存地址不在预设里时补一组「当前配置」**（单选 `${baseUrl}`，`title` 说明「你当前保存的值」）——自建网关 / 中转站的地址不该在下拉里凭空消失；
+- 最后**固定追加**一组空标题的「自定义…（手动填写）」（`value = CUSTOM_VALUE`）。
+
+**`modelGroups`** —— 跟随 `currentProvider`：
+
+- 命中服务商才列该家的 `models`（组标题即该服务商 `label`），`value` 与 `label` 都是模型名本身；
+- 已保存模型不属于当前服务商的 `models` 时补一组「当前配置」（含 `currentProvider` 为 `null` 的情况）；
+- 最后同样固定追加「自定义…（手动填写）」；
+- **没命中服务商时刻意不列任何预设模型**：免得列一堆跟当前端点配不上的名字诱导用户选错——选错就是运行期 `404 model not found`。
+
 ### 2.3 函数
 
 | 名称 | 说明 |
 |------|------|
 | `setStatus` / `setVStatus(text, kind)` | 分别写 `status`/`statusClass`、`vStatus`/`vStatusClass`，文案取 `text \|\| ''` |
 | `setRStatus(text, kind)` | 写卡片 3 的 `rStatus` / `rStatusClass`，同样 `text \|\| ''` |
+| `onBaseUrlPick(v)` | Base URL 下拉的 `@change` 回调：`v === CUSTOM_VALUE` → **只**把 `baseUrlCustom` 置 `true`（**不动 `baseUrl`**，便于在现有地址上改一改）；否则写入 `baseUrl`、`baseUrlCustom = false`，并在**已填模型不属于新服务商**（`currentProvider` 为空或 `models` 不含它）时把 `modelCustom` 置 `true`——值保留，便于改名而不是从头输 |
+| `onModelPick(v)` | 模型下拉的 `@change` 回调：`v === CUSTOM_VALUE` → 只置 `modelCustom = true`；否则写入 `modelId` 并置 `modelCustom = false` |
 | `collectCustomModel()` | 返回 `{ baseUrl, modelId, apiKey, enabled }`，三个字符串字段均 `.trim()`，`enabled` 取布尔值 |
 | `onSave()` | 校验通过后 `await window.settingsTools.save(customModel)` |
 | `onTest()` | `await window.settingsTools.test(collectCustomModel())` |
@@ -120,14 +154,16 @@ interface UpdateCheckReply {
 | `onCheckUpdate()` | 先把状态行置「正在检查更新…」并清空 `updateDetail` / 收起详情，再 `await window.updateTools.check()`；成功后**只回填主进程给的文案**（`updateMessage = res.message \|\| '检查完成'`、`updateDetail = res.detail \|\| ''`、`updateStage = res.state`）；失败分支同样读 `res.message` / `res.detail` |
 | `onOpenUpdateLog()` | `await window.updateTools.openLog()`：在文件管理器里定位 `userData/updater.log`（没有日志则打开 `userData` 目录）；失败时把消息写到**另一行** `updaterStatus`（`hf-error`），异常同样兜住 |
 | `onDownloadUpdate()` / `onCancelUpdate()` | `window.updateTools.download()` / `cancel()`；失败时 message + detail 双写（取消下载现在也读返回值：`updateMessage = res.message \|\| '取消下载失败，请重试'`、`updateDetail = res.detail \|\| ''`、`hf-error`） |
-| `onInstallUpdate()` | `window.updateTools.install()`；成功时主进程即将退出安装，**只在返回 `ok: false` 时**写提示（如「当前有任务正在进行」）；失败同样 message + detail 双写 |
+| `onInstallUpdate()` | `window.updateTools.install()`；成功时主进程即将退出安装，**只在 `ok: false` 或返回了 `message` 时**写提示（如「当前有任务正在进行」）；失败同样 message + detail 双写 |
 | `handleUpdateError(what, e)` | **所有更新动作的统一异常兜底**。`updateTools.*` / `settingsTools.saveUpdater` 都是 `ipcRenderer.invoke`：主进程 handler 抛错或频道未注册时 Promise 会 **reject**，不用 `try/catch` 包住就既不改状态也不提示——界面表现为「点了没反应」（历史上 `electron-updater` 加载失败时正是如此）。现在它把**人话进 `updateMessage`、原始异常一律进 `updateDetail`**：`what === '安装'` → 「启动安装程序失败，请重新下载安装包后手动安装」；其他 → `what + '失败，请稍后重试'`，并置 `hf-error`；`onCheckUpdate` / `onDownloadUpdate` / `onCancelUpdate` / `onInstallUpdate` / `onSkipVersion` / `onSaveFeed` / `onResetFeed` 全部已包 `try/catch` |
 | `onSkipVersion(skip)` | `saveUpdater({ skippedVersion: skip ? updateVersion.value : '' })`，用于「跳过版本」与「恢复提示版本」两个按钮；成功时清空 `updateDetail`（并写「已跳过版本 x」/「已恢复提示版本 x」） |
 | `onMounted(async cb)` | 配置回填（见 2.4） |
 
 ### 2.4 关键流程
 
-**挂载回填**：⓪ 同步执行 `const activeSection = ref(readSection())`——从 `localStorage[SETTINGS_SECTION_KEY]`（`@renderer/constants` 的 `STORAGE_KEY_SETTINGS_SECTION`）恢复上次停留的分类，值不在 `SECTIONS` 白名单内则回退 `'model'`；随后 `watch(activeSection)` 在每次切换分类时写回该键。① `settingsTools.get()` → `s.customModel || {}` 回填 `baseUrl`/`modelId`/`apiKey`/`enabled = !!m.enabled`，异常写 `setStatus('读取配置失败：' + message, 'hf-error')`；② `await window.voiceTools.listModels().catch(() => ({ ok: false, models: [] } as any))`，取 `mm.models || []` 写入 `voiceModels`（失败即空数组，不抛错）；③ 再次 `settingsTools.get()` → `s.voiceTTS || {}` 回填 `vApiKey`，`v.targetModel` 存在且候选列表含同 id 时选中它，否则有候选项时优先 `isDefault === true`、再退到 `voiceModels[0]`，异常写 `setVStatus('读取千问语音配置失败', 'hf-error')`。② 必须先于 `vModel` 回填，否则 `some(...)` 失效直接落默认项；④ 第三次 `settingsTools.get()` → `const r = (s && s.render) || FALLBACK_RENDER`，仅当值在 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` 白名单内才写入 `rQuality` / `rFps`（异常静默忽略，读取失败沿用内置默认 `standard` / `30`）。
+**挂载回填**：⓪ 同步执行 `const activeSection = ref(readSection())`——从 `localStorage[SETTINGS_SECTION_KEY]`（`@renderer/constants` 的 `STORAGE_KEY_SETTINGS_SECTION`）恢复上次停留的分类，值不在 `SECTIONS` 白名单内则回退 `'model'`；随后 `watch(activeSection)` 在每次切换分类时写回该键。① `settingsTools.get()` → `s.customModel || {}` 回填 `baseUrl`/`modelId`/`apiKey`/`enabled = !!m.enabled`，异常写 `setStatus('读取配置失败：' + message, 'hf-error')`；紧接着**按已保存值初始化两个手填态**：`baseUrlCustom = !!baseUrl && 该地址不在任何预设的 baseUrls 里`、`modelCustom = !!modelId && 该模型不属于 currentProvider`（顺序在赋值之后，故 `currentProvider` 已按新 `baseUrl` 求值）——不这么做下拉会显示空占位，用户看到的是「我配的地址 / 模型没了」。② `await window.voiceTools.listModels().catch(() => ({ ok: false, models: [] } as any))`，取 `mm.models || []` 写入 `voiceModels`（失败即空数组，不抛错）；③ 再次 `settingsTools.get()` → `s.voiceTTS || {}` 回填 `vApiKey`，`v.targetModel` 存在且候选列表含同 id 时选中它，否则有候选项时优先 `isDefault === true`、再退到 `voiceModels[0]`，异常写 `setVStatus('读取千问语音配置失败', 'hf-error')`。② 必须先于 `vModel` 回填，否则 `some(...)` 失效直接落默认项；④ 第三次 `settingsTools.get()` → `const r = (s && s.render) || FALLBACK_RENDER`，仅当值在 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` 白名单内才写入 `rQuality` / `rFps`（异常静默忽略，读取失败沿用内置默认 `standard` / `30`）。
+
+**选 Base URL / 模型**：两行的下拉都绑定 `@change`（不是 `v-model`）。选「自定义…」时只切到手填态、**不写值**；选具体项时写值并切回下拉态；Base URL 一改，若已填模型不属于新服务商则模型行自动切手填（值保留）。`HfSelect` 只在**用户点选且值确实变化**时 emit `change`（程序化改值不发），并会把 `disabled` 选项渲染成不可点选的行。
 
 **保存自定义模型**：`collectCustomModel()` 后若 `baseUrl`/`modelId`/`apiKey` 任一为空 → `setStatus('配置不完整：Base URL / Model ID / API Key 均需填写', 'hf-error')` 并中止（不发任何 IPC）；否则成功提示「配置已保存，可开始使用自定义模型生成 HTML」`hf-ok`，失败显示 `res.message || '保存失败'` `hf-error`。
 
@@ -221,12 +257,13 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 
 | 来源 | 名称 | 用途 |
 |------|------|------|
-| `vue`（页面） | `computed`、`onMounted`、`ref` | 响应式、派生的档位说明与挂载回填 |
+| `vue`（页面） | `computed`、`onBeforeUnmount`、`onMounted`、`ref`、`watch` | 响应式、派生的档位说明 / 下拉选项与挂载回填（`onBeforeUnmount` 用于注销 ESC 监听） |
 | `@shared/types`（页面） | `type RenderFps`、`type RenderQuality`、`type UpdateProgressPayload`、`type UpdateStage` | 卡片 3 两个下拉的类型标注（`rQuality` / `rFps`）；卡片 4 的进度回调与阶段标注 |
-| `@renderer/constants`（页面） | `STORAGE_KEY_SETTINGS_SECTION` | 左侧分类导航的记忆键名（赋给页面内 `SETTINGS_SECTION_KEY` 后读写 `localStorage`），值 `'myapp.settingsSection'` |
+| `@renderer/constants`（页面） | `MODEL_PROVIDERS`、`STORAGE_KEY_SETTINGS_SECTION`（**按此顺序导入**） | 前者是 Base URL / 模型 ID 两个下拉的预设数据源（`ProviderPreset[]`）；后者是左侧分类导航的记忆键名（赋给页面内 `SETTINGS_SECTION_KEY` 后读写 `localStorage`），值 `'myapp.settingsSection'` |
 | `@renderer/utils/render`（页面） | `FALLBACK_RENDER`、`RENDER_FPS_OPTIONS`、`RENDER_QUALITY_OPTIONS`、`renderQualityLabel` | 档位选项表、内置默认档位与保存成功文案里的质量标签 |
 | `@renderer/composables/useRenderOptions`（页面） | `saveRenderDefaults` | 保存全局默认档位（内部刷新 `renderDefaults` 单例） |
-| `@renderer/components/HfSelect.vue`（页面） | `HfSelect`（默认）、`type HfSelectGroup` | 三处下拉（目标模型 / 质量 / 帧率）自绘控件与选项分组类型 |
+| `@renderer/composables/useRuntime`（页面） | `useRuntime` | 卡片 4 的运行环境状态行与「重新准备运行环境」 |
+| `@renderer/components/HfSelect.vue`（页面） | `HfSelect`（默认）、`type HfSelectGroup` | 五处下拉（Base URL / 模型 ID / 目标模型 / 质量 / 帧率）自绘控件与选项分组类型 |
 | `./WhisperSection.vue`（页面） | `WhisperSection` | 语音识别模型区块子组件 |
 | `vue`（子组件） | `computed`、`onMounted`、`ref` | 派生文案、进度订阅与状态 |
 | `@renderer/utils/escape`（子组件） | `escTxt` | 模型文本（名称、文件名、说明、URL、`localFile`）的 HTML 转义 |
@@ -271,7 +308,7 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 2. 本页**没有**「自定义保存目录」表单项（只有 API Key 与目标模型），保存目录由使用侧经 `voiceTools.getSaveDir`、`voiceTools.pickDir` 处理。
 3. **`settingsTools.get()` 调用四次**，各自在独立 `try` 中（分别取 `customModel` / `voiceTTS` / `render` / `updater`），失败分别写 `status` / `vStatus`（第三次仅静默回落内置默认、第四次写 `updaterStatus`），互不影响。
 4. **`vModel` 回填条件**：只有候选列表含该 id 才采用已保存值，否则回落 `isDefault` 项或第一项，避免已下线模型 id 导致下拉空选。
-5. **`onSaveVoice` 无前置校验**：空 API Key 也会提交，合法性由主进程判断并回传 `message`；**API Key 落盘位置**界面明确为「仅保存在本机 userData/settings.json」，两个输入框均 `type="password"`，不做额外脱敏。
+5. **`onSaveVoice` 无前置校验**：空 API Key 也会提交，合法性由主进程判断并回传 `message`；**API Key 落盘位置**界面只说「只保存在本电脑」（不写 `userData/settings.json` 这类内部路径），两个输入框均 `type="password"`，不做额外脱敏。
 6. **状态类名沿用全局约定**：`''` / `'hf-ok'` / `'hf-error'`，与 `hf-status` 样式配套，四处状态条（卡片 1、卡片 2、卡片 4 两行、子组件表单）共用。
 7. **单订阅进度回调**：preload 用模块级 `_whisperProgressCb` / `_whisperProgressBound` 实现「重复注册仅替换回调」，子组件 `onMounted` 注册即可、无需解绑；离开页面后回调仍指向该闭包，其它页面用同一通道会互相覆盖。
 8. **`wmBusy` 与主进程双重防重**：界面 `:disabled="wmBusy !== ''"` 禁用全部下载按钮，`actDownload` 入口再判一次，主进程还有 `downloading` 标志与「已有模型下载任务进行中，请稍候」兜底。
@@ -286,3 +323,8 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 17. **分类记忆键名走常量、不可跟随品牌改名**：左侧导航的上次分类存在渲染层 `localStorage` 的 `STORAGE_KEY_SETTINGS_SECTION`（`@renderer/constants`，值 `'myapp.settingsSection'`），页面内以 `SETTINGS_SECTION_KEY` 引用。键名前缀 `'myapp.'` 是首次上线时的 npm 包名、**故意不跟随品牌名「影坊 / ShadowMill」**——prod 下页面走 `file://` 同源，键名就是用户数据的地址，改名会让「上次停留的分类」与「上次打开的项目」（`STORAGE_KEY_PROJECT_CTX`）一起读不到。真要改前缀必须补「读旧键 → 写新键」的迁移，不能只改常量。同理，页面上要显示的**品牌文案**不要写死在这里，取 `@shared/constants`。
 18. **`activeSection` 的读写都是静默容错**：`readSection()` 与 `watch` 里的 `setItem` 各自包 `try/catch`（源码注释：隐私模式等场景静默忽略），因此「分类记忆失效」永远不会以报错形式出现——排查时先看 `localStorage` 里该键的实际值。
 19. **详情区：文案主进程单点产出、渲染层只分两层渲染**：`updateMessage`（人话）来自主进程，`updateDetail`（原始报错 + 请求地址）默认折叠；`applyUpdateProgress()` 在 `detail` 为空时自动把 `showUpdateDetail` 复位，避免旧报错面板常驻。**「打开日志目录」按钮常驻（不受 `updateDetail` 影响）**：启动静默检查失败时本页刚挂载（`updateStage` 仍为 `idle`、`updateDetail` 为空，因为进度事件发生在订阅之前），那种情况下只有 `userData/updater.log` 里有原始报错，不常驻这个入口就无法取证；它的失败反馈写在独立一行 `updaterStatus`，不会覆盖检查/下载的状态文案。
+20. **两个下拉用 `:model-value` + `@change`，刻意不用 `v-model`**：`CUSTOM_VALUE`（`'__custom__'`）是哨兵值，不是真实地址 / 模型名。用 `v-model` 时 `HfSelect` 会先 emit `update:modelValue`，哨兵值当场写进 `baseUrl` / `modelId`，用户接着点「保存配置」就会把 `'__custom__'` 存进 `settings.json`（下次启动下拉里显示一个假地址）。改成 `@change` + `onBaseUrlPick` / `onModelPick` 后，选「自定义…」只切手填态、**不动当前值**——这也正好符合常见诉求「在现有地址上改一改」。注意 `HfSelect` 只在用户点选**且值确实变化**时 emit `change`（程序化改值不发），所以哨兵分支不会因重复点选而反复触发。
+21. **必须保留「自定义」手填**：`MODEL_PROVIDERS` 只是常见取值快捷方式（见 [constants.ts.md](./constants.ts.md) §3.3），自建网关 / 中转站 / 未收录服务商都要能用；而且模型名会被服务商下线、改名，枚举必然过时。因此两行的下拉最后都固定带一项「自定义…（手动填写）」，切到手填态后走原来的 `v-model` 输入框 + `collectCustomModel()` 提交路径，**手填值不受预设表任何约束**（本页也不用预设表做校验）。
+22. **「当前配置」兜底项是必需的**：`baseUrlGroups` / `modelGroups` 会把「已保存但不在预设内」的值补成一组「当前配置」。不加这一步，`HfSelect` 找不到匹配选项就退回占位文字（本页未传 `placeholder`，即显示「请选择…」），用户看到的是「我配的地址 / 模型没了」——实际值还在 `settings.json` 里。`onMounted` 里把 `baseUrlCustom` / `modelCustom` 置 `true` 是同一问题的另一半：命中不了预设时直接进手填态，把真实值原样显示出来。
+23. **选项文字就是 URL 本身，不拼接任何说明**：`baseUrlGroups` 的选项由 `p.baseUrls.map((u) => ({ value: u, label: u }))` 生成——Base URL 没有需要额外解释的地方，加了反而是噪音（源码注释）。早前选项文案是 `url + '（' + note + '）'`，`note` 只用来标「OpenAI 格式 / Anthropic 格式，当前不支持」，**这一整套已随预设表删掉 `note` 字段而移除**；`/v1` 只是同一格式下的写法差异，所以**每家用一条官方写法就够**（DeepSeek 两种拼法都能用，但只列不带 `/v1` 的那条；百炼的 `/v1` 是它路径的固定组成部分，照原样保留）。「当前配置」兜底项仍带 `title: '你当前保存的值'`，那是**它自己的说明**，与预设表的 `note` 无关。HfSelect 组件支持 `disabled` 选项（不可点选），但**预设里已无 `disabled` 端点**：卡片提示已经写明「只支持 OpenAI 格式的端点，Anthropic 格式暂不支持」，再在下拉里列两个灰项等于同一句话说两遍（与 §5.24 同一条判据）。
+24. **界面文案不写「OpenAI 兼容模式」这类术语**（2026-10 起）：它原本想告诉用户"这个端点是 OpenAI 接口规范的、本应用能用"，但对用户是纯噪音——用户选的是**哪家服务商**，不是"某个协议"；能不能用已经由**选项列表本身**表达（列出来的都是能用的，不支持的端点不列，见 §5.23）；而且 `/compatible-mode/` 就写在 URL 里，说一遍等于重复。所以服务商组标题只说名字（`阿里云百炼`，不带括号补充），选项文字就是裸 URL。**判断标准**：这句话删掉会不会让用户少知道一件"他需要据此做决定"的事？不会就删。

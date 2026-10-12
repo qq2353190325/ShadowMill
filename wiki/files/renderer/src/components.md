@@ -253,23 +253,37 @@
 
 ### 5.8 为什么取代原生 `<select>`
 
-原生 `<option>` 弹层由操作系统/浏览器绘制，CSS 无法控制其行高、间距、圆角、配色与选中勾，深色科技主题下表现为「选项贴在一起、当前项看不出」，属于改不动的视觉问题。`HfSelect` 用 `button` + `Teleport` 弹层换成完全可控的列表（每个选项独立成行、`:hover` 主色底、`.on` 渐变高亮 + 自绘勾、入场动画），并把宽度/布局交回父组件（默认 `flex:1`，与旧控件 `.hgen-select` 的行内 `flex:1` 等价）。相应地，**`.hf-select` / `.hgen-select` 已从 `src/renderer/src/assets/main.css` 中删除**，下拉的全部视觉由本组件自带的两段 `<style>` 负责，类名统一 `hf-sel` 前缀：`.hf-sel` / `.hf-sel-trigger` / `.hf-sel-text`（`.ph` 占位态）/ `.hf-sel-caret` / `.hf-sel-menu`（`position: fixed`、`z-index: 9500`、`overflow-y: auto`、`@keyframes hfSelIn`）/ `.hf-sel-group` / `.hf-sel-group-label` / `.hf-sel-opt`（`.on` / `.dis`）/ `.hf-sel-opt-text` / `.hf-sel-tick` / `.hf-sel-empty`。其中触发器样式在 `<style scoped>` 里，弹层样式在不带 `scoped` 的 `<style>` 块里（因为 DOM 已被 Teleport 到 `body`）。
+原生 `<option>` 弹层由操作系统/浏览器绘制，CSS 无法控制其行高、间距、圆角、配色与选中勾，深色科技主题下表现为「选项贴在一起、当前项看不出」，属于改不动的视觉问题。`HfSelect` 用 `button` + `Teleport` 弹层换成完全可控的列表（每个选项独立成行、`:hover` 主色底、`.on` 渐变高亮 + 自绘勾、入场动画），并把宽度/布局交回父组件（默认 `flex:1`，与旧控件 `.hgen-select` 的行内 `flex:1` 等价）。相应地，**`.hf-select` / `.hgen-select` 已从 `src/renderer/src/assets/main.css` 中删除**，下拉的全部视觉由本组件自带的两段 `<style>` 负责，类名统一 `hf-sel` 前缀：`.hf-sel` / `.hf-sel-trigger` / `.hf-sel-text`（`.ph` 占位态）/ `.hf-sel-caret` / `.hf-sel-menu`（`position: fixed`、`z-index: 9500`、`overflow-y: auto`、**显式 `font-size: 13px`**、`@keyframes hfSelIn`）/ `.hf-sel-group` / `.hf-sel-group-label` / `.hf-sel-opt`（`.on` / `.dis`）/ `.hf-sel-opt-text` / `.hf-sel-tick` / `.hf-sel-empty`。其中触发器样式在 `<style scoped>` 里，弹层样式在不带 `scoped` 的 `<style>` 块里（因为 DOM 已被 Teleport 到 `body`）。
 
-### 5.9 调用点清单
+### 5.9 样式与「Teleport 继承」这一坑
+
+| 选择器 | 归属 | 关键声明与理由 |
+| --- | --- | --- |
+| `.hf-sel` | `<style scoped>` | 触发器包装层，`font-size: 13px` 是**字号真源**（与 `.hgen-input` 等表单控件一致） |
+| `.hf-sel-trigger` | `<style scoped>` | `font: inherit`（跟随 `.hf-sel` 的 13px）、`color: var(--color-primary)`、`background: #0A1120`、`1px` 主色半透明描边、`8px` 圆角；`:disabled` 降透明度；`.open` 时描边转实色 + `--glow-*` 级阴影 |
+| `.hf-sel-menu` | **无 `scoped` 的全局 `<style>`** | `position: fixed`、`z-index: 9500`、`overflow-y: auto`、`padding: 6px`、深色底 + 主色描边 + 阴影、入场动画 `hfSelIn`，**外加显式 `font-size: 13px`** |
+| `.hf-sel-group-label` / `.hf-sel-empty` | 同上 | 都是 11px / 12px 的次要文字色（这两处本来就显式写了字号，不受下条影响） |
+| `.hf-sel-opt` | 同上 | `min-height: 32px`、独立成行、`:hover` 主色半透明底、`.on` 渐变高亮 + 主色字 + `font-weight: 600`、`.dis` 降透明度且不可点 |
+
+- **`.hf-sel-menu` 的字号必须显式声明，不能指望继承**（记一条坑）：弹层是 `<Teleport to="body">`，DOM 直接挂到 `body` 下，**继承不到** `.hf-sel` 上的 `font-size: 13px`；而 `assets/main.css` 的 `body` 也没设 `font-size`，于是弹层按浏览器默认的 **16px** 渲染——比触发器（13px）和 `.hgen-input`（13px）都大一圈。这是**既有 bug**（不是某轮新引入的），现象就是用户反馈「下拉的字太大」，且**影响全部 20 个调用点**（语音识别模型、音色模型、渲染档位、`StepBar` 项目切换器等）。修法只能在 `.hf-sel-menu` 上补 `font-size: 13px`。
+- **一般规律**：**Teleport 出去的 DOM 不只是丢 scoped 属性，也丢祖先的继承样式**——字号、颜色、行高、字体族这类靠继承生效的属性，都必须在弹层自己的选择器上重新声明。任何「把排版属性写在 `.hf-sel` 上让弹层跟着继承」的想法都不成立。
+- `HfSelect` 是渲染层**唯一**使用 `Teleport` 的组件（全仓 `*.vue` 核对），因此暂无其它同类漏网点；将来新增第二个 Teleport 弹层时要照这条检查一遍。
+
+### 5.10 调用点清单
 
 组件未做全局注册，每个使用方都显式 `import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'`（部分还引入 `type HfSelectOption`）。全仓 `*.vue` grep 结果：
 
 | 文件 | 使用处（绑定模型） |
 | --- | --- |
 | `components/StepBar.vue` | `selValue`（工作项目切换），1 处 |
-| `pages/SettingsPage/index.vue` | `vModel`（千问语音模型）、`rQuality`（渲染质量）、`rFps`（渲染帧率），3 处 |
+| `pages/SettingsPage/index.vue` | `baseUrl`（自定义模型 Base URL 预设，走 `:model-value` + `@change`）、`modelId`（同上的模型预设）、`vModel`（千问语音模型）、`rQuality`（渲染质量）、`rFps`（渲染帧率），5 处（前两处见 [pages/SettingsPage.md](./pages/SettingsPage.md) §2.2.1） |
 | `pages/HtmlGenPage/index.vue` | `subSel`（字幕逐条设计动画）、`videoSel`（视频素材）、`audioPick`（背景音频）、`quality` / `fps`（渲染档位，带 `:disabled="rendering"`），5 处 |
 | `pages/SubtitlePage/TranscribeSection.vue` | `lang`（识别语言），1 处 |
 | `pages/TextTtsPage/SynthSection.vue` | `voiceId`、`saveTo`（带 `@change`）、`genSelIdx`（带 `empty-text`），3 处 |
 | `pages/TextTtsPage/AlignSection.vue` | `subSrc`（带 `@change`）、`voiceId`，2 处 |
 | `pages/TextTtsPage/VoiceSection.vue` | `vcModel`（带 `@change`）、`mapVoice`（带 `ref`）、`mapModel`，3 处 |
 
-合计 18 个使用处。各调用方的 `groups` 均由 `computed`（或常量）构造为 `{ label, options: [{ value, label }] }`；`TextTtsPage/SynthSection.vue` 与 `AlignSection.vue` 的 `:groups="voiceGroups"` 也一样合规——`helpers.ts` 的 `VoiceOption` 直接以 `value` 为音色键（刻意与 `HfSelectOption` 同名），因此**可以直接透传**、无需中间映射。
+合计 20 个使用处。各调用方的 `groups` 均由 `computed`（或常量）构造为 `{ label, options: [{ value, label }] }`；`TextTtsPage/SynthSection.vue` 与 `AlignSection.vue` 的 `:groups="voiceGroups"` 也一样合规——`helpers.ts` 的 `VoiceOption` 直接以 `value` 为音色键（刻意与 `HfSelectOption` 同名），因此**可以直接透传**、无需中间映射。
 
 ## 6. `LegacyDataDialog.vue`
 
@@ -345,7 +359,7 @@
 | 依赖（Vue） | `computed`、`nextTick`、`onBeforeUnmount`、`ref`、`watch` | 扁平化选项与显示值、打开后定位、成对清理全局监听 |
 | 依赖（浏览器 API） | `Teleport`（Vue 内置）、`getBoundingClientRect`、`scrollIntoView`、`document` / `window` 事件 | 弹层挂到 `body`、fixed 定位测量、键盘高亮滚动、外部点击与滚动跟随 |
 | 依赖（样式） | 组件自带 `<style scoped>` + 不带 `scoped` 的 `<style>` | `.hf-sel*` 全部类；不依赖 `assets/main.css`（其中的 `.hf-select` / `.hgen-select` 已删除） |
-| 被使用 | `components/StepBar.vue`、`pages/SettingsPage/index.vue`、`pages/HtmlGenPage/index.vue`、`pages/SubtitlePage/TranscribeSection.vue`、`pages/TextTtsPage/{SynthSection,AlignSection,VoiceSection}.vue` | 共 18 个下拉实例（见 5.9）；无全局注册，逐个显式 import |
+| 被使用 | `components/StepBar.vue`、`pages/SettingsPage/index.vue`、`pages/HtmlGenPage/index.vue`、`pages/SubtitlePage/TranscribeSection.vue`、`pages/TextTtsPage/{SynthSection,AlignSection,VoiceSection}.vue` | 共 20 个下拉实例（见 5.9）；无全局注册，逐个显式 import |
 | 协作（插入层） | `assets/main.css` 的 `.hf-modal-mask`（`z-index: 9000`） | 菜单 `z-index: 9500` 必须保持高于它，弹窗内的下拉才不会被遮住 |
 
 ### 7.4 `LegacyDataDialog.vue`
@@ -368,7 +382,8 @@
 - **`selValue` 的 setter 仍是 no-op，这不是疏漏**：HfSelect 的 `v-model` 写回会被忽略，显示值始终来自 `appState.currentName`，真正的切换逻辑统一在 `@change="onSelect"` 中处理；任何「改 setter 就能切换」的假设都是错误的，读新值必须走 HfSelect 给出的回调参数（旧文档里的 `event.target.value` 已不适用）。
 - **下拉值即项目名**：`selValue.get` 返回裸 `appState.currentName`，`projectGroups` 的选项 `:value="mp.name"` 也是裸项目名，`onSelect(name)` 收到的就是新选中值 —— 三处一致，不需要任何前缀或字符串偏移；空字符串只可能来自未来的占位选项，`onSelect` 保留了 `if (!name) return` 防御。
 - **HfSelect 的 `@change` 参数是字符串**：签名 `(value: string) => void`，不是 DOM Event；且**只在用户选中不同选项时**触发，程序化改值不触发。`pick()` 在 `o.value === modelValue` 时提前返回、连 `update:modelValue` 都不发。
-- **菜单必须 `Teleport` + `fixed`**：`.card` 与 `.hf-modal` 都有 `overflow: hidden`，菜单留在组件内会被裁掉；`z-index: 9500` 是为了盖住 `.hf-modal-mask`（9000）。改动这两点会同时破坏所有 18 个调用点在卡片/弹窗内的表现。
+- **菜单必须 `Teleport` + `fixed`**：`.card` 与 `.hf-modal` 都有 `overflow: hidden`，菜单留在组件内会被裁掉；`z-index: 9500` 是为了盖住 `.hf-modal-mask`（9000）。改动这两点会同时破坏所有 20 个调用点在卡片/弹窗内的表现。
+- **弹层字号必须自己声明，不能指望继承**：`.hf-sel-menu` 上的 `font-size: 13px` 不能删。弹层是 `<Teleport to="body">`，DOM 直接挂到 `body` 下，**继承不到** `.hf-sel` 上的 `font-size: 13px`；而 `main.css` 的 `body` 也没有设 `font-size`，于是弹层按浏览器默认的 **16px** 渲染——比触发器（13px）和 `.hgen-input`（13px）都大一圈。这是**既有 bug**（不是某轮新引入的），表现为用户反馈「下拉的字太大」。**Teleport 出去的 DOM 不只是丢 scoped 属性，也丢祖先的继承样式**：字号、颜色、行高这类依赖继承的排版属性都必须在 `.hf-sel-menu` 或其子选择器上显式给出。改这一处字号即对**全部 20 个调用点**生效（语音识别模型、音色模型、渲染档位、`StepBar` 项目切换器等）。`HfSelect` 是渲染层**唯一**使用 `Teleport` 的组件（全仓 `*.vue` 核对），暂无其它同类漏网点。
 - **全局监听成对注册**：`document` 的 `mousedown`（capture）与 `window` 的 `scroll`（capture）/ `resize` 在打开时挂、关闭时摘，`onBeforeUnmount` 再兜底摘一次；菜单上的 `@mousedown.prevent` 是为了让 listbox 保住焦点，键盘导航才不会中断。
 - **`activeIndex` 是扁平下标**：`watch(open)` 按「当前值 → 第一个可用项」播种，`move` 循环绕行跳过 `disabled`；分组只影响渲染，不影响键盘顺序。另注意分组 `:key="g.label"` 用的是 label，现有调用方至多一个 `label: ''` 的匿名组，不会撞 key。
 - **切换后重进当前页**：`onSelect` 与 `onCreated` 都以 `goPage(props.page)` 收尾，依赖 `pageNavKey` 的自增来强制页面重挂载，这是「切换 / 新建项目后页面数据不残留」的关键。

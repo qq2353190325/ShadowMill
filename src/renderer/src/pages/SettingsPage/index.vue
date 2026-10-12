@@ -14,15 +14,33 @@
 
     <div class="settings-content">
       <div v-if="activeSection === 'model'" class="card hgen-panel">
-      <div class="panel-title"><span class="dot"></span>自定义模型（OpenAI 兼容）</div>
-      <div class="hgen-tip">配置用于「HTML 生成 / 修改」的自定义模型 Agent。填写 Base URL、模型 ID 与 API Key 并开启后，HTML 生成页即使用该模型工作。API Key 仅保存在本机 userData/settings.json。</div>
+      <div class="panel-title"><span class="dot"></span>自定义模型</div>
+      <div class="hgen-tip">配置「HTML 生成 / 修改」使用的模型服务。只支持 OpenAI 格式的端点，Anthropic 格式暂不支持。Base URL 与模型 ID 可从常见服务商直接选，也可手填自己的服务地址；填好 API Key 并勾选「启用」后，HTML 生成页就用这个模型工作。API Key 只保存在本电脑。</div>
       <div class="hgen-row">
         <label class="sel-label">Base URL</label>
-        <input v-model="baseUrl" class="hgen-input" style="flex:1" placeholder="https://api.openai.com/v1（需以 /v1 结尾，按服务商实际提供）" />
+        <HfSelect
+          v-if="!baseUrlCustom"
+          :model-value="baseUrl"
+          :groups="baseUrlGroups"
+          @change="onBaseUrlPick"
+        />
+        <template v-else>
+          <input v-model="baseUrl" class="hgen-input" style="flex:1" placeholder="https://…/v1（OpenAI 兼容，需含版本段）" />
+          <button class="hf-btn" style="flex:none" @click="baseUrlCustom = false">从列表选</button>
+        </template>
       </div>
       <div class="hgen-row">
         <label class="sel-label">模型 ID</label>
-        <input v-model="modelId" class="hgen-input" style="flex:1" placeholder="如 gpt-4o-mini / deepseek-chat" />
+        <HfSelect
+          v-if="!modelCustom"
+          :model-value="modelId"
+          :groups="modelGroups"
+          @change="onModelPick"
+        />
+        <template v-else>
+          <input v-model="modelId" class="hgen-input" style="flex:1" placeholder="如 deepseek-flash / qwen3.8-max" />
+          <button class="hf-btn" style="flex:none" @click="modelCustom = false">从列表选</button>
+        </template>
       </div>
       <div class="hgen-row">
         <label class="sel-label">API Key</label>
@@ -40,7 +58,7 @@
     </div>
     <div v-if="activeSection === 'voice'" class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>千问语音（音色管理 &amp; 文字生音频）</div>
-      <div class="hgen-tip">配置千问AI平台 API Key 与目标语音合成模型，供「音色管理」和「文字生音频」使用。API Key 仅保存在本机 userData/settings.json。创建音色时的 target_model 必须与合成模型一致。</div>
+      <div class="hgen-tip">配置千问AI平台 API Key 与目标语音合成模型，供「音色管理」和「文字生音频」使用。API Key 只保存在本电脑。创建音色时所选的模型需与这里的合成模型一致。</div>
       <div class="hgen-row">
         <label class="sel-label">API Key</label>
         <input v-model="vApiKey" type="password" class="hgen-input" style="flex:1" placeholder="sk-...（DASHSCOPE_API_KEY）" />
@@ -148,7 +166,7 @@
 // 自定义模型 + 千问语音配置 + 视频渲染默认档位；语音识别模型区块为子组件 WhisperSection（原 window.__settings.initWhisper）。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { RenderFps, RenderQuality, UpdateProgressPayload, UpdateStage } from '@shared/types'
-import { STORAGE_KEY_SETTINGS_SECTION } from '@renderer/constants'
+import { MODEL_PROVIDERS, STORAGE_KEY_SETTINGS_SECTION } from '@renderer/constants'
 import {
   FALLBACK_RENDER,
   RENDER_FPS_OPTIONS,
@@ -167,6 +185,60 @@ const apiKey = ref('');
 const enabled = ref(false);
 const status = ref('');
 const statusClass = ref('');
+
+// Base URL / 模型 ID 的下拉预设（表在 @renderer/constants 的 MODEL_PROVIDERS）。
+// 「自定义」是个哨兵值：选中它只切到手填输入框、**不动当前值**（常见诉求是"在现有地址上改一改"）。
+// 这里刻意用 :model-value + @change 而不是 v-model —— 用 v-model 时哨兵值会先写进 baseUrl，
+// 用户接着点「保存配置」就会把 '__custom__' 存进 settings.json。
+const CUSTOM_VALUE = '__custom__';
+const baseUrlCustom = ref(false);
+const modelCustom = ref(false);
+
+// 当前 baseUrl 命中哪个服务商预设（模型列表跟着它联动）
+const currentProvider = computed(() => MODEL_PROVIDERS.find((p) => p.baseUrls.includes(baseUrl.value)) || null);
+
+const baseUrlGroups = computed<HfSelectGroup[]>(() => {
+  const groups: HfSelectGroup[] = MODEL_PROVIDERS.map((p) => ({
+    label: p.label,
+    // 选项文字就是 URL 本身：Base URL 没有需要额外解释的地方，加了反而是噪音
+    options: p.baseUrls.map((u) => ({ value: u, label: u }))
+  }));
+  // 已保存的地址不在预设里（自建网关 / 中转站）：补一条「当前配置」，否则下拉显示空占位，看着像配置丢了
+  if (baseUrl.value && !MODEL_PROVIDERS.some((p) => p.baseUrls.includes(baseUrl.value))) {
+    groups.push({ label: '当前配置', options: [{ value: baseUrl.value, label: baseUrl.value, title: '你当前保存的值' }] });
+  }
+  groups.push({ label: '', options: [{ value: CUSTOM_VALUE, label: '自定义…（手动填写）' }] });
+  return groups;
+});
+
+// 模型列表跟随 Base URL：命中预设才列出该家的模型；没命中就只给「自定义」——
+// 免得列一堆跟当前端点配不上的名字诱导用户选错（选错就是运行期 404 model not found）
+const modelGroups = computed<HfSelectGroup[]>(() => {
+  const groups: HfSelectGroup[] = [];
+  const p = currentProvider.value;
+  if (p) groups.push({ label: p.label, options: p.models.map((m) => ({ value: m, label: m })) });
+  if (modelId.value && !(p && p.models.includes(modelId.value))) {
+    groups.push({ label: '当前配置', options: [{ value: modelId.value, label: modelId.value, title: '你当前保存的值' }] });
+  }
+  groups.push({ label: '', options: [{ value: CUSTOM_VALUE, label: '自定义…（手动填写）' }] });
+  return groups;
+});
+
+function onBaseUrlPick(v: string): void {
+  if (v === CUSTOM_VALUE) { baseUrlCustom.value = true; return; }
+  baseUrl.value = v;
+  baseUrlCustom.value = false;
+  // 换了服务商：已填的模型名若不属于新家，切到手填态（值保留，便于改名而不是从头输）
+  if (modelId.value && !(currentProvider.value && currentProvider.value.models.includes(modelId.value))) {
+    modelCustom.value = true;
+  }
+}
+
+function onModelPick(v: string): void {
+  if (v === CUSTOM_VALUE) { modelCustom.value = true; return; }
+  modelId.value = v;
+  modelCustom.value = false;
+}
 
 // ===== 设置分类（左侧导航 → 右侧内容）=====
 // 5 类平级：模型配置 / 语音服务 / 渲染档位 / 应用更新 / 语音识别模型。
@@ -521,6 +593,9 @@ onMounted(async () => {
     modelId.value = m.modelId || '';
     apiKey.value = m.apiKey || '';
     enabled.value = !!m.enabled;
+    // 已保存的值不在预设里 ⇒ 默认进手填态。不这么做下拉会显示空占位，用户看到的是"我配的地址/模型没了"
+    baseUrlCustom.value = !!baseUrl.value && !MODEL_PROVIDERS.some((p) => p.baseUrls.includes(baseUrl.value));
+    modelCustom.value = !!modelId.value && !(currentProvider.value && currentProvider.value.models.includes(modelId.value));
   } catch (e) {
     setStatus('读取配置失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : e), 'hf-error');
   }

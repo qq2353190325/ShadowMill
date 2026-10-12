@@ -66,7 +66,7 @@
 | `index.html` | [renderer/index.html.md](./files/renderer/index.html.md) |
 | `src/main.ts` | [renderer/src/main.ts.md](./files/renderer/src/main.ts.md) |
 | `src/env.d.ts` | [renderer/src/env.d.ts.md](./files/renderer/src/env.d.ts.md) |
-| `src/constants.ts`（渲染层公共常量：`localStorage` 键名） | [renderer/src/constants.ts.md](./files/renderer/src/constants.ts.md) |
+| `src/constants.ts`（渲染层公共常量：`localStorage` 键名 + 服务商预设表 `MODEL_PROVIDERS`） | [renderer/src/constants.ts.md](./files/renderer/src/constants.ts.md) |
 | `src/App.vue`（外壳） | [renderer/src/App.vue.md](./files/renderer/src/App.vue.md) |
 | `src/assets/`（设计系统：`main.css`） | [renderer/src/assets.md](./files/renderer/src/assets.md) |
 | `src/components/`（通用组件：`StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue`、`LegacyDataDialog.vue`） | [renderer/src/components.md](./files/renderer/src/components.md) |

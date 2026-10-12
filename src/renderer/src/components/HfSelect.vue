@@ -308,6 +308,10 @@ onBeforeUnmount(() => {
 .hf-sel-menu {
   position: fixed;
   z-index: 9500; /* 高于 .hf-modal-mask(9000)：弹窗里的下拉也要能盖住弹窗 */
+  /* 字号必须在这里显式给：弹层 Teleport 到 <body>，继承不到 .hf-sel 上的 13px，
+     而 body 没设 font-size ⇒ 会按浏览器默认的 16px 渲染，比触发器与 .hgen-input 都大一截。
+     与表单控件保持一致用 13px（设计规范：正文 14px / 说明 12px，表单控件取 13px）。 */
+  font-size: 13px;
   padding: 6px;
   overflow-y: auto;
   background: rgba(11, 18, 32, 0.98);
