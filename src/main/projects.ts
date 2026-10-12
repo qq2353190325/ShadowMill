@@ -39,10 +39,18 @@ import type {
 // 主进程内部与 `projects.Project` / `./projects` 的旧引用都不受影响，但字段只定义一处。
 export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'
 
-const projectsRoot = path.join(app.getPath('userData'), 'projects');
+// 项目根目录：**故意用函数、不用模块级常量**。
+// 原因：ESM 的 import 提升会让本模块在 index.ts 的模块体之前求值。当前 userData 位置只跟随
+// package.json 的 name，模块级快照本来也正确；但只要将来有任何"在模块体里改 userData 位置"的代码
+// （例如重新引入 app.setPath），快照就会静默钉在**当时**的 userData 上，表现为"项目全没了"，
+// 而且极难查。写成函数永远按当前值解析，代价为零，属于纯保险。
+// 写法与 whisper.modelsDir() / runtime.runtimeDir() 保持一致。
+function projectsRoot(): string {
+  return path.join(app.getPath('userData'), 'projects');
+}
 
 function projectDir(name: string): string {
-  return path.join(projectsRoot, String(name || '').replace(/[\\/:*?"<>|]/g, '_'));
+  return path.join(projectsRoot(), String(name || '').replace(/[\\/:*?"<>|]/g, '_'));
 }
 function projectFilePath(name: string, file: string): string {
   return path.join(projectDir(name), file);
@@ -107,9 +115,10 @@ function normalizeContent(raw: unknown): ContentScript {
 
 // 扫描“我的项目”（可读写，供项目选择器使用）
 function scanProjects(): { name: string; title: string; hasSubtitle: boolean; hasHtml: boolean; hasVideo: boolean; subtitleCount: number; updatedAt: string }[] {
-  if (!fs.existsSync(projectsRoot)) return [];
+  const root = projectsRoot();
+  if (!fs.existsSync(root)) return [];
   const list: { name: string; title: string; hasSubtitle: boolean; hasHtml: boolean; hasVideo: boolean; subtitleCount: number; updatedAt: string }[] = [];
-  for (const d of fs.readdirSync(projectsRoot, { withFileTypes: true })) {
+  for (const d of fs.readdirSync(root, { withFileTypes: true })) {
     if (!d.isDirectory()) continue;
     const p = readProject(d.name);
     if (!p) continue;
@@ -592,7 +601,7 @@ function register(ctx?: RegisterCtx): void {
   // 删除“我的项目”（慎重：仅限 userData 下的项目目录）
   ipcMain.handle(IPC.Project.Delete, (_event, name?: string) => {
     const dir = projectDir(String(name || ''));
-    if (!name || !dir.startsWith(projectsRoot)) return { ok: false, message: '非法项目名' };
+    if (!name || !dir.startsWith(projectsRoot())) return { ok: false, message: '非法项目名' };
     if (fs.existsSync(dir)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }

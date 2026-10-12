@@ -1,5 +1,5 @@
 // src/shared/ipc.ts —— IPC 频道名常量（main / preload / 渲染层三端共享）
-// 频道名与现行实现逐一对应，禁止改动（preload 8 命名空间与渲染层调用依赖它们）。
+// 频道名与现行实现逐一对应，禁止改动（preload 11 命名空间与渲染层调用依赖它们）。
 
 export const IPC = {
   // 窗口控制（renderer → main，send）+ 最大化状态回推（main → renderer）
@@ -110,6 +110,12 @@ export const IPC = {
     Status: 'runtime:status',
     Prepare: 'runtime:prepare',
     Progress: 'runtime:progress'
+  },
+  // 历史数据目录（index.js）：品牌/目录改名后，老目录里可能留着用户的全部数据（项目、模型、配置）。
+  // 主进程负责扫描与执行；渲染层挂载时问一次 Status，用户在选择弹窗里做完决定回传 Resolve。
+  Legacy: {
+    Status: 'legacy:status',
+    Resolve: 'legacy:resolve'
   }
 } as const
 

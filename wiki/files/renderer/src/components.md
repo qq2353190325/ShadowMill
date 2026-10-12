@@ -1,14 +1,15 @@
 # src/renderer/src/components/（通用组件）
 
-> 目录级一篇：链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue`
+> 目录级一篇：链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + 旧数据处置弹窗 `LegacyDataDialog.vue`
 
-- **覆盖文件**：`components/` 目录（链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue`；文件行数随迭代变化，不写死）
+- **覆盖文件**：`components/` 目录（链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + 旧版本数据弹窗 `LegacyDataDialog.vue`；文件行数随迭代变化，不写死）
 - **所在目录**：`src/renderer/src/components/`
-- **类型**：通用组件（单文件组件，`<script setup lang="ts">`）。`StepBar.vue` / `NewProjectDialog.vue` **都没有 `<style>` 块**，样式来自全局 `assets/main.css`；`HfSelect.vue` **自带两个 `<style>` 块**（触发器用 `<style scoped>`、Teleport 弹层用不带 `scoped` 的 `<style>`），下拉的全部视觉不依赖 `main.css`。
+- **类型**：通用组件（单文件组件，`<script setup lang="ts">`）。`StepBar.vue` / `NewProjectDialog.vue` **都没有 `<style>` 块**，样式来自全局 `assets/main.css`；`HfSelect.vue` **自带两个 `<style>` 块**（触发器用 `<style scoped>`、Teleport 弹层用不带 `scoped` 的 `<style>`），下拉的全部视觉不依赖 `main.css`；`LegacyDataDialog.vue` **自带一段 `<style scoped>`**（只放它私有的 `.path-line` / `.opt-list` / `.danger-text` 与危险按钮的描边重写，其余视觉复用 `main.css` 的 `.hf-modal*`）。
 - **对外导出**：
   - `StepBar`：默认导出组件；**props**：`page: PageKey`（必填）；**emits**：无（自身直接调用 `goPage` / `switchProject`）
   - `NewProjectDialog`：默认导出组件；**props**：`{ visible: boolean }`；**emits**：`update:visible(value: boolean)`、`created(name: string)`
   - `HfSelect`：默认导出组件；**props**：`modelValue: string`（必填，配 `v-model`）、`groups: HfSelectGroup[]`（必填）、`placeholder?: string`（默认 `'请选择…'`）、`emptyText?: string`（默认 `'（暂无可选项）'`）、`disabled?: boolean`（默认 `false`）、`title?: string`（默认 `''`）、`style?: string | Record<string, string>`（默认 `'flex:1'`）；**emits**：`update:modelValue(value: string)`、`change(value: string)`；**导出类型**：`HfSelectOption`（`value: string`、`label: string`、`disabled?: boolean`、`title?: string`）、`HfSelectGroup`（`label: string`、`options: HfSelectOption[]`）
+  - `LegacyDataDialog`：默认导出组件；**props**：无；**emits**：无（显隐与动作全部来自 `useLegacyData()` 单例）
 
 ## 1. 作用与职责
 
@@ -28,6 +29,12 @@
 ### 1.3 `HfSelect.vue` —— 全局自定义下拉
 
 替代原生 `<select>` 的通用下拉组件：`button` 触发器 + **Teleport 到 `body` 的 fixed 定位弹层**，用 `v-model` 读写值、用 `groups` 喂分组选项。之所以自绘，是因为原生 `<option>` 弹层由系统/浏览器绘制，行高、间距、圆角、配色与选中勾都无法用 CSS 控制，深色科技主题下会出现「选项挤在一起、选中态看不出」且改不动的问题（源码注释即写明这一点）。它对原生 `<select>` 的关键语义做了对齐：`v-model`、`disabled`、`title`、空值占位、`optgroup` 分组、`@change` **只在用户选择时触发**（程序化改值不触发，等价于原生 `v-model` 赋值不发 `change`）。
+
+### 1.4 `LegacyDataDialog.vue` —— 「发现旧版本数据」弹窗（应用内）
+
+品牌 / 目录改名后，老用户的数据可能还留在旧目录（如 `%APPDATA%\my-app`）。主进程扫到**确有应用数据**的老目录后不弹任何界面，只把结论放进 `legacy:status`；本组件在首屏渲染完之后问一次「迁移过来 / 删除旧数据 / 稍后再说」，用户的选择经 `legacy:resolve` 回传执行。
+
+它替代了早先主进程侧的原生 `dialog.showMessageBox` 三按钮对话框：原生框的按钮排布、字体与配色都跟不上 Cyber UI 设计系统（规范见 `src/renderer/agents.md`），而项目已有 `.hf-modal` 弹窗体系可复用，样式、文案与交互都能和「新建项目」等既有弹窗保持一致。**契约极简：无 props、无 emits**，显隐与文案全部来自 `useLegacyData()` 的模块级单例（见 [common.md](./common.md) §5）。
 
 ## 2. `StepBar.vue`
 
@@ -264,9 +271,49 @@
 
 合计 18 个使用处。各调用方的 `groups` 均由 `computed`（或常量）构造为 `{ label, options: [{ value, label }] }`；`TextTtsPage/SynthSection.vue` 与 `AlignSection.vue` 的 `:groups="voiceGroups"` 也一样合规——`helpers.ts` 的 `VoiceOption` 直接以 `value` 为音色键（刻意与 `HfSelectOption` 同名），因此**可以直接透传**、无需中间映射。
 
-## 6. 依赖与协作
+## 6. `LegacyDataDialog.vue`
 
-### 6.1 `StepBar.vue`
+### 6.1 模板结构
+
+| 区块 | 关键标记 | 说明 |
+| --- | --- | --- |
+| 遮罩 | `.hf-modal-mask`（`v-show="visible"`、`@click.self="later"`） | 点遮罩 = 不处理；组件常驻、靠 `v-show` 显隐（与 `NewProjectDialog` 同思路，不重建实例） |
+| 弹窗 | `.hf-modal`（行内 `style="width:min(560px,92vw)"`） | 常规宽度 560px，窄屏退到 92vw |
+| 头部 | `.hf-modal-head` / `.hf-modal-title`「发现旧版本数据」/ `.hf-modal-close`（`title="稍后再说"`） | `×` 与「稍后再说」等价；`:disabled="busy"` |
+| 正文·路径 | `.panel-title-sm`「旧数据目录」+ `.path-line`（`info ? info.dir : ''`）+ `.hgen-tip`「其中包含：{{ entryText \|\| '—' }}」 | 路径单独成块用等宽字体展示（见 6.3 样式） |
+| 正文·选项说明 | `.panel-title-sm`「要怎么处理？」+ `ul.opt-list` | 三条说明：**迁移过来**（移动到当前数据目录，两边都有的文件保留当前这一份、**不会覆盖**）、**删除旧数据**（永久删除整个旧目录，`.danger-text` 标「不可恢复」）、**稍后再说**（本次不处理，下次启动会再问一次） |
+| 底部按钮 | `.hf-modal-foot`：`.hf-btn`「稍后再说」/ `.hf-btn.danger`「删除旧数据」/ `.hf-btn.hf-btn-primary`「迁移过来」 | 三枚按钮全部 `:disabled="busy"`；主按钮文案在 `busy` 时切为「处理中…」 |
+
+### 6.2 脚本成员
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `info` / `visible` / `busy` / `entryText` / `resolve` | `useLegacyData()` 解构 | 状态与动作的唯一来源，语义见 [common.md](./common.md) §5 |
+| `later()` | `async (): Promise<void>` | `busy` 时直接返回；否则 `await resolve('later')`——点遮罩 / `×` / 「稍后再说」三个出口共用同一函数 |
+| `doMigrate()` | `async (): Promise<void>` | `resolve('migrate')` → 无返回（主进程无响应）则 `toast('迁移失败：主进程无响应')` 并结束；否则**成败都**先 `await refreshProject()`（部分成功也可能已经带过来一些项目）→ `r.ok` 时 `toast('已迁移 N 项' + （有 skipped 时追加「，保留当前目录里已有的 N 项」）`，否则 `toast(r.message \|\| '迁移未完成，旧目录已保留')` |
+| `doDelete()` | `async (): Promise<void>` | `resolve('delete')` → 失败 `toast((r && r.message) \|\| '删除失败')`，成功 `toast('旧数据目录已删除')` |
+
+### 6.3 样式（`<style scoped>`，本组件唯一一段）
+
+| 类 | 说明 |
+| --- | --- |
+| `.path-line` | 旧目录绝对路径：`"JetBrains Mono", Consolas, monospace`、12px、`--color-primary` 文字、`word-break: break-all`（长路径强制换行）、`--radius-btn` 圆角、`rgba(0,212,255,.08)` 底 + `1px solid rgba(0,212,255,.25)` 描边 |
+| `.opt-list` / `.opt-list b` | 三条说明列表：13px、行高 1.9、`--text-primary`；`b` 用 `--color-primary` + 字重 600 |
+| `.danger-text` | 行内警示文字，取 `--color-danger` |
+| `.hf-btn.danger` | **危险动作复用次要按钮骨架，只换前景与描边**：`color: var(--color-danger)` + `border-color: rgba(255,77,109,.55)` |
+| `.hf-btn.danger:hover:not(:disabled)` | 必须**重写** hover（基础 `.hf-btn:hover:not(:disabled)` 特异性更高，不重写就会被那层半透明主色填充顶掉）：`background: rgba(255,77,109,.16)` + `box-shadow: 0 0 8px rgba(255,77,109,.45)` |
+
+### 6.4 交互约定与取舍
+
+- **点遮罩 / `×` / 「稍后再说」三者等价**：都走 `resolve('later')`，什么都不动；主进程只写一行 `startup.log`，下次启动重新扫描后**会再问一次**（问题没解决就不该被静默遗忘）。
+- **迁移与删除都先收起弹窗**：`useLegacyData().resolve()` 在成功与失败两条路径上都先 `visible = false`，结果交给 toast——用户不必盯着一个可能卡住的框。
+- **迁移后立刻刷新项目列表**：`doMigrate()` 无论成败都 `await refreshProject()`，让「首页 / StepBar」马上看到新项目，不用重开应用。
+- **删除前主进程还有一道校验**：界面负责把「不可恢复」讲清楚，真正的放行在主进程（只允许删 `%APPDATA%` 下、名字在 `LEGACY_DIR_NAMES` 内的目录，见 [main/index.ts.md](../../main/index.ts.md) §3.1⑤）——渲染层只回传 `'delete'` 这个动作，不自己判断路径。
+- **为什么不做成原生对话框**：见 §1.4；**为什么主进程没有 1.5s 延迟**：显示时机由渲染层掌握，外壳挂载时首屏已渲染完，主进程侧不需要「等首屏」的魔法数字。
+
+## 7. 依赖与协作
+
+### 7.1 `StepBar.vue`
 
 | 方向 | 对象 | 用途 |
 | --- | --- | --- |
@@ -280,7 +327,7 @@
 | 被使用 | 各页面组件（内容脚本 / 配音 / 字幕 / HTML / 视频预览） | 页面模板顶部 `<StepBar :page="..."/>` |
 | 间接协作 | `src/renderer/src/App.vue` | 菜单跳转改变 `currentPage`，页面重挂载后由新页面重新传入 `page` prop，从而更新高亮 |
 
-### 6.2 `NewProjectDialog.vue`
+### 7.2 `NewProjectDialog.vue`
 
 | 方向 | 对象 | 用途 |
 | --- | --- | --- |
@@ -291,7 +338,7 @@
 | 依赖（样式） | `assets/main.css` | `.hf-modal-mask` / `.hf-modal` / `.hf-modal-head` / `.hf-modal-title` / `.hf-modal-close` / `.hf-modal-body` / `.hf-modal-foot`、`.hgen-input` / `.hgen-tip` / `.hf-btn` / `.hf-btn-primary`、`.panel-title-sm` |
 | 被使用 | `components/StepBar.vue` | `v-model:visible` + `@created`；目前是唯一使用方（首页不再有新建入口） |
 
-### 6.3 `HfSelect.vue`
+### 7.3 `HfSelect.vue`
 
 | 方向 | 对象 | 用途 |
 | --- | --- | --- |
@@ -301,9 +348,21 @@
 | 被使用 | `components/StepBar.vue`、`pages/SettingsPage/index.vue`、`pages/HtmlGenPage/index.vue`、`pages/SubtitlePage/TranscribeSection.vue`、`pages/TextTtsPage/{SynthSection,AlignSection,VoiceSection}.vue` | 共 18 个下拉实例（见 5.9）；无全局注册，逐个显式 import |
 | 协作（插入层） | `assets/main.css` 的 `.hf-modal-mask`（`z-index: 9000`） | 菜单 `z-index: 9500` 必须保持高于它，弹窗内的下拉才不会被遮住 |
 
-## 7. 注意事项与实现要点
+### 7.4 `LegacyDataDialog.vue`
 
-- **三个组件里只有 `HfSelect` 有 `<style>` 块**：`StepBar.vue` / `NewProjectDialog.vue` 的视觉全部通过全局 `main.css` 类 + 模板行内 `style` 实现，在它们内新增 class 时必须同步在 `main.css` 里补样式；`HfSelect.vue` 则相反——它的 `.hf-sel*` 样式全在组件内部，**且弹层那段故意不带 `scoped`**（Teleport 到 `body` 的 DOM 收不到 scoped 属性），改样式时要认准这两段。
+| 方向 | 对象 | 用途 |
+| --- | --- | --- |
+| 依赖 | `@renderer/composables/useLegacyData` | `useLegacyData()`：`info` / `visible` / `busy` / `entryText` / `resolve` |
+| 依赖 | `@renderer/composables/useAppStore` | `refreshProject()`（迁移后刷新项目列表，成败都调） |
+| 依赖 | `@renderer/composables/useToast` | `toast(msg)` 报告迁移 / 删除结果与失败原因 |
+| 依赖（preload 桥，间接） | `window.legacyTools.status` / `window.legacyTools.resolve` | 频道 `legacy:status` / `legacy:resolve`；本组件不直接调用，全经 `useLegacyData` |
+| 依赖（样式） | `assets/main.css` | `.hf-modal-mask` / `.hf-modal` / `.hf-modal-head` / `.hf-modal-title` / `.hf-modal-close` / `.hf-modal-body` / `.hf-modal-foot`、`.panel-title-sm`、`.hgen-tip`、`.hf-btn` / `.hf-btn-primary`；组件自身的 `scoped` 样式只补 `.path-line` / `.opt-list` / `.danger-text` / `.hf-btn.danger` |
+| 被使用 | `src/renderer/src/App.vue` | 外壳模板里挂一次 `<LegacyDataDialog />`（位于 `.layout` 之后、Toast 宿主之前），不传任何 prop |
+| 依赖（Vue） | 无 | 组件不 import 任何 Vue API（无 `ref` / `computed` / 生命周期），状态全在 composable 单例里 |
+
+## 8. 注意事项与实现要点
+
+- **四个组件里只有 `HfSelect` 与 `LegacyDataDialog` 有 `<style>` 块**：`StepBar.vue` / `NewProjectDialog.vue` 的视觉全部通过全局 `main.css` 类 + 模板行内 `style` 实现，在它们内新增 class 时必须同步在 `main.css` 里补样式；`HfSelect.vue` 的 `.hf-sel*` 样式全在组件内部，**且弹层那段故意不带 `scoped`**（Teleport 到 `body` 的 DOM 收不到 scoped 属性）；`LegacyDataDialog.vue` 只有一段 `<style scoped>`，放的是它私有的 `.path-line` / `.opt-list` / `.danger-text` 与 `.hf-btn.danger` 覆盖，其余全走 `main.css`。
 - **`.hf-select` / `.hgen-select` 已从 `main.css` 移除**：任何「给下拉改样式要动 `main.css`」的旧结论都已失效，下拉（触发器 + 弹层）的视觉只归 `HfSelect` 管；`StepBar` 也只剩 `style="width:210px;flex:none"` 这样的布局行内样式。
 - **`done` 与 `active-now` 由 store 判定，不在此组件内计算**：`hasHtml` 要求 `htmlExists && htmlPath` 同时成立，其余几个也都只看当前项目自身的产物字段。
 - **`selValue` 的 setter 仍是 no-op，这不是疏漏**：HfSelect 的 `v-model` 写回会被忽略，显示值始终来自 `appState.currentName`，真正的切换逻辑统一在 `@change="onSelect"` 中处理；任何「改 setter 就能切换」的假设都是错误的，读新值必须走 HfSelect 给出的回调参数（旧文档里的 `event.target.value` 已不适用）。
@@ -322,3 +381,7 @@
 - **依赖分界遵循 `agents.md` 规则 6**：依赖的 `useAppStore` / `useToast` 属于 `composables/`（有状态、含 localStorage 与 Vue 响应式），因此放在 composables 而非 utils；`HfSelect` 自身不引入任何 composable / 工具函数，只用 Vue 与浏览器 API。
 - **HfSelect 的选项契约只认 `value`**：`current` / `displayText` / `pick` / `activeIndex` 播种全部按 `o.value === modelValue` 判定，选项对象里其它键一律不参与取值与回传。**调用方必须提供 `value`**：写成 `voiceId` 之类的别名会让所有选项 `value === undefined`（触发器恒显示 `placeholder`、无选中高亮，点选回传 `undefined`）。现有调用方都满足该契约——`TextTtsPage` 的 `VoiceOption` 就直接用 `value` 作音色键，所以 `:groups="voiceGroups"` 可以原样透传。
 - **HfSelect 未全局注册**：它只是 `components/` 下的普通共享组件，每个使用方都要显式 import（含 `HfSelectGroup` 类型）；新增下拉时照抄现有调用点的 `computed<HfSelectGroup[]>` 写法即可。
+- **旧数据弹窗刻意不走 props / emits**：`LegacyDataDialog.vue` 无 props、无 emits，`visible` / `busy` / `info` 都是 `useLegacyData.ts` 的模块级 ref——因为「要不要弹」由主进程的扫描结论决定、不来自任何父组件。想改显隐语义（例如加「本次不再提示」）要改 composable，而不是在 `App.vue` 里加 `v-if` 或给组件加 prop。
+- **危险按钮的样式必须自己重写 hover**：`.hf-btn.danger:hover:not(:disabled)` 若省略，基础 `.hf-btn:hover:not(:disabled)`（特异性更高）会把半透明主色填充盖上来，删除按钮 hover 时反而变青绿色；这与设计规范里「主按钮 hover 必须重写 `background`」是同一条规律。
+- **旧数据弹窗的「不可恢复」是有主进程兜底的**：界面只回传 `'migrate' \| 'delete' \| 'later'` 三种动作，路径校验、缓存清理与重试语义都在 `src/main/index.ts`（非法 action 一律当 `later`），因此**不要在渲染层拼路径或做删除判断**。
+- **旧数据弹窗的文案改写点有两处**：目录 / 文件名 → 中文的映射在 `useLegacyData.ts` 的 `ENTRY_LABEL`（主进程白名单新增条目时要同步补），三条动作说明与按钮文字在 `LegacyDataDialog.vue` 模板里。

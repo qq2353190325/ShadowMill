@@ -14,7 +14,7 @@
 它不参与打包、不在产物中出现，但其声明决定了整个渲染层的开发体验：
 
 1. 让 `src/renderer/src/**` 中的 `window.electronAPI`、`window.projectTools` 等调用通过编译期检查，并在 VS Code 中获得自动补全与参数提示。
-2. 通过 `interface Window extends PreloadApi {}` 把 `PreloadApi` 声明的**全部命名空间**（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / `updateTools`，共 9 个）一次性并入全局 `Window`，成员签名直接来自共享层的 ⑨ 节（成员数随契约演进，不在本文件写死）。
+2. 通过 `interface Window extends PreloadApi {}` 把 `PreloadApi` 声明的**全部命名空间**（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / `updateTools` / `runtimeTools` / `legacyTools`，共 11 个）一次性并入全局 `Window`，成员签名直接来自共享层的 ⑨ 节（成员数随契约演进，不在本文件写死）。
 3. 与 `src/preload/index.ts` 共用**同一份契约**：preload 实现侧用 `PreloadApi['<命名空间>']` 标注各 `contextBridge` 对象，本文件把同一契约交给渲染层，因此「实现」与「渲染层看到的签名」不会再各自漂移。
 
 ## 2. 导出与关键实现
@@ -33,11 +33,11 @@
 | 维度 | 旧形态 | 现形态 |
 | --- | --- | --- |
 | `OkResult<T>` / `FailResult` / `IpcResult<T>` | 在本文件内部定义（未导出，110 行版的主体） | 上移到 `src/shared/types.ts` ① 节，即 `IpcFail` / `IpcResult<T>` |
-| 8 个命名空间的方法签名 | 在本文件 `declare global` 里逐条手写 | 汇总成 `src/shared/types.ts` ⑨ 节的 `PreloadApi`，本文件只做 `extends` |
+| 各命名空间的方法签名 | 在本文件 `declare global` 里逐条手写 | 汇总成 `src/shared/types.ts` ⑨ 节的 `PreloadApi`，本文件只做 `extends` |
 | 与 preload 实现的关系 | 「实现 + 声明」两份契约，需人工保持逐字一致 | 同一份契约：preload 实现标注 `PreloadApi['x']`，本文件把 `PreloadApi` 挂给渲染层 |
 | 成功载荷的字段访问 | `OkResult` 带 `[key: string]: any` 索引签名，拼错字段名不报错 | 成功分支是 `{ ok: true } & T` 交叉类型，字段名有精确类型（索引签名已取消） |
 
-### 2.2 `declare global` 内 Window 的 9 个命名空间
+### 2.2 `declare global` 内 Window 的 11 个命名空间
 
 各命名空间的成员一览（成员数以第三列为准，签名详见 [`shared/types.ts.md`](../shared/types.ts.md) 第 2.9 节）：
 
@@ -51,6 +51,9 @@
 | `voiceTools` | 18 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` |
 | `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` |
+| `updateTools` | 7 | `version`、`check`、`download`、`cancel`、`install`、`openLog`、`onProgress` |
+| `runtimeTools` | 3 | `status`、`prepare`、`onProgress` |
+| `legacyTools` | 2 | `status`、`resolve`（**无 `on*` 订阅**：旧数据是否存在由渲染层主动拉取，主进程不推送） |
 
 ### 2.3 结果类型约定（定义在 `src/shared/types.ts` ① 节）
 
@@ -107,7 +110,7 @@ tsconfig.web.json ── include: ["src/renderer/src/**/*.ts", "src/renderer/src
 | 被引用 | `tsconfig.web.json` | `include` 第 21 行显式引入，使声明进入渲染层编译上下文 |
 | 被校验 | `npm run typecheck` | `tsc --noEmit -p tsconfig.web.json` 会同时校验渲染层调用与本文声明 |
 | 契约来源 | `src/shared/types.ts` ⑨ 节 | `PreloadApi` 是唯一真源；本文件只转发 |
-| 契约对端 | `src/preload/index.ts` | 8 个命名空间、方法名、参数顺序、返回结构由同一份 `PreloadApi` 约束 |
+| 契约对端 | `src/preload/index.ts` | 11 个命名空间、方法名、参数顺序、返回结构由同一份 `PreloadApi` 约束 |
 | 契约下游 | `src/renderer/src/**` | `pages/`、`composables/`、`App.vue` 等全部 `window.*` 调用 |
 
 ## 5. 注意事项与实现要点

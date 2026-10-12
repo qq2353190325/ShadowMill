@@ -262,11 +262,37 @@ function register(ctx?: RegisterCtx): void {
   });
 }
 
+// 判断指定的 settings.json 是否还是「出厂状态」（用户在这个位置什么都没配过）。
+// 用途：index.ts 迁移老数据（migrateFrom）时，只有在**新位置还没被配置过**的情况下才用老配置覆盖 settings.json，
+// 否则会把用户在新位置刚配好的东西冲掉。
+// 只把「用户投入过的字段」算作动过：API Key / Base URL / Model ID / 自定义音色表 / 识别模型档位 /
+// 保存目录 / 更新源地址。像 updater.autoCheck、render.quality 这种**开关故意不阻断覆盖**——
+// 丢一个开关是两次点击能补回来的，而丢 API Key 要用户去控制台重新翻出来。
+function isPristineSettings(file: string): boolean {
+  let raw: any;
+  try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return true; } // 不存在 / 损坏 ⇒ 视为出厂
+  if (!raw || typeof raw !== 'object') return true;
+  const s = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const cm = (raw.customModel || {}) as Record<string, unknown>;
+  const vt = (raw.voiceTTS || {}) as Record<string, unknown>;
+  const wp = (raw.whisper || {}) as Record<string, unknown>;
+  const up = (raw.updater || {}) as Record<string, unknown>;
+  const profiles = (raw.voiceProfiles || {}) as Record<string, unknown>;
+  const touched =
+    !!s(cm.apiKey) || !!s(cm.baseUrl) || !!s(cm.modelId) || cm.enabled === true ||
+    !!s(vt.apiKey) || !!s(vt.saveDir) ||
+    !!s(wp.modelId) || (Array.isArray(wp.customModels) && wp.customModels.length > 0) ||
+    !!s(up.feedUrl) ||
+    Object.keys(profiles).length > 0;
+  return !touched;
+}
+
 export {
   register,
   readSettings,
   writeSettings,
   loadOpenAI,
+  isPristineSettings,
   DEFAULT_RENDER,
   normalizeRenderOptions,
   pickRenderOverride,

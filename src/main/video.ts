@@ -71,9 +71,11 @@ function register(ctx?: RegisterCtx): void {
         resolve({ ok: false, message: '未找到 hyperframes CLI（hyperframes.mjs）。可设置环境变量 HYPERFRAMES_CLI 指向其路径。' });
         return;
       }
-      const nodeCmd = hfEnv.findNode();
-      if (!nodeCmd) {
-        resolve({ ok: false, message: '未找到系统 Node.js（HyperFrames 要求 >= 22）' });
+      // 返回 { cmd, env }：优先复用 Electron 内嵌 Node，此时 env 里带 ELECTRON_RUN_AS_NODE=1。
+      // 这个 env **必须**合进下面 spawn 的环境，否则 electron.exe 会把自己当应用来启动（详见 hfEnv.findNode()）。
+      const nodeRt = hfEnv.findNode();
+      if (!nodeRt) {
+        resolve({ ok: false, message: '未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 随包 / 系统三种途径均不可用）' });
         return;
       }
 
@@ -108,7 +110,7 @@ function register(ctx?: RegisterCtx): void {
 
       const outMp4 = path.join(projDir, 'output.mp4');
 
-      const env: Record<string, string | undefined> = { ...process.env };
+      const env: Record<string, string | undefined> = { ...process.env, ...nodeRt.env };
       const ffBin = hfEnv.findFfmpegBin();
       if (ffBin) env.PATH = ffBin + path.delimiter + (env.PATH || '');
       // 内置 ffmpeg/ffprobe 路径显式注入，避免依赖系统 PATH（HYPERFRAMES_* 为可选）
@@ -125,7 +127,7 @@ function register(ctx?: RegisterCtx): void {
       if (renderOpts.quality) renderArgs.push('--quality', renderOpts.quality);
       if (renderOpts.fps) renderArgs.push('--fps', String(renderOpts.fps));
 
-      const child = spawn(nodeCmd, renderArgs, {
+      const child = spawn(nodeRt.cmd, renderArgs, {
         cwd: projDir,
         env
       });
@@ -145,7 +147,7 @@ function register(ctx?: RegisterCtx): void {
         const text = d.toString();
         event.sender.send(IPC.Video.Progress, { text });
       });
-      child.on('error', (err) => done({ ok: false, message: '启动渲染失败：' + err.message + '（node: ' + (nodeCmd || 'null') + '）' }));
+      child.on('error', (err) => done({ ok: false, message: '启动渲染失败：' + err.message + '（node: ' + (nodeRt.cmd || 'null') + '）' }));
       child.on('close', (code) => {
         if (code === 0 && fs.existsSync(outMp4)) {
           done({ ok: true, outputVideo: outMp4, projectDir: projDir });

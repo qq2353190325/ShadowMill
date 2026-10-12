@@ -60,6 +60,9 @@
     </main>
   </div>
 
+  <!-- 历史数据目录（品牌/目录改名留下的老数据）：有就由这个应用内弹窗问「迁移 / 删除 / 稍后」 -->
+  <LegacyDataDialog />
+
   <!-- 轻提示（原 window.App.toast 的固定定位 div） -->
   <TransitionGroup tag="div" name="toast" class="toast-host">
     <div v-for="t in toasts" :key="t.id" class="toast-item">{{ t.msg }}</div>
@@ -78,6 +81,8 @@ import { useToasts } from './composables/useToast'
 import { initRenderProgress } from './composables/useRenderProgress'
 import { loadRenderDefaults } from './composables/useRenderOptions'
 import { initRuntime, useRuntime } from './composables/useRuntime'
+import { initLegacyData } from './composables/useLegacyData'
+import LegacyDataDialog from './components/LegacyDataDialog.vue'
 
 const toasts = useToasts();
 const contentEl = ref<HTMLElement | null>(null);
@@ -125,6 +130,7 @@ onMounted(() => {
   window.windowControls.onMaximizedChange((v: boolean) => { isMaximized.value = v; });
   initRenderProgress();
   initRuntime();
+  initLegacyData();
   void initApp();
 });
 </script>

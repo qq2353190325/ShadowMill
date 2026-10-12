@@ -1,12 +1,12 @@
 // scripts/pack-runtime.mjs —— 把 resources/ 打成「运行环境包」（runtime.7z + runtime.json）
 //
-// 背景（为什么需要这个包）：ffmpeg(180MB) / node.exe(83MB) / hyperframes(440MB, 4800+ 文件) / whisper(12.5MB)
-// 合计约 716MB，占安装体积 72%，但**跨版本几乎不变**。NSIS 的更新是「整体卸载旧版 → 解压复制新包」，
+// 背景（为什么需要这个包）：ffmpeg(180MB) / hyperframes(440MB, 4900+ 文件) / whisper(12.5MB)
+// 合计约 632MB（node.exe 已不随包，见下方 EXCLUDE_TOP），是安装体积的大头，但**跨版本几乎不变**。NSIS 的更新是「整体卸载旧版 → 解压复制新包」，
 // 这些文件每次更新都要重新解压+复制一遍（实测一次更新 97 秒，期间应用不存在、快捷方式失效）。
 // 把 resources/ 换成一个 7z 包后：
 //   ① 安装目录里的文件数从 ~4900 降到 1 个（安装期的解压/复制开销大幅下降）；
 //   ② 应用首次启动时把包解到 userData/runtime/<id>/（有进度可展示），
-//      之后更新只要包内容没变就**完全不动**这 716MB。
+//      之后更新只要包内容没变就**完全不动**这 632MB。
 //
 // 产物（都在 build/ 下，不进 git）：
 //   build/runtime-pack/runtime.7z    运行环境包本体
@@ -32,6 +32,13 @@ const TOOLS_DIR = path.join(ROOT, 'build', 'tools')
 const PACK_FILE = path.join(OUT_DIR, 'runtime.7z')
 const MANIFEST_FILE = path.join(OUT_DIR, 'runtime.json')
 const FORCE = process.argv.includes('--force')
+
+// 不打进运行环境包的顶层条目。
+// node：hyperframes 现在复用 Electron 内嵌的 Node（src/main/hfEnv.ts 的 findNode() 用
+//   ELECTRON_RUN_AS_NODE 跑 process.execPath），这份 83MB 已实测为纯冗余（成片与用 node 22 逐项相同）。
+//   ⚠ 要回退成「随包 node.exe」：把 'node' 从这里删掉即可，findNode() 会自动回落到它的 ② 分支
+//   （<资源根>/node/node.exe）——注意 resources/node 目录本身要留着，否则回落也无处可去。
+const EXCLUDE_TOP = ['node']
 
 function log(msg) { process.stdout.write('[runtime-pack] ' + msg + '\n') }
 function fail(msg) { process.stderr.write('[runtime-pack] ' + msg + '\n'); process.exit(1) }
@@ -92,6 +99,7 @@ function scanSource() {
   while (stack.length) {
     const cur = stack.pop()
     for (const e of fs.readdirSync(cur, { withFileTypes: true })) {
+      if (cur === SRC_DIR && EXCLUDE_TOP.includes(e.name)) continue
       const full = path.join(cur, e.name)
       if (e.isDirectory()) { stack.push(full); continue }
       if (!e.isFile()) continue
@@ -123,7 +131,9 @@ function buildPack(sevenZip) {
   }
 
   // 顶层条目显式列出（不用 "*"：spawn 不经 shell，通配符展开交给 7z 反而不确定）
-  const entries = fs.readdirSync(SRC_DIR).filter((n) => fs.existsSync(path.join(SRC_DIR, n)))
+  const entries = fs.readdirSync(SRC_DIR)
+    .filter((n) => !EXCLUDE_TOP.includes(n))
+    .filter((n) => fs.existsSync(path.join(SRC_DIR, n)))
   if (!entries.length) fail('resources/ 是空的，没有可打包的内容')
   try { fs.rmSync(PACK_FILE, { force: true }) } catch (e) { /* ignore */ }
 

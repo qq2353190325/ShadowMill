@@ -1,6 +1,6 @@
 # 03 · 目录架构：`src/preload/`（桥接层）
 
-> 预加载脚本是渲染层通往系统的**唯一门面**：它把 76 个 IPC 频道收敛成 9 个命名空间的方法，并用「单订阅」语义转发 5 路进度推送。渲染层永远不直接接触 `ipcRenderer`。
+> 预加载脚本是渲染层通往系统的**唯一门面**：它把 81 个 IPC 频道收敛成 11 个命名空间的方法，并用「单订阅」语义转发 6 路进度推送。渲染层永远不直接接触 `ipcRenderer`。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 文件 | 行数 | 角色 | 是否进运行时 |
 |---|---|---|---|
-| [index.ts](./files/preload/index.ts.md) | 193 | `contextBridge` 暴露 9 个命名空间 + 5 路进度通道的单订阅转发；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
+| [index.ts](./files/preload/index.ts.md) | 220 | `contextBridge` 暴露 11 个命名空间 + 6 路进度通道的单订阅转发；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
 | [index.d.ts](./files/preload/index.d.ts.md) | 11 | 只做 `interface Window extends PreloadApi {}`，把共享层契约挂到全局 `Window` | 否（仅类型，被 `tsconfig.web.json` include，为渲染层提供智能提示） |
 
 ---
@@ -21,7 +21,7 @@
 
 ---
 
-## 3. 暴露的 9 个命名空间
+## 3. 暴露的 11 个命名空间
 
 | 命名空间 | 方法数 | 底层域 | 说明 |
 |---|---|---|---|
@@ -34,14 +34,16 @@
 | `whisperTools` | 12 | `whisper:*` | 模型状态 / 下载 / 删除 / 设为当前 / 自定义模型增删改 / 打开目录 / 选音频 / 项目音频 / 转录 / 进度订阅 |
 | `projectTools` | 25 | `project:*` | 项目化流水线全量能力 + `onHtmlProgress` |
 | `updateTools` | 6 | `update:*` | 检查更新 / 下载 / 取消 / 重启安装 / **打开日志** / 版本号（同步）+ 进度订阅 |
+| `runtimeTools` | 3 | `runtime:*` | 运行环境包：状态查询 / 主动准备 / 进度订阅 |
+| `legacyTools` | 2 | `legacy:*` | 旧版本数据：状态查询 / 回传选择（`migrate` \| `delete` \| `later`）；**无进度订阅**——旧数据是否存在由渲染层主动问一次，主进程不推送、不弹界面 |
 
-> 渲染层对主进程的全部依赖面就是这 9 个命名空间，因此它们被定义为**不可漂移的契约**：方法签名唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi`，频道名一一对应 `src/shared/ipc.ts`。
+> 渲染层对主进程的全部依赖面就是这 11 个命名空间，因此它们被定义为**不可漂移的契约**：方法签名唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi`，频道名一一对应 `src/shared/ipc.ts`。
 
 ---
 
 ## 4. 进度通道的「单订阅」语义
 
-5 路主→渲染推送在 preload 中被统一处理成「注册回调」的形式：
+6 路主→渲染推送在 preload 中被统一处理成「注册回调」的形式：
 
 | 通道 | 命名空间方法 | 单订阅实现 |
 |---|---|---|
@@ -50,6 +52,7 @@
 | `voice:align-progress` | `voiceTools.onAlignProgress(cb)` | `_alignProgressCb` + `_alignProgressBound` |
 | `video:progress` | `hfTools.onProgress(cb)` | 直接 `ipcRenderer.on` 转发（无单订阅标志） |
 | `update:progress` | `updateTools.onProgress(cb)` | `_updateProgressCb` + `_updateProgressBound` |
+| `runtime:progress` | `runtimeTools.onProgress(cb)` | `_runtimeProgressCb` + `_runtimeProgressBound` |
 
 做法：模块级保存「当前回调」，只在首次注册时真正 `ipcRenderer.on` 一次；后续调用**只替换回调函数**。目的与效果：
 
@@ -60,8 +63,8 @@
 
 ## 5. 类型来源：`shared/types.ts` 的 `PreloadApi`
 
-- **唯一真源在共享层**：9 个命名空间的方法签名、参数顺序与返回类型统一定义在 `src/shared/types.ts` ⑨ 节的 `PreloadApi`；`index.d.ts` 只剩一句 `interface Window extends PreloadApi {}`（外加 `import type` 与 `export {}`）。
-- **实现侧也被同一份契约约束**：`index.ts` 的每个对象都写成 `const hfTools: PreloadApi['hfTools'] = { ... }` 形式（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / `updateTools` 共 9 处），因此方法名、参数个数、返回类型写错会直接在 `tsconfig.node.json` 阶段编译失败。
+- **唯一真源在共享层**：11 个命名空间的方法签名、参数顺序与返回类型统一定义在 `src/shared/types.ts` ⑨ 节的 `PreloadApi`；`index.d.ts` 只剩一句 `interface Window extends PreloadApi {}`（外加 `import type` 与 `export {}`）。
+- **实现侧也被同一份契约约束**：`index.ts` 的每个对象都写成 `const hfTools: PreloadApi['hfTools'] = { ... }` 形式（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / `updateTools` / `runtimeTools` / `legacyTools` 共 11 处），因此方法名、参数个数、返回类型写错会直接在 `tsconfig.node.json` 阶段编译失败。
 - **结果类型约定（① 节）**：
 
 ```ts

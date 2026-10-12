@@ -17,7 +17,7 @@
 
 | 文件 | 内容 | 是否属于「IPC 契约」 |
 |---|---|---|
-| `ipc.ts` | 75 个 IPC 频道名字符串 | 是（禁止改动） |
+| `ipc.ts` | 81 个 IPC 频道名字符串 | 是（禁止改动） |
 | `types.ts` | 跨进程载荷类型 | 是（线上字段格式禁止改动） |
 | `constants.ts` | 品牌文案与请求标识 | **否**——改它不影响任何频道名或载荷格式，只影响显示文案 |
 
@@ -83,4 +83,4 @@
 - **不要在 shared 放业务逻辑**：本层任何**函数实现**都会同时进入 main 与 preload 两个 bundle（`ipc.ts` 文档中的同一约束），因此这里只放字面量与常量派生。
 - **`productName` 的漂移只能告警、不能报错**：`checkBrandConsistency()` 内部 `try/catch` 并在不一致时 `console.warn`，因为「校验失败不应影响构建」（例如 `package.json` 暂不可读）；改 `APP_NAME_EN` 后请留意构建/开发启动日志里的 `[dsh:brand]` 提示。
 - **`APP_NAME_EN` 同时是三类东西**：界面英文名、安装包/可执行文件名（经 `productName`）、出网 `User-Agent` 前缀——改名时三者会一起变，属预期行为。
-- **`name`（npm 包名）不在此清单**：Electron 的 `userData` 目录名取自 `package.json` 的 `name`（`shadowmill`），改它等于搬用户数据目录，需要主进程迁移逻辑配合，与本文件的品牌文案是两件事。
+- **`name`（npm 包名）在此清单之外——但它是 userData 目录名的来源**：Electron 的 `userData` 就是 `%APPDATA%\<name>`（`src/main/index.ts` **不做** `app.setPath`）。因此**改 `name` 等于换数据目录**：必须把旧名字手动加进 `index.ts` 的 `LEGACY_DIR_NAMES`，启动扫描时才会（在通过归属证明后）弹窗让用户选「迁移 / 删除 / 稍后」（见 [main/index.ts.md](../main/index.ts.md) §3.1）。这与本文件的品牌文案仍是两件事。

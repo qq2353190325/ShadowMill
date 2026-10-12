@@ -6,7 +6,7 @@
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `src/renderer/src/pages/SettingsPage/index.vue` | 551 | 页面主体：左侧分类导航 + 自定义模型卡片、千问语音卡片、视频渲染默认档位卡片、应用更新卡片，末张卡片挂载子组件；分类记忆键取 `@renderer/constants` |
+| `src/renderer/src/pages/SettingsPage/index.vue` | 578 | 页面主体：左侧分类导航 + 自定义模型卡片、千问语音卡片、视频渲染默认档位卡片、应用更新卡片，末张卡片挂载子组件；分类记忆键取 `@renderer/constants` |
 | `src/renderer/src/pages/SettingsPage/WhisperSection.vue` | 274 | 页面子组件：语音识别模型区块（原 `pages/settings/whisper.js` 的 `window.__settings.initWhisper`） |
 
 - **类型**：页面 + 页面子组件（均为 SFC，`<script setup lang="ts">`）
@@ -49,6 +49,7 @@
 | `.hf-status`（卡片 4，状态行） | `{{ updateMessage }}`（检查 / 下载进度，`:class="updateStatusClass"`），文案来自主进程 |
 | 详情按钮行（卡片 4） | **常驻**的 `.hgen-actions`（`style="margin-top:0"`）：`查看详情 / 收起详情` 按钮**仅当 `updateDetail` 非空时渲染**（`v-if="updateDetail"`，文案 `showUpdateDetail ? '收起详情' : '查看详情'`，点击切换 `showUpdateDetail`）；`打开日志目录` 按钮**常驻**（无 `v-if`，→ `onOpenUpdateLog`）。之所以让日志入口常驻：**启动静默检查失败时本页是刚挂载的**（`updateStage` 还是 `idle`、`updateDetail` 为空，因为进度事件发生在订阅之前），那种情况下只有 `updater.log` 里有原始报错，不常驻就没法取证 |
 | 详情块（卡片 4） | `<div v-if="updateDetail && showUpdateDetail" class="hf-detail">{{ updateDetail }}</div>`：等宽字体 + `white-space: pre-wrap` + `user-select: text`，默认折叠（类样式见 `assets/main.css`） |
+| 运行环境状态行（卡片 4） | `.hf-status`（`:class="runtimeStatusClass"`、`{{ runtimeStatusText }}`）：已就绪显示「运行环境已就绪（体积）」、准备中显示进度文案、失败显示失败文案；`runtimeFailed` 时同排给「重新准备运行环境」按钮（`onPrepareRuntime`，`:disabled="runtimeBusy"`），数据来自 `useRuntime` |
 | `.hf-status`（卡片 4，反馈行） | `v-if="updaterStatus"`、`:class="updaterStatusClass"`、`{{ updaterStatus }}`（保存 / 重置 / 打开日志失败的反馈）——**必须与状态行分两行**：共行会被随后的进度文案盖掉，表现为「点了保存没反应」 |
 | 跳过版本行（卡片 4） | `available` 态显示「跳过版本 x.y.z」；`skipped` 态显示「恢复提示版本 x.y.z」 |
 | **自定义更新源弹窗** | 沿用 `.hf-modal-mask` / `.hf-modal` 组件类（同 `HtmlGenPage` 的渲染档位弹窗）；含更新源输入 `v-model="feedDraft"`、启动检查 `v-model="autoCheckDraft"`、说明 `留空即重置为内置地址…须以 / 结尾`；底部 `重置` / `取消` / `保存` 三个按钮 |

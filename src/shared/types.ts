@@ -195,6 +195,31 @@ export interface RuntimeProgressPayload {
 }
 
 // ============================================================
+// ⑧b 历史数据目录（品牌/目录改名留下的老数据）
+// ============================================================
+// 背景：userData 目录名跟随 package.json 的 name。2026-10-12 品牌更名（my-app → shadowmill）后，
+// 老用户的数据仍留在 %APPDATA%\my-app，打开应用会看到「项目全没了」。
+// 流程：主进程扫历史目录名 + 归属证明确认 → 渲染层弹应用内弹窗 → 用户选 迁移 / 删除 / 稍后。
+export interface LegacyDataInfo {
+  // 老目录绝对路径（例如 C:\Users\x\AppData\Roaming\my-app）
+  dir: string
+  // 其中确有数据的条目名（projects / whisper / voice / tts-output / html-agent / settings.json）
+  entries: string[]
+  // projects/ 下的项目数；没数出来为 0
+  projects: number
+}
+export type LegacyResolveAction = 'migrate' | 'delete' | 'later'
+export interface LegacyResolveResult {
+  ok: boolean
+  action: LegacyResolveAction
+  // 迁移统计（action === 'migrate' 时有值）
+  moved?: number
+  skipped?: number
+  failed?: number
+  message?: string
+}
+
+// ============================================================
 // ④ 音色与配音（voice.ts / ttsAlign.ts）
 // ============================================================
 // Qwen-TTS 系统音色（内置表 systemVoices.ts 的条目结构）
@@ -674,6 +699,12 @@ export interface PreloadApi {
     // 进度仍由 runtime:progress 回推，这里只回成败
     prepare(): Promise<IpcResult>
     onProgress(callback: (data: RuntimeProgressPayload) => void): void
+  }
+  // 历史数据目录（品牌/目录改名留下的老数据）：渲染层挂载时问一次有没有待处理的旧目录，
+  // 有就弹应用内弹窗；用户的选择经 resolve 回传。主进程不做任何"启动时弹原生对话框"。
+  legacyTools: {
+    status(): Promise<LegacyDataInfo | null>
+    resolve(action: LegacyResolveAction): Promise<LegacyResolveResult>
   }
   voiceTools: {
     getConfig(): Promise<IpcResult<VoiceConfigResult>>

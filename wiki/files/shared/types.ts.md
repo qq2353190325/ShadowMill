@@ -4,8 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：707 行
-- **对外导出**：按 10 个小节组织（源码编号 ①～⑨，其中更新一节编号为 ③.5）—— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个
+- **规模**：772 行
+- **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境包 2 个（`RuntimeStage`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个
 
 ## 1. 作用与职责
 
@@ -14,11 +14,11 @@
 1. **统一载荷格式**：IPC 两端对同一份数据（设置文件、音色条目、模型条目、项目结构）使用完全相同的字段名与类型，避免「主进程叫 `voiceId`、渲染层叫 `voice_id`」这类漂移。
 2. **统一 IPC 结果形状**：`IpcFail` / `IpcResult<T>` 是全部 `{ ok, ... }` 结果类型的唯一来源 —— 它们原先只在 `src/preload/index.d.ts` 内部以 `OkResult` / `FailResult` / `IpcResult` 三个未导出类型存在，现在上移到共享层并被主进程、preload、渲染层共同引用。
 3. **描述持久化结构**：`CustomModelConfig` / `VoiceTTSConfig` / `VoiceProfile` / `WhisperCustomModel` / `WhisperSettings` / `AppSettings` 共同构成 `userData/settings.json` 的完整 schema。
-4. **定义 `window.*` 契约**：⑨ 节的 `PreloadApi` 用 9 个命名空间的完整方法签名描述「preload 实现 ↔ 渲染层消费」的唯一真源 —— `src/preload/index.ts` 用它标注各 `contextBridge` 对象，`src/preload/index.d.ts` 用它给 `Window` 补类型，因此两端不会再各自漂移。
+4. **定义 `window.*` 契约**：⑨ 节的 `PreloadApi` 用 11 个命名空间的完整方法签名描述「preload 实现 ↔ 渲染层消费」的唯一真源 —— `src/preload/index.ts` 用它标注各 `contextBridge` 对象，`src/preload/index.d.ts` 用它给 `Window` 补类型，因此两端不会再各自漂移。
 5. **收敛主进程的本地类型**：`whisper.ts` / `ttsAlign.ts` / `video.ts` / `htmlAgent.ts` / `voice.ts` / `projects.ts` 原先各自声明过 `WhisperProgressPayload`、`AlignProgressInfo`、`RenderPayload` / `RenderResult`、`AgentProgress`、`VoiceModel`、`Scene` / `ContentScript` / `Project` / `SubtitleLine`，现在全部改为从本文件导入（`htmlAgent.ts` 保留 `AgentProgress` 这一导出名，但它已是 `HtmlAgentProgress` 的类型别名；`projects.ts` 用 `export type { … } from '../shared/types'` 再导出，保持 `projects.Project` / `from './projects'` 的既有引用面）。**`src/main/` 下已不存在任何本地声明的 payload / result / progress 接口**，各 IPC handler 的 `payload` 参数也一律用本文件的 `*Payload` 类型标注（此前多为 `Record<string, unknown>` 或内联字面量）。
 6. **约束主进程装配模式**：`RegisterCtx` 把 `src/main/*.ts` 各模块 `register(ctx)` 所依赖的能力（拿主窗口）显式化。
 
-文件按 10 个小节组织，首行注释给出两条硬约束：**载荷格式必须与现行实现逐字段一致，禁止改结构**；**新增/修改 IPC 接口须三处齐改 —— 主进程 `register()` 回调、本文件类型、preload 桥接方法**。文件为纯类型模块，编译后不产生任何运行时代码，仅 1 个 `import type`（引自 `electron`，用于 `BrowserWindow`）。
+文件按 12 个小节组织（源码小节横幅依次为 ① ② ③ ③.5 ③.6 **⑧b** ④ ⑤ ⑥ ⑦ ⑧ ⑨——`⑧b 历史数据目录` 在这一版里被写在 ③.6 与 ④ 之间，是「旧数据处置」契约的补充小节），首行注释给出两条硬约束：**载荷格式必须与现行实现逐字段一致，禁止改结构**；**新增/修改 IPC 接口须三处齐改 —— 主进程 `register()` 回调、本文件类型、preload 桥接方法**。文件为纯类型模块，编译后不产生任何运行时代码，仅 1 个 `import type`（引自 `electron`，用于 `BrowserWindow`）。
 
 | 小节 | 覆盖内容 | 主要消费方 |
 | --- | --- | --- |
@@ -26,12 +26,14 @@
 | ② 主进程装配上下文 | `RegisterCtx` | `src/main/*.ts` 的 `register(ctx)` |
 | ③ 设置 | `settings.json` 的 schema（含渲染档位 `render` 与更新设置 `updater`）与 `settings:*` / `voice:save-config` 载荷 | `src/main/settings.ts`、设置页、配音页 |
 | ③.5 应用自更新 | `update:*` 的检查结果（`message` + `detail` 分层）与进度载荷 | `src/main/updater.ts`、设置页 |
+| ③.6 运行环境包 | `RuntimeStage`、`RuntimeProgressPayload`（运行环境包阶段与下载 / 解包进度） | `src/main/runtime.ts`、设置页、`src/renderer/src/composables/useRuntime.ts` |
+| ⑧b 历史数据目录 | `LegacyDataInfo`（扫描结论）、`LegacyResolveAction`（三选一）、`LegacyResolveResult`（执行结果与迁移计数） | `src/main/index.ts`、`src/renderer/src/composables/useLegacyData.ts`、`src/renderer/src/components/LegacyDataDialog.vue` |
 | ④ 音色与配音 | 系统音色、克隆音色、音色映射、合成/对齐载荷与结果 | `src/main/voice.ts`、`src/main/ttsAlign.ts` |
 | ⑤ 语音识别 | whisper 模型状态、转录载荷与结果 | `src/main/whisper.ts` |
 | ⑥ 项目与字幕 | `project.json`（含渲染档位覆盖 `render`）、字幕行、项目列表项、HTML 生成载荷 | `src/main/projects.ts` |
 | ⑦ 预览 / 转视频 | 渲染载荷与渲染结果 | `src/main/video.ts` |
-| ⑧ 进度推送 | 5 路 main → renderer 推送的载荷 | `src/main/*.ts` 推送方 + `src/preload/index.ts` 订阅方 |
-| ⑨ `window.*` API 契约 | `PreloadApi`（9 个命名空间） | `src/preload/index.ts`、`src/preload/index.d.ts`、渲染层全部 `window.*` 调用 |
+| ⑧ 进度推送 | 6 路 main → renderer 推送的载荷 | `src/main/*.ts` 推送方 + `src/preload/index.ts` 订阅方 |
+| ⑨ `window.*` API 契约 | `PreloadApi`（11 个命名空间） | `src/preload/index.ts`、`src/preload/index.d.ts`、渲染层全部 `window.*` 调用 |
 
 ## 2. 导出与关键实现
 
@@ -121,6 +123,42 @@
 | `UpdateCheckResult` | `message` | `string`（**必填**） | 用户可见文案，由主进程**单点产出**（含 `available` / `skipped` / `none` 三种状态文案），UI 直接渲染即可——早前渲染层也自己拼一套「发现新版本…」，与事件推送的文案互相覆盖 |
 | `UpdateCheckResult` | `detail` | 可选 `string` | 排障详情（HTTP 状态、AccessDenied 原文、请求 URL 等）：只在 UI「查看详情」里展开；与 `message` 分离，是因为 403 / 404 / 缺 `app-update.yml` 的处置动作都在发布者那一侧 |
 | `UpdateProgressPayload` | `detail` | 可选 `string` | 同上；仅 `error` 阶段非空，UI 默认折叠 |
+
+### 2.3.2 ③.6 运行环境包（`src/main/runtime.ts`）
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `RuntimeStage` | `type` | `'idle' \| 'checking' \| 'downloading' \| 'extracting' \| 'ready' \| 'failed'`——`idle` 未检查；`checking` 找包 / 读清单；`downloading` 从更新源下载包；`extracting` 7za 解包；`ready` 就绪（含 dev / 旧版布局内置）；`failed` 失败（转录、渲染不可用） |
+| `RuntimeProgressPayload` | `interface` | `runtime:progress` 推送与 `runtime:status` 返回共用的载荷；字段见下 |
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `stage` | `RuntimeStage` | 当前阶段 |
+| `percent` | `number` | downloading / extracting 阶段有效；`ready` 为 100 |
+| `id` | `string` | 运行环境包的内容 id（sha512 前 12 位，也是解包目录名），未知时为空串 |
+| `message` | `string` | 用户可见文案（人话：正在做什么 / 已经就绪 / 失败了怎么办） |
+| `detail` | 可选 `string` | 排障详情（7za 退出码、HTTP 状态、路径等），仅失败或降级时有值 |
+| `source` | `string` | `local` = 随安装包携带；`download` = 从更新源下载；`dev` / `legacy` = 安装目录内已是展开形态；`cache` = 复用已解包目录 |
+| `bytes` | `number` | 包体积（下载进度用） |
+| `unpackedBytes` / `files` | `number` | 解包后体积与文件数（解包进度的分母，也用于设置页展示「运行环境 716 MB / 4917 文件」） |
+
+> 同一个接口也在 §2.8 的进度载荷表里列了一行（⑧ 进度推送视角），两处引用的是同一份定义。
+
+### 2.3.3 ⑧b 历史数据目录（`src/main/index.ts`）
+
+> 背景：`userData` 目录名跟随 `package.json` 的 `name`，2026-10-12 品牌更名（`my-app` → `shadowmill`）后老用户的数据仍留在 `%APPDATA%\my-app`，打开应用会看到「项目全没了」。**主进程只回答「有没有 / 是什么」并执行选择，界面完全在渲染层**：弹窗是应用内弹窗（沿用 `.hf-modal` 体系），**不再使用原生 `dialog.showMessageBox`**，主进程侧因此也没有任何「等首屏画完」的延迟。
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `LegacyDataInfo` | `interface` | 扫描结论：`dir`（老目录绝对路径，例如 `C:\Users\x\AppData\Roaming\my-app`）/ `entries`（其中**确有数据**的条目名：projects / whisper / voice / tts-output / html-agent / settings.json）/ `projects`（`projects/` 下的项目数，没数出来为 0）。`legacy:status` 返回 `LegacyDataInfo \| null`，`null` 表示没有待处理的旧数据 |
+| `LegacyResolveAction` | `type` | `'migrate' \| 'delete' \| 'later'`——用户在弹窗里的三选一；主进程侧**非法或缺省的 action 一律当 `'later'`**（绝不会因调用方写错就搬走或删除数据） |
+| `LegacyResolveResult` | `interface` | `legacy:resolve` 的返回：`ok` / `action` + 可选 `moved` / `skipped` / `failed`（迁移统计，`action === 'migrate'` 时有值）+ 可选 `message`（失败或部分失败的说明） |
+
+字段语义要点：
+
+- `entries` 只列白名单里**确有数据**的条目（空目录 / 0 字节文件不算），因此渲染层可以直接把它拼成「其中包含：项目、识别模型…」的文案；`projects > 0` 时再追加「（N 个项目）」。
+- `LegacyResolveResult.ok` 表达的是**这一动作是否成功**，不是「用户是否做了选择」：`'later'` 属成功的选择，回 `{ ok: true, action: 'later' }`；迁移有失败项时回 `ok: false`，但**仍带上三个计数**并提示可稍后重试。
+- 没有待处理数据时（已处理过、或 `MIGRATE_USER_DATA=0`）回 `{ ok: false, action, message: '没有待处理的旧数据' }`。
 
 ### 2.4 ④ 音色与配音（`voice.ts` / `ttsAlign.ts`）
 
@@ -252,7 +290,7 @@
 
 `VideoRenderResult` **不是** `IpcResult<T>` 的实例：它的失败分支 `message` 必填，且成功分支不复用 `IpcFail` 联合；失败分支的 `compatible: false` 表示 HTML 未通过 HyperFrames 合规校验（渲染层据此区分「环境错误」与「HTML 不合规」）。
 
-### 2.8 ⑧ 进度推送（5 路 main → renderer）
+### 2.8 ⑧ 进度推送（6 路 main → renderer）
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
@@ -266,12 +304,13 @@
 | `VideoProgressPayload` | `interface` | `{ text }`（HyperFrames 渲染日志行，渲染层按 `[Render:trace]` 前缀自行解析）；频道 `video:progress` |
 | `UpdateStage` | `type` | `'idle' \| 'checking' \| 'available' \| 'skipped' \| 'downloading' \| 'downloaded' \| 'none' \| 'error'`（应用更新的阶段；`idle` 表示本进程尚未检查过） |
 | `UpdateProgressPayload` | `interface` | `{ stage, version, currentVersion, percent, transferred, total, bytesPerSecond, message, detail? }`；频道 `update:progress`（检查结果与下载进度共用一路）。`message` 是人话文案、`detail` 是排障详情（仅 `error` 阶段非空），与 `UpdateCheckResult` 同一分层约定（见 §2.3.1） |
+| `RuntimeProgressPayload` | `interface` | `{ stage, percent, id, message, detail?, source, bytes, unpackedBytes, files }`；频道 `runtime:progress`（运行环境包的就绪 / 下载 / 解包进度，类型定义在本文件 ③.6 节） |
 
-`HtmlAgentProgress` 与 `HtmlProgressPayload` 的分工：前者是 Agent 调用层（`htmlAgent.ts` 的 `emit` / `AgentProgress`）的形状，后者是**线上载荷**（`projects.ts` 补上 `text` 文案字段后推送）。`video:progress` 是 5 路里唯一**没有**单订阅包装的通道（preload 直接 `ipcRenderer.on`）。
+`HtmlAgentProgress` 与 `HtmlProgressPayload` 的分工：前者是 Agent 调用层（`htmlAgent.ts` 的 `emit` / `AgentProgress`）的形状，后者是**线上载荷**（`projects.ts` 补上 `text` 文案字段后推送）。`video:progress` 是 6 路里唯一**没有**单订阅包装的通道（preload 直接 `ipcRenderer.on`）。
 
 ### 2.9 ⑨ `PreloadApi`（`window.*` API 契约）
 
-`PreloadApi` 用一个 `interface` 描述 9 个命名空间的完整方法签名，是「preload 实现 ↔ 渲染层消费」的唯一真源：
+`PreloadApi` 用一个 `interface` 描述 11 个命名空间的完整方法签名，是「preload 实现 ↔ 渲染层消费」的唯一真源：
 
 ```ts
 // 用法（源码注释）
@@ -290,6 +329,8 @@
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` | 见下 |
 | `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下 |
 | `updateTools` | 7 | `version`、`check`、`download`、`cancel`、`install`、`openLog`、`onProgress` | 见下 |
+| `runtimeTools` | 3 | `status`、`prepare`、`onProgress` | `status()` → `Promise<RuntimeProgressPayload>`；`prepare()` → `Promise<IpcResult>`（幂等，进度仍由 `runtime:progress` 回推）；`onProgress(cb: (data: RuntimeProgressPayload) => void)`（单订阅） |
+| `legacyTools` | 2 | `status`、`resolve` | `status()` → `Promise<LegacyDataInfo \| null>`；`resolve(action: LegacyResolveAction)` → `Promise<LegacyResolveResult>`（preload 只把 `action` 字符串透传，见 §2.3.3） |
 
 `voiceTools` 逐个签名（含未单独命名的内联载荷）：
 
@@ -359,7 +400,7 @@
       ┌──────────────────────┬────────────────────────┬─────────────────────┐
       ▼                      ▼                        ▼                     ▼
   src/main/*             src/preload/index.ts    src/preload/index.d.ts   渲染层
-  (9 个模块 import 类型)   (导入 PreloadApi + 3 个进度载荷)  (导入 PreloadApi)   （经 Window 间接获得）
+  (10 个模块 import 类型)   (导入 PreloadApi + 3 个进度载荷)  (导入 PreloadApi)   （经 Window 间接获得）
 ```
 
 `tsconfig.web.json` 的 `include` 含 `"src/shared/**/*.ts"` 与 `"src/preload/index.d.ts"`；`tsconfig.node.json` 覆盖主进程与 `src/preload/index.ts`；`npm run typecheck` 依次跑 `tsconfig.node.json`、`tsconfig.web.json`、`tsconfig.agent.json`，因此本文件的任何字段改动会同时触发三端编译报错定位。
@@ -382,9 +423,9 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 
 ### 3.4 `PreloadApi` 契约如何生效
 
-1. `src/preload/index.ts` 的 9 个 `contextBridge` 对象分别标注为 `PreloadApi['electronAPI']`、`PreloadApi['hfTools']` … —— 方法名、参数顺序、返回类型写错会在 `tsconfig.node.json` 阶段直接编译失败（实现被契约校验）。
+1. `src/preload/index.ts` 的 11 个 `contextBridge` 对象分别标注为 `PreloadApi['electronAPI']`、`PreloadApi['hfTools']` … —— 方法名、参数顺序、返回类型写错会在 `tsconfig.node.json` 阶段直接编译失败（实现被契约校验）。
 2. `src/preload/index.d.ts` 只有 `import type { PreloadApi } from '../shared/types'` + `declare global { interface Window extends PreloadApi {} }`，不再自己定义任何类型；渲染层看到的 `window.*` 与 preload 实现同源。
-3. 因此「改契约」变成**只改本文件 ⑨ 节**这一件事：两端同时生效。⑨ 节注释同时指明命名空间与 IPC 频道的对应关系见 `src/shared/ipc.ts`（9 个命名空间 ↔ 8 组频道常量）。
+3. 因此「改契约」变成**只改本文件 ⑨ 节**这一件事：两端同时生效。⑨ 节注释同时指明命名空间与 IPC 频道的对应关系见 `src/shared/ipc.ts`（11 个命名空间 ↔ 10 组频道常量）。
 
 ### 3.5 `IpcResult` 的判别联合与收窄
 
@@ -399,11 +440,12 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | 依赖（仅类型） | `electron` | 仅引入 `BrowserWindow` 类型 |
 | 被 import | `src/main/settings.ts` | `AppSettings`、`CustomModelConfig`、`RegisterCtx`、`VoiceProfile`、`VoiceTTSConfig`、`WhisperCustomModel` |
 | 被 import（+ 再导出） | `src/main/projects.ts` | `RegisterCtx`、`ProjectAgentPayload`、`ProjectExportSrtPayload`、`ProjectNamePayload`、`ProjectSaveContentPayload`、`ProjectSaveHtmlPayload`、`ProjectSaveSubtitlePayload`、`ProjectSetAudioPayload`、`ProjectSetVideoPayload`；并 `export type { ContentScript, Project, Scene, SubtitleLine }` 再导出四个项目结构 |
-| 被 import | `src/main/index.ts` | `RegisterCtx` |
+| 被 import | `src/main/index.ts` | `RegisterCtx`、`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`（后三者服务于 `legacy:status` / `legacy:resolve`） |
 | 被 import | `src/main/whisper.ts` | `RegisterCtx`、`WhisperCustomModel` 与全部 `Whisper*Payload`（含 `WhisperProgressPayload`） |
 | 被 import | `src/main/voice.ts` | `RegisterCtx`、`SystemVoice`、`VoiceModel`、`VoiceProfile`、`VoiceTTSConfig`、`VoiceCreatePayload`、`VoiceProfileKeyPayload`、`VoiceProfilePayload`、`VoiceSaveConfigPayload`、`VoiceSaveDirPayload`、`VoiceSynthPayload` |
 | 被 import | `src/main/ttsAlign.ts` | `RegisterCtx`、`AlignProgressPayload`（取代原本地 `AlignProgressInfo`）、`VoiceAlignPayload` |
 | 被 import | `src/main/video.ts` | `RegisterCtx`、`VideoRenderPayload`、`VideoRenderResult`（取代原本地声明的 `RenderPayload` / `RenderResult`） |
+| 被 import | `src/main/runtime.ts` | `RegisterCtx`、`RuntimeProgressPayload`（③.6 节；`RuntimeStage` 由该接口的 `stage` 字段内联引用） |
 | 被 import | `src/main/htmlAgent.ts` | `HtmlAgentProgress`（以 `export type AgentProgress = HtmlAgentProgress` 对外保留 `AgentProgress` 名） |
 | 被 import | `src/main/systemVoices.ts` | `SystemVoice` |
 | 被 import（仅类型） | `src/preload/index.ts` | `PreloadApi`、`AlignProgressPayload`、`HtmlProgressPayload`、`WhisperProgressPayload` |

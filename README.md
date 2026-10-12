@@ -117,7 +117,7 @@ AIGC:
 
 ### 2.1 技术栈与架构
 
-- **Electron 31.7.7 + Vue 3.5 + electron-vite 5 + Vite 7 + TypeScript 7**；全量 TS，`main` / `preload` 输出 **CJS**（sandboxed preload 的硬要求，全工程无 `"type": "module"`）。
+- **Electron 44.7.0（Chromium 152 + Node 24.21.0）+ Vue 3.5 + electron-vite 5 + Vite 7 + TypeScript 7**；全量 TS，`main` / `preload` 输出 **CJS**（sandboxed preload 的硬要求，全工程无 `"type": "module"`）。
 - **无 vue-router / pinia**：导航用页面注册表（`src/renderer/src/pages/index.ts`）的 `goPage()`，全局状态为模块级 `reactive` / `ref` 单例（`composables/useAppStore.ts`）。
 - 源码分层：
 
@@ -136,7 +136,9 @@ src/
 
 ```
 vendor/gsap/gsap.min.js   # 随包 GSAP 3.14.2（离线渲染/预览用），经 build.files 打进 asar
-resources/                # 内置运行时（node / ffmpeg / hyperframes+chrome / whisper），走 extraResources，约 715 MB
+resources/                # 内置运行时（ffmpeg / hyperframes+chrome / whisper），约 632 MB，
+                          #   打包时由 scripts/pack-runtime.mjs 压成 runtime.7z 走 extraResources；
+                          #   node/ 目录仅作回退源（node.exe 已不随包，见 2.3「转视频」与第五章）
 ```
 
 - **IPC 契约单一真源**：频道名集中在 `src/shared/ipc.ts`；所有载荷、结果与进度推送类型集中在 `src/shared/types.ts`；`window.*` 的签名由 `types.ts` 的 `PreloadApi` 统一定义——preload 实现按 `PreloadApi['<命名空间>']` 标注，渲染层通过 `preload/index.d.ts` 挂载同一份契约，两端不会各自漂移。
@@ -172,7 +174,7 @@ userData/
 - **HTML 生成流式反馈**：按 `connecting → thinking → writing → retry → done` 分阶段回推（300 ms 节流），实时滚动展示模型思考原文（末 2 万字符）；推理模型把配额耗在思考阶段导致输出为空或被截断时，自动按 **32768 → 65536** 升档重试；每次生成/修改的完整会话写入 `html-agent/chat.jsonl`（含每档尝试的思考全文、`finish_reason`、`usage` 与各阶段耗时），供事后分析。
 - **HTML 合规校验**：转视频前要求源码同时命中 `data-composition-id` / `__timelines` / `gsap` 三个特征（启发式文本匹配）；生成侧只提示不阻断，转视频侧是硬门槛。
 - **GSAP 本地化（离线可用）**：生成的 HTML 统一以 `<script src="./gsap.min.js"></script>` 引入 GSAP，文件由随包携带的 `vendor/gsap/gsap.min.js`（3.14.2）提供——生成 / 保存 / 预览 / 渲染四个环节都会把残留的 CDN 引用改写为项目内相对引用并复制该文件（渲染与预览只改副本，不动原件）。时间轴按 HyperFrames 契约写成 `gsap.timeline({ paused: true })` 并登记为**以 composition id 为键的对象**（`window.__timelines["<id>"] = tl`），预览控制脚本同时兼容旧生成物的数组形态。
-- **转视频**：把 Node 解析为真实绝对路径（规避 nvm shim / WindowsApps alias），把内置 FFmpeg 的 bin 注入渲染进程 `PATH`，并指定内置 chrome-headless-shell，避免渲染时重新下载浏览器；质量 / 帧率档位随 `video:render` 载荷传入，主进程按白名单拼 `--quality` / `--fps`（缺省走 CLI 默认 `standard` / `30`）。
+- **转视频**：Node 优先**复用 Electron 内嵌的 Node**（以 `ELECTRON_RUN_AS_NODE=1` 跑 `electron.exe`，Electron 44.7.0 内置 Node 24.21.0，满足 HyperFrames 的 >= 22 要求），失败才回退随包 `resources/node/node.exe` 或系统 Node（系统 Node 同样要求 >= 22，并解析为真实绝对路径以规避 nvm shim / WindowsApps alias）；`findNode()` 返回的 `env` 必须合进子进程环境，否则 `electron.exe` 会把自己当应用启动。随后把内置 FFmpeg 的 bin 注入渲染进程 `PATH`，并指定内置 chrome-headless-shell，避免渲染时重新下载浏览器；质量 / 帧率档位随 `video:render` 载荷传入，主进程按白名单拼 `--quality` / `--fps`（缺省走 CLI 默认 `standard` / `30`）。
 - **预览协议 `hgpreview://`**：dev 下渲染层来自 http 源，Chromium 会拦截 `file://` iframe，故预览统一走自定义协议 `hgpreview://p/<项目名>/<相对路径>`；主进程把 URL 映射回项目目录内的文件，并做目录穿越校验（解析后必须位于该项目目录内），显式给出 MIME、`Cache-Control: no-store`，失败落盘日志便于排查。
 
 ---
@@ -215,15 +217,19 @@ npm run pack       # runtime:pack + build + electron-builder --dir（免安装�
 npm run dist       # runtime:pack + build + electron-builder --win（NSIS 安装包）
 ```
 
+> **安装与首次运行提示（Electron 44）**：Electron 44 的 npm 包**没有 `postinstall`**，二进制改为**首次 `require('electron')` 时懒下载**——因此 `npm install` 完成后 `node_modules/electron/dist` 可能并不存在，**首次 `npm run dev` 会触发约 150 MB 的下载**（需要显式安装时用 `npx install-electron`，其 bin 为 `install-electron` → `node_modules/electron/install.js`）。下载镜像由仓库根新增的 `.npmrc` 提供：`electron_mirror=https://npmmirror.com/mirrors/electron/`（该地址会 302 跳到 `https://cdn.npmmirror.com/binaries/electron/`，下载器自行跟随；CDN 上没有 `/mirrors/` 前缀，只有 `binaries/`）。它与 `package.json` 的 `build.electronDownload.mirror` 分工不同——后者只在 electron-builder 打包时下载 Electron 运行时，管不到 `npm install`。
+
 **外部依赖**
 
-- **Node.js ≥ 22**：HyperFrames CLI 需要；优先使用随包 `resources/node/node.exe`，否则解析系统 Node 真实路径。
+- **Node.js ≥ 22**：HyperFrames CLI 需要。三种途径按序回退：① **Electron 内嵌 Node**（`ELECTRON_RUN_AS_NODE=1` + `process.execPath`，Electron 44.7.0 实测 Node 24.21.0；探针用 `-e` 打印 `process.versions.node`，要求 `status === 0` 且主版本 >= 22，该复用依赖 Electron 的 `RunAsNode` 熔丝保持默认开启）→ ② 随包 `resources/node/node.exe`（回退源，已不随运行环境包分发）→ ③ 系统 Node（`NVM_SYMLINK` → `LOCALAPPDATA\nvm\nodejs` → `C:\Program Files\nodejs` → `where.exe`，同样要求 >= 22，且解析为真实绝对路径以规避 nvm shim / WindowsApps alias）。由 `src/main/hfEnv.ts` 的 `findNode()` 统一返回 `{ cmd, env }`。
 - **HyperFrames CLI**：优先用内置 `resources/hyperframes/`（含 chrome-headless-shell），也可用环境变量 `HYPERFRAMES_CLI` 指定。
 - **FFmpeg / FFprobe**：内置 `resources/ffmpeg/bin/`，同时会探测 WinGet 安装的 `Gyan.FFmpeg` 并注入 `PATH`。
 - **whisper-cli.exe**：内置 `resources/whisper/`（含依赖 DLL）；**识别模型文件不随包分发**，在应用内按需下载。
 - **GSAP**：随包 `vendor/gsap/gsap.min.js`（3.14.2），无需联网；版本与更新步骤见 `vendor/gsap/README.md`。
-- **运行环境包**：上面这几项（ffmpeg / node / hyperframes / whisper）合计约 716 MB、4900+ 文件，
-  打包时由 `scripts/pack-runtime.mjs` 压成 `build/runtime-pack/runtime.7z` 随包发布，**首次启动**由主进程
+- **运行环境包**：上面这几项（ffmpeg / hyperframes / whisper）合计约 632 MB、4900+ 文件 ——
+  **`node` 已不再随包**（HyperFrames 复用 Electron 内嵌 Node，省下 `resources/node/node.exe` 那 83 MB），
+  `scripts/pack-runtime.mjs` 顶层的 `EXCLUDE_TOP = ['node']` 负责把该顶层条目排除、`resources/node/` 目录本身保留作回退源，
+  打包时压成 `build/runtime-pack/runtime.7z` 随包发布，**首次启动**由主进程
   解到 `%APPDATA%\shadowmill\runtime\<id>\`（带进度横幅，约 30~60 秒），之后更新只要包内容没变就不再重装它们。
   解包器 `7za.exe` 一并随包（`build/tools/`）；开发态直接用项目根 `resources/`，不走解包。
   想把安装包再瘦一圈：把 `runtime.7z` 与 `runtime.json` 上传到更新源（`app-update.yml` 的 url 目录），
@@ -250,7 +256,7 @@ npm run dist       # runtime:pack + build + electron-builder --win（NSIS 安装
 - **生成契约与 HyperFrames 对齐 + GSAP 本地化**：提示词要求 `gsap.timeline({ paused: true })` 与「以 composition id 为键的 `__timelines` 对象」（与官方文档一致）；GSAP 改为随包 `vendor/gsap/gsap.min.js` + 项目内相对引用，生成 / 保存 / 预览 / 渲染四环节自动改写残留 CDN 引用，预览控制脚本同时兼容旧生成物的数组形态。
 - **⑤ 视频预览与转视频**：合规校验、HyperFrames 后台渲染与中文进度文案、**渲染档位（设置页全局默认 + 项目级覆盖）**、成品内嵌播放与「重新加载」「在文件夹中显示」、产物回写项目。
 - **项目化**：创建（弹窗输入名称 → 立即创建并切换）/ 切换 / 删除、字幕与内容脚本保存、背景音频与视频素材管理（含提取原声）、`hgpreview://` 预览协议。
-- **工程化**：TypeScript 全量覆盖（`npm run typecheck` 全绿）、IPC 载荷类型集中在 `shared/types.ts` 并作为 `window.*` 的单一真源、CSP/sandbox/contextIsolation 安全边界、electron-builder 打包配置完备（重型运行资源经 `runtime-pack` 随包发布、首次启动解到 userData）。
+- **工程化**：TypeScript 全量覆盖（`npm run typecheck` 全绿）、IPC 载荷类型集中在 `shared/types.ts` 并作为 `window.*` 的唯一真源、CSP/sandbox/contextIsolation 安全边界、electron-builder 打包配置完备（重型运行资源经 `runtime-pack` 随包发布、首次启动解到 userData）、**Electron 升级到 44.7.0 且运行环境包不再携带 `node.exe`**（HyperFrames 复用 Electron 内嵌 Node，运行环境包由约 716 MB 降到约 632 MB）。
 
 ### 已知限制与说明
 
@@ -259,8 +265,9 @@ npm run dist       # runtime:pack + build + electron-builder --win（NSIS 安装
 - **对齐配音**：单句最多加速到 1.15 倍，超出靠顺延；末句无槽位、不加速也不顺延；同一时刻只允许一个对齐任务，取消是句间软中断（当前句的合成请求不会被打断）。
 - **本地音频格式**：whisper-cli 原生只支持 flac/mp3/ogg/wav（其它格式会先自动转码）；克隆音色上传的本地音频 Base64 后需小于 10 MB；VAD 只解析 16 bit PCM WAV。
 - **API Key 以明文保存在本机 `userData/settings.json`**，仅主进程读取，不会外传；如需更高安全性可后续接入 Electron `safeStorage` 加密。
-- **首次启动偏慢属于正常现象**：安装包内含完整 Electron 运行时，加上随包发布的运行环境包（约 275 MB 压缩 / 716 MB 解包）首次启动要解到 `%APPDATA%\shadowmill\runtime\`（**窗口顶部有「正在准备运行环境 x%」进度横幅**，约 30~60 秒；同一份包只解一次），同时 Windows Defender 会扫描新落盘文件、磁盘冷缓存也会拖慢第一批读取，可能出现十几秒的等待。**这段等待不再是「只有背景」**：窗口一出现就是品牌底色，页面首帧即显示启动画面（logo + 扫描条 + 「正在启动…」），Vue 挂载后自动淡出。应用自身的启动开销也已压缩——`electron-updater` 与 `openai` 两个大模块改为懒加载、启动时不再重复拉取项目数据。
-- **更新安装期间应用会整体消失约 1~2 分钟**：NSIS 更新是「静默卸载旧版本 → 解压复制新安装包」，期间安装目录被清空重建，**桌面 / 开始菜单快捷方式会暂时指向不存在的文件**（点击提示「文件不存在或已被移动」，属正常现象，勿重复点击），装完会自动重新打开。因此「重启安装」必须由用户显式点击（弹窗会先说明这段预期与 UAC 提权），应用**不再在关窗时自动安装**；安装成功后的首次启动会清掉 `%LOCALAPPDATA%\shadowmill-updater\pending\` 里重复的安装包（约 275 MB）。安装耗时的大头是 716 MB 运行资源被反复重装 —— 拆到独立运行环境包后（见上文「外部依赖 · 运行环境包」），只有资源本身变化的那次更新才需要重新解包。
+- **HyperFrames 复用 Electron 内嵌 Node 依赖 `RunAsNode` 熔丝**：默认开启时用 `process.execPath` + `ELECTRON_RUN_AS_NODE=1` 即可当 Node 用；**若将来在 `package.json` 的 `build.electronFuses` 里把该熔丝关掉**，`findNode()` 的探针会失败并静默回落到「随包 node.exe → 系统 Node」——不报错，但 `resources/node/node.exe` 会重新变成必需品（届时还需把它从 `scripts/pack-runtime.mjs` 的 `EXCLUDE_TOP` 里移除、让它重新进入运行环境包）。
+- **首次启动偏慢属于正常现象**：安装包内含完整 Electron 运行时，加上随包发布的运行环境包（约 632 MB 解包）首次启动要解到 `%APPDATA%\shadowmill\runtime\`（**窗口顶部有「正在准备运行环境 x%」进度横幅**，约 30~60 秒；同一份包只解一次），同时 Windows Defender 会扫描新落盘文件、磁盘冷缓存也会拖慢第一批读取，可能出现十几秒的等待。**这段等待不再是「只有背景」**：窗口一出现就是品牌底色，页面首帧即显示启动画面（logo + 扫描条 + 「正在启动…」），Vue 挂载后自动淡出。应用自身的启动开销也已压缩——`electron-updater` 与 `openai` 两个大模块改为懒加载、启动时不再重复拉取项目数据。
+- **更新安装期间应用会整体消失约 1~2 分钟**：NSIS 更新是「静默卸载旧版本 → 解压复制新安装包」，期间安装目录被清空重建，**桌面 / 开始菜单快捷方式会暂时指向不存在的文件**（点击提示「文件不存在或已被移动」，属正常现象，勿重复点击），装完会自动重新打开。因此「重启安装」必须由用户显式点击（弹窗会先说明这段预期与 UAC 提权），应用**不再在关窗时自动安装**；安装成功后的首次启动会清掉 `%LOCALAPPDATA%\shadowmill-updater\pending\` 里重复的安装包（约 275 MB）。安装耗时的大头是 632 MB 运行资源被反复重装 —— 拆到独立运行环境包后（见上文「外部依赖 · 运行环境包」），只有资源本身变化的那次更新才需要重新解包。
 - **排查启动耗时**：`%APPDATA%\shadowmill\startup.log` 每次启动追加几行，每行形如 `2026-10-12T01:02:19.780Z +4200ms window created`——`+NNNms` 是距进程启动的毫秒数，可直接看出时间花在「主进程模块加载 / 建窗 / 页面加载」哪一段。（更新日志在同目录 `updater.log`，运行环境解包日志在 `runtime.log`，预览协议日志在 `preview-protocol.log`。）旧版本（`MarvisStudio` / npm 包名 `my-app`）的 `%APPDATA%\my-app\` 会在首次启动时**自动迁移**到 `%APPDATA%\shadowmill\`（开发态同样迁移；需要保留旧目录做对照时，用 `MIGRATE_USER_DATA=0` 启动一次即可跳过）。
 
 *（内容由AI生成，仅供参考）*

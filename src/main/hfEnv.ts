@@ -19,6 +19,9 @@ import { app } from 'electron'
 // 解包完成后由 refreshBuiltinResources() 失效）。
 let cachedRoot: string | null = null;
 let cachedChrome: string | null | undefined;
+// Node 探测结果缓存：探针要 spawn 一次 electron.exe（约 200-400ms，且 spawnSync 会阻塞主进程），
+// 而结果在一次会话里不会变。资源根变化时由 refreshBuiltinResources() 一并失效。
+let cachedNode: { cmd: string; env: Record<string, string> } | null | undefined;
 
 // 运行环境包指针：<userData>/runtime/current.json 指向 id，那一份目录里有 ok.json 才算解包完整
 function packRootFromMarker(): string {
@@ -91,6 +94,7 @@ const BUILTIN_RESOURCES: {
 function refreshBuiltinResources(root?: string): string {
   cachedRoot = (typeof root === 'string' && root) ? root : null;
   cachedChrome = undefined;
+  cachedNode = undefined;
   return resolveRoot();
 }
 
@@ -126,23 +130,61 @@ function resolveNodePath(): string | null {
   return null;
 }
 
-// 探测 Node（HyperFrames 要求 >= 22）：内置优先，回退系统，一律返回绝对路径
-function findNode(): string | null {
-  // 内置 Node 优先（打包分发免装环境）
+// 探测 Node（HyperFrames 要求 >= 22）。返回 { cmd, env }：**env 必须合进子进程环境后再 spawn**，
+// 不能再当纯路径用。优先级：① Electron 内嵌 Node → ② 随包 Node → ③ 系统 Node。
+//
+// 为什么首选 ①：Electron 35+ 内置 Node >= 22（44.7.0 实测 v24.21.0），加 ELECTRON_RUN_AS_NODE
+// 即可让 electron.exe 以 Node 行为跑 hyperframes CLI，于是那份 83MB 的 node.exe 不必再随包分发。
+// 实测（2026-10-12，Electron 44.7.0 + hyperframes 0.8.33，1280x720 / 2s / 60 帧的 composition）：
+//   · onnxruntime-node 与 sharp 都能在 Electron 的 Node 24 下加载（libvips 与 Node 22 下一致，8.18.6）；
+//   · 成片与用 node 22 渲染的逐项相同，含字节数（157397 字节）；
+//   · hyperframes 内部三处 spawn(process.execPath) 均继承 process.env，标志会传到子进程，
+//     不会出现「子进程以为自己是 Electron 应用」而误启主程序。
+//
+// ⚠ 这条复用依赖 Electron 的 RunAsNode 熔丝处于默认开启状态。若将来在 package.json 的
+//   build.electronFuses 里把它关掉，下面的探针会失败并自动回落到 ②/③——不报错，但 node.exe
+//   就重新变成必需品了，别在没验的情况下关熔丝。
+// 探针刻意用 `-e` 打印 Node 版本、而不是 `-v`：熔丝若被关闭，electron.exe 会把 `-e` 当应用路径
+// 而直接失败；但 `-v` 会打印 Electron 版本（44 >= 22），会造成「复用可用」的误判。
+function findNode(): { cmd: string; env: Record<string, string> } | null {
+  if (cachedNode !== undefined) return cachedNode;
+  // ① Electron 内嵌 Node（免下载、免随包 83MB）
+  const reuseEnv = { ELECTRON_RUN_AS_NODE: '1' };
+  try {
+    const self = spawnSync(
+      process.execPath,
+      ['-e', 'process.stdout.write(String(process.versions.node || ""))'],
+      { encoding: 'utf8', env: { ...process.env, ...reuseEnv } }
+    );
+    const v = String(self.stdout || '').trim();
+    const major = parseInt(v.split('.')[0], 10);
+    if (self.status === 0 && !isNaN(major) && major >= 22) {
+      cachedNode = { cmd: process.execPath, env: reuseEnv };
+      return cachedNode;
+    }
+  } catch (e) { /* 探针失败即回落，不影响启动 */ }
+
+  // ② 随包 Node（dev 的 resources/node；旧布局兜底）
   if (fs.existsSync(BUILTIN_RESOURCES.node)) {
     const p = spawnSync(BUILTIN_RESOURCES.node, ['-v'], { encoding: 'utf8' });
-    if (p.status === 0) return BUILTIN_RESOURCES.node;
+    if (p.status === 0) {
+      cachedNode = { cmd: BUILTIN_RESOURCES.node, env: {} };
+      return cachedNode;
+    }
   }
+  // ③ 系统 Node
   const probe = spawnSync('node', ['-v'], { encoding: 'utf8' });
   if (probe.status === 0) {
     const v = (probe.stdout || '').trim().replace('v', '');
     const major = parseInt(v.split('.')[0], 10);
     if (!isNaN(major) && major >= 22) {
       const resolved = resolveNodePath();
-      return resolved; // 有绝对路径用绝对路径；极端情况为 null 时下面会报错
+      if (resolved) { cachedNode = { cmd: resolved, env: {} }; return cachedNode; }
     }
   }
-  return resolveNodePath();
+  const fallback = resolveNodePath();
+  cachedNode = fallback ? { cmd: fallback, env: {} } : null;
+  return cachedNode;
 }
 
 // 探测 WinGet 安装的 Gyan.FFmpeg 可执行目录

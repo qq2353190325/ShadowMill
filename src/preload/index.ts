@@ -1,5 +1,5 @@
 // src/preload/index.ts —— 预加载脚本：通过 contextBridge 向渲染进程暴露安全 API
-// 10 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/updateTools/runtimeTools）
+// 11 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/updateTools/runtimeTools/legacyTools）
 // 与 6 个进度推送通道的单订阅语义（重复注册仅替换回调，避免页面切换叠加监听）。
 // 类型契约：每个对象都以 PreloadApi['<命名空间>'] 标注（见 src/shared/types.ts ⑨ 节），
 //           渲染层拿到的 window.* 签名由 preload/index.d.ts 挂载同一份契约 —— 两处不会漂移。
@@ -198,6 +198,14 @@ const runtimeTools: PreloadApi['runtimeTools'] = {
   }
 };
 contextBridge.exposeInMainWorld('runtimeTools', runtimeTools);
+
+// 历史数据目录（品牌/目录改名留下的老数据）：主进程扫历史目录名并按归属证明确认，
+// 找到就由渲染层的 LegacyDataDialog 弹**应用内**弹窗；这里只暴露「查 / 回传选择」两件事
+const legacyTools: PreloadApi['legacyTools'] = {
+  status: () => ipcRenderer.invoke(IPC.Legacy.Status),
+  resolve: (action) => ipcRenderer.invoke(IPC.Legacy.Resolve, action)
+};
+contextBridge.exposeInMainWorld('legacyTools', legacyTools);
 
 // ===== 进度通道单订阅状态（模块级标志，避免页面切换叠加监听） =====
 let _htmlProgressCb: ((data: HtmlProgressPayload) => void) | null = null;

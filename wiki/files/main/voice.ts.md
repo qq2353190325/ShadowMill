@@ -61,7 +61,7 @@
 | `voiceFriendlyError(err, label)` | 取 `err.message`（无则 `String(err)`）；`InvalidApiKey/unauthorized/Unauthorized/401/403` → 「API Key 无效或无权限，请检查后重试」；`quota/ExceededQuota/Insufficient` → 前缀「额度不足或已被限流：」；最终返回 `label + '：' + msg` |
 | `nowStamp()` | 本地时间戳 `YYYYMMDD_HHmmss`（各段 `padStart(2,'0')`） |
 | `guessAudioExt(url)` | 去 query → 取末段并 `decodeURIComponent` → 匹配 `wav/mp3/m4a/mp4/aac/ogg/flac`，命中返回小写扩展名，否则 `'wav'` |
-| `resolveTtsDir(projectName, saveDir)` | 落盘目录解析，优先级：`saveDir` → `projects.projectsRoot/<projectName>/audio` → `scanProjects()[0].name` 的 `audio/` → `app.getPath('userData')/tts-output` |
+| `resolveTtsDir(projectName, saveDir)` | 落盘目录解析，优先级：`saveDir` → `projects.projectsRoot()/<projectName>/audio` → `scanProjects()[0].name` 的 `audio/` → `app.getPath('userData')/tts-output` |
 | `systemVoiceDefaultModel(v)` | 按 `series` 数组优先级取默认模型：`instruct-flash` > `flash` > `tts`；不命中回落字面量 `'qwen3-tts-flash'` |
 | `resolveVoiceModel(voiceKey, _ctx)` | 「音色→模型」三级统一解析（见 4.3） |
 | `fetchClonedVoices()` | 查询云端克隆音色列表（见 4.2），返回 `{ ok, voices?, total?, message? }` |
@@ -161,7 +161,9 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 |------|------|-------|
 | 1 | `userData/tts-output` | `音频输出目录` |
 | 2 | `cfg.saveDir`（非空时） | `自定义目录` |
-| 3 | `projectsRoot/<每个顶层目录>/audio` | `项目 · <项目名>` |
+| 3 | `projects.projectsRoot()/<每个顶层目录>/audio` | `项目 · <项目名>` |
+
+  > 第 3 处的根目录在 handler 开头一次性取得（`const projectsRoot = projects.projectsRoot()`），后续只用这个局部变量——**不是**模块级快照。
 
 3. `pushDir` 内部：目录不存在或 `readdirSync` 抛错则跳过；仅收正则命中的名字，`statSync` 失败或非普通文件跳过；条目为 `{ path, name, group, size, mtime }`。
 4. 结果按 `mtime` 降序，返回 `{ ok:true, items, total }`。
@@ -177,14 +179,24 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 | `electron` 的 `app` / `ipcMain` / `dialog` | 注册 handler、取 `userData` 路径、文件与目录选择框 |
 | `node:path` / `node:fs` | 路径拼接、目录与文件读写、`existsSync` / `statSync` / `readdirSync` |
 | `./settings` | `getVoiceConfig` / `getVoiceProfiles` / `saveVoiceProfile` / `deleteVoiceProfile` / `readSettings` / `writeSettings` |
-| `./projects` | `projectsRoot` 与 `scanProjects()`，用于项目 `audio/` 定位与列表扫描 |
+| `./projects` | `projects.projectsRoot()`（**函数，惰性求值**）与 `scanProjects()`，用于项目 `audio/` 定位与列表扫描 |
 | `./systemVoices` | `SYSTEM_VOICES`（内置系统音色）与 `isSystemVoice` |
 | `../shared/ipc` | `IPC.Voice.*` 频道常量 |
 | `../shared/types` | 类型 `RegisterCtx` / `SystemVoice` / `VoiceModel` / `VoiceProfile` / `VoiceTTSConfig`，以及载荷类型 `VoiceCreatePayload` / `VoiceProfileKeyPayload` / `VoiceProfilePayload` / `VoiceSaveConfigPayload` / `VoiceSaveDirPayload` / `VoiceSynthPayload`；`VoiceModel` 与全部载荷类型先前在本文件本地声明，现已上移共享层（同时供各 handler 的 `payload` 标注） |
 
+**`projects.projectsRoot()` 的三个调用点**（本轮由「模块级常量 `projects.projectsRoot`」改为「函数调用」，写法与 `whisper.modelsDir()` / `runtime.runtimeRoot()` 一致）：
+
+| 位置 | 用法 |
+|------|------|
+| `resolveTtsDir(projectName, saveDir)`（第 84 行） | `const projectsRoot = projects.projectsRoot()`，随后拼 `<root>/<projectName>/audio` 与 `<root>/<首个项目名>/audio` |
+| `IPC.Voice.ListGenerated`（第 415 行） | handler 开头取一次，用于 `existsSync` / `readdirSync` / 拼各项目 `audio/` |
+| `IPC.Voice.Synth` 落盘回执段（第 496 行） | 需要写项目 `project.json` 时取一次，拼 `path.join(projectsRoot, projectName)` |
+
+> 三处都是**局部的 `const projectsRoot = projects.projectsRoot()`**，不是模块级常量：ESM 的 import 提升会让模块级快照早于 `index.ts` 的模块体求值；当前 userData 只跟随 `package.json` 的 `name`，快照本来也正确，函数化是为了将来若有人重新引入 `setPath` 之类的改动时不会静默错位（零代价纯保险，见 [index.ts.md](./index.ts.md) §3.1① 与 [projects.ts.md](./projects.ts.md) §3）。
+
 被调用方：
 
-- `src/main/index.ts:150` 执行 `voice.register(ctx)`（主进程装配，依赖图 `settings ← htmlAgent ← projects ← voice ← ttsAlign`）。
+- `src/main/index.ts:376` 执行 `voice.register(ctx)`（主进程装配，依赖图 `settings ← htmlAgent ← projects ← voice ← ttsAlign`）。
 - `src/main/ttsAlign.ts` 导入 `synthOne` / `resolveVoiceModel` / `voiceFriendlyError`，用于 `voice:synth-aligned` 逐句合成。
 - `src/preload/index.ts` 暴露 `window.voiceTools`（`getConfig` / `getSaveDir` / `saveConfig` / `pickAudio` / `pickDir` / `listGenerated` / `create` / `list` / `listSystemVoices` / `listAll` / `listModels` / `getProfiles` / `saveProfile` / `deleteProfile` / `synth`）。
 - 渲染层：`src/renderer/src/pages/TextTtsPage/VoiceSection.vue`（克隆音色、映射管理；原独立页 `SoundCopyPage/index.vue` 已并入配音页第三个 Tab）、`src/renderer/src/pages/TextTtsPage/SynthSection.vue`（保存位置、`synth`、`listGenerated`）、`src/renderer/src/pages/TextTtsPage/helpers.ts`（`list-all` 失败时的回退组装）。
@@ -199,5 +211,6 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 - **配置合并语义**：`voice:save-config` 只覆盖显式传入的字段——只存 `saveDir` 不会清空 API Key，设置页保存也不会覆盖 `saveDir`；`targetModel` 非法时静默回落 `qwen-audio-3.0-tts-flash`。
 - **落盘回执不撒谎**：存到自定义目录 / 音频输出目录时不再回写 `project.json`，`savedTo` 如实返回 `custom` / `output`；只有真正写入项目 `audio/` 才置 `project`。
 - **容错风格**：`parseJsonLike` 解析失败返回 `null`；目录创建、`project.json` 回写、`readdirSync` 失败均被吞掉，不阻断主流程；`ipcMain.handle` 内部一律 `try/catch` 转成 `{ ok:false, message }`。
+- **项目根路径保持惰性求值（纯保险）**：`projectsRoot` 现在是函数，三处调用点都写成局部的 `const projectsRoot = projects.projectsRoot()`；**不要**把它提升成模块级常量、也不要在模块顶层调用它——将来若有人重新引入 `setPath` 之类的改动，模块级快照会静默钉在当时的位置（品牌改名导致「项目全没了」正是这种模式的后果）。
 - **潜在注意点**：`voice:pick-dir` 在窗口为空时使用 `win as Electron.BrowserWindow` 断言（与 `PickAudio` 的显式 `null` 判断不一致）；`voice:synth` 的文件名未做重名检测，同一秒内同名可能覆盖。
 - **类型集中在共享层**：`VoiceModel` 与全部 `voice:*` 载荷类型（`VoiceSaveDirPayload` / `VoiceSaveConfigPayload` / `VoiceCreatePayload` / `VoiceProfilePayload` / `VoiceProfileKeyPayload` / `VoiceSynthPayload`）都定义在 `src/shared/types.ts` ④ 节，本文件只 import；`VOICE_MODELS` 用 `VoiceModel[]` 标注，字段写错会直接编译失败。`voice:save-config` 的形参是联合类型 `VoiceSaveConfigPayload | Partial<VoiceTTSConfig>`，因为线上存在「带 `voiceTTS` 包装」与「裸配置对象」两种历史形态（注释已标明）。

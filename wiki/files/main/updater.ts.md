@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：业务域模块（`register(ctx)` 装配模式，唯一使用**同步 IPC** 的模块）
-- **规模**：465 行
+- **规模**：563 行
 - **对外导出**：`register`、`checkNow`、`downloadUpdate`、`cancelDownload`、`installNow`、`isBusy`、`quitForUpdate`、`updaterLoadError`
 - **IPC 域**：`update:check` / `update:download` / `update:cancel` / `update:install` / `update:open-log`（`handle`）、`update:version`（`on` + `event.returnValue`）、`update:progress`（推送）
 
@@ -108,6 +108,28 @@ renderer「打开日志目录」→ updateTools.openLog() → update:open-log
 ```
 
 它存在的原因：`message` 只说人话（不含 `latest.yml` / 存储桶 / 请求 URL），真正的处置线索全在日志里；而**启动静默检查失败时用户往往是刚进设置页**（进度事件发生在订阅之前），界面上只剩空状态，此时唯一能取证的就是这个入口——所以它不依赖 electron-updater 能否加载，也不依赖任何更新状态。
+
+### 3.5 状态文案（主进程单点产出）
+
+`state.message` 只在 `bindEvents()` 的事件回调与各动作入口里写，渲染层直接渲染、不再拼串（2026-10 起）：
+
+| 触发点 | stage | message（用户可见，逐字） |
+| --- | --- | --- |
+| `checking-for-update` | `checking` | `正在检查更新…` |
+| `update-available`（该版本未被跳过） | `available` | `发现新版本 <version>，可点「下载更新」获取安装包` |
+| `update-available`（`skippedVersion` 命中该版本） | `skipped` | `版本 <version> 已跳过，如需安装请点「下载更新」` |
+| `update-not-available` | `none` | `当前已是最新版本（<appVersion>）` |
+| `download-progress` | `downloading` | `正在下载更新 <n>%（<transferred> / <total>）`（字节数经 `bytesText`） |
+| `update-downloaded` | `downloaded` | `更新已下载（<version>），重启应用完成安装` |
+| `error` 事件 / `setError()` | `error` | 见 §5 的 `humanError()` 对照表第一列 |
+| `downloadUpdate()` 入口 | `downloading` | `正在下载更新…` |
+| `downloadUpdate()` 前置校验失败 | — | `当前没有可下载的更新，请先检查更新` |
+| `cancelDownload()` 成功 / 异常 | 回到 `available` | `已取消下载` / `取消下载失败，请重试`（detail：`取消失败：…`） |
+| `installNow()` 未下载完成 / 忙碌 | — | `更新尚未下载完成` / `当前有任务正在进行（转录 / 渲染 / 配音），请等任务结束后再重启安装` |
+| `installNow()` 即将退出安装 | — | `正在退出并安装更新…` |
+| `quitAndInstall` 抛错 | `error` | `启动安装程序失败，请重新下载安装包后手动安装`（detail：`quitAndInstall 失败：…`） |
+| 模块未加载（`notReady()`） | — | `更新模块不可用，请重新安装应用`（detail：`updaterLoadError \|\| 'electron-updater 未加载'`） |
+| `update:open-log` handler 抛错 | — | `打开日志目录失败`（detail：原始异常） |
 
 ## 4. 依赖与协作
 

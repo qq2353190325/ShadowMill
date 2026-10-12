@@ -81,7 +81,7 @@ function guessAudioExt(url: string): string {
 function resolveTtsDir(projectName: string, saveDir: string): string {
   const dir = String(saveDir || '').trim();
   if (dir) return dir;
-  const projectsRoot = projects.projectsRoot;
+  const projectsRoot = projects.projectsRoot();
   if (projectName) {
     const dir = path.join(projectsRoot, projectName);
     return path.join(dir, 'audio');
@@ -412,7 +412,7 @@ function register(ctx?: RegisterCtx): void {
   // 扫描已生成 TTS 音频：默认输出目录 + 自定义保存目录 + 各项目 audio/（供渲染层复用为背景音频）
   ipcMain.handle(IPC.Voice.ListGenerated, async () => {
     const cfg = getVoiceConfig();
-    const projectsRoot = projects.projectsRoot;
+    const projectsRoot = projects.projectsRoot();
     const AUDIO_RE = /\.(wav|mp3|m4a|aac|ogg|flac|mp4)$/i;
     const items: { path: string; name: string; group: string; size: number; mtime: number }[] = [];
     const seen = new Set<string>();
@@ -493,7 +493,7 @@ function register(ctx?: RegisterCtx): void {
       // 存到自定义目录 / 音频输出目录时不再冒充「已保存到项目」
       let savedTo = saveDir ? 'custom' : defaultOut ? 'output' : 'default';
       let targetName = projectName || '';
-      const projectsRoot = projects.projectsRoot;
+      const projectsRoot = projects.projectsRoot();
       if (!saveDir && !defaultOut && projectName) {
         const projDir = path.join(projectsRoot, projectName);
         const pf = path.join(projDir, 'project.json');
