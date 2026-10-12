@@ -5,7 +5,7 @@
       <svg class="titlebar-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
         <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
       </svg>
-      <span class="titlebar-title">影坊</span>
+      <span class="titlebar-title">{{ APP_NAME }}</span>
     </div>
     <div class="titlebar-controls">
       <button class="win-btn" title="最小化" @click="winMinimize">
@@ -29,6 +29,14 @@
       </button>
     </div>
   </header>
+
+  <!-- 运行环境包（ffmpeg/node/hyperframes/whisper 约 716MB）首次解包提示：
+       安装包里只带一个 7z，主进程在后台解到 userData；解包期间转录 / 转视频 / 逐句对齐会等它完成 -->
+  <div v-if="runtimeVisible" class="runtime-banner" :class="{ 'is-error': runtimeFailed }">
+    <span class="runtime-banner-text">{{ runtimeState.message }}</span>
+    <span v-if="runtimeBusy" class="runtime-banner-bar"><i :style="{ width: runtimeState.percent + '%' }"></i></span>
+    <button v-if="runtimeFailed" class="runtime-banner-btn" @click="retryRuntime">重新准备</button>
+  </div>
 
   <div class="layout">
     <!-- 左侧菜单（文字菜单） -->
@@ -61,17 +69,22 @@
 <script setup lang="ts">
 // App.vue —— 应用外壳：标题栏 + 侧边菜单 + 页面容器 + ToastHost + 全局初始化
 // （原 src/index.html 的 titlebar/sidebar 标记 + entry.js 的窗口控制/进度监听/启动逻辑）
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { APP_NAME } from '@shared/constants'
+import { STORAGE_KEY_PROJECT_CTX } from '@renderer/constants'
 import { activeMenu, appState, refreshProject, type PageKey } from './composables/useAppStore'
 import { currentPage, goPage, pageNavKey } from './pages'
 import { useToasts } from './composables/useToast'
 import { initRenderProgress } from './composables/useRenderProgress'
 import { loadRenderDefaults } from './composables/useRenderOptions'
+import { initRuntime, useRuntime } from './composables/useRuntime'
 
 const toasts = useToasts();
 const contentEl = ref<HTMLElement | null>(null);
 const isMaximized = ref(false);
-
+// 运行环境横幅：仅在「正在准备」或「准备失败」时出现（已就绪时保持界面干净）
+const { runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, retry: retryRuntime } = useRuntime();
+const runtimeVisible = computed(() => runtimeBusy.value || runtimeFailed.value);
 const menuItems: { key: PageKey; label: string; title: string }[] = [
   { key: 'home', label: '首页', title: '首页' },
   { key: 'content', label: '内容脚本', title: '内容脚本' },
@@ -96,7 +109,7 @@ function winClose(): void { window.windowControls.close(); }
 // ===== 启动：恢复上次项目上下文 → 刷新项目 → 进入首页（原 App.init） =====
 async function initApp(): Promise<void> {
   try {
-    const saved = JSON.parse(localStorage.getItem('myapp.projectCtx') || 'null');
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_PROJECT_CTX) || 'null');
     if (saved && saved.name) {
       appState.currentName = saved.name;
     }
@@ -111,11 +124,69 @@ async function initApp(): Promise<void> {
 onMounted(() => {
   window.windowControls.onMaximizedChange((v: boolean) => { isMaximized.value = v; });
   initRenderProgress();
+  initRuntime();
   void initApp();
 });
 </script>
 
 <style scoped>
+/* 运行环境横幅（标题栏之下、内容区之上的一条窄带；flex 子项，不遮挡页面） */
+.runtime-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 16px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: linear-gradient(90deg, rgba(0, 212, 255, .12) 0%, rgba(139, 92, 246, .10) 100%);
+  border-bottom: 1px solid rgba(0, 212, 255, .25);
+  box-shadow: var(--glow-card);
+}
+.runtime-banner.is-error {
+  background: linear-gradient(90deg, rgba(255, 77, 109, .14) 0%, rgba(255, 176, 32, .10) 100%);
+  border-bottom-color: rgba(255, 77, 109, .35);
+}
+.runtime-banner-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 进度条：与渲染进度同语言的细条 */
+.runtime-banner-bar {
+  flex: none;
+  width: 160px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .12);
+  overflow: hidden;
+}
+.runtime-banner-bar > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(135deg, #00D4FF 0%, #8B5CF6 100%);
+  box-shadow: var(--glow-primary);
+  transition: width .2s ease;
+}
+.runtime-banner-btn {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+  transition: background .2s ease, box-shadow .2s ease;
+}
+.runtime-banner-btn:hover {
+  background: rgba(0, 212, 255, .16);
+  box-shadow: var(--glow-primary);
+}
+
 /* 轻提示（样式自原 app.js toast 内联样式移植） */
 .toast-host {
   position: fixed;

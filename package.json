@@ -1,15 +1,16 @@
 {
   "name": "shadowmill",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "ShadowMill（影坊）：Electron 桌面应用，以「项目」为粒度的一站式音视频创作流水线",
   "main": "out/main/index.js",
   "scripts": {
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "runtime:pack": "node scripts/pack-runtime.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.agent.json",
-    "pack": "npm run build && npx electron-builder --dir",
-    "dist": "npm run build && npx electron-builder --win"
+    "pack": "npm run runtime:pack && npm run build && npx electron-builder --dir",
+    "dist": "npm run runtime:pack && npm run build && npx electron-builder --win"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
@@ -64,13 +65,17 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/"
+        "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/MarvisStudio/"
       }
     ],
     "extraResources": [
       {
-        "from": "resources",
-        "to": "."
+        "from": "build/runtime-pack",
+        "to": "runtime-pack"
+      },
+      {
+        "from": "build/tools",
+        "to": "tools"
       }
     ]
   },

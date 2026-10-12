@@ -10,6 +10,7 @@
 //   video.ts     预览 / HyperFrames 转视频 + dialog:open-html / video:* IPC
 //   whisper.ts   whisper.cpp 字幕转录 + whisper:* IPC
 //   updater.ts   应用自更新（electron-updater generic provider）+ update:* IPC
+//   runtime.ts   运行环境包（ffmpeg/node/hyperframes/whisper 解包到 userData）+ runtime:* IPC
 // 依赖图：settings ← htmlAgent ← projects ← voice ← ttsAlign；hfEnv ← video；updater ← settings；无环。
 // 打包输出 out/main/index.js；preload 输出 out/preload/index.js；渲染层输出 out/renderer/。
 import { app, BrowserWindow, Menu, ipcMain, clipboard, protocol } from 'electron'
@@ -24,6 +25,7 @@ import * as ttsAlign from './ttsAlign'
 import * as video from './video'
 import * as whisper from './whisper'
 import * as updater from './updater'
+import * as runtime from './runtime'
 
 // ===== userData 目录迁移：my-app → shadowmill =====
 // 应用名（package.json 的 name）决定 userData 目录名，改名会让老用户的数据目录"看起来消失"
@@ -247,6 +249,8 @@ app.whenReady().then(() => {
   video.register(ctx)
   whisper.register(ctx)
   updater.register(ctx)
+  // 运行环境包（runtime.ts）：自己带 2s 延迟在后台解包，注册顺序放在最后（不抢启动时间）
+  runtime.register(ctx)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

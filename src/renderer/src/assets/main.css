@@ -527,6 +527,24 @@ body {
   text-shadow: 0 0 8px rgba(255, 84, 112, 0.5);
 }
 
+/* 排障详情块（当前用于「设置 → 应用更新」的「查看详情」）：
+   等宽 + 可换行 + 可选中复制 —— 内容是原始报错（HTTP 状态 / AccessDenied 原文 / URL），
+   默认折叠，只有出错时才出现，故用比正文更弱的色阶，避免抢状态行的视线 */
+.hf-detail {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: var(--radius-btn);
+  background: rgba(11, 18, 32, 0.6);
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
 .hf-video-wrap {
   margin-top: var(--space-3);
   display: flex;

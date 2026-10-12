@@ -20,9 +20,9 @@
 
 | 字段 | 值 | 说明 |
 | --- | --- | --- |
-| `name` | `my-app` | npm 包名（`productName` 另为 `MarvisStudio`，二者不同） |
-| `version` | `0.0.2` | 应用与安装包版本号 |
-| `description` | `Electron 项目：左侧菜单 + 右侧内容区布局（五节点音视频创作流水线）` | 项目描述 |
+| `name` | `shadowmill` | npm 包名（`productName` 另为 `ShadowMill`，二者的书写形式不同）；同时决定 Electron 的 userData 目录名（`%APPDATA%\shadowmill`，改名前的 `my-app` 由主进程做一次迁移） |
+| `version` | `0.0.3` | 应用与安装包版本号；与 `src/shared/constants.ts` 的 `APP_USER_AGENT = 'ShadowMill/1.0'` 里那个 `1.0` **无关**（后者是固定的请求标识片段，版本号一律运行时取 `app.getVersion()`） |
+| `description` | `ShadowMill（影坊）：Electron 桌面应用，以「项目」为粒度的一站式音视频创作流水线` | 项目描述（改品牌名时属于清单第 2 项，需与 `src/shared/constants.ts` 一并改） |
 | `main` | `out/main/index.js` | Electron 主进程入口；`out/` 由 electron-vite 构建产出，即源码 `src/main/index.ts` 的编译结果 |
 
 ### 2.2 scripts（逐条）
@@ -63,8 +63,8 @@
 
 | 选项 | 值 | 说明 |
 | --- | --- | --- |
-| `appId` | `com.marvis.avpipeline` | Windows 应用唯一标识（安装/升级识别用） |
-| `productName` | `MarvisStudio` | 安装包与可执行文件显示名、快捷方式名 |
+| `appId` | `com.shadowmill.app` | Windows 应用唯一标识（安装/升级识别用） |
+| `productName` | `ShadowMill` | 安装包与可执行文件显示名、快捷方式名（产物为 `ShadowMill.exe` / `ShadowMill Setup <版本>.exe`）；**必须与 `src/shared/constants.ts` 的 `APP_NAME_EN` 一致**——JSON 无法 import TS 常量，故由 `electron.vite.config.ts` 的 `checkBrandConsistency()` 在配置加载时（`npm run dev` / `build` 各一次）比对，不一致时打印 `[dsh:brand] …` 告警（只告警、不阻断构建） |
 | `electronVersion` | `31.7.7` | 打包时下载/使用的 Electron 版本，与 `devDependencies.electron` 对齐 |
 | `electronDownload.mirror` | `https://npmmirror.com/mirrors/electron/` | Electron 二进制下载镜像（国内网络加速） |
 | `directories.output` | `dist` | 所有打包产物输出目录（与 `.gitignore` 的 `dist/` 对应） |
@@ -79,7 +79,7 @@
 | `nsis.createDesktopShortcut` | `true` | 创建桌面快捷方式 |
 | `nsis.createStartMenuShortcut` | `true` | 创建开始菜单快捷方式 |
 | `nsis.differentialPackage` | `true` | 生成差分包元数据，配合安装包旁的 `.exe.blockmap` 让客户端只下变化部分 |
-| `publish` | `[{ "provider": "generic", "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/MarvisStudio/" }]` | 更新源（阿里云 OSS，公共读 + 尾斜杠必备）。**`npm run dist` 借此生成 `resources/app-update.yml` 与 `dist/latest.yml`；generic 源不会自动上传**，两个文件要手工传到该 URL 下 |
+| `publish` | `[{ "provider": "generic", "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/" }]` | 更新源（阿里云 OSS，公共读 + 尾斜杠必备）。**`npm run dist` 借此生成 `resources/app-update.yml` 与 `dist/latest.yml`；generic 源不会自动上传**，两个文件要手工传到该 URL 下 |
 | `extraResources` | `[{ "from": "resources", "to": "." }]` | 把工程根 `resources/` 原样复制到安装目录的 `resources/`（asar **外**） |
 
 ### 2.6 files 收口（逐条）
@@ -121,7 +121,7 @@
 
 | 关联文件 | 关系 |
 | --- | --- |
-| `electron.vite.config.ts` | 被 `electron-vite` 自动读取；`externalizeDepsPlugin()` 决定 `dependencies` 里的包**不内联**，从而要求 asar 内必须能找到真实的包文件（现由 electron-builder 按 `dependencies` 自动收集） |
+| `electron.vite.config.ts` | 被 `electron-vite` 自动读取；`externalizeDepsPlugin()` 决定 `dependencies` 里的包**不内联**，从而要求 asar 内必须能找到真实的包文件（现由 electron-builder 按 `dependencies` 自动收集）；其 `checkBrandConsistency()` 会读本文件的 `build.productName` 与 `src/shared/constants.ts` 的 `APP_NAME_EN` 比对，不一致即告警 |
 | `tsconfig.node.json` / `tsconfig.web.json` / `tsconfig.agent.json` | `typecheck` 脚本按这三个 `-p` 逐个检查 |
 | `tsconfig.json` | 只是 solution 根，不被任何脚本直接使用（`tsc -b` 未被调用） |
 | `.gitignore` | 忽略 `node_modules/`、`dist/`、`out/`、`resources/`，与本文件的依赖目录、打包输出、extraResources 源一一对应 |
@@ -172,6 +172,7 @@ findstr /C:"node_modules\debug\" list.txt    # 每个运行时依赖都要 >0
 - `main` 是 `out/main/index.js`：**必须先 `build` 才能 `start`**，否则 `electron-vite preview` 无产物可加载。
 - package.json 根**无 `"type": "module"`**：根部默认 CommonJS。`src/agent/` 下有独立的 `{"type":"module"}` 标记，仅让该子目录按 ESM 解析。
 - `pack` 与 `dist` 都带 `npm run build` 前置，但**不**包含 `typecheck`——类型检查需要单独执行。
+- **改品牌名要动本文件三处**：`build.productName`（安装包与 exe 名）、`description`、`build.appId`；`build.productName` 与 `src/shared/constants.ts` 的 `APP_NAME_EN` 必须一致（构建期由 `checkBrandConsistency()` 告警），而显示用的中文名 / 口号只改 `src/shared/constants.ts` 即可（`index.html` 走占位符注入、渲染层直接 import）。注意 `name`（`shadowmill`，决定 `userData` 目录名）**不在**品牌清单里：改它等于搬用户数据目录，需要主进程迁移逻辑配合。
 - `build.files` 只收应用代码与随包资源（`out/**/*`、`vendor/**/*`、`README.md` + 排除项）；用户项目数据一律在 `userData/projects/` 下，不随包分发。
 - **`vendor/**/*` 进 asar，而不是走 `extraResources`**：`vendor/gsap/gsap.min.js` 只被主进程**按字节读取与复制**（`fs.readFileSync` / `fs.copyFileSync`），不需要 `spawn` 执行，因此放进 asar 即可；`hfEnv.findLocalGsap()` 用 `app.getAppPath()` 定位它（dev = 项目根，打包后 = `app.asar` 根），两种形态都能命中。配套的一对改写：项目内 `index.html` 用 `./gsap.min.js` 本地引用（`localizeGsapHtml`），**导出/下载单个 HTML 时**用 `externalizeGsapHtml` 换回固定版本 CDN——因此随包文件只服务打包后的离线预览/渲染，导出物本身不携带它。
 - **`vendor/` 未被 `.gitignore` 忽略且不应忽略**：它是分发给最终用户的运行资源，必须随源码入库（否则新环境克隆后 GSAP 本地化会静默退化为 CDN 加载）。更新步骤见 `vendor/gsap/README.md`；升级时 `hfEnv.ts` 的 `GSAP_CDN_PINNED` 必须同步改版本号。

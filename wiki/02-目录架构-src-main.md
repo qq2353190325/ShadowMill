@@ -8,17 +8,17 @@
 
 | 文件 | 行数 | 角色 | 注册的 IPC 域 |
 |---|---|---|---|
-| [index.ts](./files/main/index.ts.md) | 180 | **入口装配器**：生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议、窗口控制与剪贴板 IPC、启动时序打点 `startup.log` | `window:*`、`app:copy-text` |
+| [index.ts](./files/main/index.ts.md) | 265 | **入口装配器**：userData 迁移（`my-app` → `shadowmill`，模块顶层最先执行）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议、窗口控制与剪贴板 IPC、启动时序打点 `startup.log` | `window:*`、`app:copy-text` |
 | [hfEnv.ts](./files/main/hfEnv.ts.md) | 212 | 环境探测与内置依赖定位 + GSAP 本地化 / 导出外部化辅助（不注册 IPC） | — |
-| [settings.ts](./files/main/settings.ts.md) | 270 | 设置存储（`userData/settings.json`，含视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` | `settings:*`（5） |
+| [settings.ts](./files/main/settings.ts.md) | 285 | 设置存储（`userData/settings.json`，含视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` | `settings:*`（5） |
 | [systemVoices.ts](./files/main/systemVoices.ts.md) | 63 | Qwen-TTS 内置系统音色静态表 | — |
-| [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 235 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用；SDK 经 settings 懒加载） | — |
+| [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 248 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用；SDK 经 settings 懒加载） | — |
 | [projects.ts](./files/main/projects.ts.md) | 804 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、背景音轨注入（`<audio id="myv-bgm">`）、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、音视频产物（项目结构再导出 `shared/types`） | `project:*`（24 handle + 1 推送） |
 | [voice.ts](./files/main/voice.ts.md) | 533 | 千问语音：音色管理 + 文字生音频 | `voice:*`（15） |
 | [ttsAlign.ts](./files/main/ttsAlign.ts.md) | 332 | 字幕配音逐句合成与时间对齐（模式 A/B） | `voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | [video.ts](./files/main/video.ts.md) | 157 | HyperFrames 转视频（渲染副本 GSAP 本地化；音轨来自页面内的 `<audio id="myv-bgm">`） | `dialog:open-html`、`video:*`（3 handle + 1 推送） |
 | [whisper.ts](./files/main/whisper.ts.md) | 704 | whisper.cpp 转录 + 识别模型下载/管理 | `whisper:*`（11 handle + 1 推送） |
-| [updater.ts](./files/main/updater.ts.md) | 373 | 应用自更新（electron-updater generic provider，**懒加载**）：检查 / 下载 / 取消 / 退出安装 + 启动静默检查 + 忙碌态判定 | `update:*`（4 handle + 1 `on`/`sendSync` + 1 推送） |
+| [updater.ts](./files/main/updater.ts.md) | 465 | 应用自更新（electron-updater generic provider，**懒加载**）：检查 / 下载 / 取消 / 退出安装 / **打开日志** + 启动静默检查 + 忙碌态判定；错误文案分 `message` / `detail` 两层 | `update:*`（5 handle + 1 `on`/`sendSync` + 1 推送） |
 | [vad.ts](./files/main/vad.ts.md) | 122 | WAV 采样读取与静音裁剪（零依赖纯函数） | — |
 
 ---
@@ -77,6 +77,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 
 ### 4.1 `index.ts` —— 入口装配器
 
+- **userData 迁移**：产品改名（`my-app` → `shadowmill`）后 userData 目录名随 `package.json` 的 `name` 变化，模块在**顶层、任何模块读写 userData 之前**执行一次 `migrateLegacyUserData()`（`%APPDATA%\my-app` → `%APPDATA%\shadowmill`）。放弃搬迁的守卫：① `MIGRATE_USER_DATA=0` 单次关闭（**开发态默认可搬迁**）；② 应用名等于旧名；③ 无法从 userData 目录名推导出应用名；④ 老目录不存在或新目录已存在（后者视为已迁移过，不覆盖）；⑤ 全程 `try/catch`，失败只记日志。搬迁逐项 `renameSync`（目标同名项则跳过），跨分区/占用时退化为 `cpSync` + 删源、单项失败单独计数；老目录搬空后删除。结果写新目录 `startup.log`：`userData 迁移 my-app → shadowmill：搬迁 N 项，跳过 N 项，失败 N 项`。**打点路径 `STARTUP_LOG` 在迁移之后才解析**，否则前几行打点会提前建出新目录、让迁移误判为「已迁移过」。详见 [files/main/index.ts.md](./files/main/index.ts.md) §3.1。
 - **协议特权**：`app` ready **之前**调用 `protocol.registerSchemesAsPrivileged([{ scheme: 'hgpreview', privileges: { standard, secure, supportFetchAPI, stream } }])`；ready 之后 `protocol.handle('hgpreview', …)` 把 `hgpreview://p/<encodeURIComponent(项目名)>/<相对路径>` 映射回 `userData/projects/<项目名>/` 内的文件。
   - 目录穿越防护：`path.resolve` 后必须等于项目目录或以 `项目目录 + path.sep` 开头，否则 403。
   - 直接读字节构造 `Response`（`net.fetch(file://)` 在协议处理器内有兼容问题，会导致预览空白），MIME 由 `previewMime()` 的扩展名表显式给出，`Cache-Control: no-store`。
@@ -162,7 +163,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 ### 4.11 `updater.ts` —— 应用自更新
 
 - **更新源三级优先**：`settings.json` 的 `updater.feedUrl`（非空即 `setFeedURL({ provider: 'generic', url })` 覆盖）→ 打包时写入 `resources/app-update.yml` 的 `publish` 地址（由 `package.json` 的 `build.publish` 在 `npm run dist` 时生成）。
-- **依赖加载是防御式的、并且是懒加载的**：`electron-updater` 用 `require()` 取 `autoUpdater`，整段包在 `try` 里并存下 `updaterLoadError`；缺依赖时所有 `update:*` 调用都返回 `{ ok: false, message }`，**不会让主进程启动崩掉**（打包白名单漏项这类问题因此表现为「功能不可用」而不是「应用打不开」）。加载动作集中在 `ensureUpdater()`，**`register()` 不再触发它**——`electron-updater` 的模块图（实测 ~70ms，冷启动更久）因此不占用「建窗 → 首屏」这段时间；`autoCheck=false` 的用户整个会话都不会加载它。
+- **依赖加载是防御式的、并且是懒加载的**：`electron-updater` 用 `require()` 取 `autoUpdater`，整段包在 `try` 里并存下 `updaterLoadError`；缺依赖时所有 `update:*` 调用都返回 `{ ok: false, message, detail }`（`message` 是「更新模块不可用，请重新安装应用」，技术原因只留在 `detail`），**不会让主进程启动崩掉**（打包白名单漏项这类问题因此表现为「功能不可用」而不是「应用打不开」）。加载动作集中在 `ensureUpdater()`，**`register()` 不再触发它**——`electron-updater` 的模块图（实测 ~70ms，冷启动更久）因此不占用「建窗 → 首屏」这段时间；`autoCheck=false` 的用户整个会话都不会加载它。
 - **下载策略**：`autoDownload = false`（安装包近 300 MB，只由用户点「下载更新」触发）、`autoInstallOnAppQuit = true`（已下载的更新在用户直接关窗时也会装上）。
 - **安装前拒绝长任务**：`installNow()` 在 `busy` 时返回「当前有任务正在进行（转录 / 渲染 / 配音）」并拒绝重启。`busy` 不改动任何业务模块——它由 `bindBusyTracking()` 监听 4 路进度通道（`whisper:progress` / `video:progress` / `voice:align-progress` / `project:html-progress`）的起止自动推导。
 - **与 `window-all-closed` 的配合**：`quitAndInstall()` 会触发窗口关闭，若入口的 `window-all-closed` 再 `app.quit()` 会与安装器抢退出流程，因此 `installNow()` 先置 `quitFlag`，入口据此直接 `return`（`updater.quitForUpdate()`）。

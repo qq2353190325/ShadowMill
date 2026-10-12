@@ -1,8 +1,8 @@
 <template>
   <div>
     <section class="hero">
-      <span class="hero-tag">影坊 · SHADOWMILL</span>
-      <h1>一站式音视频创作流水线</h1>
+      <span class="hero-tag">{{ brandTag }}</span>
+      <h1>{{ APP_SLOGAN }}</h1>
       <p>以“项目”为单位贯通：内容脚本 → 配音 → 字幕 → HTML → 视频，一键生成。</p>
       <p class="hero-sub">CYBER UI · 深空科技 视觉主题 · 语音识别与视频渲染均在本机完成</p>
     </section>
@@ -52,11 +52,15 @@
 // 原 JS 版 home 模块 {template,index}.js 移植；原 init 的 DOM 注入改为响应式 v-for。
 // 内置示例项目已下线（含其快捷入口块）；新建项目入口统一收在顶部 StepBar 的弹窗，首页只选择/打开项目。
 import { computed } from 'vue'
+import { APP_NAME, APP_NAME_EN, APP_SLOGAN } from '@shared/constants'
 import {
   appState, hasAudio, hasContent, hasHtml, hasSubtitle, hasVideo,
   switchProject, type PageKey
 } from '@renderer/composables/useAppStore'
 import { goPage } from '@renderer/pages'
+
+// 首页角标：中文名 · 英文名大写（品牌文案统一来自 @shared/constants）
+const brandTag = APP_NAME + ' · ' + APP_NAME_EN.toUpperCase();
 
 // 首页：动态流水线（反映当前项目状态，可点击跳转）
 const flowDefs = computed(() => [

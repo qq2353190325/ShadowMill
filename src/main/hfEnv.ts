@@ -7,53 +7,92 @@ import fs from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { app } from 'electron'
 
-// ===== 内置依赖资源定位（打包后由 electron-builder extraResources 投放至 resources）=====
-// 注：开发版资源根为 项目根/resources（以 app.getAppPath() 为基准，打包后走 process.resourcesPath）
-const BUILTIN_RESOURCES: {
-  root: string
-  node: string
-  ffmpegBin: string
-  ffmpeg: string
-  ffprobe: string
-  hfCli: string
-  hivePlayer: string
-  chromeShell: string | null
-} = (() => {
-  const root = app.isPackaged
-    ? process.resourcesPath
-    : path.join(app.getAppPath(), 'resources');
-  const exists = (p: string) => fs.existsSync(p);
+// ===== 内置依赖资源定位（ffmpeg / node / hyperframes / whisper）=====
+// 资源根按优先级解析：
+//   ① <userData>/runtime/<id>：运行环境包解出来的那一份（安装版常态，见 src/main/runtime.ts）
+//   ② <resources>：dev 下为 项目根/resources，打包后为 process.resourcesPath（旧版布局 / 兜底）
+// 为什么搬到 userData：ffmpeg+node+hyperframes+whisper 合计约 716MB、4900+ 文件，占安装体积 72%，
+// 却跨版本几乎不变；而 NSIS 的更新是「整体卸载旧版 → 解压复制新包」，这些文件每次更新都要重来一遍
+// （实测一次更新 97 秒，期间应用不存在、快捷方式失效）。拆成运行环境包后更新不再碰它们。
+// 实现上刻意用 getter 而不是快照：userData 目录迁移（my-app → shadowmill）与本模块的 import 顺序
+// 不确定，解包又是运行时才完成，快照会把路径永久钉在旧值上；getter 每次按当前状态算（结果带缓存，
+// 解包完成后由 refreshBuiltinResources() 失效）。
+let cachedRoot: string | null = null;
+let cachedChrome: string | null | undefined;
 
-  // chrome-headless-shell 可执行：<root>\hyperframes\chrome\chrome-headless-shell\**\chrome-headless-shell.exe
-  let chromeShell: string | null = null;
+// 运行环境包指针：<userData>/runtime/current.json 指向 id，那一份目录里有 ok.json 才算解包完整
+function packRootFromMarker(): string {
+  try {
+    const base = path.join(app.getPath('userData'), 'runtime');
+    const cur = JSON.parse(fs.readFileSync(path.join(base, 'current.json'), 'utf8'));
+    const id = cur && typeof cur.id === 'string' ? cur.id : '';
+    if (!id) return '';
+    const dir = path.join(base, id);
+    return fs.existsSync(path.join(dir, 'ok.json')) ? dir : '';
+  } catch (e) { return ''; }
+}
+
+function resolveRoot(): string {
+  if (cachedRoot !== null) return cachedRoot;
+  // 开发态刻意不看运行环境包指针：改 resources/ 就该马上生效，不该被上次打包解出来的那份顶掉
+  // （要测解包路径时用 SHADOWMILL_RUNTIME_PACK 指向包里目录，runtime.ts 会在解包后显式刷新根）
+  cachedRoot = app.isPackaged
+    ? (packRootFromMarker() || process.resourcesPath)
+    : path.join(app.getAppPath(), 'resources');
+  return cachedRoot;
+}
+
+// chrome-headless-shell 可执行：<root>\hyperframes\chrome\chrome-headless-shell\**\chrome-headless-shell.exe
+// （目录层级随 hyperframes 版本变化，按文件名递归找；结果缓存，缺资源时返回 null）
+function findChromeShell(root: string): string | null {
+  if (cachedChrome !== undefined) return cachedChrome;
+  cachedChrome = null;
   try {
     const base = path.join(root, 'hyperframes', 'chrome', 'chrome-headless-shell');
-    if (exists(base)) {
+    if (fs.existsSync(base)) {
       const stack = [base];
-      while (stack.length && !chromeShell) {
+      while (stack.length && !cachedChrome) {
         const cur = stack.pop() as string;
         for (const e of fs.readdirSync(cur, { withFileTypes: true })) {
           if (e.isDirectory()) stack.push(path.join(cur, e.name));
           else if (/^chrome-headless-shell\.exe$/i.test(e.name)) {
-            chromeShell = path.join(cur, e.name);
+            cachedChrome = path.join(cur, e.name);
             break;
           }
         }
       }
     }
-  } catch (e) { chromeShell = null; }
+  } catch (e) { cachedChrome = null; }
+  return cachedChrome;
+}
 
-  return {
-    root,
-    node: path.join(root, 'node', 'node.exe'),
-    ffmpegBin: path.join(root, 'ffmpeg', 'bin'),
-    ffmpeg: path.join(root, 'ffmpeg', 'bin', 'ffmpeg.exe'),
-    ffprobe: path.join(root, 'ffmpeg', 'bin', 'ffprobe.exe'),
-    hfCli: path.join(root, 'hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs'),
-    hivePlayer: path.join(root, 'hyperframes', 'node_modules', 'hyperframes', 'dist', 'hyperframes-player.global.js'),
-    chromeShell
-  };
-})();
+const BUILTIN_RESOURCES: {
+  readonly root: string
+  readonly node: string
+  readonly ffmpegBin: string
+  readonly ffmpeg: string
+  readonly ffprobe: string
+  readonly hfCli: string
+  readonly hivePlayer: string
+  readonly chromeShell: string | null
+} = {
+  get root() { return resolveRoot(); },
+  get node() { return path.join(resolveRoot(), 'node', 'node.exe'); },
+  get ffmpegBin() { return path.join(resolveRoot(), 'ffmpeg', 'bin'); },
+  get ffmpeg() { return path.join(resolveRoot(), 'ffmpeg', 'bin', 'ffmpeg.exe'); },
+  get ffprobe() { return path.join(resolveRoot(), 'ffmpeg', 'bin', 'ffprobe.exe'); },
+  get hfCli() { return path.join(resolveRoot(), 'hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs'); },
+  get hivePlayer() { return path.join(resolveRoot(), 'hyperframes', 'node_modules', 'hyperframes', 'dist', 'hyperframes-player.global.js'); },
+  get chromeShell() { return findChromeShell(resolveRoot()); }
+};
+
+// 资源根变化（运行环境包解包完成 / 切换到指定目录）后调用：清缓存并返回新的根。
+// 不传参数即回到「按指针重新解析」。
+function refreshBuiltinResources(root?: string): string {
+  cachedRoot = (typeof root === 'string' && root) ? root : null;
+  cachedChrome = undefined;
+  return resolveRoot();
+}
 
 // 探测 HyperFrames CLI 入口（hyperframes.mjs）：内置优先，回退环境变量
 function findHyperframesCli(): string | null {
@@ -198,6 +237,7 @@ function copyGsapIntoProject(dir: string): boolean {
 
 export {
   BUILTIN_RESOURCES,
+  refreshBuiltinResources,
   findHyperframesCli,
   resolveNodePath,
   findNode,

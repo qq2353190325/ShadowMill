@@ -210,8 +210,9 @@ npm run dev        # 开发：起 Vite dev server（127.0.0.1:5173）+ Electron�
 npm run build      # 构建三端产物到 out/
 npm start          # 以构建产物启动（= electron-vite preview，需先 npm run build）
 npm run typecheck  # 三份 tsconfig 串行类型检查
-npm run pack       # build + electron-builder --dir（免安装解包目录）
-npm run dist       # build + electron-builder --win（NSIS 安装包）
+npm run runtime:pack  # 把 resources/ 打成运行环境包（build/runtime-pack/，源目录没变则自动跳过）
+npm run pack       # runtime:pack + build + electron-builder --dir（免安装解包目录）
+npm run dist       # runtime:pack + build + electron-builder --win（NSIS 安装包）
 ```
 
 **外部依赖**
@@ -221,6 +222,12 @@ npm run dist       # build + electron-builder --win（NSIS 安装包）
 - **FFmpeg / FFprobe**：内置 `resources/ffmpeg/bin/`，同时会探测 WinGet 安装的 `Gyan.FFmpeg` 并注入 `PATH`。
 - **whisper-cli.exe**：内置 `resources/whisper/`（含依赖 DLL）；**识别模型文件不随包分发**，在应用内按需下载。
 - **GSAP**：随包 `vendor/gsap/gsap.min.js`（3.14.2），无需联网；版本与更新步骤见 `vendor/gsap/README.md`。
+- **运行环境包**：上面这几项（ffmpeg / node / hyperframes / whisper）合计约 716 MB、4900+ 文件，
+  打包时由 `scripts/pack-runtime.mjs` 压成 `build/runtime-pack/runtime.7z` 随包发布，**首次启动**由主进程
+  解到 `%APPDATA%\shadowmill\runtime\<id>\`（带进度横幅，约 30~60 秒），之后更新只要包内容没变就不再重装它们。
+  解包器 `7za.exe` 一并随包（`build/tools/`）；开发态直接用项目根 `resources/`，不走解包。
+  想把安装包再瘦一圈：把 `runtime.7z` 与 `runtime.json` 上传到更新源（`app-update.yml` 的 url 目录），
+  再把 `package.json` 的 `build.extraResources` 里 `build/runtime-pack` 一项删掉即可（应用会自动改为下载）。
 
 **首次使用配置**（设置页）
 
@@ -243,7 +250,7 @@ npm run dist       # build + electron-builder --win（NSIS 安装包）
 - **生成契约与 HyperFrames 对齐 + GSAP 本地化**：提示词要求 `gsap.timeline({ paused: true })` 与「以 composition id 为键的 `__timelines` 对象」（与官方文档一致）；GSAP 改为随包 `vendor/gsap/gsap.min.js` + 项目内相对引用，生成 / 保存 / 预览 / 渲染四环节自动改写残留 CDN 引用，预览控制脚本同时兼容旧生成物的数组形态。
 - **⑤ 视频预览与转视频**：合规校验、HyperFrames 后台渲染与中文进度文案、**渲染档位（设置页全局默认 + 项目级覆盖）**、成品内嵌播放与「重新加载」「在文件夹中显示」、产物回写项目。
 - **项目化**：创建（弹窗输入名称 → 立即创建并切换）/ 切换 / 删除、字幕与内容脚本保存、背景音频与视频素材管理（含提取原声）、`hgpreview://` 预览协议。
-- **工程化**：TypeScript 全量覆盖（`npm run typecheck` 全绿）、IPC 载荷类型集中在 `shared/types.ts` 并作为 `window.*` 的单一真源、CSP/sandbox/contextIsolation 安全边界、electron-builder 打包配置完备（内置运行时经 `extraResources` 携带）。
+- **工程化**：TypeScript 全量覆盖（`npm run typecheck` 全绿）、IPC 载荷类型集中在 `shared/types.ts` 并作为 `window.*` 的单一真源、CSP/sandbox/contextIsolation 安全边界、electron-builder 打包配置完备（重型运行资源经 `runtime-pack` 随包发布、首次启动解到 userData）。
 
 ### 已知限制与说明
 
@@ -252,7 +259,8 @@ npm run dist       # build + electron-builder --win（NSIS 安装包）
 - **对齐配音**：单句最多加速到 1.15 倍，超出靠顺延；末句无槽位、不加速也不顺延；同一时刻只允许一个对齐任务，取消是句间软中断（当前句的合成请求不会被打断）。
 - **本地音频格式**：whisper-cli 原生只支持 flac/mp3/ogg/wav（其它格式会先自动转码）；克隆音色上传的本地音频 Base64 后需小于 10 MB；VAD 只解析 16 bit PCM WAV。
 - **API Key 以明文保存在本机 `userData/settings.json`**，仅主进程读取，不会外传；如需更高安全性可后续接入 Electron `safeStorage` 加密。
-- **首次启动偏慢属于正常现象**：安装包内含完整 Electron 运行时与内置资源（约 1 GB 安装体积），安装后第一次启动时 Windows Defender 会扫描新落盘的 `ShadowMill.exe`，加上磁盘冷缓存，可能出现十几秒的等待。**这段等待不再是「只有背景」**：窗口一出现就是品牌底色，页面首帧即显示启动画面（logo + 扫描条 + 「正在启动…」），Vue 挂载后自动淡出。应用自身的启动开销也已压缩——`electron-updater` 与 `openai` 两个大模块改为懒加载、启动时不再重复拉取项目数据。
-- **排查启动耗时**：`%APPDATA%\shadowmill\startup.log` 每次启动追加几行，每行形如 `2026-10-12T01:02:19.780Z +4200ms window created`——`+NNNms` 是距进程启动的毫秒数，可直接看出时间花在「主进程模块加载 / 建窗 / 页面加载」哪一段。（更新日志在同目录 `updater.log`，预览协议日志在 `preview-protocol.log`。）旧版本（`MarvisStudio` / npm 包名 `my-app`）的 `%APPDATA%\my-app\` 会在首次启动时**自动迁移**到 `%APPDATA%\shadowmill\`（开发态同样迁移；需要保留旧目录做对照时，用 `MIGRATE_USER_DATA=0` 启动一次即可跳过）。
+- **首次启动偏慢属于正常现象**：安装包内含完整 Electron 运行时，加上随包发布的运行环境包（约 275 MB 压缩 / 716 MB 解包）首次启动要解到 `%APPDATA%\shadowmill\runtime\`（**窗口顶部有「正在准备运行环境 x%」进度横幅**，约 30~60 秒；同一份包只解一次），同时 Windows Defender 会扫描新落盘文件、磁盘冷缓存也会拖慢第一批读取，可能出现十几秒的等待。**这段等待不再是「只有背景」**：窗口一出现就是品牌底色，页面首帧即显示启动画面（logo + 扫描条 + 「正在启动…」），Vue 挂载后自动淡出。应用自身的启动开销也已压缩——`electron-updater` 与 `openai` 两个大模块改为懒加载、启动时不再重复拉取项目数据。
+- **更新安装期间应用会整体消失约 1~2 分钟**：NSIS 更新是「静默卸载旧版本 → 解压复制新安装包」，期间安装目录被清空重建，**桌面 / 开始菜单快捷方式会暂时指向不存在的文件**（点击提示「文件不存在或已被移动」，属正常现象，勿重复点击），装完会自动重新打开。因此「重启安装」必须由用户显式点击（弹窗会先说明这段预期与 UAC 提权），应用**不再在关窗时自动安装**；安装成功后的首次启动会清掉 `%LOCALAPPDATA%\shadowmill-updater\pending\` 里重复的安装包（约 275 MB）。安装耗时的大头是 716 MB 运行资源被反复重装 —— 拆到独立运行环境包后（见上文「外部依赖 · 运行环境包」），只有资源本身变化的那次更新才需要重新解包。
+- **排查启动耗时**：`%APPDATA%\shadowmill\startup.log` 每次启动追加几行，每行形如 `2026-10-12T01:02:19.780Z +4200ms window created`——`+NNNms` 是距进程启动的毫秒数，可直接看出时间花在「主进程模块加载 / 建窗 / 页面加载」哪一段。（更新日志在同目录 `updater.log`，运行环境解包日志在 `runtime.log`，预览协议日志在 `preview-protocol.log`。）旧版本（`MarvisStudio` / npm 包名 `my-app`）的 `%APPDATA%\my-app\` 会在首次启动时**自动迁移**到 `%APPDATA%\shadowmill\`（开发态同样迁移；需要保留旧目录做对照时，用 `MIGRATE_USER_DATA=0` 启动一次即可跳过）。
 
 *（内容由AI生成，仅供参考）*

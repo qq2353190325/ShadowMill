@@ -2,17 +2,17 @@
 
 > 首页：hero 区 + 五节点动态流水线 + 「我的项目」卡片（只选择 / 打开）。
 
-- **覆盖文件**：`HomePage/index.vue`（本目录唯一文件，81 行）
+- **覆盖文件**：`HomePage/index.vue`（本目录唯一文件，86 行）
 - **所在目录**：`src/renderer/src/pages/HomePage/`
 - **类型**：页面组件（SFC）
-- **规模**：81 行
+- **规模**：86 行
 - **对外导出**：默认导出组件（无 props、无 emits）
 
 ## 1. 作用与职责
 
 首页是整个「内容脚本 → 配音 → 字幕 → HTML → 视频」创作流水线的入口页，承担三件事：
 
-1. **品牌与定位展示**：hero 区展示主题标签、主标题与一句话流程说明。
+1. **品牌与定位展示**：hero 区展示**品牌角标**（`{{ brandTag }}` = `APP_NAME + ' · ' + APP_NAME_EN.toUpperCase()`，当前渲染为「影坊 · SHADOWMILL」）、主标题（`{{ APP_SLOGAN }}`，当前为「一站式音视频创作流水线」）与一句话流程说明，底部另有一行参数小字（视觉主题「CYBER UI · 深空科技」+「语音识别与视频渲染均在本机完成」）。品牌文案全部来自 `@shared/constants`，本页不写品牌字面量。
 2. **链路可视化 + 导航**：`flow-pipeline` 用 `v-for` 渲染五个节点，节点点亮态由 `useAppStore` 的 `has*` computed 决定，点击任意节点调用 `goPage(n.page)` 直接跳到对应页。
 3. **项目选择入口**：展示 `appState.myProjects`（我的项目）卡片，标注 HTML ✓/— 、视频 ✓/— 、字幕 ✓/— 与更新时间，点击进入该项目。
 
@@ -24,7 +24,7 @@
 
 | 区块 | 说明 |
 | --- | --- |
-| `section.hero` | 主题标签 `CYBER UI · 深空科技`、`<h1>一站式音视频创作流水线</h1>`、副标题说明五节点流程 |
+| `section.hero` | 品牌角标 `{{ brandTag }}`（`APP_NAME · APP_NAME_EN.toUpperCase()`，当前为「影坊 · SHADOWMILL」）、`<h1>{{ APP_SLOGAN }}</h1>`（当前为「一站式音视频创作流水线」）、副标题说明五节点流程、参数行 `.hero-sub`「CYBER UI · 深空科技 视觉主题 · 语音识别与视频渲染均在本机完成」 |
 | `div.flow-pipeline#home-flow` | 动态流水线容器，`v-for="(n, i) in flowDefs"` 渲染节点，节点间以 `→`（`i < flowDefs.length - 1`）连接 |
 | `div.flow-node` | 单节点：序号 `{{ n.idx }}`、标题 `{{ n.t }}`、描述 `{{ n.d }}`；`done` 为真时加 `flow-done` 类并显示「已完成」角标；`@click="goPage(n.page)"`，带 `:data-page="n.page"` |
 | `div.metric-grid` | 四个静态指标卡：`5+` 支持音频格式、`1080P` 导出分辨率、`5` 项目链路节点、`MP4` 视频输出格式 |
@@ -38,7 +38,7 @@
 
 | 类名 | 作用 | 定义位置 |
 | --- | --- | --- |
-| `hero` / `hero-tag` | hero 区容器与主题标签胶囊 | `assets/main.css` |
+| `hero` / `hero-tag` / `hero-sub` | hero 区容器、**品牌角标**胶囊（文案 `{{ brandTag }}`，来自 `@shared/constants`）、底部参数小字行（12px、`letter-spacing:1px`、`opacity:.75`） | `assets/main.css` |
 | `flow-pipeline` / `flow-node` / `flow-arrow` | 流水线容器、单个节点、节点之间的箭头 | 同上 |
 | `flow-done` / `flow-node-index` / `flow-badge` | 节点「已完成」态、左上角序号、「已完成」角标 | 同上 |
 | `metric-grid` / `metric-card` / `metric-value` / `metric-label` | 指标卡网格、卡片、数值、说明文字 | 同上 |
@@ -55,6 +55,8 @@
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `flowDefs` | `computed` 数组 | 五个节点定义，字段为 `idx` / `t` / `d` / `page` / `done`，随 `has*` 变化自动重算 |
+| `brandTag` | 模块级常量 `string` | `APP_NAME + ' · ' + APP_NAME_EN.toUpperCase()`（当前渲染为「影坊 · SHADOWMILL」），供 `.hero-tag` 使用；两个来源常量都取自 `@shared/constants` |
+| `APP_SLOGAN` | 导入的常量 | 直接用于 `<h1>{{ APP_SLOGAN }}</h1>`（当前为「一站式音视频创作流水线」） |
 
 `flowDefs` 的具体内容与点亮条件：
 
@@ -103,6 +105,7 @@
 | 来源 | 引入内容 |
 | --- | --- |
 | `vue` | `computed` |
+| `@shared/constants` | `APP_NAME`、`APP_NAME_EN`、`APP_SLOGAN`（品牌文案唯一来源：前两个拼出 `brandTag`，第三个作主标题） |
 | `@renderer/composables/useAppStore` | `appState`、`hasAudio`、`hasContent`、`hasHtml`、`hasSubtitle`、`hasVideo`、`switchProject`、类型 `PageKey` |
 | `@renderer/pages` | `goPage` |
 
@@ -130,3 +133,4 @@
 - **`flowDefs` 使用类型断言**：每个节点的 `page` 标注为 `PageKey`（如 `'content' as PageKey`），保证 `goPage(n.page)` 的类型安全。
 - **首页无 `onMounted`**：页面不自行拉取数据，完全依赖全局状态；这也是 `goPage` 每次导航都调用 `refreshProject()` 的原因。
 - **`fmtTime` 是本页私有实现**：只有本页用这种「到分钟」的展示格式，因此没有下放到 `utils/time.ts`，避免与字幕时间轴格式化（`[分:秒]`）混淆。
+- **品牌文案一律走常量、不写字面量**：角标由 `brandTag`（`APP_NAME + ' · ' + APP_NAME_EN.toUpperCase()`）拼出、主标题直接用 `APP_SLOGAN`，三个源常量都来自 `@shared/constants`。这样改品牌只改那一个文件（`index.html` 的标题与启动画面走构建期占位符注入，见 [index.html.md](../../index.html.md) §2.2），本页不需要动。注意 `brandTag` 是**模块级常量**而非 `computed`——两个操作数都是编译期常量，无需响应式。

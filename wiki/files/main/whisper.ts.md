@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（whisper.cpp 转录 + 模型管理）
-- **规模**：704 行
+- **规模**：705 行
 - **对外导出**：`WHISPER_MODELS`、`WHISPER_LANGS`、`MODEL_BASE_URL`、`modelsDir`、`resolveCliPath`、`allModels`、`findModel`、`resolveModelFile`、`unknownModelFiles`、`register`，以及从 `./vad` 复用的 `readWavSamples`、`toVadSamples`、`vadTrimSegments`
 
 ## 1. 作用与职责
@@ -74,7 +74,7 @@
 | `resolveModelFile(id)` | `(id: string) => { name; path; bytes } \| null` | **精确解析**：只认该档位登记的 `file`，`statSync` 失败、非普通文件或 `size <= 0` 时返回 `null` |
 | `unknownModelFiles()` | `() => string[]` | 模型目录中文件名不在枚举内的 `.bin` 列表（提示用户可「添加自定义模型」纳入管理） |
 | `modelFilePath(id)` | `(id: string) => string` | 模型文件绝对路径，未命中返回空串；当前模块内无调用点，为预留工具函数 |
-| `httpGetFollow(url, redirects)` | `(url: string, redirects: number) => Promise<IncomingMessage>` | 支持重定向的 GET：3xx 且有 `location` 时最多跟随 5 跳，非 200 直接 reject；请求头带 `User-Agent: MarvisStudio/1.0` |
+| `httpGetFollow(url, redirects)` | `(url: string, redirects: number) => Promise<IncomingMessage>` | 支持重定向的 GET：3xx 且有 `location` 时最多跟随 5 跳，非 200 直接 reject；请求头带 `User-Agent: APP_USER_AGENT`（常量来自 `src/shared/constants.ts`，值即 `'ShadowMill/1.0'`，不再写字面量） |
 | `downloadFile(url, destPath, onProgress?)` | `(…) => Promise<number>` | 流式写盘：`createWriteStream(destPath)` 边收边写，返回累计字节数；进度节流见 5.1 |
 | `runCli(cliPath, modelPath, audioPath, outPrefix, language, emit, id)` | `(…) => Promise<string>` | spawn `whisper-cli`：`-m 模型 -f 音频 -oj -of 前缀 --no-prints -pp`（`language` 非空且非 `auto` 时追加 `-l 语言`）；解析 stderr 进度行回推 `transcribing`；成功时 resolve 过滤掉进度行后的 stderr 尾部，非 0 退出码 reject |
 | `parseWhisperJson(jsonPath)` | `(jsonPath: string) => { lang; segs } \| null` | 解析 `-oj` 输出的 JSON，兼容新版（顶层 `transcription` 数组，时间在 `offsets.from/to` 毫秒）与旧版（`transcription.segments`、`start/end` 秒）及兜底顶层 `segments`；语言取 `raw.result.language`；文件缺失或解析失败返回 `null`，识别为空时 `segs` 为 `[]` |
@@ -167,6 +167,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ⑤ 节（本文件**�
 | `./hfEnv` | `BUILTIN_RESOURCES`（使用 `BUILTIN_RESOURCES.ffmpeg`，即 `resources/ffmpeg/bin/ffmpeg.exe`） | 音频格式转换与 VAD 取样 |
 | `./vad` | `readWavSamples`、`vadTrimSegments`、类型 `VadSegment` | WAV 采样读取与静音裁剪（纯函数） |
 | `../shared/ipc` | `IPC` | `IPC.Whisper.*` 频道常量 |
+| `../shared/constants` | `APP_USER_AGENT` | 出网下载请求的 `User-Agent`（原为字面量 `'ShadowMill/1.0'`）；常量定义在 `src/shared/constants.ts`，由 `APP_NAME_EN` 派生 |
 | `../shared/types` | 类型 `RegisterCtx`、`WhisperCustomModel` 与全部载荷类型 `WhisperIdPayload`、`WhisperAddModelPayload`、`WhisperUpdateModelPayload`、`WhisperOpenDirPayload`、`WhisperProjectAudioPayload`、`WhisperTranscribePayload`、`WhisperProgressPayload` | `register(ctx)` 上下文、自定义模型条目结构、各 handler 载荷与进度推送载荷（进度类型原先在本文件本地声明，现已上移共享层） |
 | `opencc-js`（运行时 `require`） | `OpenCC.Converter({ from: 'tw', to: 'cn' })` | 繁体转简体；惰性加载，被 `externalizeDepsPlugin` 保留为运行时依赖 |
 

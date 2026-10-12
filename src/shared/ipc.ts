@@ -21,6 +21,8 @@ export const IPC = {
     Install: 'update:install',
     // 同步取当前版本号（sendSync）：设置页首屏要立刻显示「当前版本 x.y.z」，不等异步检查
     Version: 'update:version',
+    // 定位 userData/updater.log（排障出口，不依赖 electron-updater 加载成功）
+    OpenLog: 'update:open-log',
     Progress: 'update:progress'
   },
   // 设置（settings.js）
@@ -101,6 +103,13 @@ export const IPC = {
     ShowInFolder: 'video:show-in-folder',
     Render: 'video:render',
     Progress: 'video:progress'
+  },
+  // 运行环境包（runtime.js）：把 ffmpeg / node / hyperframes / whisper 约 716MB 资源
+  // 从「随安装包展开」改成「首次启动解到 userData」，更新时不再重装它们
+  Runtime: {
+    Status: 'runtime:status',
+    Prepare: 'runtime:prepare',
+    Progress: 'runtime:progress'
   }
 } as const
 

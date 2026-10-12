@@ -5,6 +5,9 @@ node_modules/
 # 打包内置运行时（ffmpeg / node / hyperframes + chrome-headless-shell，体积大不进 git）
 resources/
 
+# 运行环境包产物（scripts/pack-runtime.mjs 生成：runtime.7z + runtime.json + 7za.exe，体积大不进 git）
+build/
+
 # ---------- 构建产物 ----------
 # electron-builder 输出（安装包 / 便携版 / 缓存）
 dist/

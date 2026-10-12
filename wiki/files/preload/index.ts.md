@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
-- **规模**：191 行
+- **规模**：193 行
 - **对外导出**：本文件不产生模块导出；其作用是把 9 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、`updateTools`
 - **类型契约**：9 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 ```
 
 - `PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节，是「preload 实现 ↔ 渲染层消费」的唯一真源；方法名拼错、参数个数不符、返回类型不匹配都会在 `tsconfig.node.json` 阶段直接编译失败。
-- 进度回调的模块级状态变量也用共享层的载荷类型标注：`_htmlProgressCb: ((data: HtmlProgressPayload) => void) | null`、`_whisperProgressCb: ((data: WhisperProgressPayload) => void) | null`、`_alignProgressCb: ((data: AlignProgressPayload) => void) | null`（`hfTools.onProgress` 仍是就地构造的 `{ text: string }`）。
+- 进度回调的模块级状态变量也用共享层的载荷类型标注：`_htmlProgressCb: ((data: HtmlProgressPayload) => void) | null`、`_whisperProgressCb: ((data: WhisperProgressPayload) => void) | null`、`_alignProgressCb: ((data: AlignProgressPayload) => void) | null`、`_updateProgressCb: ((data: UpdateProgressPayload) => void) | null`（`hfTools.onProgress` 仍是就地构造的 `{ text: string }`）。
 - 本文件不再从 `../shared/types` 引入 `AppSettings` / `CustomModelConfig` / `VoiceProfile` / `VoiceTTSConfig` 等业务结构：这些类型已由 `PreloadApi` 的成员签名间接表达。
 
 ### 2.1 非方法成员（electronAPI）
@@ -118,10 +118,11 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `projectTools` | `setRender` | `project:set-render` | `{ name, render }`；`render` 传 `null` 清除项目级档位覆盖 |
 | `projectTools` | `onHtmlProgress` | `project:html-progress` | HTML 生成/修改进度订阅（单订阅） |
 | `updateTools` | `version` | `update:version` | **同步**返回当前版本号字符串（`sendSync`），供设置页首屏显示 |
-| `updateTools` | `check` | `update:check` | 检查更新，返回 `{ ok, state: 'none' \| 'available' \| 'skipped', version, currentVersion }` |
-| `updateTools` | `download` | `update:download` | 下载安装包（`autoDownload = false`，仅用户触发） |
-| `updateTools` | `cancel` | `update:cancel` | 取消下载 |
+| `updateTools` | `check` | `update:check` | 检查更新，返回 `{ ok: true, state: 'none' \| 'available' \| 'skipped', version, currentVersion, message, detail? }`（失败分支为 `{ ok: false, message, detail? }`） |
+| `updateTools` | `download` | `update:download` | 下载安装包（`autoDownload = false`，仅用户触发）；失败分支带 `message` + `detail` |
+| `updateTools` | `cancel` | `update:cancel` | 取消下载；异常时回 `取消下载失败，请重试` + `detail` |
 | `updateTools` | `install` | `update:install` | 退出并运行安装器（本机有转录 / 渲染 / 配音任务时拒绝） |
+| `updateTools` | `openLog` | `update:open-log` | 在文件管理器里定位 `userData/updater.log`（没有日志则打开 `userData` 目录），返回 `IpcResult<{ path }>`；**更新失败时的排障出口，不依赖 electron-updater 是否加载成功** |
 | `updateTools` | `onProgress` | `update:progress` | 更新阶段 / 下载进度订阅（单订阅） |
 
 ## 3. 关键流程或结构
@@ -130,7 +131,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 
 | 形态 | 用法 | 代表频道 |
 | --- | --- | --- |
-| 请求-响应 | `ipcRenderer.invoke(channel, payload)` | `settings:get`、`project:list` |
+| 请求-响应 | `ipcRenderer.invoke(channel, payload)` | `settings:get`、`project:list`、`update:open-log` |
 | 单向通知 | `ipcRenderer.send(channel)` | `window:minimize`、`voice:align-cancel` |
 | 同步取值 | `ipcRenderer.sendSync(channel)` | `update:version`（全工程唯一的同步频道，只回版本号字符串） |
 | 主进程推送 | `ipcRenderer.on(channel, handler)` | `window:maximized-change`、`video:progress`、`update:progress` |
@@ -174,7 +175,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 
 - **频道名不得硬编码**：本文件所有频道都通过 `IPC.Xxx.Yyy` 取用，禁止改成字符串字面量，否则与 `src/main/*.ts` 的注册方脱钩。
 - **方法名与参数顺序是对外契约**：唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi` —— 本文件的 9 个对象都以 `PreloadApi['<命名空间>']` 标注（实现侧被校验），渲染层经 `index.d.ts` 的 `interface Window extends PreloadApi {}` 拿到同一份签名；改契约请改共享层，不要在任一侧另行声明。
-- **`send` 与 `invoke` 不可混用**：`windowControls` 的三个窗口操作和 `voiceTools.cancelAlign` 是 `send`（无返回值），`updateTools.version` 是 `sendSync`（同步有返回值，主进程用 `ipcMain.on` + `event.returnValue`），其余基本是 `invoke`。
+- **`send` 与 `invoke` 不可混用**：`windowControls` 的三个窗口操作和 `voiceTools.cancelAlign` 是 `send`（无返回值），`updateTools.version` 是 `sendSync`（同步有返回值，主进程用 `ipcMain.on` + `event.returnValue`），其余基本是 `invoke`（含 `updateTools.openLog`）。
 - **payload 透传**：`whisperTools.addModel/updateModel/removeModel/transcribe` 与 `voiceTools.synthAligned` 原样透传对象载荷（类型分别为 `WhisperAddModelPayload` / `WhisperUpdateModelPayload` / `{ id: string }` / `WhisperTranscribePayload` / `VoiceAlignPayload`），不在 preload 做字段校验，字段合法性由主进程负责；`voiceTools.synth` / `create` 则把位置参数组装成共享层定义的载荷对象后 `invoke`。
 - **`generateHtml` / `modifyHtml` 的对象展开**：使用 `{ name, prompt, ...(materials || {}) }`，因此 `materials` 的键会与 `name` / `prompt` 平铺在同一层，`materials` 中不要出现同名键。`materials` 现为 `ProjectHtmlMaterials`（`subtitleProject` / `videoPath`），`audioPath` 已删除；对应的 `ProjectAgentPayload` 因此也不再携带音频选择。
 - **单订阅的副作用**：`onHtmlProgress` / `whisperTools.onProgress` / `onAlignProgress` / `updateTools.onProgress` 均无法"注销"回调；页面卸载后旧回调仍被引用，若回调里访问已销毁的组件状态需自行容错。

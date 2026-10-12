@@ -1,7 +1,9 @@
 // composables/useAppStore.ts —— 全局项目状态（原 window.App 的 AppState + refreshProject/switchProject/saveProjectCtx）
-// 模块级 reactive 单例；localStorage key 'myapp.projectCtx' 与结构不变（prod file:// 同源，上下文自动延续）。
+// 模块级 reactive 单例；localStorage 键名见 @renderer/constants（STORAGE_KEY_PROJECT_CTX，
+// 结构不变，prod file:// 同源，上下文自动延续）。
 import { computed, reactive, ref } from 'vue'
 import type { ProjectMeta, RenderOverride } from '@shared/types'
+import { STORAGE_KEY_PROJECT_CTX } from '@renderer/constants'
 import { pickRenderOverride } from '@renderer/utils/render'
 
 // ===== 页面键（与菜单 data-page 一致）======
@@ -62,7 +64,7 @@ export const hasAudio = computed(() => {
 });
 
 export function saveProjectCtx(): void {
-  localStorage.setItem('myapp.projectCtx', JSON.stringify({ name: appState.currentName }));
+  localStorage.setItem(STORAGE_KEY_PROJECT_CTX, JSON.stringify({ name: appState.currentName }));
 }
 
 export async function refreshProject(): Promise<void> {

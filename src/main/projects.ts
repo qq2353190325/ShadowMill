@@ -7,13 +7,14 @@
 // 提供：scanProjects / projectDir / projectFilePath / readProject / writeProject /
 //       ensureProject / parseSubtitle / copyAudioIntoProject（供 voice 引用）+ 全部 project:* IPC
 // 依赖：htmlAgent(chatWithCustomModel / extractHtmlFromReply) /
-//       hfEnv(isHyperframesComposition) / settings(渲染档位白名单) / dialog / shell
+//       hfEnv(isHyperframesComposition) / runtime(确保运行环境包已解包) / settings(渲染档位白名单) / dialog / shell
 import { app, ipcMain, dialog, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './htmlAgent'
 import * as hfEnv from './hfEnv'
+import * as runtime from './runtime'
 import { pickRenderOverride } from './settings'
 import { IPC } from '../shared/ipc'
 import type {
@@ -709,6 +710,9 @@ function register(ctx?: RegisterCtx): void {
     if (!videoRef) return { ok: false, message: '该项目没有视频素材：请先在「HTML生成」页的「视频素材」里选「选择本地视频文件…」导入' };
     const videoPath = path.join(projectDir(name), videoRef);
     if (!fs.existsSync(videoPath)) return { ok: false, message: '视频素材文件不存在：' + videoRef };
+    // 运行环境（ffmpeg 等共约 716MB）首次启动可能还在解包：等它就绪再判可执行文件
+    const rt = await runtime.ensureRuntime();
+    if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好', detail: rt.detail };
     const ffmpeg = hfEnv.BUILTIN_RESOURCES.ffmpeg;
     if (!fs.existsSync(ffmpeg)) return { ok: false, message: '未找到内置 ffmpeg（resources/ffmpeg/bin）' };
     const stem = path.basename(videoPath).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_');

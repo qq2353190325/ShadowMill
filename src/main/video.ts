@@ -2,12 +2,13 @@
 // 预览 / HyperFrames 转视频（自定义 HTML 渲染）
 // 提供：dialog:open-html / video:show-in-folder / video:render（含 video:progress 推送）
 // 依赖：hfEnv(BUILTIN_RESOURCES / findHyperframesCli / findNode / findFfmpegBin /
-//       isHyperframesComposition) / settings(渲染档位白名单) / dialog / shell
+//       isHyperframesComposition) / runtime(确保运行环境包已解包) / settings(渲染档位白名单) / dialog / shell
 import { app, ipcMain, dialog, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import * as hfEnv from './hfEnv'
+import * as runtime from './runtime'
 import { pickRenderOverride } from './settings'
 import { IPC } from '../shared/ipc'
 import type {
@@ -42,7 +43,11 @@ function register(ctx?: RegisterCtx): void {
     }
   });
 
-  ipcMain.handle(IPC.Video.Render, (event, payload?: VideoRenderPayload) => {
+  ipcMain.handle(IPC.Video.Render, async (event, payload?: VideoRenderPayload) => {
+    // 运行环境（node / hyperframes / chrome-headless-shell / ffmpeg 共约 716MB）首次可能还在解包：
+    // 这里等它就绪再找可执行文件，否则会以「未找到 hyperframes CLI」误导用户
+    const rt = await runtime.ensureRuntime();
+    if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好' } as VideoRenderResult;
     return new Promise<VideoRenderResult>((resolve) => {
       const htmlPath = payload && payload.htmlPath;
       if (!htmlPath || !fs.existsSync(htmlPath)) {

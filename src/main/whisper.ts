@@ -13,9 +13,11 @@ import https from 'node:https'
 import { spawn } from 'node:child_process'
 import * as projects from './projects'
 import * as settings from './settings'
+import * as runtime from './runtime'
 import { BUILTIN_RESOURCES } from './hfEnv'
 import { readWavSamples, vadTrimSegments, type VadSegment } from './vad'
 import { IPC } from '../shared/ipc'
+import { APP_USER_AGENT } from '../shared/constants'
 import type {
   RegisterCtx,
   WhisperAddModelPayload,
@@ -63,9 +65,11 @@ function modelsDir(): string {
   return path.join(app.getPath('userData'), 'whisper', 'models');
 }
 
-// 定位 whisper-cli.exe：打包后位于 process.resourcesPath/whisper/；开发运行位于 项目根/resources/whisper/
+// 定位 whisper-cli.exe：随「运行环境包」解到 userData/runtime/<id>/whisper/（BUILTIN_RESOURCES.root 已按此解析），
+// 旧版布局（安装目录内展开）与开发态（项目根/resources）仍在 root 下，故统一走 root 即可
 function resolveCliPath(): string {
   const candidates = [
+    path.join(BUILTIN_RESOURCES.root, 'whisper', 'whisper-cli.exe'),
     path.join(process.resourcesPath, 'whisper', 'whisper-cli.exe'),
     path.join(app.getAppPath(), 'resources', 'whisper', 'whisper-cli.exe')
   ];
@@ -193,7 +197,7 @@ function modelFilePath(id: string): string {
 // 兼容重定向的流式下载：http(s) 3xx 跟随（最多 5 跳），边下边写 .part，onProgress 节流回推
 function httpGetFollow(url: string, redirects: number): Promise<import('node:http').IncomingMessage> {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'ShadowMill/1.0' } }, (res) => {
+    https.get(url, { headers: { 'User-Agent': APP_USER_AGENT } }, (res) => {
       const code = res.statusCode || 0;
       if (code >= 300 && code < 400 && res.headers.location) {
         res.resume();
@@ -619,6 +623,10 @@ function register(ctx?: RegisterCtx): void {
     if (!audioPath || !fs.existsSync(audioPath)) return { ok: false, message: '音频文件不存在' };
     const meta = findModel(id);
     if (!meta) return { ok: false, message: UNKNOWN_MODEL_MSG + (id || '(空)') };
+    // 运行环境（whisper-cli + ffmpeg 共约 716MB）首次启动可能还在解包：等它就绪，否则下面
+    // 的 resolveCliPath() 会找不到文件、报成「未找到 whisper-cli.exe」误导用户
+    const rt = await runtime.ensureRuntime();
+    if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好', detail: rt.detail };
     const cliPath = resolveCliPath();
     if (!fs.existsSync(cliPath)) return { ok: false, message: '未找到 whisper-cli.exe，请将其放置到 resources/whisper/whisper-cli.exe（打包后自动随应用携带）' };
     const modelFile = resolveModelFile(id);

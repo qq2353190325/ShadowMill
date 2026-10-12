@@ -1,6 +1,6 @@
 // src/preload/index.ts —— 预加载脚本：通过 contextBridge 向渲染进程暴露安全 API
-// 9 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/updateTools）
-// 与 5 个进度推送通道的单订阅语义（重复注册仅替换回调，避免页面切换叠加监听）。
+// 10 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/updateTools/runtimeTools）
+// 与 6 个进度推送通道的单订阅语义（重复注册仅替换回调，避免页面切换叠加监听）。
 // 类型契约：每个对象都以 PreloadApi['<命名空间>'] 标注（见 src/shared/types.ts ⑨ 节），
 //           渲染层拿到的 window.* 签名由 preload/index.d.ts 挂载同一份契约 —— 两处不会漂移。
 // 注意：sandboxed preload 必须编译为 CJS（全项目无 "type":"module"）；
@@ -12,6 +12,7 @@ import type {
   HtmlProgressPayload,
   PreloadApi,
   RenderOverride,
+  RuntimeProgressPayload,
   UpdateProgressPayload,
   WhisperProgressPayload
 } from '../shared/types'
@@ -161,7 +162,7 @@ const projectTools: PreloadApi['projectTools'] = {
 };
 contextBridge.exposeInMainWorld('projectTools', projectTools);
 
-// 应用自更新（electron-updater generic provider）：检查 / 下载 / 取消 / 重启安装；进度经 update:progress 回推
+// 应用自更新（electron-updater generic provider）：检查 / 下载 / 取消 / 重启安装 / 打开日志；进度经 update:progress 回推
 const updateTools: PreloadApi['updateTools'] = {
   // 同步取版本号（主进程 app.getVersion()，极快，不阻塞首屏）
   version: (): string => ipcRenderer.sendSync(IPC.Update.Version),
@@ -169,6 +170,8 @@ const updateTools: PreloadApi['updateTools'] = {
   download: () => ipcRenderer.invoke(IPC.Update.Download),
   cancel: () => ipcRenderer.invoke(IPC.Update.Cancel),
   install: () => ipcRenderer.invoke(IPC.Update.Install),
+  // 在文件管理器里定位 updater.log（更新失败时的排障出口）
+  openLog: () => ipcRenderer.invoke(IPC.Update.OpenLog),
   // 单订阅：重复注册仅替换回调，避免页面切换叠加监听
   onProgress: (callback) => {
     _updateProgressCb = callback;
@@ -180,6 +183,22 @@ const updateTools: PreloadApi['updateTools'] = {
 };
 contextBridge.exposeInMainWorld('updateTools', updateTools);
 
+// 运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）：安装包里只带一个 7z，
+// 首次启动解到 userData/runtime/<id>/；这里只暴露「查状态 / 主动准备 / 订阅进度」三件事
+const runtimeTools: PreloadApi['runtimeTools'] = {
+  status: () => ipcRenderer.invoke(IPC.Runtime.Status),
+  prepare: () => ipcRenderer.invoke(IPC.Runtime.Prepare),
+  // 单订阅：重复注册仅替换回调，避免页面切换叠加监听
+  onProgress: (callback) => {
+    _runtimeProgressCb = callback;
+    if (!_runtimeProgressBound) {
+      _runtimeProgressBound = true;
+      ipcRenderer.on(IPC.Runtime.Progress, (_event, data) => { if (typeof _runtimeProgressCb === 'function') _runtimeProgressCb(data); });
+    }
+  }
+};
+contextBridge.exposeInMainWorld('runtimeTools', runtimeTools);
+
 // ===== 进度通道单订阅状态（模块级标志，避免页面切换叠加监听） =====
 let _htmlProgressCb: ((data: HtmlProgressPayload) => void) | null = null;
 let _htmlProgressBound = false;
@@ -189,3 +208,5 @@ let _alignProgressCb: ((data: AlignProgressPayload) => void) | null = null;
 let _alignProgressBound = false;
 let _updateProgressCb: ((data: UpdateProgressPayload) => void) | null = null;
 let _updateProgressBound = false;
+let _runtimeProgressCb: ((data: RuntimeProgressPayload) => void) | null = null;
+let _runtimeProgressBound = false;

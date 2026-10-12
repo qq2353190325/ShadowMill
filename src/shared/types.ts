@@ -12,6 +12,9 @@ import type { BrowserWindow } from 'electron'
 export interface IpcFail {
   ok: false
   message?: string
+  // 可选的技术详情（原始报错 / HTTP 状态 / 请求 URL）：供 UI 的「查看详情」折叠展示，
+  // 与面向用户的 message 分离——message 说人话，detail 给排障。见 UpdateCheckResult.detail
+  detail?: string
   canceled?: boolean
 }
 // 成功分支：{ ok: true } 与业务字段 T 的交叉类型；T 缺省（unknown）表示调用方只关心 ok。
@@ -139,6 +142,12 @@ export interface UpdateCheckResult {
   // 状态为 none / skipped 时也回带，便于 UI 显示「已是最新 1.0.0」
   version: string
   currentVersion: string
+  // 用户可见文案：由主进程**单点产出**（含 available / skipped / none 三种状态文案），
+  // UI 直接渲染即可——早前渲染层也自己拼一套「发现新版本…」，与事件推送的文案互相覆盖。
+  message: string
+  // 排障详情（HTTP 状态、AccessDenied 原文、请求 URL 等）：只在 UI「查看详情」里展开，
+  // 与 message 分离是因为 403 / 404 / 缺 app-update.yml 的处置动作都在发布者那一侧。
+  detail?: string
 }
 // update:progress 的进度阶段：
 // idle 尚未检查；checking 检查中；available 有新版本；skipped 该版本被用户跳过；
@@ -154,7 +163,35 @@ export interface UpdateProgressPayload {
   transferred: number
   total: number
   bytesPerSecond: number
+  // 用户可见文案（人话：发生了什么 + 能做什么）
   message: string
+  // 排障详情，仅 error 阶段非空；UI 默认折叠，见 UpdateCheckResult.detail
+  detail?: string
+}
+
+// ============================================================
+// ③.6 运行环境包（src/main/runtime.ts）
+// ============================================================
+// 阶段：idle 未检查；checking 找包/读清单；downloading 从更新源下载包；
+//       extracting 7za 解包；ready 就绪（含 dev / 旧版布局内置）；failed 失败（转录、渲染不可用）
+export type RuntimeStage = 'idle' | 'checking' | 'downloading' | 'extracting' | 'ready' | 'failed'
+export interface RuntimeProgressPayload {
+  stage: RuntimeStage
+  // downloading / extracting 阶段有效；ready 为 100
+  percent: number
+  // 运行环境包的内容 id（sha512 前 12 位，解包目录名），未知时为空串
+  id: string
+  // 用户可见文案（人话：正在做什么 / 已经就绪 / 失败了怎么办）
+  message: string
+  // 排障详情（7za 退出码、HTTP 状态、路径等），仅失败或降级时有值
+  detail?: string
+  // local=随安装包携带；download=从更新源下载；dev/legacy=安装目录内已是展开形态；cache=复用已解包目录
+  source: string
+  // 包体积（下载进度用）
+  bytes: number
+  // 解包后体积与文件数（解包进度的分母，也用于设置页展示「运行环境 716 MB / 4917 文件」）
+  unpackedBytes: number
+  files: number
 }
 
 // ============================================================
@@ -624,7 +661,19 @@ export interface PreloadApi {
     cancel(): Promise<IpcResult>
     // 退出应用并运行安装程序（主进程先置 quitForUpdate 标志，避免与 window-all-closed 抢流程）
     install(): Promise<IpcResult>
+    // 在文件管理器里定位 userData/updater.log（没有日志则打开 userData 目录）：
+    // 更新失败时用户 / 维护者唯一的原始报错出口，不依赖 electron-updater 是否加载成功
+    openLog(): Promise<IpcResult<{ path: string }>>
     onProgress(callback: (data: UpdateProgressPayload) => void): void
+  }
+  // 运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）：安装包里只带一个 7z，
+  // 首次启动解到 userData/runtime/<id>/；页面据此显示「正在准备运行环境 x%」
+  runtimeTools: {
+    status(): Promise<RuntimeProgressPayload>
+    // 主动准备（失败后重试 / 设置页点「重新准备」）；幂等，并发调用共享同一次执行。
+    // 进度仍由 runtime:progress 回推，这里只回成败
+    prepare(): Promise<IpcResult>
+    onProgress(callback: (data: RuntimeProgressPayload) => void): void
   }
   voiceTools: {
     getConfig(): Promise<IpcResult<VoiceConfigResult>>

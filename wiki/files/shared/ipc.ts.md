@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量（含派生类型）
-- **规模**：107 行
+- **规模**：109 行
 - **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video 八个分组）、`IpcChannel`（频道字面量联合类型）
 
 ## 1. 作用与职责
@@ -58,7 +58,8 @@
 | `Update.Cancel` | `update:cancel` | renderer → main，`invoke`，取消下载 |
 | `Update.Install` | `update:install` | renderer → main，`invoke`，退出并运行安装器 |
 | `Update.Version` | `update:version` | renderer → main，**`sendSync`（全工程唯一的同步频道）**，只回当前版本号字符串 |
-| `Update.Progress` | `update:progress` | main → renderer，推送更新阶段 / 下载进度（`UpdateProgressPayload`） |
+| `Update.OpenLog` | `update:open-log` | renderer → main，`invoke`，定位 `userData/updater.log`（排障出口，**不依赖 electron-updater 是否加载成功**） |
+| `Update.Progress` | `update:progress` | main → renderer，推送更新阶段 / 下载进度（`UpdateProgressPayload`，含 `message` / `detail`） |
 
 ### 2.5 Voice 分组（voice.js / ttsAlign.js）
 
@@ -167,13 +168,13 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 ### 3.2 `as const` 与 `IpcChannel`
 
 - `export const IPC = { ... } as const` 使每个属性成为**只读的字面量类型**（如 `'window:minimize'` 而非 `string`），赋值给其他变量时不会意外放宽。
-- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video'` 八个键，取 `[keyof ...]` 后得到的是**八个分组对象类型**的并集，而不是 75 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
+- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video'` 八个键，取 `[keyof ...]` 后得到的是**八个分组对象类型**的并集，而不是 76 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
 
 ### 3.3 三种通道方向约定
 
 | 方向 | 通道举例 | 典型注册方式 |
 | --- | --- | --- |
-| renderer → main（请求-响应） | `settings:get`、`project:list`、`voice:synth` | 主进程 `ipcMain.handle`，preload `invoke` |
+| renderer → main（请求-响应） | `settings:get`、`project:list`、`voice:synth`、`update:open-log` | 主进程 `ipcMain.handle`，preload `invoke` |
 | renderer → main（单向） | `window:minimize`、`voice:align-cancel` | 主进程 `ipcMain.on`，preload `send` |
 | main → renderer（推送） | `window:maximized-change`、`video:progress`、`whisper:progress`、`voice:align-progress`、`project:html-progress` | 主进程 `win.webContents.send`，preload `on` |
 
@@ -192,6 +193,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 - **禁止改动频道名字符串**：文件首行注释即写明"频道名与现行实现逐一对应，禁止改动"。改动会导致 `ipcMain.handle` 未命中，渲染层收到 `Error: No handler registered for 'xxx'`。
 - **命名不再完全对齐**：`Window.*` 用 `window:` 前缀、`Video.OpenHtml` 却用 `dialog:open-html` 前缀，属历史遗留，**不可"顺手统一"**，因为字符串就是协议本身。
 - **新增频道需四处同步**：本文件加常量 → `src/main/*.ts` 注册 handler（载荷用 `shared/types.ts` 的 `*Payload` 标注）→ `src/preload/index.ts` 绑定方法 → `src/shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`src/preload/index.d.ts` 只做 `extends`，无需改动）。
+- **`Update.OpenLog` 的位置与语义**（2026-10 新增）：它排在 `Version` 与 `Progress` 之间，值 `update:open-log`。主进程侧刻意**不经过** `ensureUpdater()`——更新失败时最常见的场景恰恰是 electron-updater 没加载起来，若把它挂在懒加载之后，最需要看日志的时候反而打不开日志。
 - **分组名 ≠ 文件名**：`Settings` 对应 `settings.ts`，`Video` 对应 `video.ts`，`App` 分组实际由 `src/main/index.ts` 处理，`Voice` 分组横跨 `voice.ts` 与 `ttsAlign.ts`。
 - **`as const` 后不可写**：所有属性为只读，运行时尝试 `IPC.Window.Close = 'x'` 在严格模式下会抛错。
 - **`IpcChannel` 粒度提示**：如上文所述它是"分组对象"的并集，误当作"频道字符串联合"使用会得到过于宽泛的类型。

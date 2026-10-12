@@ -1,12 +1,12 @@
-# 渲染层公共方法与工具（src/renderer/src/composables、utils、pages/index.ts）
+# 渲染层公共方法与工具（src/renderer/src/composables、utils、constants.ts、pages/index.ts）
 
-> 渲染层 9 个公共模块：全局状态、轻提示、渲染进度、渲染档位、语速、转义、时间格式化、档位选项与页面注册表。
+> 渲染层 10 个公共模块：全局状态、轻提示、渲染进度、渲染档位、语速、转义、时间格式化、档位选项、**渲染层常量**与页面注册表。
 
 - **覆盖文件**（行数为源文件行数）
 
 | 文件 | 行数 | 作用 |
 | --- | --- | --- |
-| `src/renderer/src/composables/useAppStore.ts` | 104 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写 |
+| `src/renderer/src/composables/useAppStore.ts` | 107 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写（键名取 `constants.ts`） |
 | `src/renderer/src/composables/useToast.ts` | 22 | 全局轻提示队列（自增 id + 2800ms 自动移除） |
 | `src/renderer/src/composables/useRenderProgress.ts` | 92 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行并生成中文进度文案（只上屏用户看得懂的阶段） |
 | `src/renderer/src/composables/useRenderOptions.ts` | 41 | 视频渲染档位：全局默认载入（`settings.json` 的 `render`）+ 生效档位 + 项目级覆盖写入 |
@@ -14,9 +14,12 @@
 | `src/renderer/src/utils/rate.ts` | 21 | 语速控件共享逻辑：0.5~2.0 播放速率同步到输入框与音频元素 |
 | `src/renderer/src/utils/escape.ts` | 4 | 单函数 HTML 转义（`&`、`<`、`>`） |
 | `src/renderer/src/utils/time.ts` | 15 | 秒 → `分:秒` 与 `分:秒.毫秒` 两种时间轴格式化 |
-| `src/renderer/src/pages/index.ts` | 41 | 页面注册表 + `goPage` 导航（含强制重挂载序号），替代 `vue-router` |
+| `src/renderer/src/constants.ts` | 14 | 渲染层公共常量：`localStorage` 键名前缀 `STORAGE_PREFIX` + 两个持久化键（**前缀故意不跟随品牌名**，改前缀必须补迁移） |
+| `src/renderer/src/pages/index.ts` | 40 | 页面注册表 + `goPage` 导航（含强制重挂载序号），替代 `vue-router` |
 
-- **类型**：组合式函数（全局状态 / 提示 / 进度 / 档位）+ 纯工具函数（档位选项、语速 / 转义 / 时间）+ 页面注册表与导航函数。这 9 个文件共同替代了旧版挂在 `window.App` 上的 `AppState`、`toast`、HF 进度监听、`rateClamp/applyRate/stepRate`、`escTxt`、时间格式化与 `pages/goPage`。
+- **类型**：组合式函数（全局状态 / 提示 / 进度 / 档位）+ 纯工具函数（档位选项、语速 / 转义 / 时间）+ 常量模块 + 页面注册表与导航函数。这些文件共同替代了旧版挂在 `window.App` 上的 `AppState`、`toast`、HF 进度监听、`rateClamp/applyRate/stepRate`、`escTxt`、时间格式化与 `pages/goPage`。
+
+> **`localStorage` 键名与品牌文案各归一层**：键名（`'myapp.projectCtx'` / `'myapp.settingsSection'`）定义在 `src/renderer/src/constants.ts`，各消费处只 `import` 常量、不再写字面量；**前缀 `'myapp.'` 故意不跟随品牌名**（prod 下 `file://` 同源，键名就是用户数据的地址，改名会让老用户「上次项目 / 设置页分类」读不到），要改必须补「读旧键 → 写新键」的迁移。品牌文案（应用名 / 英文名 / 口号）则是三端共用的 `src/shared/constants.ts`，与本文件无关。详见 [constants.ts.md](./constants.ts.md)。
 
 ## 1. 全局状态：composables/useAppStore.ts
 
@@ -67,13 +70,13 @@
 | `hasVideo` | `computed<boolean>` | `!!(p && p.videoExists)` |
 | `hasContent` | `computed<boolean>` | `!!(p && p.content && Array.isArray(p.content.scenes) && p.content.scenes.length)` |
 | `hasAudio` | `computed<boolean>` | `!!(p && p.audioFile)` |
-| `saveProjectCtx()` | `() => void` | 写 `localStorage['myapp.projectCtx'] = { name }` |
+| `saveProjectCtx()` | `() => void` | 写 `localStorage[STORAGE_KEY_PROJECT_CTX]`（常量来自 `@renderer/constants`，值 `'myapp.projectCtx'`）= `{ name }` |
 | `refreshProject()` | `() => Promise<void>` | 拉取项目列表并加载当前项目详情 |
 | `switchProject(name)` | `(string) => Promise<void>` | 切换当前项目并立即刷新 |
 
 **链路状态的判定语义**：五个 computed 一律只看**当前项目自身**的产物字段。`hasHtml` 额外要求 `p.htmlExists && p.htmlPath` 同时成立，避免只有路径、文件已被删除时误判；`hasContent` 对旧项目做**向后兼容**：详情没有 `content` 字段时按空处理（`scenes` 非数组或长度为 0 即视为未产出）；`hasAudio` 是近似判断（项目内已有背景音频即视为已产出声）。
 
-**`saveProjectCtx()`**：读取 `appState.currentName` → 序列化为 `{ name }` 写入 `localStorage` 键 `'myapp.projectCtx'`；该键的值在 `App.vue` 的 `initApp()` 中于启动时读取回填（只取 `saved.name`；历史值里可能残留的 `builtin` 字段被忽略），实现上下文延续。
+**`saveProjectCtx()`**：读取 `appState.currentName` → 序列化为 `{ name }` 写入 `localStorage` 键 `STORAGE_KEY_PROJECT_CTX`（`@renderer/constants`，值 `'myapp.projectCtx'`）；该键在 `App.vue` 的 `initApp()` 中于启动时读取回填（只取 `saved.name`；历史值里可能残留的 `builtin` 字段被忽略），实现上下文延续。
 
 **`refreshProject()`（列表 + 详情两次 IPC）**
 
@@ -297,7 +300,7 @@ export async function goPage(key: PageKey): Promise<void> {
 
 **`pageNavKey` 递增强制重挂载的语义**：1. 旧版每次 `goPage` 都重建页面 DOM、重跑页面 `init`；2. 迁移到 Vue 后，`<component :is>` 在同一组件类型之间切换时，Vue 会**复用同一个组件实例**，不会重新执行 `onMounted`；3. 于是「在配音页切换到另一个项目、再点配音」这类**同页切换**会出现：`appState` 已更新，但页面内部自己缓存的列表/预览/表单仍是旧项目的数据；4. 解决方式：给 `<component :is="currentPage" :key="pageNavKey" />` 传一个每次导航都变化的 key。key 变化 → Vue 销毁旧实例、创建新实例 → 各页面 `onMounted` 重新加载当前项目数据，**恢复旧语义**；5. 每次递增（而非随机/时间戳）便于调试时观察导航次数。
 
-**宿主 `App.vue` 中的配合**：`<component :is="currentPage" :key="pageNavKey" />` 由内容容器 `<main class="content" ref="contentEl">` 承载；滚动复位由宿主承担：`watch(currentPage, () => { contentEl.value.scrollTop = 0 })`——对应旧版 `goPage` 末尾的 `content.scrollTop = 0`，本文件注释明确指向这一点。启动流程：`App.vue` 的 `initApp()` 先读 `localStorage['myapp.projectCtx']` 回填上下文，`await refreshProject()`，再 `goPage('home')`（因此首次进入首页时会多执行一次刷新）。
+**宿主 `App.vue` 中的配合**：`<component :is="currentPage" :key="pageNavKey" />` 由内容容器 `<main class="content" ref="contentEl">` 承载；滚动复位由宿主承担：`watch(currentPage, () => { contentEl.value.scrollTop = 0 })`——对应旧版 `goPage` 末尾的 `content.scrollTop = 0`，本文件注释明确指向这一点。启动流程：`App.vue` 的 `initApp()` 先读 `localStorage[STORAGE_KEY_PROJECT_CTX]`（`@renderer/constants`，值 `'myapp.projectCtx'`）回填上下文，`await Promise.all([refreshProject(), loadRenderDefaults()])`（**不再调 `goPage('home')`**：首页本就是初始页，再走一遍只会多跑一轮刷新并把已挂好的首页整页重挂）。
 
 **与侧栏菜单的关系**：`App.vue` 的 `menuItems` 登记 **8 项**（`home`、`content`、`text-tts`、`subtitle`、`html-gen`、`video-preview`、`about`、`settings`），与本注册表的 8 个 key **一一对应、无多无少**。原先注册表里多出的 `sound-copy`（音色管理）已随页面并入配音页第三个 Tab 而删除，因此不再存在「菜单里点不到但注册表里有」的页面键。
 
@@ -353,7 +356,7 @@ export async function goPage(key: PageKey): Promise<void> {
 
 **谁用谁（被导入情况）**
 
-- `appState` / `activeMenu` / `refreshProject` / `PageKey` / 5 个 `has*`：`App.vue`（`activeMenu`、`appState`、`refreshProject`、`PageKey`，启动时读 `localStorage['myapp.projectCtx']` 回填）、`components/StepBar.vue`（`appState`、`hasContent`、`hasAudio`、`hasSubtitle`、`hasHtml`、`hasVideo`、`switchProject`、`PageKey`）、`components/NewProjectDialog.vue`（`refreshProject`、`switchProject`）、`pages/HomePage/index.vue`（`appState`、5 个 `has*`、`switchProject`、`PageKey`）、`pages/HtmlGenPage/index.vue`（`appState`、`hasHtml`、`refreshProject`）、`pages/VideoPreviewPage/index.vue`（`appState`、`refreshProject`）、`pages/ContentPage/index.vue` / `pages/SubtitlePage/index.vue` / `pages/TextTtsPage/SynthSection.vue` / `pages/SubtitlePage/TranscribeSection.vue`（`appState` 读写）、`pages/TextTtsPage/AlignSection.vue`（`appState`、`appState.myProjects` 跨项目取字幕源）。
+- `appState` / `activeMenu` / `refreshProject` / `PageKey` / 5 个 `has*`：`App.vue`（`activeMenu`、`appState`、`refreshProject`、`PageKey`，启动时读 `localStorage[STORAGE_KEY_PROJECT_CTX]`（`@renderer/constants`）回填）、`components/StepBar.vue`（`appState`、`hasContent`、`hasAudio`、`hasSubtitle`、`hasHtml`、`hasVideo`、`switchProject`、`PageKey`）、`components/NewProjectDialog.vue`（`refreshProject`、`switchProject`）、`pages/HomePage/index.vue`（`appState`、5 个 `has*`、`switchProject`、`PageKey`）、`pages/HtmlGenPage/index.vue`（`appState`、`hasHtml`、`refreshProject`）、`pages/VideoPreviewPage/index.vue`（`appState`、`refreshProject`）、`pages/ContentPage/index.vue` / `pages/SubtitlePage/index.vue` / `pages/TextTtsPage/SynthSection.vue` / `pages/SubtitlePage/TranscribeSection.vue`（`appState` 读写）、`pages/TextTtsPage/AlignSection.vue`（`appState`、`appState.myProjects` 跨项目取字幕源）。
 - `switchProject`：`components/StepBar.vue`、`pages/HomePage/index.vue`。
 - `toast` / `useToasts`：见 §2「使用方」。
 - `renderProgress` / `initRenderProgress` / `resetRenderProgress`：`App.vue`（`onMounted` 中调用 `initRenderProgress()`，全局只订阅一次）、`pages/HtmlGenPage/index.vue`（**发起渲染**：`statusDisplay` 让 trace 在渲染中接管，`onMounted` 与 `onRenderVideo` 结束时 `resetRenderProgress()`）、`pages/VideoPreviewPage/index.vue`（预览侧：`statusText = renderProgress.text || localStatus`，`onMounted` 里 `resetRenderProgress()`）。
@@ -374,9 +377,9 @@ export async function goPage(key: PageKey): Promise<void> {
 - **不要引入 `vue-router` / `pinia`**：导航用页面注册表 + `goPage()`，全局状态用模块级 `reactive` / `ref` 单例——这是本项目的既定架构。
 - **导航无并发保护**：`goPage` 是异步的且未捕获 `refreshProject()` 异常，快速连点或 `projectTools.load` 抛错会导致页面停在原处，调用方不做错误处理。
 - **`pageNavKey` 递增的代价**：每次导航都销毁重建页面实例，页面内部状态（表单草稿、预览滚动位置等）不保留。
-- **持久化键 `'myapp.projectCtx'` 不可漂移**：生产环境 `file://` 同源，键或字段名改动会导致用户上下文丢失。
+- **持久化键集中在 `constants.ts`，且 `'myapp.'` 前缀不可漂移**：`STORAGE_KEY_PROJECT_CTX` / `STORAGE_KEY_SETTINGS_SECTION` 都由 `STORAGE_PREFIX = 'myapp.'` 派生（**故意不跟随品牌名**：生产环境 `file://` 同源，键名就是用户数据的地址，改名会让「上次项目 / 设置页分类」读不到，要改必须补「读旧键 → 写新键」迁移）。消费处一律 `import` 常量，不再出现裸字面量；品牌文案则是另一层的 `@shared/constants`，两者不要混。
 - **存在性判定必须走列表项**：`htmlExists` / `videoExists` 来自 `projectTools.list()` 的 `hasHtml` / `hasVideo`（主进程文件系统检查），`projectTools.load()` 不返回这两项。
-- **`composables` 与 `utils` 的分界（与 `agents.md` 规则 6 一致，当前成立）**：`composables/` 放依赖 Vue 响应式 API 或有状态、带副作用（IPC 订阅、`localStorage`）的复用逻辑，文件名以 `use` 开头（`useAppStore.ts` / `useToast.ts` / `useRenderProgress.ts` / `useRenderOptions.ts`，四者都有模块级单例状态）；`utils/` 放无状态纯函数（`escape.ts` / `time.ts` / `rate.ts` / `render.ts`，其中 `rate.ts` 只读写传入的 DOM 元素、`render.ts` 只有常量表与纯函数，均不持有状态）。跨目录引用这些模块一律走 `@renderer/*` 别名。
+- **`composables` 与 `utils` 的分界（与 `AGENTS.md` 规则 7 一致，当前成立）**：`composables/` 放依赖 Vue 响应式 API 或有状态、带副作用（IPC 订阅、`localStorage`）的复用逻辑，文件名以 `use` 开头（`useAppStore.ts` / `useToast.ts` / `useRenderProgress.ts` / `useRenderOptions.ts`，四者都有模块级单例状态）；`utils/` 放无状态纯函数（`escape.ts` / `time.ts` / `rate.ts` / `render.ts`，其中 `rate.ts` 只读写传入的 DOM 元素、`render.ts` 只有常量表与纯函数，均不持有状态）。跨目录引用这些模块一律走 `@renderer/*` 别名。
 - **渲染档位三层优先级只有一处实现**：`项目覆盖 > 全局默认 > 内置默认`，缺省字段逐级继承；渲染层用 `utils/render.ts` 的 `resolveRenderOptions()` / `pickRenderOverride()`，主进程用 `settings.ts` 里同名的白名单实现，两边取值必须同步修改（`draft/standard/high` 与 `24/30`）。
 - **渲染动作的唯一入口是「HTML生成」页**：`hfTools.renderVideo()` 只在 `pages/HtmlGenPage/index.vue` 的 `onRenderVideo()` 里发起，因此「渲染进度由谁展示」「产物谁回写项目」都以此为准——产物回写只在该页调 `projectTools.saveVideo()`；「视频预览」页只读结果、不发起渲染。
 - **`ProjectMeta` 只在共享层定义一处**：`useAppStore.ts` 用 `import type { ProjectMeta } from '@shared/types'` + `export type { ProjectMeta }` 引入并再导出（`project:list` 的条目结构因此与主进程同源）；而 `ProjectState` 仍是渲染层自己的视图模型（含 `htmlExists` / `videoExists` 这类由列表项推导出来的字段），不要与主进程结构混用。

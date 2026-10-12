@@ -90,6 +90,20 @@
         <button v-if="updateStage === 'downloaded'" class="hf-btn hf-btn-primary" @click="onInstallUpdate">立即重启安装</button>
       </div>
       <div class="hf-status" :class="updateStatusClass">{{ updateMessage }}</div>
+      <!-- 排障出口：latest.yml / 存储桶 / HTTP 状态这类信息只在「详情」里展开，用户文案本身保持人话。
+           「打开日志目录」**常驻**——启动静默检查失败时本页是刚挂载的（stage 还是 idle），
+           只有日志里才有那次失败的原始报错，不留这个入口就没法取证 -->
+      <div class="hgen-actions" style="margin-top:0">
+        <button v-if="updateDetail" class="hf-btn" @click="showUpdateDetail = !showUpdateDetail">{{ showUpdateDetail ? '收起详情' : '查看详情' }}</button>
+        <button class="hf-btn" @click="onOpenUpdateLog">打开日志目录</button>
+      </div>
+      <div v-if="updateDetail && showUpdateDetail" class="hf-detail">{{ updateDetail }}</div>
+      <!-- 运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）：安装包里只带一个 7z，
+           首次启动由主进程解到 userData；失败时这里给重试入口（转录 / 转视频依赖它）-->
+      <div class="hf-status" :class="runtimeStatusClass">{{ runtimeStatusText }}</div>
+      <div v-if="runtimeFailed" class="hgen-actions" style="margin-top:0">
+        <button class="hf-btn hf-btn-primary" :disabled="runtimeBusy" @click="onPrepareRuntime">重新准备运行环境</button>
+      </div>
       <!-- 保存 / 重置的反馈独立成行：与检查更新共行会被随后的进度文案盖掉，看起来像「没保存」-->
       <div v-if="updaterStatus" class="hf-status" :class="updaterStatusClass">{{ updaterStatus }}</div>
       <div v-if="updateStage === 'available'" class="hgen-actions" style="margin-top:8px">
@@ -134,6 +148,7 @@
 // 自定义模型 + 千问语音配置 + 视频渲染默认档位；语音识别模型区块为子组件 WhisperSection（原 window.__settings.initWhisper）。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { RenderFps, RenderQuality, UpdateProgressPayload, UpdateStage } from '@shared/types'
+import { STORAGE_KEY_SETTINGS_SECTION } from '@renderer/constants'
 import {
   FALLBACK_RENDER,
   RENDER_FPS_OPTIONS,
@@ -141,6 +156,7 @@ import {
   renderQualityLabel
 } from '@renderer/utils/render'
 import { saveRenderDefaults } from '@renderer/composables/useRenderOptions'
+import { useRuntime } from '@renderer/composables/useRuntime'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import WhisperSection from './WhisperSection.vue'
 
@@ -154,9 +170,9 @@ const statusClass = ref('');
 
 // ===== 设置分类（左侧导航 → 右侧内容）=====
 // 5 类平级：模型配置 / 语音服务 / 渲染档位 / 应用更新 / 语音识别模型。
-// 选择记忆在 localStorage（键名沿用项目 myapp.* 前缀），下次进设置页回到上次的分类。
+// 选择记忆在 localStorage（键名见 @renderer/constants 的 STORAGE_KEY_SETTINGS_SECTION），下次进设置页回到上次的分类。
 type SettingsSection = 'model' | 'voice' | 'render' | 'update' | 'whisper';
-const SETTINGS_SECTION_KEY = 'myapp.settingsSection';
+const SETTINGS_SECTION_KEY = STORAGE_KEY_SETTINGS_SECTION;
 const SECTIONS: SettingsSection[] = ['model', 'voice', 'render', 'update', 'whisper'];
 function readSection(): SettingsSection {
   try {
@@ -260,18 +276,25 @@ async function onSaveRender(): Promise<void> {
 // ===== 应用更新（electron-updater generic provider）=====
 // 全部状态由主进程 update:progress 通道驱动：设置页只是订阅方 + 触发方（检查 / 下载 / 重启安装）。
 // 进度事件在进入本页之前就发生过也没关系——onProgress 订阅后主进程下一次广播会把当前态带过来。
+// **文案不在这一层拼**：available / skipped / none / error 的句子统一由主进程 updater.ts 产出
+// （早前渲染层也拼一套，与事件推送的文案互相覆盖，同一状态两句话在打架）。这里只渲染 message，
+// 并把 detail（排障详情）收进可折叠的「查看详情」。
 interface UpdateCheckReply {
   ok: boolean
   state?: 'none' | 'available' | 'skipped'
   version?: string
   currentVersion?: string
   message?: string
+  detail?: string
 }
 
 const updateVersion = ref('');
 const updateStage = ref<UpdateStage>('idle');
 const updateMessage = ref('');
 const updateStatusClass = ref('');
+// 排障详情（HTTP 状态 / AccessDenied 原文等）+ 其折叠开关；仅在出错时出现
+const updateDetail = ref('');
+const showUpdateDetail = ref(false);
 // 有网络动作在跑时禁用重复点击（检查中的重复点击是最常见的误操作）
 const updateBusy = computed(() => updateStage.value === 'checking' || updateStage.value === 'downloading');
 // 已保存的更新设置（回填自 settings.json，也是卡片文案的来源）
@@ -283,6 +306,21 @@ const updaterStatusClass = ref('');
 const feedDialogVisible = ref(false);
 const feedDraft = ref('');
 const autoCheckDraft = ref(true);
+
+// ===== 运行环境包状态（模块级单例，外壳也能读到；见 composables/useRuntime.ts）=====
+const { runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, ready: runtimeReady, sizeText: runtimeSizeText, retry: retryRuntime } = useRuntime();
+// 运行环境是本地转写 / 转视频的硬依赖，故这里给一行常驻状态：已就绪带体积，准备中带进度，失败给人话 + 重试
+const runtimeStatusText = computed(() => {
+  if (runtimeBusy.value) return runtimeState.value.message || '正在准备运行环境…';
+  if (runtimeFailed.value) return runtimeState.value.message || '运行环境准备失败';
+  if (runtimeReady.value) return '运行环境已就绪' + (runtimeSizeText.value ? '（' + runtimeSizeText.value + '）' : '');
+  return '运行环境状态未知';
+});
+const runtimeStatusClass = computed(() => (runtimeFailed.value ? 'hf-error' : (runtimeReady.value ? 'hf-ok' : '')));
+
+async function onPrepareRuntime(): Promise<void> {
+  await retryRuntime();
+}
 
 function openFeedDialog(): void {
   feedDraft.value = feedUrl.value;
@@ -304,6 +342,9 @@ function applyUpdateProgress(d: UpdateProgressPayload): void {
   updateStage.value = d.stage;
   if (d.currentVersion) updateVersion.value = d.currentVersion;
   updateMessage.value = d.message || '';
+  updateDetail.value = d.detail || '';
+  // 离开 error 态就收起详情面板，避免旧报错一直挂在卡片上
+  if (!updateDetail.value) showUpdateDetail.value = false;
   updateStatusClass.value = d.stage === 'error'
     ? 'hf-error'
     : (d.stage === 'downloaded' || d.stage === 'available' ? 'hf-ok' : '');
@@ -354,21 +395,25 @@ async function onResetFeed(): Promise<void> {
 
 // 更新动作的统一异常兜底：IPC 一旦 reject（handler 抛错、频道未注册等），
 // 不加 try/catch 就会让界面「点了没反应」——必须落到状态行上。
+// 人话进 updateMessage，原始异常进 updateDetail（可折叠 / 可交给提供者）
 function handleUpdateError(what: string, e: unknown): void {
   const detail = (e as Error)?.message || String(e);
   if (what === '安装') {
-    updateMessage.value = '启动安装失败：' + detail;
+    updateMessage.value = '启动安装程序失败，请重新下载安装包后手动安装';
     updateStatusClass.value = 'hf-error';
   } else {
     updateStage.value = 'error';
-    updateMessage.value = what + '失败：' + detail;
+    updateMessage.value = what + '失败，请稍后重试';
     updateStatusClass.value = 'hf-error';
   }
+  updateDetail.value = detail;
 }
 
 async function onCheckUpdate(): Promise<void> {
   updateStage.value = 'checking';
   updateMessage.value = '正在检查更新…';
+  updateDetail.value = '';
+  showUpdateDetail.value = false;
   updateStatusClass.value = '';
   let res: UpdateCheckReply;
   try {
@@ -379,18 +424,29 @@ async function onCheckUpdate(): Promise<void> {
   }
   if (!res || !res.ok) {
     updateStage.value = 'error';
-    updateMessage.value = (res && res.message) || '检查更新失败';
+    updateMessage.value = (res && res.message) || '检查更新失败，请稍后重试';
+    updateDetail.value = (res && res.detail) || '';
     updateStatusClass.value = 'hf-error';
     return;
   }
   updateStage.value = res.state || 'none';
   if (res.currentVersion) updateVersion.value = res.currentVersion;
-  updateMessage.value = res.state === 'available'
-    ? ('发现新版本 ' + res.version + '，点「下载更新」获取安装包')
-    : (res.state === 'skipped'
-      ? ('版本 ' + res.version + ' 已跳过，如需安装请点「下载更新」')
-      : ('当前已是最新版本（' + (res.currentVersion || updateVersion.value) + '）'));
+  // 文案由主进程产出（含 available / skipped / none 三种），这里只做极端兜底
+  updateMessage.value = res.message || '检查完成';
+  updateDetail.value = res.detail || '';
   updateStatusClass.value = res.state === 'available' ? 'hf-ok' : '';
+}
+
+// 打开 updater.log 所在目录：更新失败时把原始报错交给提供者的正规出口
+async function onOpenUpdateLog(): Promise<void> {
+  try {
+    const res = await window.updateTools.openLog();
+    if (res && !res.ok) {
+      setUpdaterStatus(res.message || '打开日志目录失败', 'hf-error');
+    }
+  } catch (e) {
+    setUpdaterStatus('打开日志目录失败', 'hf-error');
+  }
 }
 
 async function onDownloadUpdate(): Promise<void> {
@@ -398,7 +454,8 @@ async function onDownloadUpdate(): Promise<void> {
     const res = await window.updateTools.download();
     if (!res || !res.ok) {
       updateStage.value = 'error';
-      updateMessage.value = (res && res.message) || '下载失败';
+      updateMessage.value = (res && res.message) || '下载失败，请稍后重试';
+      updateDetail.value = (res && res.detail) || '';
       updateStatusClass.value = 'hf-error';
     }
   } catch (e) {
@@ -408,7 +465,12 @@ async function onDownloadUpdate(): Promise<void> {
 
 async function onCancelUpdate(): Promise<void> {
   try {
-    await window.updateTools.cancel();
+    const res = await window.updateTools.cancel();
+    if (res && !res.ok) {
+      updateMessage.value = res.message || '取消下载失败，请重试';
+      updateDetail.value = res.detail || '';
+      updateStatusClass.value = 'hf-error';
+    }
   } catch (e) {
     handleUpdateError('取消下载', e);
   }
@@ -417,10 +479,16 @@ async function onCancelUpdate(): Promise<void> {
 async function onInstallUpdate(): Promise<void> {
   try {
     const res = await window.updateTools.install();
-    // 成功时主进程会退出并运行安装器，这里只处理被拒绝的情况（如本机有转录 / 渲染任务在跑）
+    // 成功时主进程会退出并运行安装器，这里只处理被拒绝的情况（如本机有转录 / 渲染任务在跑）；
+    // 另一种 ok 但有话要说的情况是「用户在确认弹窗里点了取消」——那时要把这句话显示出来
     if (!res || !res.ok) {
-      updateMessage.value = (res && res.message) || '安装失败';
+      updateMessage.value = (res && res.message) || '安装失败，请稍后重试';
+      updateDetail.value = (res && res.detail) || '';
       updateStatusClass.value = 'hf-error';
+    } else if (res.message) {
+      updateMessage.value = res.message;
+      updateDetail.value = '';
+      updateStatusClass.value = '';
     }
   } catch (e) {
     handleUpdateError('安装', e);
@@ -432,6 +500,7 @@ async function onSkipVersion(skip: boolean): Promise<void> {
   try {
     const res = await window.settingsTools.saveUpdater({ skippedVersion: skip ? updateVersion.value : '' });
     if (res && res.ok) {
+      updateDetail.value = '';
       updateMessage.value = skip ? ('已跳过版本 ' + updateVersion.value) : ('已恢复提示版本 ' + updateVersion.value);
       updateStatusClass.value = '';
     } else {

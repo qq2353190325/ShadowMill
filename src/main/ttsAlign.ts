@@ -6,7 +6,7 @@
 //     超时先 atempo 加速（上限 MAX_RATE），仍超则顺延后续句子并同步平移后续字幕时间
 // 提供：planModeA / planModeB / buildTrack + voice:synth-aligned / voice:align-cancel IPC
 // 依赖：voice(synthOne / resolveVoiceModel / voiceFriendlyError) / projects(parseSubtitle) /
-//       hfEnv(BUILTIN_RESOURCES.ffmpeg / ffprobe) / electron(app / ipcMain)
+//       hfEnv(BUILTIN_RESOURCES.ffmpeg / ffprobe) / runtime(确保运行环境包已解包) / electron(app / ipcMain)
 import { app, ipcMain } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process'
 import { synthOne, resolveVoiceModel, voiceFriendlyError } from './voice'
 import { parseSubtitle, type SubtitleLine } from './projects'
 import { BUILTIN_RESOURCES } from './hfEnv'
+import * as runtime from './runtime'
 import { IPC } from '../shared/ipc'
 import type { AlignProgressPayload, RegisterCtx, VoiceAlignPayload } from '../shared/types'
 
@@ -226,6 +227,9 @@ function register(ctx?: RegisterCtx): void {
   // 逐句合成 + 对齐：payload { projectName, subtitleText, voice, voiceModel, mode, gapSec }
   ipcMain.handle(IPC.Voice.SynthAligned, async (event, payload?: VoiceAlignPayload) => {
     if (alignRunning) return { ok: false, message: '已有对齐任务进行中，请稍候' };
+    // 运行环境（ffmpeg / ffprobe 共约 716MB）首次启动可能还在解包：等它就绪再判可执行文件
+    const rt = await runtime.ensureRuntime();
+    if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好', detail: rt.detail };
     const ffmpeg = BUILTIN_RESOURCES.ffmpeg;
     const ffprobe = BUILTIN_RESOURCES.ffprobe;
     if (!fs.existsSync(ffmpeg) || !fs.existsSync(ffprobe)) {

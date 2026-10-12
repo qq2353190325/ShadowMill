@@ -3,13 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:; frame-src file: hgpreview:; media-src 'self' file:; script-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:5173" />
-  <title>影坊 ShadowMill</title>
+  <title>%APP_NAME% %APP_NAME_EN%</title>
   <style>
     /* ===== 启动画面（boot splash）=====
        目的：窗口出现到 Vue 挂载之间，页面原本只有一片空背景（首屏慢时表现为「十几秒只有背景」）。
        这段标记由 HTML 直接渲染、不依赖任何脚本，因此只要渲染进程画出第一帧就有内容可看；
        主进程 BrowserWindow.backgroundColor 同色，窗口首帧之前也不会闪白。
        主界面挂载后由 src/main.ts 加 .boot-done 淡出并移除。
+       品牌文案（%APP_NAME% / %APP_NAME_EN% / %APP_SLOGAN_SHORT%）由 electron.vite.config.ts 在
+       构建期从 src/shared/constants.ts 注入——HTML 是静态标记、无法 import TS 常量，
+       占位符保证这里的应用名与代码里那一份不会各改各的。
        配色取自设计系统（深空科技）：--bg-primary #0B1220 / 主色 #00D4FF / 次色 #8B5CF6，
        此处不引用 main.css 变量——它由 JS 侧注入，启动画面必须自包含。 */
     #boot-splash {
@@ -89,8 +92,8 @@
       <polygon points="12,2 21,7 21,17 12,22 3,17 3,7" />
       <polygon points="12,6.5 17,9.4 17,15.1 12,18 7,15.1 7,9.4" opacity="0.55" />
     </svg>
-    <div class="boot-title">影坊</div>
-    <div class="boot-sub">ShadowMill · 音视频创作流水线</div>
+    <div class="boot-title">%APP_NAME%</div>
+    <div class="boot-sub">%APP_NAME_EN% · %APP_SLOGAN_SHORT%</div>
     <div class="boot-bar"><i></i></div>
     <div class="boot-tip">正在启动…</div>
   </div>
