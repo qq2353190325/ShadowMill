@@ -171,12 +171,17 @@
 ## 11. 落地约定
 
 1. **新增 `src/shared/errors.ts`**：`friendlyError()` + `type FriendlyError = { message: string; detail: string; needConfig?: ConfigTarget }`（`ConfigTarget = 'model' | 'voice' | 'billing'`）+ 纯函数便于单测；主进程各模块 import，渲染层只渲染不做二次翻译（与 `UpdateCheckResult` 同一分层）。
-2. **`IpcFail` 已支持 `detail`**（`src/shared/types.ts`，2026-10 加入）。**新增可选 `needConfig` 字段的成本实测只有两处**：`src/shared/types.ts` 加字段 + `src/main/**` 生产它。**preload 不需要改**——它是纯转发（`ipcRenderer.invoke(...)` 把主进程返回的对象原样交给渲染层，既不解构也不重建），`detail` 与 `needPacks` 当年就是这样过去的。仍建议在 `src/preload/index.ts` 相应方法或注释里点一句，属于「类型契约在 shared、转发在 preload」的知情成本，不是代码成本。
+2. **`IpcFail` 已支持 `detail`**（`src/shared/types.ts`，2026-10 加入）。**本轮新增的可选字段实测只需两处**：`src/shared/types.ts`（`needConfig` / `configUrl` / `title`）+ `src/main/**` 生产它。**preload 不需要改**——它是纯转发（`ipcRenderer.invoke(...)` 把主进程返回的对象原样交给渲染层，既不解构也不重建），`detail` 与 `needPacks` 当年就是这样过去的（`needConfig` 同理）。
 3. **UI 挂载点**：`HtmlGenPage`（生成 HTML 失败的 `.hf-status.hf-error` 行）+ `SettingsPage`（测试连接、应用更新）已有 `.hf-detail` 折叠块与「查看详情」按钮范式，直接复用；余额类（DeepSeek 402 / 百炼 `Arrearage`）的弹窗按钮改为「去充值」+「取消」（`shell.openExternal` 打开厂家充值页）。
 4. **日志**：`detail` 与原始终端报文一并落 `userData/*.log`（复用 `updater.log` / `runtime.log` 的追加写范式）。
 5. **默认不加重试**：402 / 401 / 400 / 422 重试无意义（余额与配置问题），429 / 5xx / 网络类可自动退避重试 1 次——与 `htmlAgent` 现有「升档重试」区分开（那是针对 `max_tokens` 截断，不是针对错误码）。
 
-### 11.1 配置类错误 → 升级为「弹窗 + 去设置 / 取消」（2026-10-14 决策）
+### 11.1 配置类错误 → 升级为「弹窗 + 去设置 / 取消」（2026-10-14 决策，**已落地**）
+
+> 落地情况见 `CHANGELOG.md` 未发布区块 #10。实现即本节方案 A：`src/shared/errors.ts` 单点判定 →
+> `IpcFail.needConfig/configUrl/title` → `composables/useConfigPrompt.ts` 弹窗（App.vue 渲染）。
+> 本节保留为**设计与验收依据**（含逐条判定表），不是待办。
+
 
 **背景**：这类错误只躺在状态行里太弱——用户看一眼不知道去哪修，或者要自己翻到设置页找对应填框。
 
@@ -195,12 +200,12 @@
 
 **弹窗内不显示「查看详情」**（2026-10-14 决定）：配置类弹窗只有 `[去设置]` / `[取消]` 两个按钮，正文只说「发生了什么 + 去哪修」；`detail` 仍照常写日志。理由：配置类错误的原始报文对用户没有可操作性，而弹窗多一个折叠区会让「点哪个按钮」这个唯一决策变模糊。
 
-**两处判定（选其一即可，推荐 1）**：
+**判定方式（已按方案 A 落地：只用主进程字段，不做渲染层正则）**：
 
-1. **主进程打标**（推荐）：`friendlyError()` 判定命中「配置类」档位时，在 `IpcFail` 上带 `needConfig: 'model' | 'voice' | 'billing'`；渲染层 `if (res.needConfig) configPrompt.open(res.needConfig, res.message)`。判据是**结构化字段**而非文案，措辞怎么改都不会漏。
-2. **渲染层正则兜底**（零 IPC 改动）：由渲染层对 message 做正则判定——`未启用|配置不完整|均需填写|三项都要填|Base URL|API Key|api[ _-]?key|InvalidApiKey|unauthorized|余额不足|欠费`。
-   注意**误判陷阱**：不能用 `api.?key` 这种松写法——`Insufficient Balance` 里的 `Balance` 会被 `ala` 命中，把「没钱」误判成「Key 错了」（余额类按钮是「去充值」，误判就会给错按钮），故必须写成 `API Key`（带空格）或 `api[ _-]?key`（限定分隔符）。
-   另有兜底缺口：`/chat/completions` 被自定义 Base URL 换成非 OpenAI 协议的服务时，可能返回本表之外的报文——加 `detail` 请用户提交报文即可，不必追求穷举。**只有两处调用点**（`projects.ts:589` / `:641` 的 generate / modify）保留正则，其余一律走字段。
+`friendlyError()` 判定命中「配置类」档位时，在 `IpcFail` 上带 `needConfig: 'model' | 'voice' | 'billing'`（+ `configUrl` 充值页 / `title` 弹窗标题）；渲染层 `if (res.needConfig) configPrompt.fromResult(res)` 即可，**不认识任何文案**。
+唯一例外：`projects.ts` 捕获 `chatWithCustomModel` 抛出的错时只剩一句中文 message，用 `configTargetOf(message)` 复用同一张码表**复分类**（该函数按本文件产出的句式逐条认，因为此时没有数字状态码可判）。
+
+> 曾经的备选「渲染层正则兜底」已废弃，不再实现。原因：正则按文案措辞判定，改文案、加厂家都会漏；且 `api.?key` 这类松写法会把 `Insufficient Balance` 里的 `B**ala**nce` 误判成「Key 错了」，余额类就会给出错误的主按钮（该给「去充值」）。
 
 **复用现成范式**：App.vue 已有运行环境确认框（`env-gate`）就是「全局单例 + 两个按钮 + 取消即作废」——弹窗照它做：新增 `composables/useConfigPrompt.ts`（模块级单例：`visible` / `title` / `message` / `detail` / `section`），在 App.vue 的 `env-gate` 之后渲染一个 `.hf-modal`，标题与正文字号沿用 §3.1 刻度（标题 14px、说明 12px）。
 

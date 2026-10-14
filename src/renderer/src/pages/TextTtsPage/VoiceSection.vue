@@ -79,7 +79,7 @@
             <button class="hf-modal-close" title="关闭" @click="closeCreate">×</button>
           </div>
           <div class="hf-modal-body">
-            <div class="hgen-tip" style="margin-top:0">选目标模型并上传/粘贴人声音频即可创建克隆音色；创建时选定的模型会绑定到该音色，后续用该音色合成时沿用同一模型（创建计费 0.01 元/个）。<br/>· <b>qwen-audio-3.0-tts-flash</b>：<b>本地文件与公网 URL 都支持</b>——选本地文件会自动用 ffmpeg 截取前 15 秒、转 24kHz 单声道后直传（无需先传到公网）；也可以粘贴 <b>可公开访问的音频 URL</b>，两者都填时以 URL 为准。<br/>注意：参考音频需 <b>3~30 秒清晰人声</b>（推荐 10~20 秒）；音色创建后要过云端审核（列表里非「OK」会标注「审核中 / 审核未通过」），审核期间合成会失败。</div>
+            <div class="hgen-tip" style="margin-top:0">选目标模型并上传/粘贴人声音频即可创建克隆音色；创建时选定的模型会绑定到该音色，后续用该音色合成时沿用同一模型。<br/>· <b>qwen-audio-3.0-tts-flash</b>：<b>本地文件与公网 URL 都支持</b>——选本地文件会自动用 ffmpeg 截取前 15 秒、转 24kHz 单声道后直传（无需先传到公网）；也可以粘贴 <b>可公开访问的音频 URL</b>，两者都填时以 URL 为准。<br/>注意：参考音频需 <b>3~30 秒清晰人声</b>（推荐 10~20 秒）；音色创建后要过云端审核（列表里非「OK」会标注「审核中 / 审核未通过」），审核期间合成会失败。</div>
             <div class="hgen-row">
               <label class="sel-label">显示名称</label>
               <input v-model="vcName" class="hgen-input" style="flex:1" placeholder="给音色起个名字，支持中文，如：旁白" />
@@ -142,6 +142,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { goPage } from '@renderer/pages'
 import { toast } from '@renderer/composables/useToast'
+import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 import { escTxt } from '@renderer/utils/escape'
 import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import { activeProviderLabel, activeTtsTab, readActiveCfg, refreshVoiceKeyState, voiceKeyReady } from './helpers'
@@ -211,6 +212,8 @@ const vcUrl = ref('');
 const audioPath = ref<string | null>(null);
 const status = ref('');
 const statusClass = ref('');
+// 配置类错误弹窗（Key 无效 / 余额不足 / 未配置…）
+const configPrompt = useConfigPrompt();
 const listStatus = ref('');
 const listStatusClass = ref('');
 const listBusy = ref(false);
@@ -285,6 +288,8 @@ async function onCreate(): Promise<void> {
       loadAll(true);
       closeCreate(); // 建完收起弹窗：新音色已经出现在下面的列表里
     } else {
+      // 配置类（Key 无效 / 余额不足 / 未配置…）：弹「去设置 / 去充值」，状态行照旧显示原因
+      configPrompt.fromResult(res);
       status.value = (res as { message?: string })?.message || '创建失败';
       statusClass.value = 'hf-error';
     }
@@ -482,6 +487,7 @@ async function onDeleteCloud(): Promise<void> {
       await loadAll(true);
     } else {
       deleteTarget.value = null;
+      configPrompt.fromResult(res);
       listStatus.value = (res as { message?: string })?.message || '删除失败';
       listStatusClass.value = 'hf-error';
     }

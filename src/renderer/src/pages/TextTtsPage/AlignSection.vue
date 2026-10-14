@@ -65,6 +65,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
+import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 import { goPage } from '@renderer/pages'
 import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import { escTxt } from '@renderer/utils/escape'
@@ -75,6 +76,8 @@ import { activeProviderLabel, activeTtsTab, firstVoiceId, loadVoices, refreshVoi
 
 // 运行环境缺包时的确认框（ffmpeg 不随安装包；见 docs/runtime-pack-split.md）
 const envGate = useEnvGate();
+// 配置类错误弹窗（Key 无效 / 余额不足 / 未配置…）：主进程判好分类，本页只负责触发
+const configPrompt = useConfigPrompt();
 
 interface AlignDetail {
   index: number
@@ -237,7 +240,9 @@ async function startAlign(skipEnvGuard = false): Promise<void> {
       const msg = (fail && fail.message) || '对齐合成失败';
       showAlignBar({ text: msg, kind: 'error' }, false);
       setStatus(msg, 'hf-error');
-      if (fail && fail.needPacks && fail.needPacks.length) {
+      if (configPrompt.fromResult(fail)) {
+        // 配置类（Key 无效 / 余额不足 / 未配置…）：已弹「去设置 / 去充值」，不再叠 toast
+      } else if (fail && fail.needPacks && fail.needPacks.length) {
         // 缺 ffmpeg：弹确认框，用户点「继续」时重发这次对齐
         void envGate.guard(fail.needPacks, '逐句对齐配音', () => { void startAlign(true); });
       } else {

@@ -29,8 +29,10 @@ const electronAPI: PreloadApi['electronAPI'] = {
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 
 // 应用级小工具：剪贴板复制（sandbox 下渲染层无 clipboard 模块，经主进程写入）
+//              + 用系统浏览器打开外链（充值页等；应用没有 setWindowOpenHandler，target=_blank 会开 Electron 窗口）
 const appTools: PreloadApi['appTools'] = {
-  copyText: (text: string): Promise<boolean> => ipcRenderer.invoke(IPC.App.CopyText, text)
+  copyText: (text: string): Promise<boolean> => ipcRenderer.invoke(IPC.App.CopyText, text),
+  openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke(IPC.App.OpenExternal, url)
 };
 contextBridge.exposeInMainWorld('appTools', appTools);
 

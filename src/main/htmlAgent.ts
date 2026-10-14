@@ -6,7 +6,8 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { getCustomModel, loadOpenAI } from './settings'
-import type { HtmlAgentProgress } from '../shared/types'
+import { friendlyError } from '../shared/errors'
+import type { ConfigTarget, HtmlAgentProgress } from '../shared/types'
 
 const HTML_AGENT_SYSTEM = [
   '你是专业的 HTML 动画创作者，为桌面创作应用输出完整、独立、可运行的 HTML 单页。',
@@ -63,8 +64,13 @@ export interface AgentOpts {
 // content 为空且 finish_reason=length 时自动升档重试；升档后仍无内容则抛出带 usage 的诊断错误
 async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promise<string> {
   const m = getCustomModel();
-  if (!m.enabled) throw new Error('自定义模型未启用：请先到「设置」开启并配置 Base URL / Model ID / API Key');
-  if (!m.baseUrl || !m.modelId || !m.apiKey) throw new Error('自定义模型配置不完整：Base URL / Model ID / API Key 均需填写');
+  // 配置类失败统一走 friendlyError（人话文案 + 排障详情；配置类还带 needConfig，界面据此弹「去设置」）
+  const cfgErr = (raw: string, hint?: string): never => {
+    const f = friendlyError(new Error(raw), { label: '生成 HTML', baseUrl: m.baseUrl, hint });
+    throw new Error(f.message);
+  };
+  if (!m.enabled) cfgErr('自定义模型未启用', 'model-not-enabled');
+  if (!m.baseUrl || !m.modelId || !m.apiKey) cfgErr('自定义模型配置不完整：Base URL / Model ID / API Key 均需填写');
   const meta = (opts && opts.meta) || {};
   const messages: any[] = [
     { role: 'system', content: HTML_AGENT_SYSTEM },
@@ -88,6 +94,14 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
     let finishReason = '';
     let usage: unknown = null;
     let attemptErr: string | null = null;
+    // 本次尝试的失败分类（needConfig 非空 = 配置类，界面弹「去设置」）
+    let attemptCfg: { needConfig: ConfigTarget; configUrl?: string } | null = null;
+    // 失败时的排障详情（原始报文首行 + 请求地址），只进日志与对话记录，不进用户文案
+    let attemptDetail = '';
+    // 非 2xx 时的响应体（排障详情），只进详情不进用户文案
+    let httpDetail = '';
+    // 本次实际请求的地址：排障详情里带上它，403 / 404 才看得出「到底在请求哪个地址」
+    const apiUrl = String(m.baseUrl).replace(/\/+$/, '') + '/chat/completions';
     let lastStage = '';
     let lastEmitAt = 0;
     const reqStart = Date.now();
@@ -137,15 +151,16 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
         }
       } else {
         // 兜底 fetch：SSE 流式解析
-        const url = String(m.baseUrl).replace(/\/+$/, '') + '/chat/completions';
+        const url = apiUrl;
         const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + m.apiKey },
           body: JSON.stringify({ model: m.modelId, messages, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true } })
         });
         if (!resp.ok) {
-          const errData = await resp.json().catch(() => ({}));
-          throw new Error('HTTP ' + resp.status + '：' + JSON.stringify(errData));
+          // 非 2xx：把响应体留作排障详情（解析不出 JSON 时保留前 300 字符原文）
+          httpDetail = 'HTTP ' + resp.status + ' ' + (await resp.text().catch(() => '')).slice(0, 300);
+          throw new Error(httpDetail);
         }
         if (!resp.body) throw new Error('HTTP 响应无 body');
         const reader = resp.body.getReader();
@@ -184,7 +199,15 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
         }
       }
     } catch (e) {
-      attemptErr = String((e as Error) && (e as Error).message ? (e as Error).message : e);
+      // 原始报错一律先翻译成人话：message 给用户、detail 给排障、needConfig 决定界面是否弹「去设置」
+      const f = friendlyError(e, {
+        label: '生成 HTML',
+        baseUrl: m.baseUrl,
+        extras: [apiUrl ? '请求地址：' + apiUrl : '', httpDetail]
+      });
+      attemptErr = f.message;
+      attemptCfg = f.needConfig ? { needConfig: f.needConfig, configUrl: f.configUrl } : null;
+      attemptDetail = f.detail || '';
     }
     attempts.push({
       maxTokens,
@@ -196,6 +219,8 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
       finishReason,
       usage: usage || null,
       error: attemptErr,
+      detail: attemptDetail || undefined,  // 排障详情（原始报文首行 + 请求地址）
+      needConfig: attemptCfg,              // 配置类标记（非配置类为 null）
       timing: {
         totalMs: Date.now() - reqStart,
         firstTokenMs: firstTokenAt ? firstTokenAt - reqStart : null, // 首 token 等待时长
@@ -204,7 +229,7 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
       }
     });
     if (attemptErr) {
-      logConversation(logEntry({ ok: false, reply: '', error: attemptErr }));
+      logConversation(logEntry({ ok: false, reply: '', error: attemptErr, detail: attemptDetail }));
       throw new Error(attemptErr);
     }
     // content 非空但被 max_tokens 截断（finishReason=length 且结尾缺 </body>/</html>，HTML 明显不完整）

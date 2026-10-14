@@ -1,7 +1,9 @@
 // pages/TextTtsPage/helpers.ts —— 文字生音频页共享工具（原 window.__tts 命名空间）
 // requireCfg / cfgSaveDir / 音色下拉加载（listAll 优先，回退组装）/ 结果卡可见标记 / 「管理音色」Tab 信号。
 import { ref } from 'vue'
-import { goPage } from '@renderer/pages'
+// goPage 已不再直接调用：未配置 Key 时改为弹配置类弹窗（由用户在框里决定去不去设置页），
+// 仍保留 useNavIntent 的「跳到某个设置分类」能力（useConfigPrompt 内部使用）。
+import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 
 // 音色下拉的选项类型。字段名是 `value`（不是 `voiceId`）：全局下拉组件 HfSelect 只认 `value` / `label`，
 // 因此这里的结构刻意与 `HfSelectOption` 对齐（结构兼容即可，无需再套一层 computed 转换）。
@@ -74,20 +76,23 @@ export function setCfgSaveDir(v: string): void {
 }
 
 // 语音配置按厂家存：`active` 是当前厂家，取该厂家的 API Key 与全局保存目录。
-// 未配置 Key 时提示里带上厂家名，并跳到设置页的「语音服务」分类；同时把 voiceKeyReady 置假（禁用下拉）。
+// 未配置 Key 时**弹配置类弹窗**（说明原因 + [去设置] / [取消]）而不是直接把用户从本页拽到设置页——
+// 旧的 goPage('settings') 会让人「页面莫名其妙跳走了」。弹窗判定仍由渲染层给分类（这里是本地校验，
+// 不是主进程错误），jump=true 保持「确认后就去设置」的旧效率。
 export async function requireCfg(onError: (text: string, kind: string) => void): Promise<{ ok: boolean; apiKey?: string; saveDir?: string; provider?: string } | null> {
+  const configPrompt = useConfigPrompt();
   const c = await readActiveCfg();
   if (!c) {
     voiceKeyReady.value = false;
     onError('读取语音配置失败，请到「设置」-「语音服务」检查', 'hf-error');
-    goPage('settings');
+    configPrompt.open('读取语音配置失败，请到「设置 → 语音服务」检查', 'voice', undefined, true);
     return null;
   }
   if (!c.apiKey) {
     voiceKeyReady.value = false;
     if (!activeProviderLabel.value) activeProviderLabel.value = c.provider;
     onError('尚未配置「' + (activeProviderLabel.value || c.provider) + '」的语音 API Key，请先到「设置」-「语音服务」填写并保存', 'hf-error');
-    goPage('settings');
+    configPrompt.open('尚未配置「' + (activeProviderLabel.value || c.provider) + '」的语音 API Key，请先到「设置 → 语音服务」填写并保存', 'voice', undefined, true);
     return null;
   }
   voiceKeyReady.value = true;

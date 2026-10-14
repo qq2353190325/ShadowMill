@@ -146,6 +146,7 @@ import { escTxt } from '@renderer/utils/escape'
 import { applyRate, stepRate } from '@renderer/utils/rate'
 import { renderProgress, resetRenderProgress } from '@renderer/composables/useRenderProgress'
 import { useEnvGate } from '@renderer/composables/useEnvGate'
+import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 import {
   FALLBACK_RENDER,
   RENDER_FPS_OPTIONS,
@@ -159,6 +160,8 @@ import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 
 // ===== 生成/修改 =====
 const envGate = useEnvGate();
+// 配置类错误弹窗（Key 无效 / 余额不足 / 配置不完整…）：主进程判好分类，本页只负责触发
+const configPrompt = useConfigPrompt();
 const prompt = ref('');
 const subSel = ref('');
 const videoSel = ref('');
@@ -404,13 +407,19 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
       const msg = (res && res.message) || '提交失败';
       status.value = msg;
       statusClass.value = 'hf-error';
+      // 配置类（Key 无效 / 余额不足 / 未启用 / Base URL 填错…）：主进程判好的分类 → 弹「去设置 / 去充值」
+      // 状态行照样留着（框关掉后还能看见原因），但不叠 toast——弹窗已经把信息讲全了
+      if (res && res.needConfig) {
+        configPrompt.open(msg, res.needConfig, res.configUrl, false, res.title);
+      } else {
+        toast(msg);
+      }
       // 生成失败且项目原本就无 HTML：恢复“未生成”展示，避免误显示为已生成
       if (!appState.project?.htmlExists) {
         frameVisible.value = false;
         frameSrc.value = '';
         emptyVisible.value = true;
       }
-      toast(msg);
     }
   } finally {
     agentRunning = false;

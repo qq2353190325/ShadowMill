@@ -13,6 +13,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './htmlAgent'
+import { configTargetOf } from '../shared/errors'
 import * as hfEnv from './hfEnv'
 import * as runtime from './runtime'
 import { pickRenderOverride } from './settings'
@@ -586,7 +587,9 @@ function register(ctx?: RegisterCtx): void {
           : 'HTML 已生成，但未通过 HyperFrames 合规检查（缺 data-composition-id / __timelines / gsap），预览可用，转视频前需调整。'
       };
     } catch (e) {
-      return { ok: false, message: 'Agent 调用失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e)) };
+      // chatWithCustomModel 抛出的已是人话文案；这里只补一次分类，把「配置类」标记带给界面（弹「去设置」）
+      const msg = 'Agent 调用失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e));
+      return { ok: false, message: msg, ...configTargetOf(msg) };
     }
   });
 
@@ -638,7 +641,9 @@ function register(ctx?: RegisterCtx): void {
           : 'HTML 已修改，但未通过 HyperFrames 合规检查，转视频前需调整。'
       };
     } catch (e) {
-      return { ok: false, message: 'Agent 调用失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e)) };
+      // chatWithCustomModel 抛出的已是人话文案；这里只补一次分类，把「配置类」标记带给界面（弹「去设置」）
+      const msg = 'Agent 调用失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e));
+      return { ok: false, message: msg, ...configTargetOf(msg) };
     }
   });
 

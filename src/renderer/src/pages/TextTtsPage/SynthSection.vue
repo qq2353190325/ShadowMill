@@ -83,6 +83,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
+import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 import { applyRate, stepRate } from '@renderer/utils/rate'
 import { goPage } from '@renderer/pages'
 import { requestSettingsSection } from '@renderer/composables/useNavIntent'
@@ -94,6 +95,8 @@ import {
 
 const status = ref('');
 const statusClass = ref('');
+// 配置类错误弹窗（Key 无效 / 余额不足 / 未配置…）
+const configPrompt = useConfigPrompt();
 const setStatus = (text: string, kind: string): void => {
   status.value = text || '';
   statusClass.value = kind;
@@ -231,6 +234,8 @@ async function onSynth(): Promise<void> {
       }
       fillGenAudios(true);
     } else {
+      // 配置类（Key 无效 / 余额不足 / 未配置…）：弹「去设置 / 去充值」；状态行照旧留着，不叠 toast
+      configPrompt.fromResult(res);
       setStatus((res as { message?: string })?.message || '合成失败', 'hf-error');
     }
   } finally {

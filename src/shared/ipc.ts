@@ -9,9 +9,11 @@ export const IPC = {
     Close: 'window:close',
     MaximizedChange: 'window:maximized-change'
   },
-  // 剪贴板（renderer → main，invoke）
+  // 应用级小工具（renderer → main，invoke）
   App: {
-    CopyText: 'app:copy-text'
+    CopyText: 'app:copy-text',
+    // 用系统默认浏览器打开外链（余额不足弹窗的「去充值」）：只放行 http/https
+    OpenExternal: 'app:open-external'
   },
   // 应用自更新（updater.js，electron-updater generic provider）
   Update: {

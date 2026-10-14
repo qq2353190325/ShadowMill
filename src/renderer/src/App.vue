@@ -109,6 +109,30 @@
     </div>
   </div>
 
+  <!-- 配置类错误的统一弹窗（缺 Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用 / 余额不足）。
+       与上面的运行环境框同一范式：全局单例、两个按钮；余额类主按钮是「去充值」。
+       刻意**不显示「查看详情」**——配置类错误的原始报文对用户没有可操作性，详情仍落日志。 -->
+  <div v-if="configPrompt.visible.value" class="hf-modal-mask" @click.self="configPrompt.close()">
+    <div class="hf-modal" style="width:min(520px,92vw)">
+      <div class="hf-modal-head">
+        <span class="hf-modal-title">{{ configPrompt.title.value }}</span>
+        <button class="hf-modal-close" title="关闭" @click="configPrompt.close()">×</button>
+      </div>
+      <div class="hf-modal-body">
+        <div class="hf-status hf-error" style="margin:0">{{ configPrompt.message.value }}</div>
+        <div class="hgen-tip" style="margin:10px 0 0">
+          点「{{ configPrompt.target.value === 'billing' ? '去充值' : '去设置' }}」前往处理；点「取消」放弃本次操作，可以稍后再来。
+        </div>
+        <div class="hgen-actions" style="margin-top:12px">
+          <button class="hf-btn hf-btn-primary" @click="configPrompt.go()">
+            {{ configPrompt.target.value === 'billing' ? '去充值' : '去设置' }}
+          </button>
+          <button class="hf-btn" @click="configPrompt.close()">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻提示（原 window.App.toast 的固定定位 div） -->
   <TransitionGroup tag="div" name="toast" class="toast-host">
     <div v-for="t in toasts" :key="t.id" class="toast-item">{{ t.msg }}</div>
@@ -128,6 +152,7 @@ import { initRenderProgress } from './composables/useRenderProgress'
 import { loadRenderDefaults } from './composables/useRenderOptions'
 import { initRuntime, useRuntime } from './composables/useRuntime'
 import { initEnvGate, useEnvGate } from './composables/useEnvGate'
+import { useConfigPrompt } from './composables/useConfigPrompt'
 import { initLegacyData } from './composables/useLegacyData'
 import LegacyDataDialog from './components/LegacyDataDialog.vue'
 
@@ -142,6 +167,8 @@ const {
 const runtimeVisible = computed(() => runtimeBusy.value || runtimeFailed.value || runtimeHasMissing.value);
 // 运行环境缺包的统一确认框（各功能页经 useEnvGate().guard 触发）
 const gate = useEnvGate();
+// 配置类错误的统一弹窗（各功能页拿到主进程 res.needConfig 后经 configPrompt.open 触发）
+const configPrompt = useConfigPrompt();
 function retryRuntime(): void { void prepareRuntime(); }
 function downloadRuntime(): void { void prepareRuntime(); }
 const menuItems: { key: PageKey; label: string; title: string }[] = [

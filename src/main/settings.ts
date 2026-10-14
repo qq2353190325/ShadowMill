@@ -11,6 +11,7 @@ import { app, ipcMain, dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { IPC } from '../shared/ipc'
+import { friendlyError } from '../shared/errors'
 import type {
   AppSettings,
   CustomModelConfig,
@@ -352,7 +353,7 @@ function register(ctx?: RegisterCtx): void {
   ipcMain.handle(IPC.Settings.Test, async (_event, payload?: { customModel?: Partial<CustomModelConfig> }) => {
     const m = Object.assign({}, getCustomModel(), (payload && payload.customModel) || {});
     if (!m.baseUrl || !m.modelId || !m.apiKey) {
-      return { ok: false, message: '配置不完整：Base URL / Model ID / API Key 均需填写' };
+      return { ok: false, message: '配置不完整：Base URL / Model ID / API Key 均需填写', needConfig: 'model' as const };
     }
     try {
       let text = '';
@@ -382,7 +383,9 @@ function register(ctx?: RegisterCtx): void {
       }
       return { ok: true, message: '连接成功：模型已响应（' + String(text).slice(0, 40) + '）' };
     } catch (e) {
-      return { ok: false, message: '连接失败：' + (e && (e as Error).message ? (e as Error).message : String(e)) };
+      // 测试连接是同步返回的，这里把配置类（Key 无效 / 余额不足 / 地址填错）一起带回界面弹「去设置 / 去充值」
+      const f = friendlyError(e, { label: '连接失败', baseUrl: m.baseUrl });
+      return { ok: false, message: f.message, detail: f.detail, needConfig: f.needConfig, configUrl: f.configUrl };
     }
   });
 }

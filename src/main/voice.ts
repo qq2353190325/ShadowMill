@@ -22,7 +22,9 @@ import {
   type VoiceProviderDef
 } from './voiceCatalog'
 import { IPC } from '../shared/ipc'
+import { friendlyError } from '../shared/errors'
 import type {
+  ConfigTarget,
   RegisterCtx,
   SystemVoice,
   VoiceCreatePayload,
@@ -137,18 +139,24 @@ function vendorMismatch(voice?: string, model?: string): string | null {
 function getVoiceApiError(provider: VoiceProviderDef, apiKey: string): string | null {
   return apiKey ? null : '未配置「' + provider.label + '」的 API Key，请先到「设置」-「语音服务」填写并保存';
 }
+// 未配置 Key 是「配置类」错误：带上 needConfig，界面据此弹「去设置 / 取消」弹窗而不是只显示一行红字
+function voiceNoKeyFail(msg: string): { ok: false; message: string; needConfig: ConfigTarget } {
+  return { ok: false, message: msg, needConfig: 'voice' };
+}
 function parseJsonLike(text: string): Record<string, any> | null {
   try { return JSON.parse(text); } catch (e) { return null; }
 }
+// 语音侧的错误翻译：统一走 shared/errors 的 friendlyError（人话文案 + 排障详情）。
+// 与旧实现（本地 4 条 if 链）的差异：
+//   ① 余额 / 欠费独立成档——阿里云是 **400 + Arrearage**（不是 402），旧实现把它混在「额度不足」里只加个前缀；
+//   ② 限流按官方三个维度分档（Throttling.RateQuota / AllocationQuota / BurstRate，兼容模式别名为
+//      limit_requests / insufficient_quota / limit_burst_rate）；
+//   ③ 合规拦截（DataInspectionFailed）给出「改字幕 / 换素材」这种可操作的说法。
+// **保留原始报文**：旧行为是把原文拼进 message（终端用户能据此报障），故这里把 detail 追加回文案，
+// 界面只有在判出「配置类」时才只显示前面那句人话（见 docs/error-mapping.md §11.1）。
 function voiceFriendlyError(err: unknown, label: string): string {
-  let msg = (err && (err as Error).message) ? (err as Error).message : String(err);
-  if (/Model not exist/i.test(msg)) {
-    msg = '这个模型在当前账号里不存在（' + msg + '）：请到「设置 → 语音服务」核对厂家，或到「音色管理 → 音色映射管理」把该音色改绑到可用的模型';
-  } else if (/does not exist or is not licensed/i.test(msg)) {
-    msg = '音色未获授权或不存在（' + msg + '）：克隆音色只能用创建时对应的复刻模型合成，该模型在当前账号不可用时请改用系统音色';
-  } else if (/InvalidApiKey|unauthorized|Unauthorized|401|403/i.test(msg)) msg = 'API Key 无效或无权限，请检查后重试';
-  else if (/quota|ExceededQuota|Insufficient/i.test(msg)) msg = '额度不足或已被限流：' + msg;
-  return label + '：' + msg;
+  const f = friendlyError(err, { label, provider: activeProviderDef().key, baseUrl: activeProviderDef().apiBase });
+  return f.detail ? f.message + '（' + f.detail + '）' : f.message;
 }
 function nowStamp(): string {
   const d = new Date();
@@ -217,7 +225,7 @@ async function fetchClonedVoices(providerKey?: string): Promise<{ ok: boolean; v
   const provider = providerKey ? providerByKey(providerKey) : activeProviderDef();
   const key = settings.getVoiceProviderConfig(provider.key).config.apiKey;
   const noKey = getVoiceApiError(provider, key);
-  if (noKey) return { ok: false, message: noKey };
+  if (noKey) return voiceNoKeyFail(noKey);
   try {
     const resp = await fetch(provider.apiBase + '/services/audio/tts/customization', {
       method: 'POST',
@@ -377,7 +385,7 @@ function register(ctx?: RegisterCtx): void {
     const useModel = String((payload && payload.targetModel) || '').trim() || active.defaultModel;
     const prov = providerFor(undefined, useModel);
     const noKey = getVoiceApiError(prov.def, prov.apiKey);
-    if (noKey) return { ok: false, message: noKey };
+    if (noKey) return voiceNoKeyFail(noKey);
     // 只有 Qwen-Audio-TTS 系列能作复刻目标模型（vc 那条线已彻底移除，见 voiceCatalog 注释）。
     // 系统音色模型（如 qwen3-tts-flash）走不到这里：界面只列 role=clone 的模型，这里再兜一道。
     if (!isAudioTtsModel(useModel)) {
@@ -539,7 +547,7 @@ function register(ctx?: RegisterCtx): void {
     const provider = activeProviderDef();
     const apiKey = settings.getVoiceProviderConfig(provider.key).config.apiKey;
     const noKey = getVoiceApiError(provider, apiKey);
-    if (noKey) return { ok: false, message: noKey };
+    if (noKey) return voiceNoKeyFail(noKey);
     try {
       const resp = await fetch(provider.apiBase + '/services/audio/tts/customization', {
         method: 'POST',
@@ -670,7 +678,7 @@ function register(ctx?: RegisterCtx): void {
     const useModel = String((payload && payload.targetModel) || '').trim() || active.defaultModel;
     const prov = providerFor(voice, useModel);
     const noKey = getVoiceApiError(prov.def, prov.apiKey);
-    if (noKey) return { ok: false, message: noKey };
+    if (noKey) return voiceNoKeyFail(noKey);
     try {
       const { buf, ext } = await synthOne(text, voice, useModel);
 

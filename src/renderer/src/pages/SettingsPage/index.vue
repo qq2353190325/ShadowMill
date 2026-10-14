@@ -311,6 +311,8 @@ async function onSave(): Promise<void> {
 async function onTest(): Promise<void> {
   setStatus('正在测试连接...', '');
   const res = await window.settingsTools.test(collectCustomModel());
+  // 刻意**不弹配置类弹窗**：这个按钮本身就在设置页上、失败文案就显示在它旁边，
+  // 再弹一个「去设置」框是让用户从原地跳到原地。主进程照常回 needConfig（供别的入口用），这里只显示状态。
   setStatus(res && res.ok ? (res.message || '连接成功') : ((res as { message?: string })?.message || '测试失败'), res && res.ok ? 'hf-ok' : 'hf-error');
 }
 
