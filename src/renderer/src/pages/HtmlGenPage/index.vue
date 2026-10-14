@@ -85,8 +85,20 @@
       <div class="hg-prev-ctl" v-show="ctlVisible">
         <button class="hf-btn" title="暂停 / 继续播放动画" style="padding:4px 14px;font-size:12px" @click="onPrevToggle">{{ prevToggleText }}</button>
         <button class="hf-btn" title="从头重新播放" style="padding:4px 14px;font-size:12px" @click="onPrevReplay">重新播放</button>
-        <div class="hg-prev-bar"><div class="hg-prev-bar-fill" :style="{ width: prevFillPct }"></div></div>
+        <div
+          class="hg-prev-bar"
+          :class="{ seeking }"
+          title="点击或按住拖动进度条，可跳转到任意播放位置"
+          @pointerdown="onSeekStart"
+          @pointermove="onSeekMove"
+          @pointerup="onSeekEnd"
+          @pointercancel="onSeekEnd"
+        >
+          <div class="hg-prev-track"><div class="hg-prev-bar-fill" :style="{ width: prevFillPct }"></div></div>
+        </div>
         <span class="hg-prev-time">{{ prevTimeText }}</span>
+        <!-- 预览默认不自动播放、合成又普遍以 opacity:0 开头 ⇒ 首帧是空的。这里说明一句，免得被当成"白屏故障" -->
+        <span v-if="!prevPlaying && prevDur > 0 && prevTimeCur < 0.05" class="hg-prev-hint">已暂停在第 0 帧 · 起始帧本就是空的，点「播放」或拖动进度条</span>
       </div>
     </div>
 
@@ -222,15 +234,70 @@ function fmtPrev(sec: number): string {
   const s = Math.max(0, Math.floor(Number(sec) || 0));
   return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 }
-function prevPost(type: string): void {
+function prevPost(type: string, seconds?: number): void {
   const frame = frameEl.value;
-  if (frame && frame.contentWindow) frame.contentWindow.postMessage({ __hg: true, type }, '*');
+  if (frame && frame.contentWindow) frame.contentWindow.postMessage({ __hg: true, type, seconds }, '*');
+}
+// ===== 进度条拖动跳转（seek）=====
+// 拖动中本地立即跟手（不画面里的 300ms 回报会打架），松手前把 seeking 置位以忽略回报；
+// 定位由画面里的桥接脚本完成（composition 时间轴 + 音频/视频一起跳到该秒，保持播放/暂停状态）。
+const seeking = ref(false);
+// 松手后等画面 ack（或超时）期间：丢弃一切旧回报
+const seekPending = ref(false);
+let seekAckTimer = 0;
+function seekRatio(ev: PointerEvent): number {
+  const el = ev.currentTarget as HTMLElement | null;
+  if (!el) return 0;
+  const rect = el.getBoundingClientRect();
+  if (!rect.width) return 0;
+  return Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+}
+function seekTo(ev: PointerEvent): void {
+  const dur = prevDur.value;
+  if (!(dur > 0)) return; // 总时长还没上报（画面刚载入）→ 无从换算，忽略
+  const sec = seekRatio(ev) * dur;
+  prevTimeCur.value = sec;
+  prevPost('seek', sec);
+}
+function onSeekStart(ev: PointerEvent): void {
+  if (!frameSrc.value || !(prevDur.value > 0)) return;
+  seeking.value = true;
+  // 指针捕获：拖出进度条（甚至拖到按钮上）也继续收 move 事件
+  try { (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId); } catch (e) { /* 忽略 */ }
+  seekTo(ev);
+}
+function onSeekMove(ev: PointerEvent): void {
+  if (seeking.value) seekTo(ev);
+}
+function onSeekEnd(ev: PointerEvent): void {
+  if (!seeking.value) return;
+  seeking.value = false;
+  try { (ev.currentTarget as HTMLElement).releasePointerCapture(ev.pointerId); } catch (e) { /* 忽略 */ }
+  // 松手后画面会立刻回一条带 ack 的进度（见主进程的 report(true)）；在收到它之前一律不采信回报，
+  // 否则可能先收到一条"拖动前发出"的旧回报，看起来就像进度条被拽回原位。
+  // 800ms 是兜底：画面里若是旧脚本（不认 seek）也不会让进度条永远卡住不更新。
+  seekPending.value = true;
+  if (seekAckTimer) window.clearTimeout(seekAckTimer);
+  seekAckTimer = window.setTimeout(() => { seekPending.value = false; }, 800);
 }
 function onPrevMessage(ev: MessageEvent): void {
   const d = ev && ev.data;
   if (!d || !d.__hg || d.type !== 'progress') return;
+  const acked = d.ack === true;
+  if (acked) {
+    seekPending.value = false;
+    if (seekAckTimer) { window.clearTimeout(seekAckTimer); seekAckTimer = 0; }
+  }
+  // 拖动中、或松手后还没等到 ack：只更新总时长，位置与播放状态一律不采信
+  if (seeking.value || (seekPending.value && !acked)) {
+    prevDur.value = Number(d.dur) || 0;
+    return;
+  }
   prevTimeCur.value = Number(d.time) || 0;
   prevDur.value = Number(d.dur) || 0;
+  // 用画面里的真实播放状态校准按钮文案：合成的 timeline 是 paused:true 创建的，
+  // 「看似播着、其实停在第 0 帧」正是白屏时按钮却写着「暂停」的原因。
+  if (typeof d.playing === 'boolean') prevPlaying.value = d.playing;
   if (prevPlaying.value && prevDur.value > 0 && prevTimeCur.value >= prevDur.value - 0.25) {
     prevPlaying.value = false; // 自然播完：进度停满，按钮回「播放」（点击即从头重播）
   }
@@ -244,8 +311,10 @@ function fitFrame(): void {
   }
 }
 function onFrameLoad(): void {
-  // 每次载入完成（含重新播放的 reload）：重置进度与按钮状态，并按容器宽度重新缩放画布
-  prevPlaying.value = true;
+  // 每次载入完成（含重新播放的 reload）：重置进度与按钮状态，并按容器宽度重新缩放画布。
+  // 这里刻意**不**主动起播——预览默认静止在第 0 帧，播放交给用户（「播放」按钮 / 拖动进度条）。
+  // 按钮文案靠画面回报的 playing 校准，所以第一帧就会显示「播放」而不是假装在播。
+  prevPlaying.value = false;
   prevDur.value = 0;
   prevTimeCur.value = 0;
   fitFrame();
@@ -640,5 +709,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('message', onPrevMessage);
   window.removeEventListener('resize', fitFrame);
   document.removeEventListener('keydown', onModalKeydown);
+  if (seekAckTimer) { window.clearTimeout(seekAckTimer); seekAckTimer = 0; }
 });
 </script>

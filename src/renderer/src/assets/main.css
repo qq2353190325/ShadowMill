@@ -974,11 +974,24 @@ body {
 .hg-prev-bar {
   flex: 1;
   min-width: 160px;
+  /* 上下各 5px 透明热区：8px 的细条很难点中，热区把可点高度撑到 18px，视觉厚度不变 */
+  padding: 5px 0;
+  cursor: pointer;
+  touch-action: none;   /* 触屏拖动进度条时不被滚动/缩放手势抢走 */
+  user-select: none;
+}
+
+.hg-prev-track {
   height: 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(0, 212, 255, 0.25);
+  /* 用 inset 阴影当描边：border 会画在 padding box 上，热区一撑高边框就变成 18px 的大圆角框 */
+  box-shadow: inset 0 0 0 1px rgba(0, 212, 255, 0.25);
   overflow: hidden;
+}
+
+.hg-prev-bar:hover .hg-prev-track {
+  box-shadow: inset 0 0 0 1px rgba(0, 212, 255, 0.55), 0 0 8px rgba(0, 212, 255, 0.25);
 }
 
 .hg-prev-bar-fill {
@@ -990,12 +1003,25 @@ body {
   transition: width 0.25s linear;
 }
 
+/* 拖动中：宽度必须跟手，不能有 0.25s 的补间，否则进度条被光标甩在后面 */
+.hg-prev-bar.seeking .hg-prev-bar-fill {
+  transition: none;
+}
+
 .hg-prev-time {
   flex: none;
   font-size: 12px;
   color: var(--text-secondary);
   letter-spacing: 1px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 预览默认不自动播放、合成又普遍以 opacity:0 开头 ⇒ 首帧是空的，这句说明免得被当成"白屏故障" */
+.hg-prev-hint {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.8;
 }
 
 .empty-hint {
