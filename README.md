@@ -14,6 +14,7 @@ AIGC:
 基于 **Electron + Vue 3 + electron-vite + TypeScript** 的桌面应用，以「项目」为粒度，把 **内容脚本 → 配音 → 字幕 → HTML 动画 → 视频** 五个创作节点串成一条完整流水线。每个项目对应本地一个目录，字幕既可由脚本旁白生成，也可用**内置 whisper.cpp 在本机把音频转录成字幕**；视频由 **HyperFrames + FFmpeg 在本机渲染**——语音识别与视频渲染都不消耗 API 额度。
 
 > 工程内知识库（源码级说明、IPC 契约、逐文件文档）见 [`wiki/README.md`](wiki/README.md)；
+> 更新日志（按版本记录每次修改，发布内容看这一份）见 [`CHANGELOG.md`](CHANGELOG.md)；
 > 界面设计规范（深空科技 / Cyber UI 配色与组件风格）见 [`src/renderer/agents.md`](src/renderer/agents.md)；
 > Vue3 + TS 重构的过程记录见 [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md)。
 
@@ -257,6 +258,7 @@ npm run dist       # runtime:pack + build + electron-builder --win（NSIS 安装
 - **⑤ 视频预览与转视频**：合规校验、HyperFrames 后台渲染与中文进度文案、**渲染档位（设置页全局默认 + 项目级覆盖）**、成品内嵌播放与「重新加载」「在文件夹中显示」、产物回写项目。
 - **项目化**：创建（弹窗输入名称 → 立即创建并切换）/ 切换 / 删除、字幕与内容脚本保存、背景音频与视频素材管理（含提取原声）、`hgpreview://` 预览协议。
 - **工程化**：TypeScript 全量覆盖（`npm run typecheck` 全绿）、IPC 载荷类型集中在 `shared/types.ts` 并作为 `window.*` 的唯一真源、CSP/sandbox/contextIsolation 安全边界、electron-builder 打包配置完备（重型运行资源经 `runtime-pack` 随包发布、首次启动解到 userData）、**Electron 升级到 44.7.0 且运行环境包不再携带 `node.exe`**（HyperFrames 复用 Electron 内嵌 Node，运行环境包由约 716 MB 降到约 632 MB）。
+- **文档与变更记录**：`wiki/` 是源码级知识库，[`CHANGELOG.md`](CHANGELOG.md) 是唯一的更新日志——**一个版本一个区块，每次修改追加一条**（`[新增]`/`[修改]`/`[修复]`/`[重构]`/`[优化]`/`[文档]`/`[工程]` + 影响范围 + 验证方式）；同一功能在当前版本改到第 2 次标 `[完整版]`，所以每次发布都能直接看到这一版改了什么。约定见 [`AGENTS.md`](AGENTS.md) 第三节与关键约定第 3、4 条。
 
 ### 已知限制与说明
 

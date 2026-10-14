@@ -51,9 +51,30 @@ AIGC:
 
 - 中文字体：`"Microsoft YaHei UI", "PingFang SC", sans-serif`
 - 等宽数字/代码：`"JetBrains Mono", "Consolas", monospace`
-- 标题字号：24px / 20px / 18px，暖色冰白，字重 600
-- 正文字号：14px，行高 1.7，颜色 `#E6F1FF`
-- 说明字号：12px，颜色 `#8A9BB5`
+- 标题字重 600，颜色冰白 `#E6F1FF`；说明文字颜色雾蓝 `#8A9BB5`
+- 行高：正文段落 1.7~1.8；控件 / 表格行 1.4
+
+### 3.1 字号刻度（新增文字只能从这些档位里选）
+
+| 档位 | 字号 | 落地示例 |
+|------|------|----------|
+| 展示 | 28px | 首页 Hero 标题 `.hero h1` |
+| 页面标题 | 24px | 内容区 `h1`（`.content h1`） |
+| 区块标题 | 18px / 15px | 侧栏 Logo（18px）、节点卡片标题（`.flow-node h3` 15px） |
+| **正文（基准）** | **14px** | 段落 `.content p` / `.hero p`、列表主信息（`.model-name` / `.proj-card-name`）、弹窗标题、源码与多行文本区 |
+| 控件 / 表格行 | 13px | 表单控件（`.hgen-input` / `.sub-textarea`）、按钮 `.hf-btn`、标签 `.sel-label`、Tab `.hf-tab`、数据表行（`.sub-text`）、下拉 `.hf-sel` 触发器与弹层 |
+| 说明 | 12px | 面板标题 `.panel-title`、表头、提示 `.hgen-tip` / `.hf-status`、次要列（`.model-meta` / `.sub-time` / `.proj-stat`）、指标单位 |
+| 最小 | 11px（个别 10px） | 徽标 `.model-badge` / `.flow-badge`、`?` 图标 `.hg-help-icon`、版本号 |
+
+- 字号**没有** CSS 变量（与配色 / 间距不同），按上表直接写 px。
+- 不要写刻度外的值（存量例外：`.model-url` 的 10.5px），也不要为了「看起来大一点」临时放大某一处。
+
+### 3.2 基准字号与「不许依赖浏览器默认」（必须遵守）
+
+- **全局基准写在 `src/renderer/src/assets/main.css` 的 `html, body { font-size: 14px }`**，即刻度里的「正文」档；任何没显式声明字号的文字最差也是 14px。
+- **承载文字的元素必须显式落在某一档，不允许依赖浏览器默认字号**：Chromium 默认 16px，只要某个容器（卡片、列表行、弹层）没写字号、又没接上基准，里面的文字就会比相邻的 12px 表头 / 13px 按钮大一圈——「我的音色」列表行的音色名（16px）就是这么冒出来的，`.sel-label` 当年也是同一类问题。
+- 兜底不等于免写：基准只保证「最差 14px」，局部要更小（表格行 13px、次要列 12px）必须自己显式声明。
+- 弹层 / Teleport 到 `<body>` 的内容继承不到组件根上的字号，必须在弹层根节点显式写（见 `components/HfSelect.vue` 的 `.hf-sel-menu` 注释）。
 
 ## 4. 间距与圆角
 
@@ -97,6 +118,20 @@ AIGC:
 - 因气泡位于 `<button>` 内，需重置按钮继承下来的排版：`font-weight: 400`、`text-align: left`、`white-space: normal`
 - 交互：默认 `opacity: 0` + `visibility: hidden` + `pointer-events: none`（不可聚焦、不挡点击），hover 时 `opacity: 1` + `visibility: visible`；`?` 上要 `@click.stop`（点它不触发按钮动作）
 - 过渡：图标 `opacity 0.2s ease, background 0.2s ease`、气泡 `opacity 0.2s ease`；正文里的关键词用主色加粗（`b { color: var(--color-primary); font-weight: 600 }`）
+
+### 5.6 列表面板（标题行 + 动作 + 数据列表）
+
+落地见 `assets/main.css` 的 `.panel-head*` / `.voice-list*`，以及 `pages/TextTtsPage/VoiceSection.vue` 的「我的音色」卡片。
+
+- **头行 `.panel-head`**：`flex` + `space-between` + gap 12px + `margin-bottom: 10px`；标题用 `.panel-title` 并把它的 `margin-bottom` 归零（下边距由头行统一给，否则头行被撑高一倍）；动作放右侧 `.panel-head-actions`（gap 8px、`flex: none`）。
+- **动作按钮放列表上方**：列表内部会滚动，按钮放底部等于逼用户先滚到底才能刷新。
+- **列表 `.voice-list`**：1px 半透明主色描边 + 10px 圆角 + `overflow: hidden`。表头 `.voice-list-head`（12px 雾蓝、字距 1px、深底、下描边）放在**滚动区之外**，行区 `.voice-list-body` 自己滚（`max-height: 360px`）——表头因此天然常驻，**不要用 `sticky`**。
+- **列宽必须写 `minmax(0, Nfr)`**：`1fr` 的隐含下限是 `min-content`，超长文本（URL、机器 ID）会把列撑爆、`text-overflow: ellipsis` 直接失效。
+- **行 `.voice-list-row`**：主文字 13px / 次要列 12px（§3.1 档位）；行分隔线 `rgba(0,212,255,.08)`（末行去掉）；hover 半透明主色底；**整行可点**（`cursor: pointer` + `title` 说明点了会发生什么），当前正在别处编辑的那条加 `.on`（左 3px 主色指示条 + 90deg 渐变高亮，与侧栏菜单选中态同一套语言）。
+- 名称列 `.voice-name`（主色 + 字重 600）+ 类型徽标 `.voice-tag`（11px、`border-radius: 999px`、雾蓝描边，`.clone` 用数据绿）。
+- **列表里不显示音色 ID 这类机器标识**（如 `qwen-tts-vc-myvoice42743683-voice-…`）：那是给接口用的内部串，摆在界面上既长又没意义，会挤掉真正有用的列。没有中文名的克隆音色用「未命名克隆音色」兜底，靠「创建时间」列区分是哪一条；确需唯一标识时（如删除确认弹窗）也只显示创建时间。音色 ID 只在本机配置文件与代码里流转。
+- 行尾可以有动作列 `.voice-actions`（`flex` + 靠右 + gap 6px，宽度 `auto`）：危险动作（删除类）用 `.hf-btn-danger`，并 `@click.stop` 免得连带触发整行点击。
+- 任何可能被截断的格子都要带 `title` 给全文——省略号不能是唯一的出口。
 
 ## 6. CSS 变量（可直接粘贴使用）
 
