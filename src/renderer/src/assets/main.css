@@ -50,6 +50,11 @@
 html, body {
   height: 100%;
   font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  /* 全局字号基准 = 规范 §3 的「正文」档 14px。
+     此前 html/body 没设 font-size：凡是没显式写 font-size 的文字，都会按 Chromium 默认的 16px 渲染，
+     比相邻的 12px 表头/说明、13px 按钮大一圈（「我的音色」列表行的音色名就是这样冒出来的）。
+     这里只兜底；局部要更小（表格行 13px / 次要列 12px）仍须自己显式声明，档位见 src/renderer/agents.md §3。 */
+  font-size: 14px;
   color: var(--text-primary);
   background: var(--bg-primary);
 }
