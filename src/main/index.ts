@@ -10,8 +10,8 @@
 //   video.ts     预览 / HyperFrames 转视频 + dialog:open-html / video:* IPC
 //   whisper.ts   whisper.cpp 字幕转录 + whisper:* IPC
 //   updater.ts   应用自更新（electron-updater generic provider）+ update:* IPC
-//   runtime.ts   运行环境包（ffmpeg/node/hyperframes/whisper 解包到 userData）+ runtime:* IPC
-// 依赖图：settings ← htmlAgent ← projects ← voice ← ttsAlign；hfEnv ← video；updater ← settings；无环。
+//   runtime.ts   运行环境包（ffmpeg/hyperframes/whisper 解包到 userData）+ runtime:* IPC
+// 依赖图：settings ← htmlAgent ← projects ← voice ← ttsAlign；hfEnv ← projects, voice, whisper, ttsAlign, video, runtime；updater ← settings；无环。
 // 打包输出 out/main/index.js；preload 输出 out/preload/index.js；渲染层输出 out/renderer/。
 import { app, BrowserWindow, Menu, ipcMain, clipboard, protocol } from 'electron'
 import path from 'node:path'
@@ -444,7 +444,8 @@ app.whenReady().then(() => {
   video.register(ctx)
   whisper.register(ctx)
   updater.register(ctx)
-  // 运行环境包（runtime.ts）：自己带 2s 延迟在后台解包，注册顺序放在最后（不抢启动时间）
+  // 运行环境包（runtime.ts）：注册完即开始后台准备（不再有延迟），注册顺序仍放最后——
+  // 目的是先把 handler 挂上再干活；早到的进度事件由渲染层的 runtime:status 补齐
   runtime.register(ctx)
 
   app.on('activate', () => {

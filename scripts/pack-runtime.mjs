@@ -34,11 +34,13 @@ const MANIFEST_FILE = path.join(OUT_DIR, 'runtime.json')
 const FORCE = process.argv.includes('--force')
 
 // 不打进运行环境包的顶层条目。
-// node：hyperframes 现在复用 Electron 内嵌的 Node（src/main/hfEnv.ts 的 findNode() 用
-//   ELECTRON_RUN_AS_NODE 跑 process.execPath），这份 83MB 已实测为纯冗余（成片与用 node 22 逐项相同）。
-//   ⚠ 要回退成「随包 node.exe」：把 'node' 从这里删掉即可，findNode() 会自动回落到它的 ② 分支
-//   （<资源根>/node/node.exe）——注意 resources/node 目录本身要留着，否则回落也无处可去。
-const EXCLUDE_TOP = ['node']
+// node 已整条移除（2026-：resources/node/node.exe 那 83MB 已删，findNode() 的「随包 Node」回退分支
+//   也一并删掉了）：hyperframes 复用 Electron 内嵌的 Node（src/main/hfEnv.ts 的 findNode() 用
+//   ELECTRON_RUN_AS_NODE 跑 process.execPath），实测成片与用 node 22 逐项相同（含字节数）。
+//   ⚠ 若将来又要「随包 node.exe」（例如关掉 Electron 的 RunAsNode 熔丝后必须回退）：
+//   把 resources/node/node.exe 放回来，并把 'node' 加进这个数组之外的显式包含——即**从本数组移除**
+//   就等于包含（数组语义是排除名单，空数组 = 全都要）。
+const EXCLUDE_TOP = []
 
 function log(msg) { process.stdout.write('[runtime-pack] ' + msg + '\n') }
 function fail(msg) { process.stderr.write('[runtime-pack] ' + msg + '\n'); process.exit(1) }

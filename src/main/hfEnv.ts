@@ -7,11 +7,11 @@ import fs from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { app } from 'electron'
 
-// ===== 内置依赖资源定位（ffmpeg / node / hyperframes / whisper）=====
+// ===== 内置依赖资源定位（ffmpeg / hyperframes / whisper）=====
 // 资源根按优先级解析：
 //   ① <userData>/runtime/<id>：运行环境包解出来的那一份（安装版常态，见 src/main/runtime.ts）
 //   ② <resources>：dev 下为 项目根/resources，打包后为 process.resourcesPath（旧版布局 / 兜底）
-// 为什么搬到 userData：ffmpeg+node+hyperframes+whisper 合计约 716MB、4900+ 文件，占安装体积 72%，
+// 为什么搬到 userData：ffmpeg+hyperframes+whisper 合计约 632MB、4900+ 文件，占安装体积大头，
 // 却跨版本几乎不变；而 NSIS 的更新是「整体卸载旧版 → 解压复制新包」，这些文件每次更新都要重来一遍
 // （实测一次更新 97 秒，期间应用不存在、快捷方式失效）。拆成运行环境包后更新不再碰它们。
 // 实现上刻意用 getter 而不是快照：userData 目录迁移（my-app → shadowmill）与本模块的 import 顺序
@@ -19,7 +19,7 @@ import { app } from 'electron'
 // 解包完成后由 refreshBuiltinResources() 失效）。
 let cachedRoot: string | null = null;
 let cachedChrome: string | null | undefined;
-// Node 探测结果缓存：探针要 spawn 一次 electron.exe（约 200-400ms，且 spawnSync 会阻塞主进程），
+// 探针结果缓存：探针要 spawn 一次 electron.exe（约 200-400ms，且 spawnSync 会阻塞主进程），
 // 而结果在一次会话里不会变。资源根变化时由 refreshBuiltinResources() 一并失效。
 let cachedNode: { cmd: string; env: Record<string, string> } | null | undefined;
 
@@ -71,7 +71,6 @@ function findChromeShell(root: string): string | null {
 
 const BUILTIN_RESOURCES: {
   readonly root: string
-  readonly node: string
   readonly ffmpegBin: string
   readonly ffmpeg: string
   readonly ffprobe: string
@@ -80,7 +79,6 @@ const BUILTIN_RESOURCES: {
   readonly chromeShell: string | null
 } = {
   get root() { return resolveRoot(); },
-  get node() { return path.join(resolveRoot(), 'node', 'node.exe'); },
   get ffmpegBin() { return path.join(resolveRoot(), 'ffmpeg', 'bin'); },
   get ffmpeg() { return path.join(resolveRoot(), 'ffmpeg', 'bin', 'ffmpeg.exe'); },
   get ffprobe() { return path.join(resolveRoot(), 'ffmpeg', 'bin', 'ffprobe.exe'); },
@@ -131,10 +129,12 @@ function resolveNodePath(): string | null {
 }
 
 // 探测 Node（HyperFrames 要求 >= 22）。返回 { cmd, env }：**env 必须合进子进程环境后再 spawn**，
-// 不能再当纯路径用。优先级：① Electron 内嵌 Node → ② 随包 Node → ③ 系统 Node。
+// 不能再当纯路径用。优先级：① Electron 内嵌 Node → ② 系统 Node。
 //
 // 为什么首选 ①：Electron 35+ 内置 Node >= 22（44.7.0 实测 v24.21.0），加 ELECTRON_RUN_AS_NODE
-// 即可让 electron.exe 以 Node 行为跑 hyperframes CLI，于是那份 83MB 的 node.exe 不必再随包分发。
+// 即可让 electron.exe 以 Node 行为跑 hyperframes CLI。曾经的 ② 候选「随包 resources/node/node.exe」
+// （83MB）已整体删除：它在打包态本来就够不着（build.files / extraResources 都不带 resources/**，
+// 只有 dev 的 resolveRoot() 指向项目根 resources 时才会命中），留着等于给 dev 和 wiki 一个假回退。
 // 实测（2026-10-12，Electron 44.7.0 + hyperframes 0.8.33，1280x720 / 2s / 60 帧的 composition）：
 //   · onnxruntime-node 与 sharp 都能在 Electron 的 Node 24 下加载（libvips 与 Node 22 下一致，8.18.6）；
 //   · 成片与用 node 22 渲染的逐项相同，含字节数（157397 字节）；
@@ -142,8 +142,9 @@ function resolveNodePath(): string | null {
 //     不会出现「子进程以为自己是 Electron 应用」而误启主程序。
 //
 // ⚠ 这条复用依赖 Electron 的 RunAsNode 熔丝处于默认开启状态。若将来在 package.json 的
-//   build.electronFuses 里把它关掉，下面的探针会失败并自动回落到 ②/③——不报错，但 node.exe
-//   就重新变成必需品了，别在没验的情况下关熔丝。
+//   build.electronFuses 里把它关掉，下面的探针会失败并自动回落到 ② —— 不报错，但那时**必须**
+//   重新提供一份 Node：要么把 resources/node/node.exe 放回来（并让它进运行环境包，见
+//   scripts/pack-runtime.mjs 的 EXCLUDE_TOP），要么把「系统 Node >= 22」变成硬性前置条件。
 // 探针刻意用 `-e` 打印 Node 版本、而不是 `-v`：熔丝若被关闭，electron.exe 会把 `-e` 当应用路径
 // 而直接失败；但 `-v` 会打印 Electron 版本（44 >= 22），会造成「复用可用」的误判。
 function findNode(): { cmd: string; env: Record<string, string> } | null {
@@ -164,15 +165,7 @@ function findNode(): { cmd: string; env: Record<string, string> } | null {
     }
   } catch (e) { /* 探针失败即回落，不影响启动 */ }
 
-  // ② 随包 Node（dev 的 resources/node；旧布局兜底）
-  if (fs.existsSync(BUILTIN_RESOURCES.node)) {
-    const p = spawnSync(BUILTIN_RESOURCES.node, ['-v'], { encoding: 'utf8' });
-    if (p.status === 0) {
-      cachedNode = { cmd: BUILTIN_RESOURCES.node, env: {} };
-      return cachedNode;
-    }
-  }
-  // ③ 系统 Node
+  // ② 系统 Node
   const probe = spawnSync('node', ['-v'], { encoding: 'utf8' });
   if (probe.status === 0) {
     const v = (probe.stdout || '').trim().replace('v', '');

@@ -623,7 +623,7 @@ function register(ctx?: RegisterCtx): void {
     if (!audioPath || !fs.existsSync(audioPath)) return { ok: false, message: '音频文件不存在' };
     const meta = findModel(id);
     if (!meta) return { ok: false, message: UNKNOWN_MODEL_MSG + (id || '(空)') };
-    // 运行环境（whisper-cli + ffmpeg 共约 716MB）首次启动可能还在解包：等它就绪，否则下面
+    // 运行环境（whisper-cli + ffmpeg 共约 632MB）首次启动可能还在解包：等它就绪，否则下面
     // 的 resolveCliPath() 会找不到文件、报成「未找到 whisper-cli.exe」误导用户
     const rt = await runtime.ensureRuntime();
     if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好', detail: rt.detail };

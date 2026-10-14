@@ -186,7 +186,7 @@ const updateTools: PreloadApi['updateTools'] = {
 };
 contextBridge.exposeInMainWorld('updateTools', updateTools);
 
-// 运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）：安装包里只带一个 7z，
+// 运行环境包（ffmpeg / hyperframes / whisper 约 632MB）：安装包里只带一个 7z，
 // 首次启动解到 userData/runtime/<id>/；这里只暴露「查状态 / 主动准备 / 订阅进度」三件事
 const runtimeTools: PreloadApi['runtimeTools'] = {
   status: () => ipcRenderer.invoke(IPC.Runtime.Status),

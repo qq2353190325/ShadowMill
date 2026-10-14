@@ -30,7 +30,7 @@
     </div>
   </header>
 
-  <!-- 运行环境包（ffmpeg/node/hyperframes/whisper 约 716MB）首次解包提示：
+  <!-- 运行环境包（ffmpeg/hyperframes/whisper 约 632MB）首次解包提示：
        安装包里只带一个 7z，主进程在后台解到 userData；解包期间转录 / 转视频 / 逐句对齐会等它完成 -->
   <div v-if="runtimeVisible" class="runtime-banner" :class="{ 'is-error': runtimeFailed }">
     <span class="runtime-banner-text">{{ runtimeState.message }}</span>

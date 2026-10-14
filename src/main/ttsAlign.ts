@@ -227,7 +227,7 @@ function register(ctx?: RegisterCtx): void {
   // 逐句合成 + 对齐：payload { projectName, subtitleText, voice, voiceModel, mode, gapSec }
   ipcMain.handle(IPC.Voice.SynthAligned, async (event, payload?: VoiceAlignPayload) => {
     if (alignRunning) return { ok: false, message: '已有对齐任务进行中，请稍候' };
-    // 运行环境（ffmpeg / ffprobe 共约 716MB）首次启动可能还在解包：等它就绪再判可执行文件
+    // 运行环境（ffmpeg / ffprobe 共约 632MB）首次启动可能还在解包：等它就绪再判可执行文件
     const rt = await runtime.ensureRuntime();
     if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好', detail: rt.detail };
     const ffmpeg = BUILTIN_RESOURCES.ffmpeg;

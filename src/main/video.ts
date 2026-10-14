@@ -44,7 +44,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   ipcMain.handle(IPC.Video.Render, async (event, payload?: VideoRenderPayload) => {
-    // 运行环境（node / hyperframes / chrome-headless-shell / ffmpeg 共约 716MB）首次可能还在解包：
+    // 运行环境（hyperframes / chrome-headless-shell / ffmpeg 共约 632MB）首次可能还在解包：
     // 这里等它就绪再找可执行文件，否则会以「未找到 hyperframes CLI」误导用户
     const rt = await runtime.ensureRuntime();
     if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好' } as VideoRenderResult;
@@ -75,7 +75,7 @@ function register(ctx?: RegisterCtx): void {
       // 这个 env **必须**合进下面 spawn 的环境，否则 electron.exe 会把自己当应用来启动（详见 hfEnv.findNode()）。
       const nodeRt = hfEnv.findNode();
       if (!nodeRt) {
-        resolve({ ok: false, message: '未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 随包 / 系统三种途径均不可用）' });
+        resolve({ ok: false, message: '未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 系统两种途径均不可用）' });
         return;
       }
 

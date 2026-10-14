@@ -43,6 +43,10 @@
     "asar": true,
     "compression": "normal",
     "win": {
+      "electronLanguages": [
+        "zh-CN",
+        "en-US"
+      ],
       "target": [
         {
           "target": "nsis",

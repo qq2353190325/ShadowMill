@@ -1,11 +1,11 @@
 // src/main/runtime.ts
-// 运行环境包（runtime pack）——把 ffmpeg / node / hyperframes / whisper 这些**跨版本几乎不变**的重型资源
+// 运行环境包（runtime pack）——把 ffmpeg / hyperframes / whisper 这些**跨版本几乎不变**的重型资源
 // 从「随安装包展开」改成「随安装包携带一个 7z 包，首次启动解到 userData」。
 //
-// 为什么：NSIS 的更新是「整体卸载旧版 → 解压复制新包」，而这 716MB / 4900+ 文件的资源每次更新都要
+// 为什么：NSIS 的更新是「整体卸载旧版 → 解压复制新包」，而这 632MB / 4916 文件的资源每次更新都要
 // 重新解压+复制一遍（实测一次更新 97 秒，期间应用不存在、桌面快捷方式指向空路径）。拆成包之后：
-//   ① 安装目录里的运行资源从 4900 个文件变成 1 个 runtime.7z（安装期的复制/改名开销大幅下降）；
-//   ② 解包由应用自己做（可展示进度），且包内容没变时**下一次更新完全不碰**这 716MB。
+//   ① 安装目录里的运行资源从 4916 个文件变成 1 个 runtime.7z（安装期的复制/改名开销大幅下降）；
+//   ② 解包由应用自己做（可展示进度），且包内容没变时**下一次更新完全不碰**这 632MB。
 // 包与清单由 scripts/pack-runtime.mjs 生成（build/runtime-pack/），随 extraResources 进安装目录；
 // 也可把同一份包与清单上传到更新源（app-update.yml 的 url 目录），本地包缺失时自动回退到下载。
 //
@@ -434,7 +434,7 @@ async function run(): Promise<{ ok: boolean; message?: string; detail?: string }
   return done(true)
 }
 
-// 旧的包目录留着没用（一个 716MB），解包成功后清掉；下载目录同理（包已解出来，留着只是占地方）
+// 旧的包目录留着没用（一个 632MB），解包成功后清掉；下载目录同理（包已解出来，留着只是占地方）
 function cleanOldPacks(keepId: string): void {
   try {
     for (const e of fs.readdirSync(runtimeDir(), { withFileTypes: true })) {
@@ -457,15 +457,19 @@ function ensureRuntime(): Promise<{ ok: boolean; message?: string; detail?: stri
 const runtimeStatus = (): RuntimeProgressPayload => payload()
 const runtimeRoot = (): string => hfEnv.BUILTIN_RESOURCES.root
 
-// 启动后台准备：延迟 2 秒，先让窗口首屏出来（与 updater 的静默检查同思路，不抢启动时间）
-function prepareInBackground(delayMs = 2000): void {
-  setTimeout(() => { void ensureRuntime() }, delayMs)
+// 启动即开始准备（不延迟）：曾经用 2 秒延迟换首屏，代价是全新安装白等这 2 秒才开始解包。
+// 现在直接触发——① 需要同步做的只有几个 existsSync / statSync 探测（微秒级），重活（7za 解包、
+// 远程包下载与 sha512 校验）本身都是异步的；② 早到的进度事件渲染层收不到也没关系，
+// 外壳与设置页挂载时都会用 runtime:status 补齐当前状态。
+function prepareInBackground(): void {
+  void ensureRuntime()
 }
 
 function register(ctx: RegisterCtx): void {
   getWindow = ctx && ctx.getWindow ? ctx.getWindow : null
   ipcMain.handle(IPC.Runtime.Status, () => payload())
   ipcMain.handle(IPC.Runtime.Prepare, () => ensureRuntime())
+  // 启动即准备（不延迟）；register 排在 index.ts 装配序列最后，只保证 handler 先挂上
   prepareInBackground()
 }
 

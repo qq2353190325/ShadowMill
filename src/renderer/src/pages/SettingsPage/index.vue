@@ -413,15 +413,15 @@ const feedDraft = ref('');
 const autoCheckDraft = ref(true);
 
 // ===== 运行环境包状态（模块级单例，外壳也能读到；见 composables/useRuntime.ts）=====
-const { runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, ready: runtimeReady, sizeText: runtimeSizeText, retry: retryRuntime } = useRuntime();
-// 运行环境是本地转写 / 转视频的硬依赖，故这里给一行常驻状态：已就绪带体积，准备中带进度，失败给人话 + 重试
+const { runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, retry: retryRuntime } = useRuntime();
+// 只在「准备中 / 失败」时占一行：就绪是常态，不显示（外壳顶部横幅同此口径）；
+// 失败时文案取主进程产出的人话，并给「重新准备运行环境」入口（本地转录 / 转视频依赖它）
 const runtimeStatusText = computed(() => {
   if (runtimeBusy.value) return runtimeState.value.message || '正在准备运行环境…';
   if (runtimeFailed.value) return runtimeState.value.message || '运行环境准备失败';
-  if (runtimeReady.value) return '运行环境已就绪' + (runtimeSizeText.value ? '（' + runtimeSizeText.value + '）' : '');
-  return '运行环境状态未知';
+  return '';
 });
-const runtimeStatusClass = computed(() => (runtimeFailed.value ? 'hf-error' : (runtimeReady.value ? 'hf-ok' : '')));
+const runtimeStatusClass = computed(() => (runtimeFailed.value ? 'hf-error' : ''));
 
 async function onPrepareRuntime(): Promise<void> {
   await retryRuntime();

@@ -210,7 +210,7 @@ export interface RuntimeProgressPayload {
   source: string
   // 包体积（下载进度用）
   bytes: number
-  // 解包后体积与文件数（解包进度的分母，也用于设置页展示「运行环境 716 MB / 4917 文件」）
+  // 解包后体积与文件数（解包进度的分母，也用于设置页展示「运行环境 632 MB / 4916 文件」）
   unpackedBytes: number
   files: number
 }

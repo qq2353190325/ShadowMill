@@ -106,7 +106,7 @@ export const IPC = {
     Render: 'video:render',
     Progress: 'video:progress'
   },
-  // 运行环境包（runtime.js）：把 ffmpeg / node / hyperframes / whisper 约 716MB 资源
+  // 运行环境包（runtime.js）：把 ffmpeg / hyperframes / whisper 约 632MB 资源
   // 从「随安装包展开」改成「首次启动解到 userData」，更新时不再重装它们
   Runtime: {
     Status: 'runtime:status',
