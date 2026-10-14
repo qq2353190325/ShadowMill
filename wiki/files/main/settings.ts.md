@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：设置存储模块（settings.json）
-- **规模**：448 行
+- **规模**：452 行
 - **对外导出**：`register`、`readSettings`、`writeSettings`、`loadOpenAI`、`isPristineSettings`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceSettings`、`getVoiceProviderConfig`、`saveVoiceProviderConfig`、**`saveVoiceSaveDir`**、`getUpdaterSettings`、`saveUpdaterSettings`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`（原 `getVoiceConfig` 已删除）
 
 ## 1. 作用与职责
@@ -108,15 +108,15 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `settings:save` | 先 `readSettings()`，**只覆盖 `customModel`**；四个字段逐个做类型校验（`baseUrl`/`modelId`/`apiKey` 非字符串则置 `''`，`enabled` 用 `!!` 强转）；其余分区原样保留 | `{ ok: true, settings: raw }` |
 | `settings:save-render` | 先 `readSettings()`，**只覆盖 `render`**：`cur.render = normalizeRenderOptions(Object.assign({}, cur.render, payload.render))`——在现有值上合并本次传入的字段后再整体规范化，因此只改质量不会把帧率顶掉 | `{ ok: true, settings: cur }` |
 | `settings:save-updater` | **只覆盖 `updater`**：调 `saveUpdaterSettings(payload.updater)`（内部对现有值做字段级合并 + 规范化 + 写盘），再 `readSettings()` 回读整份设置返回。因此「保存更新源」不会影响 `autoCheck`，反之亦然 | `{ ok: true, settings: readSettings() }` |
-| `settings:test` | 见下 | `{ ok: boolean, message: string }` |
+| `settings:test` | 见下 | 失败 `{ ok: false, message, detail?, needConfig? }`；成功 `{ ok: true, message }` |
 | `settings:pick-runtime-pack` | **运行环境「从本地文件安装…」**（离线 / 内网机器的兜底入口，见 `docs/runtime-pack-split.md` §11.1）：以主窗口为父弹 `dialog.showOpenDialog`（`title: '选择运行环境包（ffmpeg.7z / hyperframes.7z）'`、`filters` 只收 `7z`、`properties: ['openFile']`）；从文件名里含 `ffmpeg` / `hyperframe` 判定包名（判不出返回「这个文件名看不出是哪个包…」）；把选中的 7z **复制**到 `userData/runtime/local-import/<包名>.7z`，并按字节数生成同名 `<包名>.json` 清单（`id = 'local-' + bytes.toString(16)`、`sha512: ''` ⇒ **跳过 sha512 校验**，文件是用户自己给的；`files` / `unpackedBytes` 置 0） | 取消 `{ ok: false, canceled: true, message: '已取消' }`；成功 `{ ok: true, pack, message: '已导入 <包名>（xx MB），正在解包…' }`；导入异常 `{ ok: false, message: '导入失败：…' }` |
 
 **`settings:test` 的成功判定**：先用 `getCustomModel()` 与 payload 中的 `customModel` 合并成待测配置 `m`，再依次判断：
 
-1. `baseUrl`、`modelId`、`apiKey` 任一为空 → `ok: false`，提示「配置不完整：Base URL / Model ID / API Key 均需填写」。
+1. `baseUrl`、`modelId`、`apiKey` 任一为空 → `ok: false`，提示「配置不完整：Base URL / Model ID / API Key 均需填写」，并回 `needConfig: 'model'`（提示是给「别的入口」用的分类标记——设置页本身刻意不弹窗）。
 2. 先 `const OpenAI = loadOpenAI()`：拿到构造函数就用 `new OpenAI({ apiKey, baseURL })` 调 `client.chat.completions.create({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 64 })`；返回 `null`（SDK 未随包 / 形态不对）则走 `fetch` 兜底，POST 到 `baseUrl` 去尾斜杠后拼 `/chat/completions`，带 `Content-Type: application/json` 与 `Authorization: Bearer <apiKey>`，非 2xx 时抛 `HTTP <status>：<body>`。
 3. **仅当拿到模型返回的文本内容才算成功**：取 `choices[0].message.content`，`String(text).trim()` 为空则返回 `ok: false`，提示「连接已通但模型未返回文本内容（可能为推理模型/网关异常），请检查 Model ID 或更换模型」。
-4. 成功时返回 `{ ok: true, message: '连接成功：模型已响应（' + text.slice(0, 40) + '）' }`；抛错时返回 `{ ok: false, message: '连接失败：' + 错误消息 }`。
+4. 成功时返回 `{ ok: true, message: '连接成功：模型已响应（' + text.slice(0, 40) + '）' }`；抛错时经 `friendlyError(e, { label: '连接失败', baseUrl: m.baseUrl })` 翻译成人话，返回 `{ ok: false, message: f.message, detail: f.detail, needConfig: f.needConfig }`（Key 无效 / 地址填错这类配置类错误因此自带 `needConfig` 分类，供别的入口判断；**排障原文只在 `detail` 里**）。
 
 ### 3.5 `isPristineSettings(file)`：出厂状态判定
 
@@ -151,7 +151,7 @@ function isPristineSettings(file: string): boolean
 
 ## 4. 依赖与协作
 
-依赖：`electron`（`app` / `ipcMain`）、`node:path`、`node:fs`、`../shared/ipc`（`IPC.Settings` 频道常量）、`../shared/types`（`AppSettings`、`RenderOptions` / `RenderOverride` / `RenderQuality` / `RenderFps` / `SettingsSaveRenderPayload` / `SettingsSaveUpdaterPayload` / `UpdaterSettings` 等类型）；**`openai` 是懒加载依赖**（`loadOpenAI()` 内 `require`，不在模块顶层）。
+依赖：`electron`（`app` / `ipcMain`）、`node:path`、`node:fs`、`../shared/ipc`（`IPC.Settings` 频道常量）、**`../shared/errors`（`friendlyError`——`settings:test` 的失败文案与配置类分类）**、`../shared/types`（`AppSettings`、`RenderOptions` / `RenderOverride` / `RenderQuality` / `RenderFps` / `SettingsSaveRenderPayload` / `SettingsSaveUpdaterPayload` / `UpdaterSettings` 等类型）；**`openai` 是懒加载依赖**（`loadOpenAI()` 内 `require`，不在模块顶层）。
 
 被谁使用：
 
@@ -188,4 +188,5 @@ function isPristineSettings(file: string): boolean
 - **openai SDK 必须保持懒加载**（2026-10）：它的模块图较大（`require` 实测 ~110ms，冷启动 / 杀软扫描时更久），而 `settings.ts` 是主进程**启动路径上的模块**（`index.ts` → `settings` → …）。顶层 `import OpenAI from 'openai'` 会让这段成本压在建窗 / 首屏之前，因此改成 `loadOpenAI()` 按需 `require`；`htmlAgent.ts` 也不再自行 `import`，统一经此入口。改回顶层 `import` 会直接拖慢首屏。
 - **whisper 条目按 `file` 存活**：`file` 缺失的条目在下次读取时被丢弃；`id` 由文件名派生，因此同一文件名等价于同一 `id`。
 - **`isPristineSettings` 的判定是「白名单式」的**：只有源码里逐字列出的字段能把它判成 `false`。**将来新增「用户会投入成本」的字段（新的 API Key、新的外部地址、新的下载清单）时必须同步加进这个白名单**，否则迁移覆盖时会把用户刚配好的新字段连整份文件一起覆盖掉——这是本函数唯一需要维护的地方。
+- **`settings:test` 的失败文案统一走 `shared/errors`**（2026-10）：`friendlyError(e, { label: '连接失败', baseUrl: m.baseUrl })` 把英文原文翻成「人话 + 能做什么」，原始报文首行进 `detail`；配置类（Key 无效 / 地址填错 / 未配置完整）额外带 `needConfig`。**但设置页刻意不弹配置类弹窗**——按钮与失败状态行都在设置页上，弹「去设置」等于让用户从原地跳到原地；`needConfig` 只是照常返回、供别的入口使用。
 - **`isPristineSettings` 只读不写**：文件不存在 / 损坏返回 `true` 的语义是「当它没有内容可丢」，因此覆盖前是否备份由调用方决定（`index.ts` 一律先写 `.before-migrate.bak`）。

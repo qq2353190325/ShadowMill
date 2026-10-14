@@ -1,10 +1,12 @@
 # src/main/runtime.ts
 
 > 运行环境（**分包**）：把 `ffmpeg`（179.9 MB / 9 文件）与 `hyperframes`（439.9 MB / 4892 文件）从「随安装包展开」改成「各自一个 7z、**首次用到时**从更新源下载并解到 `<userData>/runtime/<包名>/`」；`whisper`（12.5 MB / 15 文件）改为**随安装包**（见 `package.json` 的 `extraResources`），装完即可离线转录。注册 3 个 `runtime:*` handle + 1 路 `runtime:progress` 推送。分包实测：`ffmpeg` 42.6 MB + `hyperframes` **103.1 MB = 两包合计 145.7 MB**（比旧单包 `runtime.7z` 的 147.4 MB 还小 1.7 MB）。方案与验收清单见 `docs/runtime-pack-split.md`。
+>
+> **取清单有 20 秒硬超时**（`MANIFEST_TIMEOUT_MS`）：超时按失败上报（`MANIFEST_TIMEOUT` → 「连接更新源超时，没能取到运行环境清单」），**不再回落成 `null`**（回落会被误报成「更新源上没有清单 / 404」）；超时**不是**用户取消，`.part` 残片保留待续传。
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（IPC 注册 + 网络下载 + 子进程解包）
-- **规模**：786 行
+- **规模**：825 行
 - **对外导出**：`register`、`ensurePacks`、`prepareInBackground`、`cancelPrepare`、`packsStatus`、`missingPacks`、`packSizeText`、`packRoots`、`runtimeStatus`、`runtimeDir`（另有 `export type PackManifest`、`export type PackStatus`）
 
 ## 1. 作用与职责
@@ -21,7 +23,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | 下载 + 解包 | `ensurePacks(packs?)` 才真正取清单 / 下载 / 解包（幂等 + 并发安全），带进度与取消 |
 | 启动探测 | `prepareInBackground()` **只探测、不下载**：缺包时把 phase 置 `idle`、文案「运行环境需要下载（<体积>）」，让横幅与设置页首屏就有话说 |
 | 进度回推 | 检查 / 下载 / 解包每个阶段都经 `runtime:progress` 推给渲染层（唯一出口 `push()`） |
-| 取消 | `cancelPrepare()` 中断 HTTP 请求与 `7za` 子进程，并清掉半成品（**只有取消才删残片**） |
+| 取消 | `cancelPrepare()` 中断 HTTP 请求与 `7za` 子进程，并清掉半成品（**只有取消才删残片**；取清单 20 秒无响应的**超时不算取消**，残片保留）。`checking` 阶段同样可取消（`payload().cancellable` 含 `checking`） |
 | 资源路径交接 | 某包就绪后调 `hfEnv.refreshPack(name, root)`，让 `hfEnv` 按包重算路径缓存 |
 | 老用户沿用 | 旧版整体包目录（`current.json` + `ok.json` + 两包资源齐备）识别为 `legacy` 继续沿用；两个分包都就位后由 `gc()` 删掉它 |
 
@@ -49,7 +51,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | 频道常量 | 频道路由名 | 方向 | 载荷 → 返回 |
 |----------|-----------|------|-------------|
 | `IPC.Runtime.Status` | `runtime:status` | `ipcMain.handle` | 无参 → `RuntimeProgressPayload`（`runtimeStatus()` 快照；渲染层挂载时用它补齐首帧） |
-| `IPC.Runtime.Prepare` | `runtime:prepare` | `ipcMain.handle` | `packs?: RuntimePackName[]`（**省略 = 全部**）→ `Promise<IpcResult>`（`ensurePacks(packs)`；失败后重试入口，重复点击共享同一次执行） |
+| `IPC.Runtime.Prepare` | `runtime:prepare` | `ipcMain.handle` | `packs?: RuntimePackName[]`（**省略 = 全部**；**必须是可结构化克隆的普通数组**——传 Vue 的响应式 `Proxy` 会在 `invoke` 阶段直接抛 `DataCloneError`，handler 根本不会执行）→ `Promise<IpcResult>`（`ensurePacks(packs)`；失败后重试入口，重复点击共享同一次执行） |
 | `IPC.Runtime.Cancel` | `runtime:cancel` | `ipcMain.handle` | 无参 → `IpcResult`（`cancelPrepare()`；取消 = 不下载，且发起该操作的动作一并作废） |
 | `IPC.Runtime.Progress` | `runtime:progress` | 主进程 → 渲染进程推送（`win.webContents.send`） | `RuntimeProgressPayload`（唯一推送出口 `push()`，发送前判 `win && !win.isDestroyed()`） |
 
@@ -63,7 +65,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `PackStatusEntry` / `PackStatus` | `interface` / `type`（`PackStatus` 已导出） | 单包探测结果 `{ state, id, root, files, unpackedBytes, bytes, legacy }`；`PackStatus = Record<RuntimePackName, PackStatusEntry>` |
 | `state` | 模块级对象 | `phase` / `pack` / `percent` / `packs` / `missing` / `status` / `message` / `detail` / `source` / `bytes` / `unpackedBytes` / `files`；初值 `phase:'idle'`、`message:'尚未检查运行环境'`、两包 `status` 均为 `'unknown'`。`phase` **刻意放宽为 `string`**（与 `updater.ts` 同因：跨回调写入后 TS 会把联合类型判成不可能分支），交出前由 `payload()` 断言成 `RuntimeProgressPayload['phase']` |
 | `inFlight` / `cancelRequested` / `activeReq` / `activeChild` | 模块级状态 | 并发锁（同时只跑一次准备）、取消标志、当前 HTTP 请求、当前 `7za` 子进程 |
-| `payload()` | 函数 | 把 `state` 转成 `RuntimeProgressPayload`：`percent` 先 clamp 到 `[0,100]` 再 `Math.round`；`packs` / `missing` / `status` 都是切片或浅拷贝；`cancellable = phase ∈ {downloading, extracting}`——**所有回执与推送的唯一形状** |
+| `payload()` | 函数 | 把 `state` 转成 `RuntimeProgressPayload`：`percent` 先 clamp 到 `[0,100]` 再 `Math.round`；`packs` / `missing` / `status` 都是切片或浅拷贝；`cancellable = phase ∈ {checking, downloading, extracting}`（`cancelPrepare()` 本来就支持取消取清单阶段，界面以前只在下载 / 解包时才给「取消」按钮）——**所有回执与推送的唯一形状** |
 | `push()` / `setPhase(phase, message, detail?)` | 函数 | `push()` 取窗口并 `webContents.send(runtime:progress)`（窗口已销毁则忽略）；`setPhase` 写 `phase` / `message` / `detail` 后推一次 |
 | `fail(message, detail, packs?)` | 函数 | 置 `pack=null`、`missing=packs`、`phase='error'` + 推送 + 写 `runtime.log('error: …')` + 返回 `{ ok:false, message, detail }` |
 | `cancelledResult()` | 函数 | 置 `phase='cancelled'`、`percent=0`、文案「已取消下载（运行环境未安装）」、推一次、写日志，返回 `{ ok:false, message:'已取消下载' }`（**取消不是失败**） |
@@ -80,13 +82,14 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `resolveSevenZip()` | 函数 | 解包器：`<resources>/tools/7za.exe`（非 win32 为 `7za`）→ dev 下的 `build/tools/7za(.exe)`；都没有返回 `null` |
 | `localPackDir()` | 函数 | 本地包目录：环境变量 `SHADOWMILL_RUNTIME_PACK`（指向文件则取其目录）→ 存在则用 `userData/runtime/local-import/`（设置页「从本地文件安装…」把 7z 与清单放这里）→ 空串 |
 | `readLocalManifest(dir, name)` | 函数 | 读 `<dir>/<name>.json`，校验 `id` / `file` 非空且 `<dir>/<file>` 存在，否则 `null` |
-| `httpText(url)` | 函数 | 用 Electron `net.request`（不是 `fetch`）取小文本（清单）：非 200 即 reject。注释说明 `IncomingMessage` 的类型只暴露 `statusCode` / `headers` / `on`，故运行时断言成 `NodeJS.ReadableStream` |
+| `MANIFEST_TIMEOUT_MS` / `TIMEOUT_TEXT` | 常量 | 取远端清单的等待上限 `20 * 1000`（毫秒）与超时标记串 `'超时'`：前者是 `httpText()` 的默认 `timeoutMs`，也在失败文案里换算成「20 秒」；后者用于 `fetchRemoteManifest()` 判超时、并被 `isCancelError()` 先排掉。这两个常量就是本次「点『下载运行环境』毫无反应」修复的支点 |
+| `httpText(url, timeoutMs?)` | 函数 | 用 Electron `net.request`（不是 `fetch`）取小文本（清单）：**默认 20 秒硬超时**——`settled` + `finish()` 收口保证只落定一次；超时**先落定再** `req.abort()`（abort 触发的 `error` 会因 `settled` 被忽略，不会覆盖「超时（20 秒无响应）：<url>」这条更准确的文案）；`net.request(url)` 同步抛错也包在 `try` 里；成功 / HTTP 非 200 / stream error / 请求 error 四路都走 `finish()` 并清掉计时器。非 200 即 reject。注释说明 `IncomingMessage` 的类型只暴露 `statusCode` / `headers` / `on`，故运行时断言成 `NodeJS.ReadableStream` |
 | `downloadToFile(url, dest, onProgress)` | 函数 | 断点续传下载，见 §3.3；**成功的字节落在 `<dest>.part`**，调用方校验通过后自己 rename |
 | `sha512Of(file)` | 函数 | 流式 `sha512`（1 MB 高水位）返回 **base64**，与清单的 `sha512` 直接比较 |
-| `fetchRemoteManifest(name)` | 函数 | GET `<feed><包名>.json`：`feed` 为空或以任何原因失败都返回 `null`（只写日志，文案由调用方给） |
+| `fetchRemoteManifest(name)` | 函数 | GET `<feed><包名>.json`：`feed` 为空返回 `null`；catch 里**先 `writeLog` 记下真实原因**，再判是否含 `TIMEOUT_TEXT`——是则 `throw new Error('MANIFEST_TIMEOUT')`（**超时 ≠ 清单不存在**，回落成 `null` 会被误报成「更新源上没有清单 / 404」）；其它失败（网络错、`JSON.parse` 失败、清单字段不全）仍 `return null`（对应 `NO_MANIFEST`） |
 | `extractPack(sevenZip, packFile, dest, name)` | 函数 | `spawn(7za, ['x', packFile, '-o' + dest, '-y', '-bsp1'], { windowsHide: true })`：`-bsp1` 让百分比打到 stdout，用「末尾 400 字符窗口 + 末个 `N%`」解析并推「正在准备运行环境 N%（<包名>）」，**同值不重复推**；`close` 时 `cancelRequested` 即 reject「已取消」，退出码非 0 则把 tail 最后一行带进错误 |
-| `cleanupHalfDone(name, file, dest)` | 函数 | 取消后清半成品：解包目录（recursive）、`<file>.part`、`<file>`——**只在取消时删**，网络失败要留残片续传 |
-| `isCancelError(e)` | 函数 | `cancelRequested` 为真、或错误信息含 `已取消下载`、或匹配 `/aborted|ERR_ABORTED/i` |
+| `cleanupHalfDone(name, file, dest)` | 函数 | 取消后清半成品：解包目录（recursive）、`<file>.part`、`<file>`——**只在取消时删**，网络失败 / 超时要留残片续传 |
+| `isCancelError(e)` | 函数 | 开头先排超时：信息含 `TIMEOUT_TEXT` ⇒ 返回 `false`（**超时不是用户取消**，`.part` 残片要留着续传，不能被 `cleanupHalfDone()` 当取消清掉）；其余为 `cancelRequested` 为真、或错误信息含 `已取消下载`、或匹配 `/aborted|ERR_ABORTED/i` |
 | `installOne(sevenZip, name)` | 函数 | 单包安装四段，见 §3.2 |
 | `gc()` | 函数 | 两包都就位后删 legacy 目录与 `current.json` 并从 `packs.json` 删除 `legacy` 字段；`downloads/` 只保留当前各包 `<包名>-<id>.7z`。任何失败只忽略（占用中下次再清） |
 | `runOnce(packs)` | 函数 | 一轮准备主流程，见 §3.1 |
@@ -99,14 +102,14 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 2. `setPhase('checking', '正在检查运行环境…')`；`resolveSevenZip()` 失败 ⇒ `fail('运行环境无法准备：缺少解包程序', '未找到 7za.exe（应为 <resources>/tools/7za.exe）。请用 npm run pack / npm run dist 重新打包。', packs)`。
 3. `syncStatus(packsStatus())` 后算 `state.missing`；**没有缺包** ⇒ `pack=null`、`percent=100`、`phase='ready'`、文案「运行环境已就绪」、推一次、`{ ok: true }`（这是「已装好」的常态）。
 4. 取 `feed = feedUrl()` 与 `ldir = localPackDir()`；两者都为空 ⇒ `fail('运行环境尚未准备好，暂时无法使用渲染 / 转录转码功能', '更新源未配置且本机没有运行环境包（可用环境变量 SHADOWMILL_RUNTIME_PACK 指向本地包目录）。', state.missing)`。
-5. 逐个装缺的包（每轮循环前判一次取消）：`installOne()` 抛错时——取消错误 ⇒ `cleanupHalfDone()` + 重算 `missing` + `cancelledResult()`；`NO_MANIFEST` ⇒ `fail('运行环境需要联网下载，但更新源上没有找到对应清单', '已尝试：<feed 或 (未配置更新源)><包名>.json；本地包目录：<ldir 或 (未设置)>', state.missing)`；`BADSHA` ⇒ `fail('运行环境下载校验失败（sha512 不符），已丢弃', '请重试；若反复失败请检查更新源上的 <包名>.7z 是否被改动。', state.missing)`；其它 ⇒ `fail('运行环境下载 / 解包失败', '<包名>：<原因>', state.missing)`。
+5. 逐个装缺的包（每轮循环前判一次取消）：`installOne()` 抛错时——取消错误 ⇒ `cleanupHalfDone()` + 重算 `missing` + `cancelledResult()`；`NO_MANIFEST` ⇒ `fail('运行环境需要联网下载，但更新源上没有找到对应清单', '已尝试：<feed 或 (未配置更新源)><包名>.json；本地包目录：<ldir 或 (未设置)>', state.missing)`；`MANIFEST_TIMEOUT` ⇒ `fail('连接更新源超时，没能取到运行环境清单', '已在 <feed 或 (未配置更新源)><包名>.json 上等待 20 秒无响应；请检查网络 / 代理后重试，或改用「从本地文件安装…」导入本机的 <包名>.7z。', state.missing)`；`BADSHA` ⇒ `fail('运行环境下载校验失败（sha512 不符），已丢弃', '请重试；若反复失败请检查更新源上的 <包名>.7z 是否被改动。', state.missing)`；其它 ⇒ `fail('运行环境下载 / 解包失败', '<包名>：<原因>', state.missing)`。
 6. 全部装完：重算 `missing`、`pack=null`、`percent=100`、`source='cache'`、`phase='ready'`、文案「运行环境已就绪」、推一次、`gc()`、返回 `{ ok: true }`。
 
 ### 3.2 `installOne()` —— 单包四段
 
 | 段 | 行为 |
 |---|---|
-| ① 清单 | `readLocalManifest(localPackDir(), name)` 命中 ⇒ `source='local'` 且用本地 7z；否则 `setPhase('checking', '正在获取运行环境信息（<title>）…')` 再 `fetchRemoteManifest(name)`，拿不到抛 `NO_MANIFEST`。随后把清单的 `bytes` / `unpackedBytes` / `files` 写进 `state` |
+| ① 清单 | `readLocalManifest(localPackDir(), name)` 命中 ⇒ `source='local'` 且用本地 7z；否则 `setPhase('checking', '正在获取运行环境信息（<title>）…')` 再 `fetchRemoteManifest(name)`，拿不到抛 `NO_MANIFEST`（取清单 20 秒无响应则抛 `MANIFEST_TIMEOUT`）。随后把清单的 `bytes` / `unpackedBytes` / `files` 写进 `state` |
 | ② 下载 | 本地包直接跳过；否则看 `downloads/<包名>-<id>.7z`：**已存在且 sha512 相符就复用**（不重下）；否则 `setPhase('downloading', '正在下载运行环境（<title>，<体积>）…')` 并 `downloadToFile()`，边下边推「正在下载 <title> <已下> / <总量>（N%）」。下完复核 sha512：不符 ⇒ 删 `.part` 与正式名并抛 `BADSHA`；相符才 `renameSync(.part → cached)`（**内容不完整的一律不叫「已下载」**）并写日志（含续传起点与用时） |
 | ③ 解包 | 先 `rmSync(dest, { recursive: true, force: true })` 清掉上次残留（否则半成品会被当成完整包），`setPhase('extracting', '正在准备运行环境（<title>）0%')`，再 `extractPack()` |
 | ④ 落标记 | **先写 `<包名>/ok.json`**（`{ name, id, files, unpackedBytes, at }`），再写 `packs.json` 的 `packs[包名]` 记录；然后 `state.status[name]='ready'`、`hfEnv.refreshPack(name, dest)`、写「解包完成 id=… 用时 N 秒，来源 <source>」日志 |
@@ -122,6 +125,8 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 ### 3.4 取消语义
 
 `cancelPrepare()`（框内「取消」/ 横幅「取消」/ 设置页「取消下载」三条路都到这里）⇒ 置 `cancelRequested`、`activeReq.abort()`、`activeChild.kill()`；主流程在每段边界判一次标志，抛出的取消错误被 `isCancelError()` 识别 ⇒ `cleanupHalfDone()` 清 `.part` 与半解目录 ⇒ `cancelledResult()`（`phase='cancelled'`、文案「已取消下载（运行环境未安装）」）。**取消不写 `packs.json`、不留半解目录、不产生任何下载**；网络中断则相反——残片保留，下次续传。
+
+两处边界（本次修复点）：① **取清单超时不是取消**——`isCancelError()` 先看信息里有没有「超时」，有就返回 `false`，于是 `.part` 不会被 `cleanupHalfDone()` 清掉，失败走 `MANIFEST_TIMEOUT` 分支（文案见 §3.1 第 5 步）；② **`checking` 阶段也能取消**——`payload()` 的 `cancellable` 在 `checking` / `downloading` / `extracting` 三态都为真，界面不再只在下载 / 解包时给「取消」按钮。
 
 ### 3.5 启动时序（`register`）
 
@@ -165,24 +170,26 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `src/main/whisper.ts` | 只在「非 wav/flac/mp3/ogg 要转码」且缺 ffmpeg 时用 `runtime.packSizeText(['ffmpeg'])` 组文案，并回 `needPacks:['ffmpeg']` |
 | `src/main/hfEnv.ts` | 交接对端：接收 `refreshPack(name, root)`，据此重算该包根与 `cachedChrome` / `cachedNode` |
 | `src/preload/index.ts` | `runtimeTools` 命名空间：`status` / `prepare(packs?)` / `cancel` / `onProgress`（单订阅）分别转发上述四个频道 |
-| `src/renderer/src/composables/useRuntime.ts` | 模块级状态单例：`initRuntime()` 订阅 `runtime:progress` + 查一次 `runtime:status`，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()` |
+| `src/renderer/src/composables/useRuntime.ts` | 模块级状态单例：`initRuntime()` 订阅 `runtime:progress` + 查一次 `runtime:status`，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()`。**它交给 `prepare()` 的包名数组必须是普通数组**（`toRaw(list).slice()`——Vue 响应式 `Proxy` 过不了结构化克隆），且非 ok 回执 / `invoke` 抛错会写进 `runtime` 状态（不再静默），见 [renderer/src/common.md](../renderer/src/common.md) §4.1 |
 | `src/renderer/src/composables/useEnvGate.ts` | 「需要下载运行环境」确认框：`guard(need, actionName, onContinue)` → `confirmDownload()`（内部 `rt.prepare(packs)`）/ `cancelDownload()` / `continueAction()`（**不自动续做**）。进度**不自己订阅** `runtime:progress`，而是 `watch(() => useRuntime().runtime.value, applyProgress, { deep: true })`——见 §5 的单订阅说明 |
 | `src/renderer/src/App.vue`、`src/renderer/src/pages/SettingsPage/index.vue` | 外壳横幅（下载中 + 取消 / 缺包 + 下载 / 失败 + 重试）与设置页运行环境行（三态 + 「下载运行环境」/「取消下载」/「从本地文件安装…」） |
 
 ## 5. 注意事项与实现要点
 
 - **`phase` 刻意放宽为 `string`**：与 `updater.ts` 同因——阶段由事件 / 异步回调跨函数写入，标注成 `RuntimePhase` 联合类型后 TS 的控制流分析会把最后一次赋值当成当前类型，后续比较被判「不可能分支」。交出前由 `payload()` 断言成 `RuntimeProgressPayload['phase']` 收口。
+- **取清单有 20 秒硬超时（本次修复点）**：`httpText()` 的默认等待上限是 `MANIFEST_TIMEOUT_MS = 20 * 1000`，超时文案为「超时（20 秒无响应）：<url>」，`fetchRemoteManifest()` 把它翻成 `MANIFEST_TIMEOUT`，`runOnce()` 据此报「连接更新源超时，没能取到运行环境清单」——**不再回落成 `null`**（回落会被误报成「更新源上没有清单 / 404」）。修这条之前的实际表现：网络卡住时永远停在 `checking`、`inFlight` 一直挂着，之后每次点「下载运行环境」都被「正在准备另一个运行环境包，请稍候再试」挡回且界面毫无变化。超时**不算取消**（`isCancelError()` 先排掉），`.part` 残片保留待续传。
+- **`prepare` 的载荷必须能过结构化克隆**：`ipcRenderer.invoke` 会把参数结构化克隆，Vue 响应式 `Proxy`（`ref` 深层的数组）**不可克隆** ⇒ 直接抛 `DataCloneError`，主进程 handler 根本不会执行（`runtime.log` 一个字都没有、`userData/runtime/` 也不创建）。渲染层因此用 `toRaw(list).slice()` 交出普通数组；主进程侧不感知这一约束，别在文档 / 类型上把它写成「IPC 契约的一部分」。
 - **`ok.json` 是完整性标记，`packs.json` 是记录**：`installedEntry()` 要求「`packs.json` 有该包 `id`」**且**「目录内有 `ok.json`」**且**「关键文件都在」，三者缺一即视为未就绪并触发重下；解包成功时也**先写 `ok.json` 再写记录**——中途断电不会出现「记录指向一个没解完的目录」。
 - **`current.json` 只读**：它是旧版布局留下的指针，只用于 legacy 判定与清理，新代码不再写它。老用户如果手动删掉 `userData/runtime/`，等同全新安装。
 - **sha512 用 base64 与清单直接比较**：下载完成后必须复核，不符即刻删除残片并抛 `BADSHA`；已存在且校验相符的下载文件会**直接复用**，不重复下载（ffmpeg 实际 42.6 MB、hyperframes 实际 103.1 MB，两包合计 145.7 MB）。
-- **只有取消才删残片**：`cleanupHalfDone()` 只挂在取消分支；网络中断 / 关进程都保留 `.part`，下次用 `Range` 续传。**服务端必须支持 Range**（否则回 200 从头下，见 `docs/runtime-pack-split.md` §8 的自检）。
+- **只有取消才删残片**：`cleanupHalfDone()` 只挂在取消分支；网络中断 / 关进程 / 取清单超时都保留 `.part`，下次用 `Range` 续传。**服务端必须支持 Range**（否则回 200 从头下，见 `docs/runtime-pack-split.md` §8 的自检）。
 - **`7za` 是随安装包的外部依赖**：只认 `<resources>/tools/7za.exe`（dev 为 `build/tools/7za.exe`），找不到直接 `fail` 并提示重新打包——**不要**试图回退到系统 `7z`。
 - **本地包优先于下载**：`SHADOWMILL_RUNTIME_PACK` 或 `runtime/local-import/` 里的 `<包名>.json` + `<包名>.7z` 命中即走 `source='local'`（内网 / 离线机器靠这条与设置页导入入口）。
 - **下载源与更新源同优先级**：`settings.json` 的 `updater.feedUrl` 优先，其次打包的 `app-update.yml`（dev 为 `dev-app-update.yml`）；`feedUrl()` 会裁掉尾斜杠并把非协议处的重复斜杠压成一个，再拼 `<包名>.json` / `<清单里的 file>`。
-- **`percent` 语义**：`downloading` / `extracting` 阶段有效（下载按已下 / 总量，解包取 `7za -bsp1` 的百分比），`ready` 为 100；`payload()` 里统一 clamp 并 `Math.round`，渲染层拿到的一定是合法整数；`cancellable` 只在 `downloading` / `extracting` 为真。
+- **`percent` 语义**：`downloading` / `extracting` 阶段有效（下载按已下 / 总量，解包取 `7za -bsp1` 的百分比），`checking` 阶段没有百分比，`ready` 为 100；`payload()` 里统一 clamp 并 `Math.round`，渲染层拿到的一定是合法整数；`cancellable` 在 `checking` / `downloading` / `extracting` 三态为真。
 - **失败不阻断应用**：任何一步失败都走 `fail()`——只更新 `state`（`phase='error'` + 人话 `message` + 排障 `detail`）、推一次进度、写一行 `runtime.log`，并返回 `{ ok:false, … }`。安装包自带 whisper，因此**离线首启时项目、音色、配音、转录、字幕、HTML 生成全部可用**，只有渲染 / 转码会缺包。
 - **启动不再静默下载**：`prepareInBackground()` 只探测并推一次「运行环境需要下载（<体积>）」，是否下载由用户在某处确认（两包合计 145.7 MB：ffmpeg 42.6 + hyperframes 103.1）；`ensurePacks()` 忙碌期重复调用只返回一句提示，不排队。
 - **旧包与下载目录会自清**：两包都就位后 `gc()` 删 legacy 目录（632 MB）与 `current.json`，并只保留当前各包 id 的下载缓存；被占用的下次再清。
-- **`userData/runtime.log`**：与 `updater.log` / `startup.log` 同一套排障口子（超过 64KB 自动清一次），记录「启动探测失败」「取消」「远端清单不可用」「下载完成 + 续传起点 + 用时」「解包完成 + 用时 + 来源」「识别到旧版整体目录」等关键节点。
+- **`userData/runtime.log`**：与 `updater.log` / `startup.log` 同一套排障口子（超过 64KB 自动清一次），记录「启动探测失败」「取消」「远端清单不可用（含超时的真实原因）」「下载完成 + 续传起点 + 用时」「解包完成 + 用时 + 来源」「识别到旧版整体目录」等关键节点。
 - **`register` 只注册三个 `handle` + 一路 `send`**：查询 / 准备 / 取消都是「问一次答一次」，没有主 → 渲染的独立命令通道；进度完全由 `runtime:progress` 单路推送。
 - **不写 `settings.json`、不碰项目数据**：本模块只管理自己的 `userData/runtime/**`（`packs.json` + 各包目录与 `ok.json` + `downloads/` + `local-import/`），只**读** `settings.json` 的 `updater.feedUrl`。

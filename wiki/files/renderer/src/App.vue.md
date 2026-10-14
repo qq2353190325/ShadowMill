@@ -4,12 +4,12 @@
 
 - **所在目录**：`src/renderer/src/`
 - **类型**：根组件（单文件组件，`<script setup lang="ts">` + `<style scoped>`）
-- **规模**：301 行（模板 116 行 / 脚本 74 行 / 样式 109 行，另含 2 行空行分隔；行数口径为 `[IO.File]::ReadAllLines($f).Count`）
+- **规模**：327 行（模板 139 行（1–139）/ 脚本 77 行（141–217）/ 样式 109 行（219–327），另含 2 行块间空行；行数口径为 `[IO.File]::ReadAllLines($f).Count`）
 - **对外导出**：默认导出组件对象（经 `env.d.ts` 的 `*.vue` 声明被 `main.ts` 导入）；**无 props、无 emits**，全部状态来自 composables 与 preload 桥
 
 ## 1. 作用与职责
 
-`App.vue` 是原 `src/index.html` 的 titlebar/sidebar 标记与 `entry.js` 中窗口控制、进度监听、启动逻辑的**合并移植体**。它承担七类职责：
+`App.vue` 是原 `src/index.html` 的 titlebar/sidebar 标记与 `entry.js` 中窗口控制、进度监听、启动逻辑的**合并移植体**。它承担八类职责：
 
 1. **自绘标题栏**：因主进程使用 `titleBarStyle: 'hidden'`，标题栏由本组件绘制，含 logo、标题（`{{ APP_NAME }}`，来自 `@shared/constants`）与最小化/最大化/关闭三个按钮。
 2. **运行环境横幅**：运行环境已**分包**——`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）各自一个 7z（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）、首次用到时由用户确认后下载并解到 `<userData>/runtime/<包名>/`，`whisper` 随安装包（详见 `docs/runtime-pack-split.md`）。横幅是三态窄带：**下载中**（`.runtime-banner-bar` 进度条 + 「取消」）、**缺包**（`runtimeState.message` / `runtimeMissingText` + 「下载运行环境」）、**失败**（危险色 + 「重试」）。
@@ -19,6 +19,7 @@
 5. **旧数据弹窗宿主**：挂载 `<LegacyDataDialog />`——品牌/目录改名后「发现旧版本数据」的**应用内**弹窗（迁移 / 删除 / 稍后）。弹窗自身按 `useLegacyData()` 的单例状态决定是否显示，本组件只负责把它放进外壳。
 6. **Toast 宿主**：`TransitionGroup` 渲染 `useToasts()` 的队列，并提供 `.toast-host` / `.toast-item` 的 scoped 样式。
 7. **全局启动**：`onMounted` 中订阅窗口最大化状态、初始化渲染进度监听、初始化运行环境状态、询问一次旧数据、恢复上次项目上下文、并行载入项目列表与渲染默认档位。
+8. **配置类错误弹窗宿主**（2026-10 新增）：模板里内联渲染 `useConfigPrompt()` 的单例弹窗——标题（`configPrompt.title`）+ 人话正文（`.hf-status.hf-error`）+ 提示行「点「去设置」前往修改配置；点「取消」放弃本次操作，可以稍后再来。」+ 两个按钮 `[去设置]` / `[取消]`。它由各功能页在拿到主进程失败分支的 `res.needConfig` 后触发（`configPrompt.open(...)` / `configPrompt.fromResult(res)`），本组件只负责把它放进外壳；**刻意不显示「查看详情」**（配置类错误的原始报文对用户没有可操作性），**余额 / 欠费不进这个框**（主进程不给它 `needConfig`，走内嵌状态行）。
 
 ## 2. 结构说明
 
@@ -32,6 +33,7 @@
 | 最大化图标切换 | `v-show="!isMaximized"` / `v-show="isMaximized"` | 两个互斥的 SVG 分支：还原态画单矩形，最大化态画双矩形叠放（后一个 `fill="#0B1220"` 挖空） |
 | 运行环境横幅 | `<div v-if="runtimeVisible" class="runtime-banner" :class="{ 'is-error': runtimeFailed }">` | 标题栏之下、内容区之上的一条窄带（flex 子项，不遮挡页面）：`.runtime-banner-text` 显示 `runtimeState.message \|\| runtimeMissingText`；`.runtime-banner-bar > i`（`v-if="runtimeBusy"`，宽度绑 `runtimeState.percent + '%'`）显示下载 / 解包进度；按钮三选一——`runtimeCancellable` 时「取消」（`cancelRuntime`）、`runtimeFailed` 时「重试」（`retryRuntime`）、`runtimeHasMissing` 时「下载运行环境」（`downloadRuntime`，与重试都调 `prepareRuntime()`） |
 | 运行环境确认框 | `.hf-modal-mask` + `.hf-modal`（`v-if="gate.visible.value"`） | 内联渲染的单例确认框：标题 `gate.title`、`gate.sizeText` 列出本次要下的包与体积、`gate.phase === 'downloading'` 时用 `.runtime-banner-bar` 显示 `gate.percent` 并提供「取消」（`gate.cancelDownload`）、确认态给「下载运行环境」（`gate.confirmDownload`）/「取消」（`gate.close`）、`ready` 态按钮变「继续」（`gate.continueAction`）；失败 / 取消的文案走 `gate.message` / `gate.detail` |
+| 配置类错误弹窗 | `.hf-modal-mask` + `.hf-modal`（`v-if="configPrompt.visible.value"`，`style="width:min(520px,92vw)"`） | 内联渲染的单例弹窗（2026-10 新增）：`.hf-modal-title` = `configPrompt.title.value`、关闭按钮 `configPrompt.close()`、正文 `.hf-status.hf-error` = `configPrompt.message.value`、`.hgen-tip` 提示行（固定文案「点「去设置」前往修改配置；点「取消」放弃本次操作，可以稍后再来。」）、`.hgen-actions` 里主按钮 `.hf-btn.hf-btn-primary` 文案恒为 **「去设置」**（`@click="configPrompt.go()"`）+ 次按钮「取消」（`close()`）。**没有 `.hf-detail` / 「查看详情」**（源码注释：多一个折叠区会让「点哪个按钮」这个唯一决策变模糊） |
 | 布局容器 | `<div class="layout">` | 左右分栏骨架 |
 | 侧栏 | `<aside class="sidebar"><nav class="menu" id="menu">` | 保留 `id="menu"` 与原结构一致 |
 | 菜单项 | `div.menu-item` | `v-for="item in menuItems"`，`:key="item.key"`、`:class="{ active: activeMenu === item.key }"`、`:data-page="item.key"`、`:title="item.title"`、`@click="goPage(item.key)"` |
@@ -64,6 +66,7 @@
 | `isMaximized` | `ref(false)` | 窗口最大化状态，由主进程推送更新 |
 | `runtimeState` / `runtimeBusy` / `runtimeFailed` / `runtimeHasMissing` / `runtimeCancellable` / `runtimeMissingText` / `prepareRuntime` / `cancelRuntime` | `useRuntime()` 解构出的 `runtime` / `busy` / `failed` / `hasMissing` / `cancelable` / `missingText` / `prepare` / `cancel`（旧的 `retry` 已删，重试改调 `prepare`） | 运行环境（分包）状态、是否正在下载 / 解包、是否失败、是否缺包、是否可取消、缺包文案与两个动作（`initRuntime()` 在 `onMounted` 里调用一次） |
 | `gate` | `useEnvGate()` 返回值 | 「需要下载运行环境」确认框的单例状态与动作（`visible` / `packs` / `title` / `phase` / `percent` / `readyNow` / `message` / `detail` / `sizeText` / `confirmDownload` / `cancelDownload` / `continueAction` / `close`）；`initEnvGate()` 在 `onMounted` 里调用一次 |
+| `configPrompt` | `useConfigPrompt()` 返回值 | 配置类错误弹窗的单例状态与动作（`visible` / `title` / `message` / `target` / `open` / `fromResult` / `go` / `close`，**没有 `url`**）；**无需 init**（不订阅任何推送），模板里内联渲染弹窗；动作由各功能页触发 |
 | `runtimeVisible` | `computed(() => runtimeBusy.value \|\| runtimeFailed.value \|\| runtimeHasMissing.value)` | 横幅在「正在下载 / 解包」「失败」「缺包」三种情况出现（已就绪时保持界面干净） |
 | `menuItems` | `{ key: PageKey; label: string; title: string }[]` | 菜单配置数组（见 2.2） |
 | `winMinimize()` | `function(): void` | 调 `window.windowControls.minimize()` |
@@ -119,6 +122,7 @@
 | 依赖 | `./composables/useRenderOptions` | `loadRenderDefaults()`（启动时与 `refreshProject()` 并行载入全局渲染默认档位） |
 | 依赖 | `./composables/useRuntime` | `initRuntime()` 与 `useRuntime()`（运行环境状态 / 忙 / 失败 / 缺包 / 可取消 / 缺包文案 / `prepare(packs?)` / `cancel()`） |
 | 依赖 | `./composables/useEnvGate` | `initEnvGate()` 与 `useEnvGate()`（「需要下载运行环境」确认框单例；模板内联渲染） |
+| 依赖 | `./composables/useConfigPrompt` | `useConfigPrompt()`（配置类错误弹窗单例；模板内联渲染，**无需 init**）；`const configPrompt = useConfigPrompt();` 紧跟 `const gate = useEnvGate();` |
 | 依赖 | `./composables/useLegacyData` | `initLegacyData()`（外壳挂载时问一次「有没有旧数据」） |
 | 依赖 | `./components/LegacyDataDialog.vue` | 旧数据处置弹窗（应用内 `.hf-modal` 体系；自身消费 `useLegacyData()`） |
 | 依赖（preload 桥） | `window.windowControls` | `minimize` / `toggleMaximize` / `close` / `onMaximizedChange`；类型见 `src/preload/index.d.ts` |
@@ -140,4 +144,5 @@
 - **启动只拉一次项目数据**（2026-10 修正）：`initApp()` 现在只做一次 `refreshProject()`，不再紧跟 `goPage('home')`。此前每次启动都会多拉一遍项目列表与当前项目详情，并把首页整页重挂一次（`pageNavKey` 递增）——首屏慢的问题排查中发现该冗余，已删除。**改动此处的判断依据**：只要 `pages/index.ts` 的 `currentPage` 初值仍是 `pages.home`、`useAppStore` 的 `activeMenu` 初值仍是 `'home'`，就不需要显式 `goPage`。
 - **删除项目的兜底在 store 层**：若 localStorage 记的项目已不存在，由 `refreshProject()` 回退到 `myProjects[0]` 或 `'demo-project'`，本组件不做校验。
 - **渲染默认档位只在这里读一次**：`loadRenderDefaults()` 把 `settings.json` 的 `render` 段写入模块级 `renderDefaults`（`useRenderOptions.ts`）；页面只读该单例与 `effectiveRenderOptions()`，不各自读设置。设置页保存后由 `saveRenderDefaults()` 就地更新，因此无需重启或刷新本组件。
+- **配置类弹窗是第二个内联 `.hf-modal`**（2026-10 新增）：它排在运行环境确认框之后、Toast 宿主之前，复用同一套 `.hf-modal-mask` / `.hf-modal` / `.hf-btn` 类（**没有新增 CSS**）。与运行环境框的差别是**它不驱动流程**（关掉＝本次操作作废，不像「继续」要用原参数重发），因此没有进度条、也没有「查看详情」折叠区；**只有 `[去设置]` / `[取消]`**——曾有过第三个分支「去充值」（余额类外链到厂家充值页），**已按用户要求整条摘除**（连同 `app:open-external` 频道与 `appTools.openExternal`），余额 / 欠费改为走内嵌状态行（文案说明去厂家控制台充值）。三个「谁把用户带走」的用法见 [common.md](./common.md) §5.1。
 - **品牌文案与持久化键名各取一处**：标题栏文案走 `@shared/constants` 的 `APP_NAME`（改品牌只改那一份，构建期还会校验 `package.json` 的 `productName`）；`localStorage` 键走 `@renderer/constants` 的 `STORAGE_KEY_PROJECT_CTX`（**故意不跟随品牌名**——prod 下 `file://` 同源，键名就是用户数据地址，改名会让「上次项目」记忆读不到）。本组件不再出现这两类裸字面量。

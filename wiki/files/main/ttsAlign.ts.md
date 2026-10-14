@@ -122,7 +122,7 @@
 
 - 首句前推送 `{ stage: 'synth', index: 0, total, percent: 0, message: '开始逐句合成（N 句）…' }`。
 - 循环每句：先查 `alignCancelled`（是则返回取消结果，文案含已完成句数）；再调 `synthSentence`，成功后把时长追加到 `durs`。
-- 单句异常处理：若异常带 `canceled` 标记视为取消返回；否则截取该句文本前 10 个字符，返回 `'第 N 句（xxxx…）合成失败：' + voiceFriendlyError(e, '合成语音失败')`。
+- 单句异常处理：若异常带 `canceled` 标记视为取消返回；否则截取该句文本前 10 个字符，返回 `'第 N 句（xxxx…）合成失败：' + voiceFriendlyError(e, '合成语音失败')`。（`voiceFriendlyError` 自 2026-10 起只是 `src/shared/errors.ts` 的 `friendlyError()` 薄包装，返回形如 `合成语音失败：<人话>（<原始报文首行>）`；**本文件的 import 未改动**。）
 
 ### 5.3 模式 A：音频驱动（重排字幕）
 
@@ -183,7 +183,7 @@
 | `electron` | `app`、`ipcMain` | 取 `userData/voice` 路径；注册 IPC |
 | `node:path` / `node:fs` | `path`、`fs` | 路径拼接、目录创建、写文件、清理 |
 | `node:child_process` | `spawn` | 调用 ffmpeg / ffprobe |
-| `./voice` | `synthOne`、`resolveVoiceModel`、`voiceFriendlyError` | 单句 TTS 合成、按音色解析模型、错误转中文文案 |
+| `./voice` | `synthOne`、`resolveVoiceModel`、`voiceFriendlyError` | 单句 TTS 合成、按音色解析模型、错误转中文文案（`voiceFriendlyError` 的实现本轮改为 `src/shared/errors.ts` 的 `friendlyError` 薄包装，**导出名与这里的 import 都没变**） |
 | `./projects` | `parseSubtitle`、`type SubtitleLine` | 把字幕文本解析成带 `time/end` 的行数组 |
 | `./hfEnv` | `BUILTIN_RESOURCES` | ffmpeg / ffprobe 路径（来自 ffmpeg 运行环境包） |
 | `../shared/ipc` | `IPC` | 频道名常量（`IPC.Voice.SynthAligned` / `AlignCancel` / `AlignProgress`） |
@@ -206,5 +206,5 @@
 - **并发控制**：`alignRunning` 是模块级布尔量，进程内一次只允许一个对齐任务，第二个请求立即被拒；但取消与运行并非互斥锁保护，取消只是「置标志 + 句间检查」的软中断。
 - **进度回推**：发送前检查 `event.sender && !event.sender.isDestroyed()`，避免窗口已销毁时报错。主进程实际只发送 `synth` / `assemble` / `done` / `error` 四种 `stage`；量取时长阶段刻意不推进度。渲染层若额外判断了其它 `stage`，主进程不会发出。本模块的进度载荷类型 `AlignProgressPayload` 与 handler 载荷 `VoiceAlignPayload` 均取自 `src/shared/types.ts`（原先本地声明的 `AlignProgressInfo` 已删除）。
 - **失败清理**：单句合成失败或整轨校验失败时直接 `return` 失败结构，**不做**任务目录删除；目录靠下次任务的 `cleanupOldTasks` 回收。整轨成品保留在 `taskDir` 中，可被渲染层直接播放；若任务被取消，本次 `taskDir` 会在下次任务启动时被清掉。
-- **模型与文案**：合成模型优先取 `payload.voiceModel`，其次 `resolveVoiceModel(voiceId, ctx)`；错误统一经 `voiceFriendlyError` 转为可读中文，失败时截取前 10 个字符标识是哪一句出错。
+- **模型与文案**：合成模型优先取 `payload.voiceModel`，其次 `resolveVoiceModel(voiceId, ctx)`；错误统一经 `voiceFriendlyError` 转为可读中文（内部委托 `shared/errors.friendlyError`，并把排障详情以 `（…）` 追加在文案后），失败时截取前 10 个字符标识是哪一句出错。
 - **字幕产出格式**：返回的 `subtitleText` 使用 `fmtTime` 的**秒级精度** `[mm:ss] 文本`；而渲染层写回项目时会用 `details` 的毫秒精度起止（`subtitleStart` ~ `subtitleStart + audioDur`）重新生成 `[开始-结束] 文本`，以保证与成片音轨严格一致。

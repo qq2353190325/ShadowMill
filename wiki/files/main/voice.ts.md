@@ -4,8 +4,8 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（千问语音：音色管理 + 文字生音频）
-- **规模**：745 行
-- **对外导出**：`synthOne`、`register`、`isAudioTtsModel`、`getVoiceApiError`、`parseJsonLike`、`voiceFriendlyError`、`nowStamp`、`guessAudioExt`、`resolveTtsDir`、`resolveVoiceModel`、`fetchClonedVoices`
+- **规模**：753 行
+- **对外导出**：`synthOne`、`register`、`isAudioTtsModel`、`getVoiceApiError`、`parseJsonLike`、`voiceFriendlyError`、`nowStamp`、`guessAudioExt`、`resolveTtsDir`、`resolveVoiceModel`、`fetchClonedVoices`（末尾 `export { … }` 清单共 **11** 个名字，本次未变；**`voiceNoKeyFail` 是模块内私有函数、不在导出清单里**）
 
 ## 1. 作用与职责
 
@@ -72,8 +72,9 @@
 | `modelKnownFor(provider, model?)` | 判断某个模型 id 是否在**该厂家的模型表**里；用于「本地映射绑着已下线/不存在的模型时忽略它」（否则合成必然 404 `Model not exist`） |
 | `vendorMismatch(voice?, model?)` | **跨厂家校验**：音色名是厂家私有的（千问是 `Cherry` / `Serena` 这类 `voice` 参数，别家另一套 id），系统音色按 `providerOfSystemVoice` 定厂家、模型按 `providerOfModel` 定厂家；**两家不同则返回一句含两个厂家 label 的明确提示**（并提示可到「音色管理 → 音色映射管理」改绑该音色的模型）。**不做静默改名、也不静默换厂家**；克隆音色（`providerOfSystemVoice` 返回 `null`，厂家信息在云端）与任一侧为空时**一律放行返回 `null`** |
 | `getVoiceApiError(provider, apiKey)` | `apiKey` 为空时按厂家提示「未配置「<厂家 label>」的 API Key，请先到「设置」-「语音服务」填写并保存」，否则 `null` |
+| `voiceNoKeyFail(msg)` | **模块内私有**（未导出）：返回 `{ ok: false, message: msg, needConfig: 'voice' }`——「未配置 Key」是配置类错误，渲染层据此弹「去设置 / 取消」而不是只显示一行红字。4 处 `if (noKey) return …` 都改用它（见 §3 说明） |
 | `parseJsonLike(text)` | `JSON.parse` 的容错包装，解析失败静默返回 `null` |
-| `voiceFriendlyError(err, label)` | 取 `err.message`（无则 `String(err)`）；`InvalidApiKey/unauthorized/Unauthorized/401/403` → 「API Key 无效或无权限，请检查后重试」；`quota/ExceededQuota/Insufficient` → 前缀「额度不足或已被限流：」；**`Model not exist` → 「这个模型在当前账号里不存在…请到「设置 → 语音服务」核对厂家，或到「音色管理 → 音色映射管理」把该音色改绑到可用的模型」**；**`does not exist or is not licensed` → 「音色未获授权或不存在…克隆音色只能用创建时对应的复刻模型合成，该模型在当前账号不可用时请改用系统音色」**；最终返回 `label + '：' + msg` |
+| `voiceFriendlyError(err, label)` | **薄包装**（2026-10 改写）：`const f = friendlyError(err, { label, provider: activeProviderDef().key, baseUrl: activeProviderDef().apiBase }); return f.detail ? f.message + '（' + f.detail + '）' : f.message;`——翻译与分类全部委托给 `src/shared/errors.ts`（同名导出保留，`ttsAlign.ts` 的 import 未动）；把 `detail` 追加回文案是**保留旧行为**（旧实现把原始报文拼进 message，终端用户能据此报障） |
 | `nowStamp()` | 本地时间戳 `YYYYMMDD_HHmmss`（各段 `padStart(2,'0')`） |
 | `guessAudioExt(url)` | 去 query → 取末段并 `decodeURIComponent` → 匹配 `wav/mp3/m4a/mp4/aac/ogg/flac`，命中返回小写扩展名，否则 `'wav'` |
 | `resolveTtsDir(projectName, saveDir)` | 落盘目录解析，优先级：`saveDir` → `projects.projectsRoot()/<projectName>/audio` → `scanProjects()[0].name` 的 `audio/` → `app.getPath('userData')/tts-output` |
@@ -109,6 +110,8 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 | `voice:synth` | `VoiceSynthPayload`（`{ text?, voice?, targetModel?, projectName?, saveDir?, defaultOut?, audioName? }`） | `{ ok:true, savePath, projectName, savedTo, size }` 或 `{ ok:false, message }` | 合成并落盘（见 §4.4） |
 
 > `voice:synth` 的 handler 行内注释与实现一致：「文字合成语音并保存（**两个系列都是「接口 → `output.audio.url` → 二次下载」**，见 `synthOne`）」。
+
+> **未配置 Key 的四处统一带 `needConfig`**（2026-10）：`voice:create`、`voice:list`（走 `fetchClonedVoices()`）、`voice:delete-cloud`、`voice:synth` 在 `getVoiceApiError()` 命中时都改成 `return voiceNoKeyFail(noKey)`，返回体因此是 `{ ok: false, message: '未配置「<厂家>」的 API Key，请先到「设置」-「语音服务」填写并保存', needConfig: 'voice' }`——渲染层据此弹「去设置」弹窗（见 [TextTtsPage.md](../renderer/src/pages/TextTtsPage.md)）。
 
 ## 4. 关键流程
 
@@ -165,7 +168,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 
 **本轮重写回单一查询**（上一版曾同时查两个系列的接口，随 vc 系列移除而作废）：
 
-1. 无该厂家的 API Key 直接返回 `{ ok:false, message }`。
+1. 无该厂家的 API Key 直接返回 `voiceNoKeyFail(提示)`（即 `{ ok:false, message, needConfig:'voice' }`）。
 2. POST `provider.apiBase + '/services/audio/tts/customization'`，header `Content-Type: application/json` + `Authorization: Bearer <该厂家的 apiKey>`，body **`{ model: provider.enrollModel /* voice-enrollment */, input: { action: 'list_voice', page_size: 100, page_index: 0 } }`**。
 3. HTTP 非 2xx 抛 `HTTP <status>：<message>`；成功取 `json.output.voice_list`（非数组则为 `[]`）。
 4. **字段归一化（保留）**：按 `v.voice || v.voice_id` 去重（`seen` 记录已收 id），并 `Object.assign({}, v, { voice: id, voice_id: id, target_model: model, targetModel: model })`，其中 `id = String(v.voice || v.voice_id).trim()`、`model = String(v.target_model || v.targetModel || '').trim()`——**接口给 `voice_id`、历史数据给 `voice`**，统一成两者都填同一个 id，渲染层不必再按系列分支。
@@ -239,7 +242,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 
 源码注释明确它与 `voice:delete-profile` 的分工：**`delete-profile` 只清本地映射，本频道删的是云端音色本身**（不可撤销）。**本轮收敛为单一写法**（`vc 系列的 action='delete' 写法随该系列一同移除`）。
 
-1. 取当前 **active 厂家**的 Key（缺失返回 `getVoiceApiError()` 的提示）；音色 id 从 `payload.voice` 取，缺失回「缺少音色 id」。
+1. 取当前 **active 厂家**的 Key（缺失返回 `voiceNoKeyFail(getVoiceApiError())` 的提示，带 `needConfig:'voice'`）；音色 id 从 `payload.voice` 取，缺失回「缺少音色 id」。
 2. POST `provider.apiBase + '/services/audio/tts/customization'`，body 只有一种：**`{ model: provider.enrollModel /* voice-enrollment */, input: { action: 'delete_voice', voice_id } }`**。源码注释记的成功响应形如 `{ output: {}, usage: { count: 1 } }`。
 3. 成功（HTTP 200）⇒ `settings.deleteVoiceProfile('custom:' + voice)`，返回 `{ ok: true, voice, profiles }`。
 4. 失败分支（全部在同一个 `try/catch` 内）：
@@ -247,9 +250,15 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
    - `code + ' ' + message` 命中 `/not\s*(exist|found)|invalid/i` ⇒ **也**清掉本地映射并返回 `{ ok:false, message: '云端删除被拒绝（<code 或 message>），已清除该音色的本地映射' }`（源码注释：音色不存在时也把本地映射清掉，免得留一条指向幽灵音色的条目）；
    - 其它 ⇒ `throw new Error('HTTP ' + resp.status + '：' + code + ' ' + message)`，由 `voiceFriendlyError(e, '删除云端音色失败')` 包装返回。
 
-### 4.7 错误友好化
+### 4.7 错误友好化（2026-10 改写为 `shared/errors` 的薄包装）
 
-`voiceFriendlyError` 是统一的出口包装：识别鉴权类（`InvalidApiKey` / `unauthorized` / `Unauthorized` / `401` / `403`）替换为固定文案，识别额度类（`quota` / `ExceededQuota` / `Insufficient`）加「额度不足或已被限流：」前缀，另有两条账号/模型相关的友好映射——`Model not exist`（模型在当前账号不存在 → 去设置页核对厂家，或到「音色映射管理」改绑可用模型）与 `does not exist or is not licensed`（音色未获授权/不存在 → 克隆音色只能用创建时的复刻模型，不可用时改用系统音色）；其余保留原始 message，最终统一加 `<label>：` 前缀（label 取值：`创建音色失败` / `合成语音失败` / `查询音色失败` / `删除云端音色失败`）。
+`voiceFriendlyError(err, label)` 现在只有两行：调 `friendlyError(err, { label, provider: activeProviderDef().key, baseUrl: activeProviderDef().apiBase })` 拿到 `{ message, detail, needConfig }`，再把 `detail` 追加回文案（`f.detail ? f.message + '（' + f.detail + '）' : f.message`）。
+
+- **翻译逻辑不再在本文件**：十档判定（余额/欠费 → 未启用/未配置 → 鉴权 401/403 → 地址或模型不存在 → 限流 → 5xx → 内容合规 → 参数 → 网络 → 文件系统 → 兜底）统一在 `src/shared/errors.ts`，见 [shared/errors.ts.md](../shared/errors.ts.md)。**同名导出保留**，所以 `ttsAlign.ts` 的 `import { voiceFriendlyError }` 一行未改。
+- **与旧四条 `if` 链的差异（源码注释逐条列出）**：① 余额 / 欠费独立成档——阿里云是 **400 + `Arrearage`**（不是 402），旧实现把它混在「额度不足」里只加个前缀；② 限流按官方三个维度分档（`Throttling.RateQuota` / `AllocationQuota` / `BurstRate`，兼容模式别名 `limit_requests` / `insufficient_quota` / `limit_burst_rate`）；③ 合规拦截（`DataInspectionFailed`）给出「改字幕 / 换素材」这种可操作的说法。
+- **为什么把 `detail` 拼回 message**：旧行为把原始报文拼进用户可见文案（终端用户据此报障），这里刻意保留；**只有配置类错误在界面上会被弹窗取代**（弹窗只显示人话那一句、不显示 detail）。
+- **`needConfig` 由 `friendlyError` 判定**：语音链路的 `label` 含「语音 / 音色 / 合成」，因此 401/403 与参数类会被 `cfgTargetOf()` 归到 `'voice'`；**余额 / 欠费刻意不给 `needConfig`**（去设置修不了余额，文案直接说明去厂家控制台充值）。此外「没配 Key」这种**本地校验**不以异常形式经过本函数，而是由 `voiceNoKeyFail()` 直接给出 `needConfig:'voice'`。
+- **`label` 取值**（各 `catch` 传入）：`创建音色失败` / `合成语音失败` / `查询音色失败` / `删除云端音色失败`。
 
 ## 5. 依赖与协作
 
@@ -264,7 +273,8 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 | `./projects` | `projects.projectsRoot()`（**函数，惰性求值**）与 `scanProjects()`，用于项目 `audio/` 定位与列表扫描 |
 | ~~`./systemVoices`~~ | **已无此 import**：`voice.ts` 改用 `./voiceCatalog` 的 `providerOfSystemVoice` / `seriesDefaultModel` 间接使用音色表；`systemVoices.ts` 现在只导出 `SYSTEM_VOICES` |
 | `../shared/ipc` | `IPC.Voice.*` 频道常量 |
-| `../shared/types` | `import type { RegisterCtx, SystemVoice, VoiceCreatePayload, VoiceProfileKeyPayload, VoiceProfilePayload, VoiceProfile, VoiceProviderView, VoiceSaveConfigPayload, VoiceSaveDirPayload, VoiceSynthPayload }`——**只此 10 个**（`VoiceModel` / `VoiceTTSConfig` 都不在本文件的 import 里；`voice:delete-cloud` 的 `{ voice?: string }` 是内联标注） |
+| `../shared/errors` | `friendlyError`——`voiceFriendlyError` 的全部翻译与分类逻辑（见 §4.7） |
+| `../shared/types` | `import type { ConfigTarget, RegisterCtx, SystemVoice, VoiceCreatePayload, VoiceProfileKeyPayload, VoiceProfilePayload, VoiceProfile, VoiceProviderView, VoiceSaveConfigPayload, VoiceSaveDirPayload, VoiceSynthPayload }`——**只此 11 个**（`ConfigTarget` 是本轮新增的，用于 `voiceNoKeyFail()` 的返回类型标注；`VoiceModel` / `VoiceTTSConfig` 都不在本文件的 import 里；`voice:delete-cloud` 的 `{ voice?: string }` 是内联标注） |
 
 **`projects.projectsRoot()` 的三个调用点**（函数调用，写法与 `whisper.modelsDir()` / `runtime.runtimeRoot()` 一致）：
 
@@ -285,8 +295,8 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 
 ## 6. 注意事项与实现要点
 
-- **API Key 缺失提示（按厂家）**：所有需要网络的 handler 先对「本次请求所属厂家」跑 `getVoiceApiError(provider, apiKey)`，返回统一文案「未配置「<厂家 label>」的 API Key，请先到「设置」-「语音服务」填写并保存」；`voice:list-system-voices` / `list-models` / 映射类频道**不需要** Key，离线可用。
-- **网络请求与超时**：全部使用全局 `fetch`，源码中**没有** `AbortController`、超时或重试逻辑；合成是「接口 → `output.audio.url` → 二次下载」两步，任一环节失败都会走到 `voiceFriendlyError`。
+- **API Key 缺失提示（按厂家）**：所有需要网络的 handler 先对「本次请求所属厂家」跑 `getVoiceApiError(provider, apiKey)`，命中时统一经 `voiceNoKeyFail()` 返回「未配置「<厂家 label>」的 API Key，请先到「设置」-「语音服务」填写并保存」**外加 `needConfig: 'voice'`**（4 处：`voice:create` / `voice:list` / `voice:delete-cloud` / `voice:synth`）；`voice:list-system-voices` / `list-models` / 映射类频道**不需要** Key，离线可用。
+- **网络请求与超时**：全部使用全局 `fetch`，源码中**没有** `AbortController`、超时或重试逻辑；合成是「接口 → `output.audio.url` → 二次下载」两步，任一环节失败都会走到 `voiceFriendlyError`（进而委托 `shared/errors.friendlyError`）。
 - **请求头与编码**：请求统一 `Content-Type: application/json` + `Authorization: Bearer <apiKey>`；克隆音频以 **data URI 内联进 `input.url`**（本地文件先裁成 15 秒 24k 单声道 wav ≈ 700 KB，再转 data URI ≈ 960 K 字符）。**不再有 10 MB Base64 守卫、也不再有 `VOICE_MIME` / `audio.data` 载荷**（那是 vc 系列独有的，随该系列移除）。
 - **三种输入形态的取舍**：本地路径 / `http(s)` / `oss://` / `data:` 四类字符串由 `voice:create` 自行分流；渲染层只负责把选中的「本地文件」或「URL」字符串传下来（见 [TextTtsPage.md](../renderer/src/pages/TextTtsPage.md) §5）。
 - **临时文件**：`makeCloneSample` 的输出落在 `app.getPath('temp')/shadowmill-clone-<时间戳>.wav`，只在 `voice:create` 的 `finally` 里删除；删除失败被吞掉。

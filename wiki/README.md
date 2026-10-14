@@ -15,9 +15,9 @@
 | 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程 14 个模块的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
 | 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：11 个命名空间、6 路进度通道的「单订阅」语义、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
 | 4 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) | Vue 渲染层：启动链路、无 router 的注册表导航、状态与通信约定、组件分层、页面↔主进程域对照、样式策略 | 改界面 / 加页面 |
-| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（10 组 **85** 个）、跨进程载荷类型、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
+| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（10 组 **85** 个）、跨进程载荷类型、**错误文案映射（`errors.ts`）**、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
 | 6 | [06-目录架构-src-agent](./06-目录架构-src-agent.md) | 独立实验脚本：为什么不进构建图、5 个工具、工作区防护、运行方式 | 想跑 Agent 样例 |
-| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，`files/` 下共 **42** 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue` 与 `LegacyDataDialog.vue` 四个组件） | 需要具体实现细节时查阅 |
+| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，`files/` 下共 **43** 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue` 与 `LegacyDataDialog.vue` 四个组件） | 需要具体实现细节时查阅 |
 
 ---
 
@@ -50,7 +50,7 @@
 | `src/main/updater.ts` | [main/updater.ts.md](./files/main/updater.ts.md) |
 | `src/main/runtime.ts` | [main/runtime.ts.md](./files/main/runtime.ts.md) |
 
-### 3.2 `src/preload/` 与 `src/shared/`（5 篇）
+### 3.2 `src/preload/` 与 `src/shared/`（6 篇）
 
 | 源文件 | 说明文档 |
 |---|---|
@@ -58,6 +58,7 @@
 | `src/preload/index.d.ts` | [preload/index.d.ts.md](./files/preload/index.d.ts.md) |
 | `src/shared/ipc.ts` | [shared/ipc.ts.md](./files/shared/ipc.ts.md) |
 | `src/shared/types.ts` | [shared/types.ts.md](./files/shared/types.ts.md) |
+| `src/shared/errors.ts`（全应用错误文案映射：`friendlyError` / `configTargetOf` / `configTitle`） | [shared/errors.ts.md](./files/shared/errors.ts.md) |
 | `src/shared/constants.ts`（应用级公共常量：品牌文案与请求标识） | [shared/constants.ts.md](./files/shared/constants.ts.md) |
 
 ### 3.3 `src/renderer/`（渲染层，16 篇）
@@ -71,7 +72,7 @@
 | `src/App.vue`（外壳） | [renderer/src/App.vue.md](./files/renderer/src/App.vue.md) |
 | `src/assets/`（设计系统：`main.css`） | [renderer/src/assets.md](./files/renderer/src/assets.md) |
 | `src/components/`（通用组件：`StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue`、`LegacyDataDialog.vue`） | [renderer/src/components.md](./files/renderer/src/components.md) |
-| **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress,useRuntime,useEnvGate,useLegacyData,useNavIntent,useRenderOptions}.ts`、`src/utils/{escape,rate,time,render}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
+| **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress,useRuntime,useEnvGate,useConfigPrompt,useLegacyData,useNavIntent,useRenderOptions}.ts`、`src/utils/{escape,rate,time,render}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
 | `src/pages/HomePage/index.vue` | [renderer/src/pages/HomePage.md](./files/renderer/src/pages/HomePage.md) |
 | `src/pages/AboutPage/index.vue` | [renderer/src/pages/AboutPage.md](./files/renderer/src/pages/AboutPage.md) |
 | `src/pages/ContentPage/index.vue` | [renderer/src/pages/ContentPage.md](./files/renderer/src/pages/ContentPage.md) |
@@ -115,6 +116,7 @@
 - **精确性**：文档中的频道名、导出名、字段名与源码**逐字一致**；代码变更后请同步更新对应文档（改代码前先查本索引）。
 - **更新日志必走一遍**：改任何代码前先看根目录 [`CHANGELOG.md`](../CHANGELOG.md) 的**当前版本区块**（这一版已经改了什么），改完必须在该区块**追加或更新一条**记录（影响范围 + 验证方式）；同一功能在本版内改到第 2 次的，在**最新那一条**标 `[完整版]`。细则见根目录 [`agents.md`](../agents.md) 第三节与关键约定 3、4。
 - **两类字符串不要混层**：要显示的品牌文案（应用名 / 英文名 / 口号）取 `src/shared/constants.ts`；渲染层 `localStorage` 键名取 `src/renderer/src/constants.ts`，且**故意不跟随品牌改名**（改了会丢老用户记忆，必须补迁移）。
+- **错误文案只有一处映射表**：外部服务与本机文件系统报错的「英文原文 → 人话」一律走 `src/shared/errors.ts` 的 `friendlyError()`，不要在模块里另写正则链；配置类错误的分类（`needConfig`）由主进程单点判定、渲染层只消费（见 [shared/errors.ts.md](./files/shared/errors.ts.md)）。
 - **注意事项是观察记录**：文档里标注的「注意事项」包含撰写时发现的实现细节（未使用的导入、不会触发的分支、命名不一致的历史遗留等），不代表需要立即修改。
 - 本知识库不替代 `README.md`（面向使用者）与 `REFACTOR_PLAN.md`（重构历史），三者互补。
 
@@ -127,6 +129,7 @@
 | 知道某个 IPC 频道是谁实现的 | [01-架构总览 §3.3](./01-架构总览.md) → 落到 [02-目录架构-src-main](./02-目录架构-src-main.md) |
 | 加一个新的跨进程接口 | [05-目录架构-src-shared §6](./05-目录架构-src-shared.md)（三处齐改清单） |
 | 改应用名 / 英文名 / 口号 | [shared/constants.ts.md](./files/shared/constants.ts.md)（唯一来源 + 改品牌名完整清单） |
+| 查「英文报错怎么变成人话」/ 为什么这个错误会弹「去设置」 | [shared/errors.ts.md](./files/shared/errors.ts.md)（十档映射 + `needConfig` 分类）+ [renderer/src/common.md](./files/renderer/src/common.md)（`useConfigPrompt`） |
 | 发新版本 / 排查「检查更新失败」 | [main/updater.ts.md](./files/main/updater.ts.md)（发版上传清单：安装包 + `.blockmap` + `latest.yml` + 两个运行环境包，以及 `npm run release` 自检） |
 | 某个版本改了什么 / 记一次修改 | [root/changelog.md](./files/root/changelog.md) + 根目录 [`../CHANGELOG.md`](../CHANGELOG.md) |
 | 搞清楚「项目」在磁盘上长什么样 | [00-项目结构 §7](./00-项目结构.md) + [main/projects.ts.md](./files/main/projects.ts.md) |

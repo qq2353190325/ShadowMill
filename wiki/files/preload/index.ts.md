@@ -128,8 +128,8 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `updateTools` | `openLog` | `update:open-log` | 在文件管理器里定位 `userData/updater.log`（没有日志则打开 `userData` 目录），返回 `IpcResult<{ path }>`；**更新失败时的排障出口，不依赖 electron-updater 是否加载成功**（设置页只在更新出错时显示该入口） |
 | `updateTools` | `onProgress` | `update:progress` | 更新阶段 / 下载进度订阅（单订阅） |
 | `runtimeTools` | `status` | `runtime:status` | renderer → main，`invoke`；查询运行环境（分包 ffmpeg / hyperframes）状态 |
-| `runtimeTools` | `prepare` | `runtime:prepare` | renderer → main，`invoke`；主动准备指定包（载荷 `packs?: RuntimePackName[]`，省略 = 全部） |
-| `runtimeTools` | `cancel` | `runtime:cancel` | renderer → main，`invoke`；取消进行中的下载 / 解包（成功后 `message` 为「已取消下载」） |
+| `runtimeTools` | `prepare` | `runtime:prepare` | renderer → main，`invoke`；主动准备指定包（载荷 `packs?: RuntimePackName[]`，省略 = 全部）。**载荷必须是普通数组**（渲染层用 `toRaw(list).slice()`）：`invoke` 的参数要过结构化克隆，Vue 响应式 `Proxy` 会直接抛 `DataCloneError`，主进程 handler 不会执行 |
+| `runtimeTools` | `cancel` | `runtime:cancel` | renderer → main，`invoke`；取消进行中的**检查 / 下载 / 解包**（成功后 `message` 为「已取消下载」；取清单 20 秒无响应属**超时**，不算取消） |
 | `runtimeTools` | `onProgress` | `runtime:progress` | 运行环境进度订阅（单订阅，`_runtimeProgressCb` / `_runtimeProgressBound`） |
 | `legacyTools` | `status` | `legacy:status` | renderer → main，`invoke`，无载荷；返回 `LegacyDataInfo \| null`（有没有待处理的旧数据目录 / 里面有什么） |
 | `legacyTools` | `resolve` | `legacy:resolve` | renderer → main，`invoke`；**只把 `action` 字符串透传**（`resolve(action)` → `ipcRenderer.invoke(IPC.Legacy.Resolve, action)`），返回 `LegacyResolveResult` |

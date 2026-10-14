@@ -37,9 +37,13 @@
 
 ### 2.2 App 分组（应用级小工具）
 
+> 分组注释在 2026-10 由「剪贴板（renderer → main，invoke）」改为「应用级小工具（renderer → main，invoke）」：这个分组装的是「渲染层在 sandbox 下做不到、需要主进程代劳」的零散能力，目前只有一项。
+
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
 | `App.CopyText` | `app:copy-text` | renderer → main，`invoke`，由主进程写剪贴板（sandbox 下渲染层无 clipboard 模块） |
+
+> 这里**曾经**还有一条 `App.OpenExternal`（值 `app:open-external`，主进程用 `shell.openExternal` 打开厂家充值页）：它只服务配置类弹窗上的「去充值」按钮，而那个按钮**从未被用户同意过**，已整条摘除（余额 / 欠费改为走内嵌状态行，文案说明去厂家控制台充值）。频道常量、preload 的 `appTools.openExternal`、主进程 handler 与 `electron` 的 `shell` 导入一并删除，**`App` 分组计数回到 1**；细节见 [shared/errors.ts.md](./errors.ts.md) §6 / §10。
 
 ### 2.3 Settings 分组（settings.js / settings.ts）
 
@@ -49,7 +53,7 @@
 | `Settings.Save` | `settings:save` | 保存自定义模型配置（OpenAI 兼容端点） |
 | `Settings.SaveRender` | `settings:save-render` | 保存视频渲染**默认档位**（只更新 `render` 段，不动 customModel） |
 | `Settings.SaveUpdater` | `settings:save-updater` | 保存**更新设置**（只更新 `updater` 段：`feedUrl` / `autoCheck` / `skippedVersion`） |
-| `Settings.Test` | `settings:test` | 用给定 `CustomModelConfig` 发起一次连通性测试 |
+| `Settings.Test` | `settings:test` | 用给定 `CustomModelConfig` 发起一次连通性测试（失败分支会带 `detail` 与可能的 `needConfig`，见 `src/shared/errors.ts`；设置页刻意不弹窗，只显示状态行） |
 | `Settings.PickRuntimePack` | `settings:pick-runtime-pack` | renderer → main，`invoke`，运行环境「从本地文件安装…」：弹文件框选 `ffmpeg.7z` / `hyperframes.7z`，复制到 `userData/runtime/local-import/` 并生成同名清单（离线 / 内网机器的兜底入口，见 `docs/runtime-pack-split.md` §11.1） |
 
 ### 2.4 Update 分组（updater.ts，应用自更新）
@@ -73,7 +77,7 @@
 | `Voice.GetSaveDir` | `voice:get-save-dir` | 解析本次合成的落盘目录（支持项目目录 / 自定义目录 / 默认输出目录） |
 | `Voice.SaveConfig` | `voice:save-config` | 保存 `VoiceSaveConfigPayload`（`{ provider?, config: { apiKey?, defaultModel? } }`；兼容历史 `{ voiceTTS }` / 裸 `{ apiKey, targetModel }`） |
 | `Voice.PickAudio` | `voice:pick-audio` | 弹出文件框选择音色样本音频 |
-| `Voice.Create` | `voice:create` | 用样本音频克隆音色，返回 voice_id |
+| `Voice.Create` | `voice:create` | 用样本音频克隆音色，返回 voice_id（未配置 Key 时失败体带 `needConfig:'voice'`） |
 | `Voice.ListSystemVoices` | `voice:list-system-voices` | 列出 Qwen-TTS 系统音色 |
 | `Voice.ListModels` | `voice:list-models` | 列出可用 TTS 模型 |
 | `Voice.GetProfiles` | `voice:get-profiles` | 读取本地音色映射 `Record<string, VoiceProfile>` |
@@ -115,8 +119,8 @@
 | `Project.Load` | `project:load` | 读取项目元数据与内容 |
 | `Project.SaveSubtitle` | `project:save-subtitle` | 保存字幕文本与标题 |
 | `Project.SaveContent` | `project:save-content` | 保存内容（文案/结构化数据） |
-| `Project.GenerateHtml` | `project:generate-html` | 调模型生成 HTML（带素材） |
-| `Project.ModifyHtml` | `project:modify-html` | 调模型修改既有 HTML |
+| `Project.GenerateHtml` | `project:generate-html` | 调模型生成 HTML（带素材）；失败体可能带 `needConfig` / `title`（配置类错误，由 `configTargetOf()` 补分类） |
+| `Project.ModifyHtml` | `project:modify-html` | 调模型修改既有 HTML；失败体同上传配置类字段 |
 | `Project.DownloadHtml` | `project:download-html` | 导出 HTML 到用户选定位置 |
 | `Project.ExportSrt` | `project:export-srt` | 导出 SRT 字幕文件 |
 | `Project.OpenFolder` | `project:open-folder` | 打开项目目录（项目尚未落盘时提示「项目目录不存在（项目尚未保存）」） |
@@ -184,7 +188,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 
 | 引用方 | 引用方式 |
 | --- | --- |
-| `src/main/index.ts` | `import { IPC } from '../shared/ipc'`（本轮新增 `IPC.Legacy.Status` / `IPC.Legacy.Resolve` 的注册点） |
+| `src/main/index.ts` | `import { IPC } from '../shared/ipc'`（`IPC.Legacy.*` 的注册点；`App.CopyText` 的剪贴板 handler 也在本文件） |
 | `src/main/settings.ts` | 同上 |
 | `src/main/projects.ts` | 同上 |
 | `src/main/voice.ts` | 同上 |
@@ -205,7 +209,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 
 | 方向 | 通道举例 | 典型注册方式 |
 | --- | --- | --- |
-| renderer → main（请求-响应） | `settings:get`、`project:list`、`voice:synth`、`update:open-log`、`legacy:status`、`legacy:resolve` | 主进程 `ipcMain.handle`，preload `invoke` |
+| renderer → main（请求-响应） | `settings:get`、`project:list`、`voice:synth`、`update:open-log`、`legacy:status`、`legacy:resolve`、`app:copy-text` | 主进程 `ipcMain.handle`，preload `invoke` |
 | renderer → main（单向） | `window:minimize`、`voice:align-cancel` | 主进程 `ipcMain.on`，preload `send` |
 | main → renderer（推送） | `window:maximized-change`、`video:progress`、`whisper:progress`、`voice:align-progress`、`project:html-progress`、`update:progress`、`runtime:progress` | 主进程 `win.webContents.send`，preload `on` |
 
@@ -225,7 +229,8 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 
 - **禁止改动频道名字符串**：文件首行注释即写明"频道名与现行实现逐一对应，禁止改动"。改动会导致 `ipcMain.handle` 未命中，渲染层收到 `Error: No handler registered for 'xxx'`。
 - **命名不再完全对齐**：`Window.*` 用 `window:` 前缀、`Video.OpenHtml` 却用 `dialog:open-html` 前缀，属历史遗留，**不可"顺手统一"**，因为字符串就是协议本身。
-- **新增频道需四处同步**：本文件加常量 → `src/main/*.ts` 注册 handler（载荷用 `shared/types.ts` 的 `*Payload` 标注）→ `src/preload/index.ts` 绑定方法 → `src/shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`src/preload/index.d.ts` 只做 `extends`，无需改动）。本轮 `legacy:status` / `legacy:resolve` 就是按这条流程加的：`ipc.ts` 加 `Legacy` 分组 → `src/main/index.ts` 在 `createWindow()` 之后注册两个 handler → preload 加 `legacyTools` 命名空间 → `PreloadApi.legacyTools` 补签名。运行环境分包的 `Runtime.Cancel` 与 `Settings.PickRuntimePack` 同法：`runtime.ts` / `settings.ts` 各注册一个 handler，preload 分别加 `runtimeTools.cancel` / `settingsTools.pickRuntimePack`，并在 `IpcFail` / 各业务结果类型上补 `needPacks`。
+- **新增频道需三处齐改**：本文件加常量 → `src/main/*.ts` 注册 handler（载荷用 `shared/types.ts` 的 `*Payload` 标注）→ `src/preload/index.ts` 绑定方法，并在 `src/shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`src/preload/index.d.ts` 只做 `extends`，无需改动）。`legacy:status` / `legacy:resolve`、运行环境分包的 `Runtime.Cancel` 与 `Settings.PickRuntimePack` 都是这条流程的实例（其中 `app:open-external` 曾按同法加过，又在 `909526c` 按「摘除未经同意的按钮」整条三处一起删掉——**加与删都要走齐三处**）。
+- **往 `IpcFail` 加字段不必改 preload**：preload 只是 `ipcRenderer.invoke` 转发、原样返回主进程对象，因此 `IpcFail` 新增的 `needConfig` / `title` 与 preload 无关（改动只落在 `src/shared/types.ts` 的声明与主进程/渲染层的读写上）。
 - **`Update.OpenLog` 的位置与语义**（2026-10 新增）：它排在 `Status` 与 `Progress` 之间，值 `update:open-log`。主进程侧刻意**不经过** `ensureUpdater()`——更新失败时最常见的场景恰恰是 electron-updater 没加载起来，若把它挂在懒加载之后，最需要看日志的时候反而打不开日志。
 - **`Update.Status` 的位置与语义**（2026-10 新增）：它排在 `Version` 之后、`OpenLog` 之前，值 `update:status`，`ipcMain.handle(IPC.Update.Status, () => payload())`。存在的理由：启动静默检查发生在设置页订阅 `update:progress` 之前，没有这条通道渲染层只会看到 `idle`——那次失败（以及它的「查看详情 / 打开日志目录」入口）就丢了。主进程 `state` 常驻，设置页每次挂载都能拉到当前状态；它与 `OpenLog` 一样不进 `ensureUpdater()`（只读常驻状态，与 electron-updater 能否加载无关）。
 - **分组名 ≠ 文件名**：`Settings` 对应 `settings.ts`，`Video` 对应 `video.ts`，`App` 分组实际由 `src/main/index.ts` 处理，`Voice` 分组横跨 `voice.ts` 与 `ttsAlign.ts`，**`Legacy` 分组也由 `src/main/index.ts` 处理**（与 `App` 同理）。

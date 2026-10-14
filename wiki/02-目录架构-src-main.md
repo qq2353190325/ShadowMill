@@ -10,17 +10,17 @@
 |---|---|---|---|
 | [index.ts](./files/main/index.ts.md) | 494 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议（`rangeResponse()` 支持 `Range` 字节范围取 → `206` / `416`，响应体走文件流）、窗口控制与剪贴板 IPC、启动时序打点 `startup.log` | `window:*`、`app:copy-text`、`legacy:*` |
 | [hfEnv.ts](./files/main/hfEnv.ts.md) | 339 | 环境探测与**按包解析**的内置资源定位（`resolvePackRoot()` / `refreshPack()` / `packReady()`，`root` 只作旧布局与 dev 的兜底）+ GSAP 本地化 / 导出外部化辅助（不注册 IPC） | — |
-| [settings.ts](./files/main/settings.ts.md) | 448 | 设置存储（`userData/settings.json`，含 `voice` 按厂家配置（**只有 apiKey**）与视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` + 「出厂状态」判定 `isPristineSettings`（供 index.ts 的 `migrateFrom()` 迁移老数据时决定能否覆盖 settings.json）+ 运行环境「从本地文件安装…」`settings:pick-runtime-pack`（选 `ffmpeg.7z` / `hyperframes.7z` 导入 `userData/runtime/local-import/`） | `settings:*`（6） |
+| [settings.ts](./files/main/settings.ts.md) | 452 | 设置存储（`userData/settings.json`，含 `voice` 按厂家配置（**只有 apiKey**）与视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` + 「出厂状态」判定 `isPristineSettings`（供 index.ts 的 `migrateFrom()` 迁移老数据时决定能否覆盖 settings.json）+ 运行环境「从本地文件安装…」`settings:pick-runtime-pack`（选 `ffmpeg.7z` / `hyperframes.7z` 导入 `userData/runtime/local-import/`） | `settings:*`（6） |
 | [systemVoices.ts](./files/main/systemVoices.ts.md) | 62 | Qwen-TTS 内置系统音色静态表（**只有 `SYSTEM_VOICES` 一个导出**，判定函数已删除） | — |
-| [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 248 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用；SDK 经 settings 懒加载） | — |
-| [projects.ts](./files/main/projects.ts.md) | 919 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、背景音轨注入（`<audio id="myv-bgm">`）、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、音视频产物（项目结构再导出 `shared/types`；项目根 `projectsRoot()` 为**函数**、惰性求值；预览副本注入脚本默认静止、支持 `seek` 播放头定位与播完自动停住） | `project:*`（24 handle + 1 推送） |
+| [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 273 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用；SDK 经 settings 懒加载） | — |
+| [projects.ts](./files/main/projects.ts.md) | 924 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、背景音轨注入（`<audio id="myv-bgm">`）、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、音视频产物（项目结构再导出 `shared/types`；项目根 `projectsRoot()` 为**函数**、惰性求值；预览副本注入脚本默认静止、支持 `seek` 播放头定位与播完自动停住） | `project:*`（24 handle + 1 推送） |
 | [voiceCatalog.ts](./files/main/voiceCatalog.ts.md) | 104 | **语音服务目录（按厂家组织）**：厂家定义 `VoiceProviderDef`（Key 提示 / apiBase / 克隆模型 `enrollModel` / 出厂默认模型 / 模型表 / 系统音色表）+ 查询函数（`providerByKey` / `providerOfModel` / `providerOfSystemVoice` / `seriesDefaultModel`）；千问模型表 **2 条**（`qwen3-tts-flash` 系统 / `qwen-audio-3.0-tts-flash` 复刻——本地文件 + 公网 URL）；**`enrollModelAudio` 字段与 vc 系列的两条 clone 模型已删除** | — |
-| [voice.ts](./files/main/voice.ts.md) | 745 | 语音服务（按厂家取端点与 Key）：音色管理 + 文字生音频；**跨厂家「音色 ↔ 模型」绑定会被显式拒绝**，映射绑着已下线模型时忽略并按固定绑定回落；**克隆只服务 Qwen-Audio-TTS**（非 `qwen-audio-*` 目标模型直接拒绝），参考音频用内置 ffmpeg 裁前 15 秒并转 data URI 提交（`input.url` 也收公网 URL，`prefix` 统一 10 位）；**合成一律「接口 → `output.audio.url` → 二次下载」**；**云端克隆音色列表单一接口 `list_voice`**；`voice:delete-cloud`（删云端克隆音色，**单一写法 `action:'delete_voice'`**）；`voice:save-config` 分「存某厂家 Key」与「只存全局保存目录」两条路径 | `voice:*`（16） |
+| [voice.ts](./files/main/voice.ts.md) | 753 | 语音服务（按厂家取端点与 Key）：音色管理 + 文字生音频；**跨厂家「音色 ↔ 模型」绑定会被显式拒绝**，映射绑着已下线模型时忽略并按固定绑定回落；**克隆只服务 Qwen-Audio-TTS**（非 `qwen-audio-*` 目标模型直接拒绝），参考音频用内置 ffmpeg 裁前 15 秒并转 data URI 提交（`input.url` 也收公网 URL，`prefix` 统一 10 位）；**合成一律「接口 → `output.audio.url` → 二次下载」**；**云端克隆音色列表单一接口 `list_voice`**；`voice:delete-cloud`（删云端克隆音色，**单一写法 `action:'delete_voice'`**）；`voice:save-config` 分「存某厂家 Key」与「只存全局保存目录」两条路径 | `voice:*`（16） |
 | [ttsAlign.ts](./files/main/ttsAlign.ts.md) | 338 | 字幕配音逐句合成与时间对齐（模式 A/B）；`voice:synth-aligned` 先 `runtime.missingPacks(['ffmpeg'])` 校验，缺包即返回 `needPacks` | `voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | [video.ts](./files/main/video.ts.md) | 176 | HyperFrames 转视频（渲染副本 GSAP 本地化；音轨来自页面内的 `<audio id="myv-bgm">`）；`video:render` 先按 `RENDER_PACKS = ['ffmpeg','hyperframes']` 校验，缺包即返回 `needPacks` | `dialog:open-html`、`video:*`（3 handle + 1 推送） |
 | [whisper.ts](./files/main/whisper.ts.md) | 729 | whisper.cpp 转录 + 识别模型下载/管理；`resolveCliPath()` **优先** `process.resourcesPath/whisper/`（whisper 随安装包），只在「非 wav/flac/mp3/ogg 要转码」且缺 ffmpeg 时以 `FfmpegNeededError` 回 `needPacks:['ffmpeg']` | `whisper:*`（11 handle + 1 推送） |
 | [updater.ts](./files/main/updater.ts.md) | 600 | 应用自更新（electron-updater generic provider，**懒加载**）：检查 / 下载 / 取消 / 退出安装 / **状态补齐（`update:status`）** / **打开日志** + 启动静默检查 + 忙碌态判定；错误文案分 `message` / `detail` 两层 | `update:*`（6 handle + 1 `on`/`sendSync` + 1 推送） |
-| [runtime.ts](./files/main/runtime.ts.md) | 786 | 运行环境（**分包**）：`PACK_DEFS` 包注册表（`ffmpeg` 180 MB / `hyperframes` 440 MB 各成一个 7z，whisper 不进包）→ 从更新源或本地包取 `<包名>.json` + `<包名>.7z` → sha512 校验（`Range` 断点续传）→ `7za` 解到 `userData/runtime/<包名>/`，维护 `packs.json` 记录 + 每包自己的 `ok.json` 完整性标记，就绪后按包调 `hfEnv.refreshPack()`；`packsStatus()` 纯探测、`ensurePacks()` 才下载解包（可取消），`register()` 里**启动只探测不下载**（排最后只保证 handler 先挂上） | `runtime:*`（3 handle + 1 推送） |
+| [runtime.ts](./files/main/runtime.ts.md) | 825 | 运行环境（**分包**）：`PACK_DEFS` 包注册表（`ffmpeg` 180 MB / `hyperframes` 440 MB 各成一个 7z，whisper 不进包）→ 从更新源或本地包取 `<包名>.json` + `<包名>.7z` → sha512 校验（`Range` 断点续传）→ `7za` 解到 `userData/runtime/<包名>/`，维护 `packs.json` 记录 + 每包自己的 `ok.json` 完整性标记，就绪后按包调 `hfEnv.refreshPack()`；`packsStatus()` 纯探测、`ensurePacks()` 才下载解包（可取消），`register()` 里**启动只探测不下载**（排最后只保证 handler 先挂上）；取远端清单有 **20 秒硬超时**（`MANIFEST_TIMEOUT`，超时不算取消、残片保留） | `runtime:*`（3 handle + 1 推送） |
 | [vad.ts](./files/main/vad.ts.md) | 122 | WAV 采样读取与静音裁剪（零依赖纯函数） | — |
 
 > 行数取自工作区源码实测（`[IO.File]::ReadAllLines` 与编辑器行号一致）。目录下共 **14** 个 `.ts` 文件，上表**已全部收录**（含 `runtime.ts`，其逐文件说明见 [files/main/runtime.ts.md](./files/main/runtime.ts.md)）。
@@ -66,7 +66,7 @@ settings ──→ updater（读 updater.feedUrl / autoCheck / skippedVersion）
 index.ts ──→ settings（处置老数据时用 isPristineSettings 判定出厂状态）
 runtime ──→ hfEnv / settings（按包交接资源根 hfEnv.refreshPack()、下载源取 updater.feedUrl）
 projects / video / ttsAlign / whisper ──→ runtime（动手前 runtime.missingPacks() 纯校验：缺包即返回 needPacks，不阻塞）
-shared/{ipc,types} ──→ 全部模块（仅常量与类型）
+shared/{ipc,types,errors} ──→ 全部模块（常量、跨进程类型与纯函数映射）
 ```
 
 | 依赖边 | 具体协作点 |
@@ -129,6 +129,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 - `isPristineSettings(file)`：判定指定 settings.json 是否还是「出厂状态」（用户在这个位置什么都没配过）。只看「用户投入过的字段」——`customModel.apiKey/baseUrl/modelId/enabled===true`、`voiceTTS.apiKey/saveDir`、`whisper.modelId`、`whisper.customModels` 非空、`updater.feedUrl`、`voiceProfiles` 非空；像 `updater.autoCheck` / `render.quality` 这类**开关故意不阻断覆盖**（丢开关是两次点击，丢 API Key 要去控制台重新翻）。文件不存在 / 损坏返回 `true`。唯一调用方是 `index.ts` 的 `migrateFrom()`（用户点「迁移过来」之后才执行）。
 - `readSettings()` 做**逐分区浅合并**并静默容错（文件缺失/损坏回落到默认值）；写盘为整体覆盖。
 - `settings:test` 的成功判定刻意严格：配置三项非空后发起一次极小的 `chat.completions` 请求，**必须拿到模型返回的文本内容**才算连接成功，避免把「接口通了但模型不产出」误判为可用。
+- **失败文案统一走 `shared/errors`**：`settings:test` 的失败分支调 `friendlyError(e, { label: '连接失败', baseUrl: m.baseUrl })`，返回体带 `message` / `detail` / `needConfig`（配置类分类）；配置不全时直接回 `needConfig: 'model'`。**设置页刻意不弹配置类弹窗**（按钮与状态行都在本页，弹「去设置」等于原地跳），故渲染层只显示状态行。
 - **openai SDK 懒加载**：本模块是启动路径上的模块，因此不在顶层 `import OpenAI from 'openai'`（模块图约 110ms），改为 `loadOpenAI()` 首次真正发请求时才 `require`；`htmlAgent.ts` 与 `settings:test` 共用它，SDK 不可用时各自退到内置 `fetch` 分支。
 - API Key 明文保存在本机 `userData/settings.json`，不经 IPC 外传。
 
@@ -146,6 +147,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
   - `reasoning_content`（思考）与 `content`（输出）分离统计；`onProgress` 按 `connecting / thinking / writing / retry / done` 分阶段回调。
   - 推理模型可能把 `max_tokens` 全耗在思考上导致 `content` 为空且 `finish_reason === 'length'`，此时按 `32768 → 65536` 自动升档重试，仍无内容则抛出带 `usage` 的诊断错误。
   - 每次会话（含每档尝试的思考原文、输出、`finish_reason`、`usage`、各阶段耗时）追加写入 `userData/html-agent/chat.jsonl`；记录失败静默忽略，不影响主流程。
+  - **错误一律先翻译成人话**：两处配置校验走内部 `cfgErr(raw, hint?)` → `friendlyError(new Error(raw), { label: '生成 HTML', baseUrl, hint })`（未启用传 `hint: 'model-not-enabled'`）；循环内每次尝试失败经 `friendlyError` 得到 `message` / `detail` / `needConfig`，`attempts.push` 的记录新增 `detail` 与 `needConfig`（非配置类为 `null`），失败日志条目也带 `detail`；兜底 fetch 的非 2xx 分支把响应体（前 300 字符，`httpDetail`）与请求地址一起放进排障详情。
 
 ### 4.6 `projects.ts` —— 项目化流水线（最大模块）
 
@@ -157,6 +159,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 - `project:extract-video-audio` 先按 `FFMPEG_PACKS = ['ffmpeg']` 调 `runtime.missingPacks()` **纯校验**：缺包立刻返回 `{ ok: false, needPacks, message: '提取视频音轨需要先下载运行环境（<体积>）' }`（**不再** `await` 等待下载），校验通过后才用内置 ffmpeg 提取音轨。
 - `project:open-folder` 在项目目录不存在时返回「项目目录不存在（项目尚未保存）」。
 - 写 HTML 成功后会把**失效的旧视频产物置空**，并做 HyperFrames 合规校验，返回 `compatible` 供 UI 提示。
+- **Agent 调用失败的分类**：`project:generate-html` / `project:modify-html` 两处 `catch` 先拼 `'Agent 调用失败：' + message`，再用 `...configTargetOf(msg)` 展开补 `needConfig` / `title`（`configTargetOf` 导入自 `shared/errors`）——`chatWithCustomModel` 抛出的已经是人话文案，这里只补一次分类，供渲染层弹「去设置」。
 
 ### 4.7 `voice.ts` —— 语音服务（按厂家）
 
@@ -166,7 +169,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 - 音色解析三级优先：本地映射 `voiceProfiles`（`system:X` / `custom:X`）→ 系统音色默认模型 → 内置默认模型。
 - **项目根走 `projects.projectsRoot()` 函数**：三处调用点（`resolveTtsDir()`、`voice:list-generated`、`voice:synth` 落盘回执）都是在函数 / handler 内取一次局部 `const projectsRoot = projects.projectsRoot()`，不是模块级常量。
 - 文字生音频 `voice:synth` 支持三种落盘位置（项目 `audio/`、自定义目录、音频输出目录），回执 `savedTo` 说明实际落点；`voice:list-generated` 按来源（音频输出目录 / 自定义目录 / 项目）分组列出历史音频。
-- 所有网络错误经 `voiceFriendlyError()` 转成中文可读提示。
+- **错误文案统一走 `shared/errors`**：`voiceFriendlyError(err, label)` 已由原来的四条本地 `if` 链改成**薄包装**——`friendlyError(err, { label, provider: activeProviderDef().key, baseUrl: activeProviderDef().apiBase })`，再把 `detail` 追加回文案（`message（detail）`，保留旧行为让终端用户能据此报障）；同名导出保留，故 `ttsAlign.ts` 的 import 未动。未配置 Key 的四处失败改走新函数 `voiceNoKeyFail(msg)`（**未导出**），产出 `{ ok:false, message, needConfig:'voice' }`，供渲染层弹「去设置」。详见 [voice.ts.md](./files/main/voice.ts.md)。
 
 ### 4.8 `ttsAlign.ts` —— 字幕配音与时间对齐
 
@@ -209,12 +212,12 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 ### 4.12 `runtime.ts` —— 运行环境包
 
 - **动机**：NSIS 更新是「整体卸载旧版 → 解压复制新包」，632.3 MB / 4916 文件的运行资源每次更新都要重解压复制一遍（源码注释记的实测值：一次更新 97 秒，期间应用不存在）。分包后安装包只带**代码 + whisper（12.5 MB / 15 文件）**——装完即离线可用，安装包实测 **257.6 MB → 105.08 MB**（`dist\ShadowMill Setup 0.0.3.exe` = 110,180,042 字节，−152.5 MB / −59%；设计文档原先预估的「约 145-150 MB」偏高，因为旧算法把「`runtime.7z` 在安装包内被压到约 90 MB」重复计了一次，实际是整块移出）；`ffmpeg`（179.9 MB / 9 文件）与 `hyperframes`（439.9 MB / 4892 文件）各成一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，比旧单包 `runtime.7z` 147.4 MB 还小 1.7 MB），**首次用到时由用户确认后下载**（提示体积、可取消）。包与清单由 `scripts/pack-runtime.mjs` 产出为 `build/runtime-pack/<包名>.7z` + `<包名>.json`，上传到更新源目录；离线 / 内网机器走设置页「从本地文件安装…」或 `SHADOWMILL_RUNTIME_PACK`。
-- **频道**：`runtime:status`（快照 `RuntimeProgressPayload`）、`runtime:prepare`（载荷 `packs?: RuntimePackName[]`，省略 = 全部；返回 `{ ok, message?, detail? }`）、`runtime:cancel`（中断进行中的下载 / 解包）、推送 `runtime:progress`（唯一出口 `push()`，发送前判 `win && !win.isDestroyed()`）。
+- **频道**：`runtime:status`（快照 `RuntimeProgressPayload`）、`runtime:prepare`（载荷 `packs?: RuntimePackName[]`，省略 = 全部；返回 `{ ok, message?, detail? }`；**载荷必须是可结构化克隆的普通数组**——渲染层传 Vue 响应式 `Proxy` 会在 `invoke` 阶段直接抛 `DataCloneError`，handler 根本不会执行）、`runtime:cancel`（中断进行中的**检查 / 下载 / 解包**）、推送 `runtime:progress`（唯一出口 `push()`，发送前判 `win && !win.isDestroyed()`）。
 - **三个 API 的分工**：`packsStatus()` / `missingPacks(needs?)` / `packSizeText(names)` **纯探测不下载**（供消费点校验与界面显示），`ensurePacks(packs?)` 才下载 + 解包（幂等 + 并发安全 + 可取消），`prepareInBackground()` **启动只探测**、把「需要下载（<体积>）」推给界面——是否下载由用户决定（`ffmpeg` 实测 **42.6 MB**、`hyperframes` 实测 **103.1 MB**，2026-10-14；两包合计 **145.7 MB**）。
 - **主流程 `runOnce(packs)`**：① 探测缺包（旧版整体包目录可满足，计为 legacy）⇒ 无缺即 `ready` 直接成功（**常态**）→ ② 定位 `7za`（`<resources>/tools/7za.exe`，dev 为 `build/tools/`，缺失即失败并提示重新打包）→ ③ 逐包 `installOne()`：清单**本地优先**（`runtime/local-import/` 或 `SHADOWMILL_RUNTIME_PACK`，`source='local'`），否则从更新源取 `<包名>.json` + `<包名>.7z`（`source='remote'`，**`Range` 断点续传**、下完复核 sha512、不符抛 `BADSHA` 并丢弃）→ ④ 解包（`7za x <包名>.7z -o<userData>/runtime/<包名> -y -bsp1`，从 stdout 解析百分比）→ ⑤ **先写 `<包名>/ok.json` 再写 `packs.json`**，然后 `hfEnv.refreshPack(<包名>, <目录>)` → ⑥ 全部就位后 `gc()`：两包都齐才删旧版整体包目录（632 MB）与 `current.json`，`downloads/` 只留当前各包 id 的缓存。
 - **持久状态**：`userData/runtime/packs.json` = `{ version, packs: { <包名>: { id, files, unpackedBytes, at } }, legacy?: { id, root, at } }`；就绪判定要「有记录 + 目录内有 `ok.json` + 该包关键文件都在」三者齐备，缺一即触发重下。`current.json` **只读**（旧布局指针，仅用于 legacy 判定与清理）。
 - **幂等与并发**：`ensurePacks()` 忙碌期（已有 `inFlight`）重复调用返回 `{ ok:false, message:'正在准备另一个运行环境包，请稍候再试' }`（不排队、不复用），因此「界面点下载」与「设置页重试」不会并发解包；`register()` 里 `prepareInBackground()` 只做几个 `existsSync` / `statSync` 探测（微秒级）并推一次状态，**不下载**；早到的进度事件渲染层收不到也没关系，外壳与设置页挂载时都会用 `runtime:status` 补齐。
-- **取消语义**：`cancelPrepare()` → `cancelRequested` + `activeReq.abort()` + `activeChild.kill()`，主流程在每段边界判标志 ⇒ `cleanupHalfDone()` 清 `.part` 与半解目录 ⇒ phase 落 `cancelled`（**不是失败**）。只有取消才删残片；网络中断保留 `.part`，下次用 `Range` 续传。
+- **取消语义**：`cancelPrepare()` → `cancelRequested` + `activeReq.abort()` + `activeChild.kill()`，主流程在每段边界判标志 ⇒ `cleanupHalfDone()` 清 `.part` 与半解目录 ⇒ phase 落 `cancelled`（**不是失败**）。只有取消才删残片；网络中断保留 `.part`，下次用 `Range` 续传。**超时不算取消**：`isCancelError()` 先排掉信息里带「超时」的错误，取清单 20 秒无响应走 `MANIFEST_TIMEOUT` 分支（`fail('连接更新源超时，没能取到运行环境清单', …)`），`.part` 保留续传；`payload().cancellable` 含 `checking`，取清单期间界面同样可取消。
 - **失败不阻断应用**：任何一步失败都走 `fail()`——只更新状态（`phase='error'` + 人话 `message` + 排障 `detail`）、推一次进度、写 `userData/runtime.log`，并返回 `{ ok: false, … }`；`projects.ts` / `video.ts` / `ttsAlign.ts` 缺包时只回 `needPacks` 交给界面弹确认框。详见 [files/main/runtime.ts.md](./files/main/runtime.ts.md)。
 
 ### 4.13 `vad.ts` —— 纯函数 VAD

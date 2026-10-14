@@ -1,6 +1,6 @@
 // composables/useConfigPrompt.ts —— 「配置类」错误的统一弹窗（模块级 reactive 单例）
 //
-// 为什么要有它：缺 API Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用 / 余额不足 这几类错误，
+// 为什么要有它：缺 API Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用 这几类错误，
 // 只躺在状态行里太弱——用户看一眼不知道去哪修，还得自己翻到设置页找对应填框。
 // 判定**不在渲染层做**（不用正则猜文案）：主进程 friendlyError() 单点判出 needConfig 分类随 IPC 返回
 // （见 src/shared/errors.ts 与 docs/error-mapping.md §11.1），渲染层只管弹框。

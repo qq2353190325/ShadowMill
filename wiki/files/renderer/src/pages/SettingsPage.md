@@ -150,7 +150,7 @@ interface UpdateCheckReply {
 | `onModelPick(v)` | 模型下拉的 `@change` 回调：`v === CUSTOM_VALUE` → 只置 `modelCustom = true`；否则写入 `modelId` 并置 `modelCustom = false` |
 | `collectCustomModel()` | 返回 `{ baseUrl, modelId, apiKey, enabled }`，三个字符串字段均 `.trim()`，`enabled` 取布尔值 |
 | `onSave()` | 校验通过后 `await window.settingsTools.save(customModel)` |
-| `onTest()` | `await window.settingsTools.test(collectCustomModel())` |
+| `onTest()` | `await window.settingsTools.test(collectCustomModel())`；**只加了一段注释、行为零变化**：刻意**不弹配置类弹窗**（按钮与失败状态行都在本页上，弹「去设置」等于让用户从原地跳到原地），主进程照常回 `needConfig` 供别的入口用 |
 | `onSaveVoice()` | `window.voiceTools.saveConfig({ provider: vendor.key, config: { apiKey: vApiKey.value.trim() } })`——**只提交 apiKey**（不再有 `defaultModel`）；成功后同步更新本地 `vSaved[vendor.key]` |
 | `onSaveRender()` | `await saveRenderDefaults({ quality: rQuality.value, fps: rFps.value })`（`useRenderOptions.ts`，内部走 `settingsTools.saveRender` → `settings:save-render`）；成功提示「渲染默认档位已保存：质量标签 · N fps」`hf-ok`，失败 `res.message \|\| '保存失败'` `hf-error` |
 | `applyUpdateProgress(d)` | `update:progress` 的回调：写 `updateStage` / `updateVersion`（取 `d.currentVersion`）/ **`updateNewVersion`（取 `d.version`，目标版本）** / `updateMessage`（`d.message \|\| ''`）/ **`updateDetail`（`d.detail \|\| ''`）** / `updateStatusClass`；`detail` 为空即把 `showUpdateDetail` 复位为 `false`，避免旧报错的面板一直挂着 |
@@ -176,7 +176,7 @@ interface UpdateCheckReply {
 
 **保存自定义模型**：`collectCustomModel()` 后若 `baseUrl`/`modelId`/`apiKey` 任一为空 → `setStatus('配置不完整：Base URL / Model ID / API Key 均需填写', 'hf-error')` 并中止（不发任何 IPC）；否则成功提示「配置已保存，可开始使用自定义模型生成 HTML」`hf-ok`，失败显示 `res.message || '保存失败'` `hf-error`。
 
-**测试连接**：先置「正在测试连接...」（样式类清空，保持中性），用**当前表单内容**（不要求已保存）调 `settingsTools.test`，成功 `res.message || '连接成功'`、失败 `res.message || '测试失败'`。
+**测试连接**：先置「正在测试连接...」（样式类清空，保持中性），用**当前表单内容**（不要求已保存）调 `settingsTools.test`，成功 `res.message || '连接成功'`、失败 `res.message || '测试失败'`。主进程失败体现在还会带 `detail`（排障原文）与可能的 `needConfig`（配置类分类），**本页刻意不使用它们**——源码注释写明：按钮与失败文案都在设置页上，再弹一个「去设置」框是让用户原地跳；`needConfig` 只供别的入口判断。
 
 **保存语音服务（按厂家）**：无前置校验，直接把「当前厂家 + 该厂家 API Key / 默认模型」提交给 `voice:save-config`（`{ provider, config }`）；成功提示「配置已保存…」`hf-ok`，失败 `res.message || '保存失败'` `hf-error`。**逐个音色换模型不在这里**——那是配音页「音色映射管理」的事，本页只配「该厂家的兜底默认模型」。
 
