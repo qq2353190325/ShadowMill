@@ -3,6 +3,7 @@
 // 组件对象不 reactive 化（shallowRef），避免 Vue 代理组件定义。
 import { ref, shallowRef, type Component } from 'vue'
 import { activeMenu, refreshProject, type PageKey } from '@renderer/composables/useAppStore'
+import { toast } from '@renderer/composables/useToast'
 import HomePage from './HomePage/index.vue'
 import AboutPage from './AboutPage/index.vue'
 import ContentPage from './ContentPage/index.vue'
@@ -33,7 +34,17 @@ export const pageNavKey = ref(0);
 
 export async function goPage(key: PageKey): Promise<void> {
   activeMenu.value = key;
-  await refreshProject();
+  // 刷新项目上下文失败**不能连导航一起拖住**：旧写法是「先 await refreshProject() 再切页」，
+  // 一旦它抛错（IPC 拒绝 / 某处 TypeError）就永远停在「侧栏菜单亮了、页面没换」的半截状态，
+  // 而未处理的 Promise 拒绝只进 devtools，界面上一点提示都没有——用户只能看到"点不动"。
+  // 现在：失败照切页，并把原因说出来（toast + console）。
+  try {
+    await refreshProject();
+  } catch (e) {
+    const msg = (e && (e as { message?: string }).message) || String(e);
+    console.error('[goPage] 刷新项目上下文失败（不影响本次切页）：', e);
+    toast('项目信息刷新失败：' + msg);
+  }
   currentPage.value = pages[key];
   pageNavKey.value++;
   // 滚动复位由 App.vue watch(currentPage) 处理（对应原 goPage 的 content.scrollTop = 0）
