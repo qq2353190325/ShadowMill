@@ -16,6 +16,7 @@
 import { app, BrowserWindow, Menu, ipcMain, clipboard, protocol } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { Readable } from 'node:stream'
 import { IPC } from '../shared/ipc'
 import type { LegacyDataInfo, LegacyResolveAction, LegacyResolveResult, RegisterCtx } from '../shared/types'
 import * as settings from './settings'
@@ -323,6 +324,36 @@ function previewMime(p: string): string {
   return map[path.extname(p).toLowerCase()] || 'application/octet-stream';
 }
 
+// 支持 Range 的响应：媒体（背景音轨 / 视频素材）必须能按字节范围取，否则 Chromium 会把
+// <audio>/<video> 判成不可跳转（seekable 只有 [0,0]），预览里拖进度条时画面时间轴动了、
+// 声音却跳不动（表现为「拖动后音频不跟着走、再播放还从原处继续」）。
+// 这里按请求范围返回 206 + Content-Range，响应体用流（214MB 的素材不能整个读进内存）。
+function rangeResponse(full: string, request: Request): Response {
+  const type = previewMime(full)
+  const size = fs.statSync(full).size
+  const head = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' }
+  const noBody = request.method === 'HEAD'
+  const raw = request.headers.get('range')
+  const m = raw ? /^bytes=(\d*)-(\d*)$/.exec(raw.trim()) : null
+  let start = 0;
+  let end = size - 1;
+  if (m) {
+    if (m[1]) { start = Number(m[1]); if (m[2]) end = Number(m[2]); }
+    else if (m[2]) { start = Math.max(0, size - Number(m[2])); }   // 后缀范围 bytes=-N：最后 N 字节
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+      return new Response(null, { status: 416, headers: { ...head, 'Content-Range': 'bytes */' + size } });
+    }
+    if (end > size - 1) end = size - 1;
+  }
+  const len = end - start + 1;
+  const partial = !!m;
+  const headers: Record<string, string> = { ...head, 'Content-Length': String(len) };
+  if (partial) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + size;
+  if (noBody) return new Response(null, { status: partial ? 206 : 200, headers });
+  const body = partial ? fs.createReadStream(full, { start, end }) : fs.createReadStream(full);
+  return new Response(Readable.toWeb(body) as unknown as BodyInit, { status: partial ? 206 : 200, headers });
+}
+
 // 窗口引用：供 IPC 窗口控制回调使用
 let mainWindow: BrowserWindow | null = null
 const getWindow = (): BrowserWindow | null => mainWindow
@@ -402,6 +433,7 @@ app.whenReady().then(() => {
   bootLog('app ready')
   // hgpreview 协议处理：仅允许读取目标项目目录内的文件（防目录穿越），供预览 iframe 与页面内相对素材引用。
   // 直接读文件字节构造 Response（net.fetch(file://) 在协议处理器内存在兼容性问题，易致预览空白）；
+  // 媒体文件（音轨 / 视频素材）走 rangeResponse 支持按字节范围取，见其注释（预览跳转依赖它）；
   // 失败/异常落盘 userData/preview-protocol.log，便于预览异常时排查。
   protocol.handle('hgpreview', (request) => {
     const log = (line: string): void => {
@@ -418,10 +450,7 @@ app.whenReady().then(() => {
       const full = path.resolve(dir, rel);
       if (full !== dir && !full.startsWith(dir + path.sep)) { log('403 ' + request.url); return new Response('Forbidden', { status: 403 }); }
       if (!fs.existsSync(full) || !fs.statSync(full).isFile()) { log('404 ' + request.url + ' -> ' + full); return new Response('Not Found', { status: 404 }); }
-      const data = fs.readFileSync(full);
-      return new Response(data as unknown as BodyInit, {
-        headers: { 'Content-Type': previewMime(full), 'Cache-Control': 'no-store' }
-      });
+      return rangeResponse(full, request);
     } catch (e) {
       log('500 ' + request.url + ' ' + String((e as Error) && (e as Error).message ? (e as Error).message : e));
       return new Response('Bad Request', { status: 400 });
