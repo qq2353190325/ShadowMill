@@ -11,11 +11,11 @@
 | # | 文档 | 内容 | 适合谁 |
 |---|---|---|---|
 | 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构、`src/` 完整目录树、构建与打包、运行时数据目录、全局约定 | 第一次接触项目的人 |
-| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（83 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
+| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（85 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
 | 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程 14 个模块的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
 | 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：11 个命名空间、6 路进度通道的「单订阅」语义、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
 | 4 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) | Vue 渲染层：启动链路、无 router 的注册表导航、状态与通信约定、组件分层、页面↔主进程域对照、样式策略 | 改界面 / 加页面 |
-| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（10 组 83 个）、跨进程载荷类型、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
+| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（10 组 **85** 个）、跨进程载荷类型、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
 | 6 | [06-目录架构-src-agent](./06-目录架构-src-agent.md) | 独立实验脚本：为什么不进构建图、5 个工具、工作区防护、运行方式 | 想跑 Agent 样例 |
 | 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，`files/` 下共 **42** 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue` 与 `LegacyDataDialog.vue` 四个组件） | 需要具体实现细节时查阅 |
 
@@ -71,7 +71,7 @@
 | `src/App.vue`（外壳） | [renderer/src/App.vue.md](./files/renderer/src/App.vue.md) |
 | `src/assets/`（设计系统：`main.css`） | [renderer/src/assets.md](./files/renderer/src/assets.md) |
 | `src/components/`（通用组件：`StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue`、`LegacyDataDialog.vue`） | [renderer/src/components.md](./files/renderer/src/components.md) |
-| **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress,useRuntime,useLegacyData,useRenderOptions}.ts`、`src/utils/{escape,rate,time,render}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
+| **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress,useRuntime,useEnvGate,useLegacyData,useNavIntent,useRenderOptions}.ts`、`src/utils/{escape,rate,time,render}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
 | `src/pages/HomePage/index.vue` | [renderer/src/pages/HomePage.md](./files/renderer/src/pages/HomePage.md) |
 | `src/pages/AboutPage/index.vue` | [renderer/src/pages/AboutPage.md](./files/renderer/src/pages/AboutPage.md) |
 | `src/pages/ContentPage/index.vue` | [renderer/src/pages/ContentPage.md](./files/renderer/src/pages/ContentPage.md) |
@@ -127,12 +127,13 @@
 | 知道某个 IPC 频道是谁实现的 | [01-架构总览 §3.3](./01-架构总览.md) → 落到 [02-目录架构-src-main](./02-目录架构-src-main.md) |
 | 加一个新的跨进程接口 | [05-目录架构-src-shared §6](./05-目录架构-src-shared.md)（三处齐改清单） |
 | 改应用名 / 英文名 / 口号 | [shared/constants.ts.md](./files/shared/constants.ts.md)（唯一来源 + 改品牌名完整清单） |
-| 发新版本 / 排查「检查更新失败」 | [main/updater.ts.md](./files/main/updater.ts.md)（发版三件套与更新源） |
+| 发新版本 / 排查「检查更新失败」 | [main/updater.ts.md](./files/main/updater.ts.md)（发版上传清单：安装包 + `.blockmap` + `latest.yml` + 两个运行环境包，以及 `npm run release` 自检） |
 | 某个版本改了什么 / 记一次修改 | [root/changelog.md](./files/root/changelog.md) + 根目录 [`../CHANGELOG.md`](../CHANGELOG.md) |
 | 搞清楚「项目」在磁盘上长什么样 | [00-项目结构 §7](./00-项目结构.md) + [main/projects.ts.md](./files/main/projects.ts.md) |
 | 明白 HTML 是怎么被 Agent 生成的 | [01-架构总览 §5.1](./01-架构总览.md) + [main/htmlAgent.ts.md](./files/main/htmlAgent.ts.md) |
 | 查 whisper 模型档位与转录流程 | [main/whisper.ts.md](./files/main/whisper.ts.md) |
-| 搞清 716MB 运行环境包怎么准备 / 解包 | [main/runtime.ts.md](./files/main/runtime.ts.md) + [01-架构总览 §3.3](./01-架构总览.md)（`runtime:*`） |
+| 搞清 ffmpeg / hyperframes 分包怎么按需下载与解包 | [main/runtime.ts.md](./files/main/runtime.ts.md) + [01-架构总览 §3.3](./01-架构总览.md)（`runtime:*`） |
+| 搞清「缺运行环境」时界面怎么问用户 / 怎么续做 | [renderer/src/common.md](./files/renderer/src/common.md) §4（`useRuntime` / `useEnvGate`） |
 | 查旧数据弹窗 / `legacy:*` 契约 | [main/index.ts.md](./files/main/index.ts.md) §3.1 + [renderer/src/components.md](./files/renderer/src/components.md) §6 |
 | 改界面 / 加页面 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) → 对应页面文档（§3.3） |
 | 找全局状态 / 提示 / 进度 / 渲染档位 / 语速 / 注册表 | [renderer/src/common.md](./files/renderer/src/common.md) |

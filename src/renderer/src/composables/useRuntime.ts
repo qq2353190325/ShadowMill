@@ -1,20 +1,25 @@
-// composables/useRuntime.ts —— 运行环境包状态（主进程解包/下载进度 → 外壳横幅 + 设置页）
-// 背景：ffmpeg / hyperframes / whisper 约 632MB 不再随安装包展开，而是安装时带一个 7z、
-// 首次启动由主进程解到 userData（见 src/main/runtime.ts，文档 wiki/files/main/runtime.ts.md）。
-// 解包期间应用可用，但转录 / 转视频 / 逐句对齐会等它完成，所以要有可见的进度与失败重试入口。
+// composables/useRuntime.ts —— 运行环境（分包 ffmpeg / hyperframes）状态 → 外壳横幅 + 设置页
+// 背景：ffmpeg(180MB) 与 hyperframes(440MB) 已从安装包移出、各自成一个包，**用到相关功能时按需下载**
+// （whisper 随安装包，不需要下载）。所以这里要能表达三件事：正在下 / 缺哪些包 / 失败原因。
+// 状态由主进程 runtime:progress 推送 + 首次用 runtime:status 补齐（见 src/main/runtime.ts、
+// 方案见 docs/runtime-pack-split.md）。
 import { computed, ref } from 'vue'
-import type { RuntimeProgressPayload } from '@shared/types'
+import type { RuntimePackName, RuntimeProgressPayload } from '@shared/types'
 
 // 模块级单例：外壳初始化一次，所有页面共享同一份状态（与 useAppStore 同思路）
 const runtime = ref<RuntimeProgressPayload>({
-  stage: 'idle',
+  phase: 'idle',
+  pack: null,
   percent: 0,
-  id: '',
+  packs: [],
+  missing: [],
+  status: { ffmpeg: 'unknown', hyperframes: 'unknown' },
   message: '',
   source: '',
   bytes: 0,
   unpackedBytes: 0,
-  files: 0
+  files: 0,
+  cancellable: false
 })
 let bound = false
 
@@ -24,20 +29,42 @@ export function initRuntime(): void {
   bound = true
   window.runtimeTools.onProgress((d: RuntimeProgressPayload) => { runtime.value = d })
   void window.runtimeTools.status()
-    .then((d: RuntimeProgressPayload) => { if (d && d.stage) runtime.value = d })
+    .then((d: RuntimeProgressPayload) => { if (d && d.phase) runtime.value = d })
     .catch(() => { /* 主进程未就绪：保持 idle，不打扰用户 */ })
 }
 
+const PACK_LABEL: Record<RuntimePackName, string> = {
+  ffmpeg: '音视频处理（ffmpeg）',
+  hyperframes: '视频渲染引擎（HyperFrames）'
+}
+
 export function useRuntime() {
-  const busy = computed(() => runtime.value.stage === 'checking' || runtime.value.stage === 'downloading' || runtime.value.stage === 'extracting')
-  const failed = computed(() => runtime.value.stage === 'failed')
-  // 失败后重试（幂等：主进程并发调用共享同一次执行）
-  async function retry(): Promise<void> {
+  // 「忙」＝正在取清单 / 下载 / 解包：横幅此时显示进度条与取消按钮
+  const busy = computed(() => runtime.value.phase === 'checking' ||
+    runtime.value.phase === 'downloading' || runtime.value.phase === 'extracting')
+  const failed = computed(() => runtime.value.phase === 'error')
+  // 缺包（首次安装的常态）：此时不自动下载，等用户在某处确认后再下
+  const missing = computed<RuntimePackName[]>(() => runtime.value.missing || [])
+  const hasMissing = computed(() => missing.value.length > 0)
+  // 就绪＝没有缺包、也没有在跑；已就绪时界面保持干净（不常驻一句「已就绪」）
+  const ready = computed(() => !busy.value && !failed.value && !hasMissing.value)
+  const cancelable = computed(() => runtime.value.cancellable)
+
+  const missingText = computed(() => missing.value.map((n) => PACK_LABEL[n]).join('、'))
+
+  // 主动准备指定包（省略 = 全部缺的）：用户确认下载 / 失败后重试
+  async function prepare(packs?: RuntimePackName[]): Promise<boolean> {
     try {
-      await window.runtimeTools.prepare()
-    } catch (e) { /* 成败由 runtime:progress 回填，这里只触发 */ }
+      const r = await window.runtimeTools.prepare(packs && packs.length ? packs : missing.value)
+      return !!(r && r.ok)
+    } catch (e) {
+      return false
+    }
   }
-  // 只暴露「要用到的三件事」：状态、是否忙、是否失败（外壳横幅与设置页都只显示这两种态）；
-  // 「已就绪」是常态、不再有任何界面展示它，故不再提供 ready / sizeText（避免死代码）
-  return { runtime, busy, failed, retry }
+  // 取消正在进行的下载 / 解包：取消 = 不下载，且不留半截状态
+  async function cancel(): Promise<void> {
+    try { await window.runtimeTools.cancel() } catch (e) { /* 成败由进度回填 */ }
+  }
+
+  return { runtime, busy, failed, missing, hasMissing, ready, cancelable, missingText, prepare, cancel }
 }

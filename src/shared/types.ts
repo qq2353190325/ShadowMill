@@ -9,6 +9,9 @@ import type { BrowserWindow } from 'electron'
 // ============================================================
 // 失败分支：多数频道必带 message；唯 voice:pick-dir 的「用户取消」分支只回
 // { ok:false, canceled:true }（无 message），故 message 为可选、canceled 用于区分取消与真失败。
+// 运行环境分包名（定义放最前：IpcFail.needPacks 与 ⑧ 的进度载荷都要用；详细说明见本文件「运行环境」一节）
+export type RuntimePackName = 'ffmpeg' | 'hyperframes'
+
 export interface IpcFail {
   ok: false
   message?: string
@@ -16,9 +19,14 @@ export interface IpcFail {
   // 与面向用户的 message 分离——message 说人话，detail 给排障。见 UpdateCheckResult.detail
   detail?: string
   canceled?: boolean
+  // 这次失败是因为「本机缺运行环境包」：界面据此弹「需要下载运行环境（体积）/ 取消」确认框，
+  // 用户确认后调 runtimeTools.prepare(needPacks) 下载，下完由用户在同一个框里点「继续」重发本操作。
+  // 详见 docs/runtime-pack-split.md §5.2
+  needPacks?: RuntimePackName[]
 }
 // 成功分支：{ ok: true } 与业务字段 T 的交叉类型；T 缺省（unknown）表示调用方只关心 ok。
-export type IpcResult<T = unknown> = ({ ok: true } & T) | IpcFail
+// message 在成功分支也可选：取消、幂等复用（"当前没有正在进行的下载"）等场景需要给一句话回执。
+export type IpcResult<T = unknown> = ({ ok: true; message?: string } & T) | IpcFail
 
 // ============================================================
 // ② 主进程装配上下文（各业务模块 register(ctx) 模式）
@@ -193,26 +201,42 @@ export interface UpdateProgressPayload {
 // ============================================================
 // ③.6 运行环境包（src/main/runtime.ts）
 // ============================================================
-// 阶段：idle 未检查；checking 找包/读清单；downloading 从更新源下载包；
-//       extracting 7za 解包；ready 就绪（含 dev / 旧版布局内置）；failed 失败（转录、渲染不可用）
-export type RuntimeStage = 'idle' | 'checking' | 'downloading' | 'extracting' | 'ready' | 'failed'
+// 运行环境（分包：ffmpeg / hyperframes 各自一个 7z，首次用到时下载；whisper 随安装包）
+// ============================================================
+// 为什么分包：ffmpeg(180MB) 被「转录转码」与「渲染」两条线共用、hyperframes(440MB) 只有渲染要、
+// whisper(12.5MB) 缺了转录就完全不能用——三者变化节奏与归属都不同，捆在一起会让每次更新都重下全部。
+// 详见 docs/runtime-pack-split.md。
+// 单个包的状态：ready 已就绪；missing 本机没有（需要下载）；unknown 还没探测过
+export type RuntimePackState = 'ready' | 'missing' | 'unknown'
+// phase：idle 未开始；checking 探测/取清单；downloading 下载中；extracting 解包中；
+//        ready 需要的包都就绪；cancelled 用户取消（**不是失败**）；error 失败（有 detail 可排障）
+export type RuntimePhase = 'idle' | 'checking' | 'downloading' | 'extracting' | 'ready' | 'cancelled' | 'error'
 export interface RuntimeProgressPayload {
-  stage: RuntimeStage
-  // downloading / extracting 阶段有效；ready 为 100
+  phase: RuntimePhase
+  // 正在处理的包；空闲 / 就绪时为 null
+  pack: RuntimePackName | null
+  // downloading / extracting 阶段有效（当前这个包的百分比），ready 为 100
   percent: number
-  // 运行环境包的内容 id（sha512 前 12 位，解包目录名），未知时为空串
-  id: string
+  // 本次操作需要的全部包（供界面说明「要下什么」）
+  packs: RuntimePackName[]
+  // 当前仍缺的包（就绪后为空数组）
+  missing: RuntimePackName[]
+  // 各包在本机的状态（设置页据此分项显示）
+  status: Record<RuntimePackName, RuntimePackState>
   // 用户可见文案（人话：正在做什么 / 已经就绪 / 失败了怎么办）
   message: string
   // 排障详情（7za 退出码、HTTP 状态、路径等），仅失败或降级时有值
   detail?: string
-  // local=随安装包携带；download=从更新源下载；dev/legacy=安装目录内已是展开形态；cache=复用已解包目录
+  // 来源：remote=从更新源下载；local=用户指定的本地 7z（SHADOWMILL_RUNTIME_PACK / 设置页选择）；
+  //       legacy=沿用旧版整体包已解开的目录；dev=开发态项目根 resources；cache=复用已解包目录
   source: string
-  // 包体积（下载进度用）
+  // 当前包的下载体积（下载进度用）
   bytes: number
-  // 解包后体积与文件数（解包进度的分母，也用于设置页展示「运行环境 632 MB / 4916 文件」）
+  // 解包后体积与文件数（解包进度的分母）
   unpackedBytes: number
   files: number
+  // 是否可取消（downloading / extracting 期间为 true）
+  cancellable: boolean
 }
 
 // ============================================================
@@ -638,10 +662,11 @@ export interface ProjectHtmlResult {
 export interface VideoRenderPayload extends RenderOverride {
   htmlPath?: string
 }
-// 渲染结果：失败分支的 compatible=false 表示 HTML 未通过 HyperFrames 合规校验
+// 渲染结果：失败分支的 compatible=false 表示 HTML 未通过 HyperFrames 合规校验；
+// needPacks 非空表示本机缺运行环境包（界面据此弹下载确认框，见 docs/runtime-pack-split.md §5.2）
 export type VideoRenderResult =
   | { ok: true; outputVideo: string; projectDir: string }
-  | { ok: false; message: string; compatible?: boolean }
+  | { ok: false; message: string; compatible?: boolean; needPacks?: RuntimePackName[] }
 
 // ============================================================
 // ⑧ 进度推送（4 路 main → renderer，均为单订阅语义）
@@ -720,6 +745,9 @@ export interface PreloadApi {
     // 更新源与自动检查开关（settings.json 的 updater 段）
     saveUpdater(updater: Partial<UpdaterSettings>): Promise<IpcResult<SettingsSaveResult>>
     test(customModel: CustomModelConfig): Promise<IpcResult>
+    // 运行环境「从本地文件安装」：弹出文件选择框选一个 <pack>.7z 并导入（离线 / 内网机器兜底）。
+    // 取消时 { ok:false, canceled:true }；导入成功后调用方接着 runtimeTools.prepare()
+    pickRuntimePack(): Promise<IpcResult<{ pack?: RuntimePackName }>>
   }
   // 应用自更新（electron-updater）：检查 / 下载 / 取消 / 重启安装 + 进度推送
   updateTools: {
@@ -738,13 +766,15 @@ export interface PreloadApi {
     openLog(): Promise<IpcResult<{ path: string }>>
     onProgress(callback: (data: UpdateProgressPayload) => void): void
   }
-  // 运行环境包（ffmpeg / hyperframes / whisper 约 632MB）：安装包里只带一个 7z，
-  // 首次启动解到 userData/runtime/<id>/；页面据此显示「正在准备运行环境 x%」
+  // 运行环境（分包）：ffmpeg / hyperframes 各自一个 7z、首次用到时下载；whisper 随安装包。
+  // 页面据此显示「正在下载运行环境 x%」，以及缺失时的「需要下载 xx MB」与取消入口
   runtimeTools: {
     status(): Promise<RuntimeProgressPayload>
-    // 主动准备（失败后重试 / 设置页点「重新准备」）；幂等，并发调用共享同一次执行。
-    // 进度仍由 runtime:progress 回推，这里只回成败
-    prepare(): Promise<IpcResult>
+    // 主动准备指定包（省略 = 全部）：用户确认下载 / 失败后重试 / 设置页「下载」按钮。
+    // 幂等，并发调用共享同一次执行；进度由 runtime:progress 回推，这里只回成败（取消时 ok=false）
+    prepare(packs?: RuntimePackName[]): Promise<IpcResult>
+    // 取消正在进行的下载 / 解包（用户点「取消」）：取消后不留半份状态，也不产生任何下载结果
+    cancel(): Promise<IpcResult>
     onProgress(callback: (data: RuntimeProgressPayload) => void): void
   }
   // 历史数据目录（品牌/目录改名留下的老数据）：渲染层挂载时问一次有没有待处理的旧目录，

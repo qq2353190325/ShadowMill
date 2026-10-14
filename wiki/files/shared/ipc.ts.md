@@ -4,8 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量（含派生类型）
-- **规模**：127 行
-- **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video / Runtime / **Legacy** 十个分组（共 **83** 个频道））、`IpcChannel`（频道字面量联合类型）
+- **规模**：132 行
+- **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video / Runtime / **Legacy** 十个分组（共 **85** 个频道））、`IpcChannel`（频道字面量联合类型）
 
 ## 1. 作用与职责
 
@@ -50,6 +50,7 @@
 | `Settings.SaveRender` | `settings:save-render` | 保存视频渲染**默认档位**（只更新 `render` 段，不动 customModel） |
 | `Settings.SaveUpdater` | `settings:save-updater` | 保存**更新设置**（只更新 `updater` 段：`feedUrl` / `autoCheck` / `skippedVersion`） |
 | `Settings.Test` | `settings:test` | 用给定 `CustomModelConfig` 发起一次连通性测试 |
+| `Settings.PickRuntimePack` | `settings:pick-runtime-pack` | renderer → main，`invoke`，运行环境「从本地文件安装…」：弹文件框选 `ffmpeg.7z` / `hyperframes.7z`，复制到 `userData/runtime/local-import/` 并生成同名清单（离线 / 内网机器的兜底入口，见 `docs/runtime-pack-split.md` §11.1） |
 
 ### 2.4 Update 分组（updater.ts，应用自更新）
 
@@ -144,13 +145,16 @@
 | `Video.Render` | `video:render` | HyperFrames 渲染为视频 |
 | `Video.Progress` | `video:progress` | main → renderer，推送渲染进度 `{ text }` |
 
-### 2.9 Runtime 分组（runtime.js / runtime.ts）
+### 2.9 Runtime 分组（runtime.ts，运行环境分包）
+
+> 运行环境由「安装包里带一个整体包」改为**分包**：`ffmpeg` 与 `hyperframes` 各自一个 7z、首次用到时下载并解到 `<userData>/runtime/<包名>/`，`whisper` 随安装包。方案见 `docs/runtime-pack-split.md`。
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
-| `Runtime.Status` | `runtime:status` | renderer → main，`invoke`，查询运行环境包状态 |
-| `Runtime.Prepare` | `runtime:prepare` | renderer → main，`invoke`，主动准备运行环境包 |
-| `Runtime.Progress` | `runtime:progress` | main → renderer，`send`，推送运行环境包进度 |
+| `Runtime.Status` | `runtime:status` | renderer → main，`invoke`，查询运行环境状态（`RuntimeProgressPayload`：`phase` / `pack` / `percent` / `packs` / `missing` / `status` / …） |
+| `Runtime.Prepare` | `runtime:prepare` | renderer → main，`invoke`，主动准备指定包（载荷 `packs?: RuntimePackName[]`，**省略 = 全部**） |
+| `Runtime.Cancel` | `runtime:cancel` | renderer → main，`invoke`，**取消**进行中的下载 / 解包（中断 HTTP 请求与 `7za` 子进程，并清掉半成品） |
+| `Runtime.Progress` | `runtime:progress` | main → renderer，`send`，推送运行环境进度（单订阅；唯一出口 `push()`） |
 
 ### 2.10 Legacy 分组（`src/main/index.ts`，历史数据目录）
 
@@ -188,14 +192,14 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 | `src/main/whisper.ts` | 同上 |
 | `src/main/video.ts` | 同上 |
 | `src/main/updater.ts` | 同上 |
-| `src/main/runtime.ts` | 同上（`Runtime` 三频道） |
+| `src/main/runtime.ts` | 同上（`Runtime` 四频道：`Status` / `Prepare` / `Cancel` / `Progress`） |
 | `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`，逐方法绑定频道 |
 | `tsconfig.web.json` | `include` 含 `"src/shared/**/*.ts"`，故渲染层也可直接引用 |
 
 ### 3.2 `as const` 与 `IpcChannel`
 
 - `export const IPC = { ... } as const` 使每个属性成为**只读的字面量类型**（如 `'window:minimize'` 而非 `string`），赋值给其他变量时不会意外放宽。
-- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video' | 'Runtime' | 'Legacy'` 十个键，取 `[keyof ...]` 后得到的是**十个分组对象类型**的并集，而不是 83 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
+- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video' | 'Runtime' | 'Legacy'` 十个键，取 `[keyof ...]` 后得到的是**十个分组对象类型**的并集，而不是 85 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
 
 ### 3.3 三种通道方向约定
 
@@ -221,7 +225,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 
 - **禁止改动频道名字符串**：文件首行注释即写明"频道名与现行实现逐一对应，禁止改动"。改动会导致 `ipcMain.handle` 未命中，渲染层收到 `Error: No handler registered for 'xxx'`。
 - **命名不再完全对齐**：`Window.*` 用 `window:` 前缀、`Video.OpenHtml` 却用 `dialog:open-html` 前缀，属历史遗留，**不可"顺手统一"**，因为字符串就是协议本身。
-- **新增频道需四处同步**：本文件加常量 → `src/main/*.ts` 注册 handler（载荷用 `shared/types.ts` 的 `*Payload` 标注）→ `src/preload/index.ts` 绑定方法 → `src/shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`src/preload/index.d.ts` 只做 `extends`，无需改动）。本轮 `legacy:status` / `legacy:resolve` 就是按这条流程加的：`ipc.ts` 加 `Legacy` 分组 → `src/main/index.ts` 在 `createWindow()` 之后注册两个 handler → preload 加 `legacyTools` 命名空间 → `PreloadApi.legacyTools` 补签名。
+- **新增频道需四处同步**：本文件加常量 → `src/main/*.ts` 注册 handler（载荷用 `shared/types.ts` 的 `*Payload` 标注）→ `src/preload/index.ts` 绑定方法 → `src/shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`src/preload/index.d.ts` 只做 `extends`，无需改动）。本轮 `legacy:status` / `legacy:resolve` 就是按这条流程加的：`ipc.ts` 加 `Legacy` 分组 → `src/main/index.ts` 在 `createWindow()` 之后注册两个 handler → preload 加 `legacyTools` 命名空间 → `PreloadApi.legacyTools` 补签名。运行环境分包的 `Runtime.Cancel` 与 `Settings.PickRuntimePack` 同法：`runtime.ts` / `settings.ts` 各注册一个 handler，preload 分别加 `runtimeTools.cancel` / `settingsTools.pickRuntimePack`，并在 `IpcFail` / 各业务结果类型上补 `needPacks`。
 - **`Update.OpenLog` 的位置与语义**（2026-10 新增）：它排在 `Status` 与 `Progress` 之间，值 `update:open-log`。主进程侧刻意**不经过** `ensureUpdater()`——更新失败时最常见的场景恰恰是 electron-updater 没加载起来，若把它挂在懒加载之后，最需要看日志的时候反而打不开日志。
 - **`Update.Status` 的位置与语义**（2026-10 新增）：它排在 `Version` 之后、`OpenLog` 之前，值 `update:status`，`ipcMain.handle(IPC.Update.Status, () => payload())`。存在的理由：启动静默检查发生在设置页订阅 `update:progress` 之前，没有这条通道渲染层只会看到 `idle`——那次失败（以及它的「查看详情 / 打开日志目录」入口）就丢了。主进程 `state` 常驻，设置页每次挂载都能拉到当前状态；它与 `OpenLog` 一样不进 `ensureUpdater()`（只读常驻状态，与 electron-updater 能否加载无关）。
 - **分组名 ≠ 文件名**：`Settings` 对应 `settings.ts`，`Video` 对应 `video.ts`，`App` 分组实际由 `src/main/index.ts` 处理，`Voice` 分组横跨 `voice.ts` 与 `ttsAlign.ts`，**`Legacy` 分组也由 `src/main/index.ts` 处理**（与 `App` 同理）。

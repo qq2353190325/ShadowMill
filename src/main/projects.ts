@@ -30,9 +30,13 @@ import type {
   ProjectSetRenderPayload,
   ProjectSetVideoPayload,
   RegisterCtx,
+  RuntimePackName,
   Scene,
   SubtitleLine
 } from '../shared/types'
+
+// 提取视频音轨要哪几包（分包后 ffmpeg 不再随安装包，缺了就由界面问用户是否下载）
+const FFMPEG_PACKS: RuntimePackName[] = ['ffmpeg']
 
 // ===== 项目数据结构 =====
 // 结构定义已上移到 src/shared/types.ts（跨进程单一真源），此处再导出以保持既有引用面：
@@ -815,11 +819,13 @@ function register(ctx?: RegisterCtx): void {
     if (!videoRef) return { ok: false, message: '该项目没有视频素材：请先在「HTML生成」页的「视频素材」里选「选择本地视频文件…」导入' };
     const videoPath = path.join(projectDir(name), videoRef);
     if (!fs.existsSync(videoPath)) return { ok: false, message: '视频素材文件不存在：' + videoRef };
-    // 运行环境（ffmpeg 等共约 632MB）首次启动可能还在解包：等它就绪再判可执行文件
-    const rt = await runtime.ensureRuntime();
-    if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好', detail: rt.detail };
+    // 分包之后运行环境不再随安装包：提取音轨要 ffmpeg 包。纯校验（不下载），缺包交给界面问用户
+    const lack = runtime.missingPacks(FFMPEG_PACKS);
+    if (lack.length) {
+      return { ok: false, needPacks: lack, message: '提取视频音轨需要先下载运行环境（' + runtime.packSizeText(lack) + '）' };
+    }
     const ffmpeg = hfEnv.BUILTIN_RESOURCES.ffmpeg;
-    if (!fs.existsSync(ffmpeg)) return { ok: false, message: '未找到内置 ffmpeg（resources/ffmpeg/bin）' };
+    if (!ffmpeg || !fs.existsSync(ffmpeg)) return { ok: false, message: '未找到 ffmpeg（运行环境包可能损坏，可在设置页重新下载）' };
     const stem = path.basename(videoPath).replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_');
     const outName = stem + '.m4a';
     const audioDir = path.join(projectDir(name), 'audio');

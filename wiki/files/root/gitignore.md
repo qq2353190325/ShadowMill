@@ -24,15 +24,19 @@
 
 | 规则 | 被忽略的内容 | 原因 |
 | --- | --- | --- |
-| `resources/` | `resources/` 目录全部内容——依据文件内注释，即**打包内置运行时**：ffmpeg / node / hyperframes + chrome-headless-shell | 这是**大体积二进制**（注释原文：「体积大不进 git」）。它们由打包流程或下载脚本提供，通过 `package.json` 的 `extraResources` 复制进安装目录，而不是作为源码分发 |
+| `resources/` | `resources/` 目录全部内容——依据文件内注释，即**打包内置运行时**（注释原文：ffmpeg / node / hyperframes + chrome-headless-shell） | 这是**大体积二进制**（注释原文：「体积大不进 git」）。**分包后该目录的实际内容是 `ffmpeg/`（179.9 MB / 9 文件）、`hyperframes/`（439.9 MB / 4892 文件）与 `whisper/`（12.5 MB / 15 文件）三个子目录（合计 632.3 MB / 4916 文件），`node/` 已删除**；其中**只有 `whisper/` 随安装包**（经 `extraResources`），`ffmpeg/` 与 `hyperframes/` 由 `npm run runtime:pack` 打成 `ffmpeg.7z`（实测 42.6 MB）与 `hyperframes.7z`（实测 103.1 MB）上传更新源、**由用户确认后才下载**，不作为源码分发 |
+| `build/` | `build/` 目录全部内容（注释原文：运行环境包产物——`scripts/pack-runtime.mjs` 生成） | 打包中间产物：`build/runtime-pack/ffmpeg.7z` + `ffmpeg.json`、`build/runtime-pack/hyperframes.7z` + `hyperframes.json`、`build/tools/7za.exe`（解包器，随安装包）。**注释里的 `runtime.7z + runtime.json` 是分包前的旧口径**；脚本里的 `cleanLegacySinglePack()` 会把这两个遗留产物自动删掉，产物可直接重打，不进 git |
 
 注释原文（第 5 行）：`# 打包内置运行时（ffmpeg / node / hyperframes + chrome-headless-shell，体积大不进 git）`
+注释原文（第 8 行）：`# 运行环境包产物（scripts/pack-runtime.mjs 生成：runtime.7z + runtime.json + 7za.exe，体积大不进 git）`
+
+> 这两行注释尚未随「运行环境分包」改造更新（`resources/node` 已删除、产物已改名为 `ffmpeg.7z` / `hyperframes.7z`），**以本表说明为准**；`.gitignore` 的规则本身（忽略 `resources/` 与 `build/`）不变。旧单包产物 `runtime.7z` / `runtime.json` 现在由 `scripts/pack-runtime.mjs` 的 `cleanLegacySinglePack()` 在打包后自动清理（实测打包目录里只剩 `ffmpeg.7z/.json` 与 `hyperframes.7z/.json`）。
 
 ### 2.3 构建产物
 
 | 规则 | 被忽略的内容 | 原因 |
 | --- | --- | --- |
-| `dist/` | **electron-builder** 的输出：安装包 / 便携版 / 缓存（注释原文如此） | 与 `package.json` 的 `build.directories.output: "dist"` 对应；产出物可重新生成，且单文件动辄上百 MB |
+| `dist/` | **electron-builder** 的输出：安装包 / 便携版 / 缓存（注释原文如此） | 与 `package.json` 的 `build.directories.output: "dist"` 对应；产出物可重新生成，且单文件动辄上百 MB（分包与 `electronLanguages` 收口后实测安装包 **105.08 MB**，`latest.yml` 与 `.exe.blockmap` 0.11 MB） |
 | `out/` | **electron-vite** 的三端构建输出（`out/main`、`out/preload`、`out/renderer`） | 与 `package.json` 的 `main: "out/main/index.js"` 对应；`npm run build` 可随时重建 |
 
 ### 2.4 日志
@@ -87,24 +91,24 @@
 | `node_modules/` | `npm install`（依赖清单见 `package.json` 的 `dependencies` / `devDependencies`） |
 | `out/` | `npm run build`（即 `electron-vite build`） |
 | `dist/` | `npm run pack`（`electron-builder --dir`）或 `npm run dist`（`electron-builder --win`） |
-| `resources/` | 预先准备的本地运行时目录；打包时由 `build.extraResources` 的 `{ from: "resources", to: "." }` 复制进安装目录 |
+| `resources/` | 预先准备的本地运行时目录；打包时由 `build.extraResources` 的 `{ from: "resources/whisper", to: "whisper" }` 取其中一份复制进安装目录（`ffmpeg` / `hyperframes` 走运行环境包，见下） |
 
 ## 4. 与其他文件的关系
 
 | 关联文件 | 关系 |
 | --- | --- |
-| `package.json` | `build.directories.output: "dist"` 对应 `dist/` 规则；`extraResources.from: "resources"` 对应 `resources/` 规则；`main: "out/main/index.js"` 对应 `out/` 规则；`dependencies` / `devDependencies` 对应 `node_modules/` 规则 |
+| `package.json` | `build.directories.output: "dist"` 对应 `dist/` 规则；`extraResources.from: "resources/whisper"` / `"build/tools"` 对应 `resources/` 与 `build/` 两条规则；`main: "out/main/index.js"` 对应 `out/` 规则；`dependencies` / `devDependencies` 对应 `node_modules/` 规则 |
 | `electron.vite.config.ts` | 其构建输出即为被忽略的 `out/` |
 | `src/**`、`wiki/**`、`README.md`、`vendor/` | **未**被本文件忽略，属正常跟踪内容（`vendor/gsap/gsap.min.js` 是随包分发的运行资源，见 `package.json` 的 `build.files`） |
 
 ## 5. 注意事项与实现要点
 
-- **`resources/` 进 git 会让仓库爆体积**：该目录装的是 ffmpeg、node、hyperframes + chrome-headless-shell 等成套二进制运行时，单个可执行文件就可达数十至上百 MB，且是压缩过的二进制、git 无法有效增量存储——一旦提交，历史里每一版都会永久留存，克隆与拉取成本不可逆。
-- **忽略的连带影响**：`resources/` 不入库意味着**新环境克隆后应用无法直接运行**（缺 ffmpeg 等），必须另行分发或下载这些运行时。
-- **忽略 ≠ 不打包**：`resources/` 被 git 忽略，但**仍然会进入安装包**（通过 `extraResources`）。版本控制范围与分发范围是两件事，不要混淆。
+- **`resources/` 进 git 会让仓库爆体积**：该目录装的是 ffmpeg、hyperframes 与 whisper 等成套二进制运行时（合计 632.3 MB / 4916 文件），单个可执行文件就可达数十至上百 MB，且是压缩过的二进制、git 无法有效增量存储——一旦提交，历史里每一版都会永久留存，克隆与拉取成本不可逆。
+- **忽略的连带影响**：`resources/` 不入库意味着**新环境克隆后应用无法直接运行**（缺 whisper / ffmpeg / hyperframes），必须另行分发或下载这些运行时（`npm run runtime:pack` 需要本地已备好 `resources/`）。
+- **忽略 ≠ 不打包**：`resources/` 被 git 忽略，但其中 `resources/whisper` **仍然会进入安装包**（通过 `extraResources`）；`resources/ffmpeg` / `resources/hyperframes` 则只进更新源上的两个 7z，**不进安装包**。版本控制范围与分发范围是两件事，不要混淆。
 - **`out/` 与 `dist/` 职责不同**：`out/` 是 electron-vite 的三端编译产物（应用代码），`dist/` 是 electron-builder 的安装包/解包目录（含 `out/` 与 `resources/` 的最终形态）。
 - **无 `!` 否定规则**：如果将来需要把 `resources/` 里的**小体积必要文件**（如某个配置或脚本）纳入版本库，必须新增 `!resources/xxx` 这样的否定规则，并注意 git 的「已忽略目录内的文件无法用 `!` 重新包含」限制——需要先不忽略该目录本身。
 - **用户项目数据不在仓库内**：项目只落在 `userData/projects/`（Electron 用户数据目录），既不进 git 跟踪，也不涉及 `build.files`，因此本文件无需为项目数据写任何规则。
-- **`vendor/` 未被忽略，且刻意如此**：`vendor/gsap/gsap.min.js` 是随包分发的 GSAP 运行时（不进 asar 之外的 extraResources，而是经 `build.files` 的 `vendor/**/*` 进 asar）。它与 `resources/` 的处理方式相反：`resources/` 是可由命令准备的大体积二进制（忽略 + `extraResources`），`vendor/` 是体积小、必须随源码入库的分发资源——**不要**给它加忽略规则，否则新环境克隆后 GSAP 本地化会静默退化为 CDN 加载。
+- **`vendor/` 未被忽略，且刻意如此**：`vendor/gsap/gsap.min.js` 是随包分发的 GSAP 运行时（不进 asar 之外的 extraResources，而是经 `build.files` 的 `vendor/**/*` 进 asar）。它与 `resources/` 的处理方式相反：`resources/` 是可由命令准备的大体积二进制（忽略 + 部分 `extraResources`），`vendor/` 是体积小、必须随源码入库的分发资源——**不要**给它加忽略规则，否则新环境克隆后 GSAP 本地化会静默退化为 CDN 加载。
 - **无锁文件规则**：本文件**没有**忽略 `package-lock.json` 之类的锁文件，即锁文件应当入库以保证依赖可复现。
 - **`.tmp/` 与 `*.tmp` 成对出现**：前者管目录、后者管文件，删掉任一条都会留下漏网之鱼。

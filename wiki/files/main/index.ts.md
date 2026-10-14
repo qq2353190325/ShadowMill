@@ -314,7 +314,7 @@ whenReady
   ├─ video.register(ctx)
   ├─ whisper.register(ctx)
   ├─ updater.register(ctx)                // 内部另安排 3s 后的启动静默检查
-  └─ runtime.register(ctx)                // 最后注册；启动即开始后台准备运行环境包（不延迟），排最后只保证 handler 先挂上
+  └─ runtime.register(ctx)                // 最后注册；**启动只探测、不下载**（缺包时推「运行环境需要下载（体积）」），排最后只保证 handler 先挂上
 ```
 
 顺序即数据依赖顺序；源码注释给出的依赖图：`settings ← htmlAgent ← projects ← voice ← ttsAlign`，`hfEnv ← projects, voice, whisper, ttsAlign, video, runtime`，`updater ← settings`，全图**无环**。`hfEnv.ts` 不注册 IPC，因此不在此列表中。
@@ -342,7 +342,7 @@ whenReady
 - 渲染层的 `src/renderer/src/composables/useLegacyData.ts`（挂载时问一次、回传选择）与 `src/renderer/src/components/LegacyDataDialog.vue`（应用内弹窗）是本文件 `legacy:*` 契约的唯一消费方。
 - `src/renderer/src/pages/HtmlGenPage/index.vue` 生成 `hgpreview://p/<encodeURIComponent(appState.currentName)>/<encodeURIComponent(relFile)>?v=<时间戳>` 形式的 iframe 地址；`src/renderer/index.html` 的 CSP 中 `frame-src file: hgpreview:` 放行该协议。
 - `src/main/projects.ts` 提供 `projectDir(name)`，是本文件协议处理器的路径基准；`src/main/settings.ts` 提供 `isPristineSettings()`，是迁移时 `settings.json` 特例的判据。**这两处调用都不构成环**（index 是装配器，位于依赖图顶端）。
-- 业务模块各自用 `app.getPath('userData')` 取数据根（如 `projects.projectsRoot()` / `whisper.modelsDir()` / `runtime.runtimeRoot()` / `settings.settingsFile()`），本文件**不再**在任何位置改写 userData，因此「模块级快照 vs import 提升」在这一版里是**纯保险**问题（见 §5）。
+- 业务模块各自用 `app.getPath('userData')` 取数据根（如 `projects.projectsRoot()` / `whisper.modelsDir()` / `runtime.runtimeDir()`（`runtimeRoot()` 已随分包删除，各包根用 `runtime.packRoots()`） / `settings.settingsFile()`），本文件**不再**在任何位置改写 userData，因此「模块级快照 vs import 提升」在这一版里是**纯保险**问题（见 §5）。
 
 ## 5. 注意事项与实现要点
 
@@ -367,7 +367,7 @@ whenReady
 - **安全边界**：`path.resolve` + `startsWith(dir + path.sep)` 组合是防目录穿越的唯一防线；`full === dir` 放行但随后会被 `isFile()` 判否返回 404。每段单独 `decodeURIComponent`，注意编码后的斜杠在分段解码后才会显现。`Range` 只影响读取的字节区间，**不改变路径校验结果**（校验在 `rangeResponse` 之前完成）。
 - **排障入口**：预览异常时看 `userData/preview-protocol.log`；**首屏慢 / 启动卡顿看 `userData/startup.log`**（每行带「距进程启动毫秒数」，可直接判断时间花在模块加载、建窗还是页面加载），历史数据迁移/删除/「稍后」那几行也在同一文件里（见 §3.1⑤）。
 - **两种 IPC 语义不能混用**：窗口控制是 `ipcMain.on`（渲染层 `send`，单向、无返回值），剪贴板与 `legacy:*` 都是 `ipcMain.handle`（渲染层 `invoke`，返回 Promise）。`IPC.Window.MaximizedChange` 是主进程 → 渲染层的推送频道；`legacy:*` 没有主 → 渲染的推送，**完全由渲染层拉取**。
-- **`register(ctx)` 顺序有约束**：必须在 `createWindow()` 之后、且按 settings → projects → voice → ttsAlign → video → whisper → updater → runtime 注册，避免跨域依赖缺位（`runtime` 放最后只是保证它的 handler 先挂上：它现在**启动即开始后台准备、不再有延迟**，同步部分只有几个 `existsSync` / `statSync` 探测）；`legacy:*` 两个 handler 也在这个位置注册，顺序上写在 `ctx` 之前。
+- **`register(ctx)` 顺序有约束**：必须在 `createWindow()` 之后、且按 settings → projects → voice → ttsAlign → video → whisper → updater → runtime 注册，避免跨域依赖缺位（`runtime` 放最后只是保证它的 handler 先挂上：它现在**启动只做一次探测、不下载**，同步部分只有几个 `existsSync` / `statSync` 探测，是否下载由用户在界面上确认（`ffmpeg` 实测 42.6 MB、`hyperframes` 实测 103.1 MB，两包合计 145.7 MB））；`legacy:*` 两个 handler 也在这个位置注册，顺序上写在 `ctx` 之前。
 - **`window-all-closed` 要给更新安装让路**：`updater.quitForUpdate()` 为真时直接返回，否则 `app.quit()` 会与 electron-updater 调起的 NSIS 安装器抢退出流程（表现为「点了重启安装但没装上」）。
 - **窗口引用失效**：`closed` 后 `mainWindow = null`，所有 IPC 回调都先做空值判断，`maximize`/`unmaximize` 回调使用 `mainWindow?.` 可选链。`legacy:*` 两个 handler 不使用窗口引用（不弹原生框、不需要父窗口），因此**与窗口生命周期完全解耦**。
 - **输出布局**：主进程 `out/main/index.js`、preload `out/preload/index.js`、渲染层 `out/renderer/`；`__dirname` 相对定位依赖这一布局。

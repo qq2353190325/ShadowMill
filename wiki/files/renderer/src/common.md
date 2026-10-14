@@ -1,6 +1,6 @@
 # 渲染层公共方法与工具（src/renderer/src/composables、utils、constants.ts、pages/index.ts）
 
-> 渲染层 13 个公共模块：全局状态、轻提示、渲染进度、运行环境包状态、历史数据处置、渲染档位、**跨页导航意图**、语速、转义、时间格式化、档位选项、**渲染层常量**与页面注册表。
+> 渲染层 14 个公共模块：全局状态、轻提示、渲染进度、运行环境状态、**运行环境确认框**、历史数据处置、渲染档位、**跨页导航意图**、语速、转义、时间格式化、档位选项、**渲染层常量**与页面注册表。
 
 - **覆盖文件**（行数为源文件行数）
 
@@ -9,7 +9,8 @@
 | `src/renderer/src/composables/useAppStore.ts` | 107 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写（键名取 `constants.ts`） |
 | `src/renderer/src/composables/useToast.ts` | 22 | 全局轻提示队列（自增 id + 2800ms 自动移除） |
 | `src/renderer/src/composables/useRenderProgress.ts` | 92 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行并生成中文进度文案（只上屏用户看得懂的阶段） |
-| `src/renderer/src/composables/useRuntime.ts` | 43 | 运行环境包（约 716MB）状态单例：`runtime:progress` 订阅 + `runtime:status` 首帧补齐，派生 `busy` / `failed` 与失败重试 `retry()` |
+| `src/renderer/src/composables/useRuntime.ts` | 70 | 运行环境（**分包** ffmpeg / hyperframes，首次用到时下载）状态单例：`runtime:progress` 订阅 + `runtime:status` 首帧补齐，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()` |
+| `src/renderer/src/composables/useEnvGate.ts` | 158 | 全局唯一的「需要下载运行环境」确认框单例：`guard(need, actionName, cont?)` → `confirmDownload()` / `cancelDownload()` / `continueAction()` / `close()`，三态 `confirm \| downloading \| ready`（装好后按钮变「继续」、**不自动续做**）；进度**不自己订阅** `runtime:progress`，而是 `watch` 消费 `useRuntime` 的状态（全渲染层只有 `useRuntime.ts` 一处 onProgress 注册） |
 | `src/renderer/src/composables/useLegacyData.ts` | 60 | 旧版本数据（品牌/目录改名留下）提示：挂载时问一次 `legacy:status`，有结果就弹应用内弹窗，并把用户选择经 `legacy:resolve` 回传 |
 | `src/renderer/src/composables/useRenderOptions.ts` | 41 | 视频渲染档位：全局默认载入（`settings.json` 的 `render`）+ 生效档位 + 项目级覆盖写入 |
 | `src/renderer/src/composables/useNavIntent.ts` | 30 | 跨页面「导航意图」信号（模块级 `ref` 单例）：`requestSettingsSection()` 置位、目标页 `consumeSettingsSection()` 读取并复位；设置页 5 个分类的**唯一枚举来源**（`SETTINGS_SECTIONS`） |
@@ -20,7 +21,7 @@
 | `src/renderer/src/constants.ts` | 14 | 渲染层公共常量：`localStorage` 键名前缀 `STORAGE_PREFIX` + 两个持久化键（**前缀故意不跟随品牌名**，改前缀必须补迁移） |
 | `src/renderer/src/pages/index.ts` | 51 | 页面注册表 + `goPage` 导航（**刷新项目失败也照切页**并把原因 toast 出来；含强制重挂载序号），替代 `vue-router` |
 
-- **类型**：组合式函数（全局状态 / 提示 / 进度 / 运行环境 / 旧数据 / 档位 / 导航意图）+ 纯工具函数（档位选项、语速 / 转义 / 时间）+ 常量模块 + 页面注册表与导航函数。这些文件共同替代了旧版挂在 `window.App` 上的 `AppState`、`toast`、HF 进度监听、`rateClamp/applyRate/stepRate`、`escTxt`、时间格式化与 `pages/goPage`。
+- **类型**：组合式函数（全局状态 / 提示 / 进度 / 运行环境状态与确认框 / 旧数据 / 档位 / 导航意图）+ 纯工具函数（档位选项、语速 / 转义 / 时间）+ 常量模块 + 页面注册表与导航函数。这些文件共同替代了旧版挂在 `window.App` 上的 `AppState`、`toast`、HF 进度监听、`rateClamp/applyRate/stepRate`、`escTxt`、时间格式化与 `pages/goPage`。
 
 > **`localStorage` 键名与品牌文案各归一层**：键名（`'myapp.projectCtx'` / `'myapp.settingsSection'`）定义在 `src/renderer/src/constants.ts`，各消费处只 `import` 常量、不再写字面量；**前缀 `'myapp.'` 故意不跟随品牌名**（prod 下 `file://` 同源，键名就是用户数据的地址，改名会让老用户「上次项目 / 设置页分类」读不到），要改必须补「读旧键 → 写新键」的迁移。品牌文案（应用名 / 英文名 / 口号）则是三端共用的 `src/shared/constants.ts`，与本文件无关。详见 [constants.ts.md](./constants.ts.md)。
 
@@ -181,29 +182,65 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 **注意事项**：**必须以完整行为单位解析**（`[Render:trace]` 行可能被 IPC 分块从任意位置截断，直接对每次 chunk 做 `JSON.parse` 会频繁失败）；**半行只在“收到换行”后才被消费**，若 CLI 的最后一行没有以 `\n` 结尾（进程结束时常见），它不会被本次解析计入——这是刻意取舍，避免解析半截 JSON；**“宁可不刷新”的代价**：若 CLI 一条 trace 都不发（例如人为调高日志级别）、或长时间停在未登记阶段，状态区会一直停在上一条文案（整场都无 trace 时停在本页占位文案），这是为“不显示术语”付的代价，判断为可接受；**唯一显示英文的出口是 `status === 'error'` 的失败原因**（截断 120 字），属刻意保留的诊断信息；**`slice(tIdx + 14)` 的魔法数**与 `'[Render:trace]'.length` 绑定，若日志标记改名，必须同步改 `indexOf` 判定与偏移量两处；**`elapsedMs` 是自流水线开始的总耗时**（CLI 另有 `durationMs` 表示本阶段耗时，本模块不使用），`Math.round` 四舍五入，因此 1499ms 显示 `已用 1s`、1500ms 显示 `已用 2s`；**帧进度只对三个 `capture_*` 显示**，`capture_calibration` 写的是探针帧、`framesCompleted` 恒为 0，报帧数会误导；**映射缺失既不吞也不显示**——查不到 `HF_PHASE_LABELS` 就整条不上屏，所以 HyperFrames 升级后若新增/改名阶段，界面上会“少一段进度”，需要补表（CLI 内部的 `pipeline` / `file_server` / `worker_resolution` / `capture_strategy` / `hdr_detection` 属有意不补）；**`catch (e)` 为空块**，解析异常只用于“放弃本条”，不打印错误避免刷屏，代价是排查解析问题需自行打断点；**单例与订阅次数**——`renderProgress` 是模块级 `reactive`，多个页面读同一份文本，但 `initRenderProgress()` 若被多处调用，最终生效的是**最后一次**传入的回调（preload 单订阅语义），不会重复处理同一 chunk。
 
-## 4. 运行环境包状态：composables/useRuntime.ts
+## 4. 运行环境：composables/useRuntime.ts 与 composables/useEnvGate.ts
 
-运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）不再随安装包展开，而是安装包里带一个 7z、首次启动由主进程解到 `userData`（主进程实现见 [main/runtime.ts.md](../../main/runtime.ts.md)）。解包期间应用可用，但转录 / 转视频 / 逐句对齐会等它完成，因此需要一个**可见的进度与失败重试入口**。
+运行环境已**分包**：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）各自一个 7z、**首次用到时**由用户确认后下载并解到 `<userData>/runtime/<包名>/`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14；比旧单包 `runtime.7z` 147.4 MB 还小）；`whisper`（12.5 MB）随安装包，装完即可离线转录（主进程实现见 [main/runtime.ts.md](../../main/runtime.ts.md)，方案见 `docs/runtime-pack-split.md`）。渲染层因此拆成两个模块级单例：`useRuntime` 管**状态**，`useEnvGate` 管**「缺包 → 问用户 → 装好后继续」这条交互**。
 
-**模块级单例**：`runtime`（`ref<RuntimeProgressPayload>`，初值 `{ stage: 'idle', percent: 0, id: '', message: '', source: '', bytes: 0, unpackedBytes: 0, files: 0 }`）+ `bound` 幂等标志。
+### 4.1 `useRuntime.ts`（70 行）—— 运行环境状态单例
+
+**模块级单例**：`runtime`（`ref<RuntimeProgressPayload>`，初值 `{ phase: 'idle', pack: null, percent: 0, packs: [], missing: [], status: { ffmpeg: 'unknown', hyperframes: 'unknown' }, message: '', source: '', bytes: 0, unpackedBytes: 0, files: 0, cancellable: false }`）+ `bound` 幂等标志。
 
 | 导出 | 类型 | 说明 |
 | --- | --- | --- |
-| `initRuntime()` | `() => void` | 外壳挂载时调用一次；`bound` 保证只生效一次：**先** `window.runtimeTools.onProgress((d) => { runtime.value = d })` 订阅进度，**再** `window.runtimeTools.status()` 补齐首帧（`d && d.stage` 才写入），`.catch` 静默（主进程未就绪时保持 `idle`，不打扰用户） |
-| `useRuntime()` | `() => { runtime, busy, failed, retry }` | 见下表（`ready` / `sizeText` 已删：见下） |
+| `initRuntime()` | `() => void` | 外壳挂载时调用一次；`bound` 保证只生效一次：**先** `window.runtimeTools.onProgress((d) => { runtime.value = d })` 订阅进度，**再** `window.runtimeTools.status()` 补齐首帧（`d && d.phase` 才写入），`.catch` 静默（主进程未就绪时保持 `idle`，不打扰用户） |
+| `useRuntime()` | `() => { runtime, busy, failed, missing, hasMissing, ready, cancelable, missingText, prepare, cancel }` | 见下表 |
 
 | 成员 | 类型 | 说明 |
 | --- | --- | --- |
-| `runtime` | `Ref<RuntimeProgressPayload>` | 原始进度载荷（`stage` / `percent` / `id` / `message` / `detail?` / `source` / `bytes` / `unpackedBytes` / `files`） |
-| `busy` | `computed<boolean>` | `stage` 为 `checking` / `downloading` / `extracting` 之一 |
-| `failed` | `computed<boolean>` | `stage === 'failed'` |
-| `retry()` | `async (): Promise<void>` | 调 `window.runtimeTools.prepare()`（主进程侧幂等，并发调用共享同一次执行）；**只负责触发**，成败由 `runtime:progress` 回填，异常静默吞掉 |
+| `runtime` | `Ref<RuntimeProgressPayload>` | 原始进度载荷（`phase` / `pack` / `percent` / `packs` / `missing` / `status` / `message` / `detail?` / `source` / `bytes` / `unpackedBytes` / `files` / `cancellable`） |
+| `busy` | `computed<boolean>` | `phase` 为 `checking` / `downloading` / `extracting` 之一（此时横幅显示进度条与「取消」） |
+| `failed` | `computed<boolean>` | `phase === 'error'` |
+| `missing` / `hasMissing` | `computed<RuntimePackName[]>` / `computed<boolean>` | 当前仍缺的包 / 是否缺包（**缺包是首次安装的常态**，此时不自动下载，等用户在某处确认） |
+| `ready` | `computed<boolean>` | 不忙、不失败、也不缺包；已就绪时界面保持干净（不常驻「已就绪」） |
+| `cancelable` | `computed<boolean>` | `payload.cancellable`（downloading / extracting 期间为真） |
+| `missingText` | `computed<string>` | 把缺的包按 `PACK_LABEL`（`ffmpeg` → 「音视频处理（ffmpeg）」、`hyperframes` → 「视频渲染引擎（HyperFrames）」）用「、」拼成一句话 |
+| `prepare(packs?)` | `async (packs?: RuntimePackName[]) => Promise<boolean>` | 调 `window.runtimeTools.prepare(packs && packs.length ? packs : missing.value)`；只负责触发，成败由 `runtime:progress` 回填，异常吞掉返回 `false` |
+| `cancel()` | `async () => Promise<void>` | 调 `window.runtimeTools.cancel()`（取消 = 不下载，且不留半截状态；成败同样由进度回填） |
 
-> `ready`（`stage === 'ready'`）与 `sizeText`（完成体积 / 文件数文案）**已删除**：外壳横幅与设置页状态行都只在「准备中 / 失败」时出现（`runtimeVisible = busy || failed`、设置页 `v-if="runtimeBusy || runtimeFailed"`），「已就绪」不再有任何界面展示它们，留着就是死代码。
+> 旧的 `retry()` 与 `sizeText` 已删除：重试统一走 `prepare()`，体积文案由主进程的 `message` 与确认框的 `HINT_MB` 承担。
 
-**使用方**：`App.vue`（`useRuntime()` 驱动标题栏下方的运行环境横幅：`runtimeVisible = busy \|\| failed`，`.runtime-banner-text` 显示 `runtime.message`、进度条用 `percent`、`failed` 时给「重新准备」按钮；`onMounted` 里调 `initRuntime()`）、`pages/SettingsPage/index.vue`（卡片 4 的运行环境状态行 `v-if="runtimeBusy \|\| runtimeFailed"`：**只在准备中显示进度文案、失败显示失败文案 + 「重新准备运行环境」按钮**（按钮 `:disabled="runtimeBusy"`）；就绪是常态，不再显示「运行环境已就绪（体积）」）。
+### 4.2 `useEnvGate.ts`（158 行，**本轮新增**）—— 「需要下载运行环境」确认框
 
-**注意事项**：`initRuntime()` 只在 `App.vue` 调用一次（与进度类频道的单订阅语义一致；重复调用被 `bound` 短路，不会叠加监听）；`runtime` 是模块级 `ref`，所有页面共享同一份，因此设置页与外壳横幅永远同步；**进度只来自主进程推送**，渲染层不做任何估算，因此 `percent` 长时间不动代表主进程那一段真的没有新进展。
+任何用到 ffmpeg / hyperframes 的功能在动手前先校验，缺包时**不下载、不阻塞**，而是把 `needPacks` 交给这里弹确认框：
+
+```
+[下载运行环境] [取消]
+  ├─ 取消 ⇒ 不产生任何下载，发起该操作的那次动作也就此作废（什么都不发生）
+  └─ 下载 ⇒ 框内原地显示进度与「取消」；装好后按钮变 [继续]，点它才用原参数重发原来的操作
+```
+
+**模块级单例**（全局只有一个框）：`visible` / `packs` / `title` / `phase: 'confirm' | 'downloading' | 'ready'` / `percent` / `readyNow` / `message` / `detail` / `onContinue`；常量 `LABEL`（同 `PACK_LABEL`）与 `HINT_MB = { ffmpeg: 43, hyperframes: 105 }`（**体积提示**：两者都已按 2026-10-14 实测的 42.6 MB / 103.1 MB 回填；真实值以主进程清单为准）。
+
+| 导出 | 说明 |
+| --- | --- |
+| `EnvGateResult` | `interface { ok: boolean; pending: boolean }`：`ok` = 包已就绪、可以继续；`pending` = 已弹框，调用方直接返回，等用户点「继续」后由 `onContinue` 重发 |
+| `initEnvGate()` | **不订阅** `runtime:progress`，而是 `const rt = useRuntime()` 后 `watch(() => rt.runtime.value, (d) => { if (d && visible.value) applyProgress(d) }, { deep: true })` —— 同一份状态、同一个订阅者，确认框照样实时；`applyProgress(d)` 把状态映射成三态：`downloading` / `checking` / `extracting` → 进度态；`ready` 且 `missing` 非空 → 回到确认态并换上还缺的包；`ready` 且无缺 → `ready` 态（`readyNow = true`、100%）；`cancelled` → 回确认态（文案取推送或「已取消下载」）；`error` → 回确认态并写 `message` / `detail` |
+| `guard(need, actionName, cont?)` | 只在 `rt.missing` 与 `need` 有交集时弹框（否则返回 `{ ok: true, pending: false }`）；弹框时记下 `onContinue = cont`，返回 `{ ok: false, pending: true }`；`need` 为空数组时按 `['ffmpeg','hyperframes']` 兜底 |
+| `confirmDownload()` | 进 `downloading` 态、`message = '正在准备下载…'`，调 `rt.prepare(packs)`——真正的进度 / 终态由推送驱动 |
+| `cancelDownload()` | 调 `rt.cancel()`（中断下载 / 解包，不留半截状态，框回到可再次下载的确认态） |
+| `continueAction()` | **先 `close()` 再执行 `onContinue`** —— 用原参数重发那一次操作；**刻意不自动续做**，用户不会遇到「我忘了点过什么，它自己开始跑」 |
+| `close()` | 隐藏并清空 `onContinue` / `readyNow` / `detail` / `message` |
+| `labelText(list)` / `sizeText` | 把包名渲染成「<label>（约 N MB）」；`sizeText` 是 `packs` 的 `computed` |
+
+**使用方**：`App.vue`（`initEnvGate()` + 模板里内联渲染确认框）、`pages/HtmlGenPage/index.vue`（`转成视频` 要 `['ffmpeg','hyperframes']`、`提取视频原声` 要 `['ffmpeg']`）、`pages/SubtitlePage/TranscribeSection.vue`（`文字转字幕`，只在要转码时缺 ffmpeg）、`pages/TextTtsPage/AlignSection.vue`（`逐句对齐配音`）。页面用法固定为：
+
+```ts
+const g = await envGate.guard(need, '动作名', () => { void doIt(true) })
+if (!g.ok) return                     // 缺包（框已弹出）或用户取消，本次操作到此为止
+// 主进程返回 needPacks 时再 guard 一次，用 skipEnvGuard = true 重发
+```
+
+**注意事项**：① 续做所需的动作只活在 `onContinue` 闭包与框的组件作用域内，关框即丢弃，**主进程不记「待续做」**，所以不存在成环问题；② **进度来源只有一个订阅者**：preload 的 `runtime:progress` 是单订阅语义（重复注册只替换回调），因此 `useEnvGate` **刻意不再自己调 `window.runtimeTools.onProgress(...)`**，改为 `watch` 消费 `useRuntime()` 的 `runtime` ref（见 4.2 的 `initEnvGate`）——这样外壳横幅 / 设置页 / 确认框读的是同一份状态，且后注册者不会顶掉 `useRuntime` 的订阅（旧写法会导致 `useRuntime` 的 `runtime` 停在首帧 `status()` 快照上，已修正）；③ 体积提示（2026-10-14 实测）：`ffmpeg` 42.6 MB、`hyperframes` 103.1 MB，**两包合计 145.7 MB**；主进程 `packSizeText()` 才是取清单后的口径。
 
 ## 5. 历史数据：composables/useLegacyData.ts
 
@@ -429,13 +466,15 @@ export async function goPage(key: PageKey): Promise<void> {
 | `window.settingsTools.get()` | 频道 `settings:get`，读 `settings.json`（含 `render` 段） | `useRenderOptions.loadRenderDefaults()`；`SettingsPage` 另单独调用一次以回填表单 |
 | `window.settingsTools.saveRender(render)` | 频道 `settings:save-render`，只更新渲染默认档位 | `useRenderOptions.saveRenderDefaults()` |
 | `window.projectTools.setRender(name, render \| null)` | 频道 `project:set-render`，写 / 清除项目级档位覆盖 | `useRenderOptions.saveProjectRenderOverride()` |
-| `window.runtimeTools.onProgress(callback)` | 频道 `runtime:progress`，运行环境包进度推送（单订阅），回调参数为 `RuntimeProgressPayload` | `useRuntime.initRuntime()` |
+| `window.runtimeTools.onProgress(callback)` | 频道 `runtime:progress`，运行环境进度推送（单订阅），回调参数为 `RuntimeProgressPayload`（`phase` / `pack` / `missing` / …） | **只有** `useRuntime.initRuntime()` 注册（全渲染层唯一订阅者）；`useEnvGate` 经 `watch(useRuntime().runtime)` 消费同一份状态，不再注册第二个回调 |
 | `window.runtimeTools.status()` | 频道 `runtime:status`，查一次当前状态（补齐首帧，此后由推送驱动） | `useRuntime.initRuntime()` |
-| `window.runtimeTools.prepare()` | 频道 `runtime:prepare`，失败后重试（主进程幂等）；**只触发，成败由 `runtime:progress` 回填** | `useRuntime.useRuntime().retry()` → `App.vue` 横幅 / `SettingsPage` |
+| `window.runtimeTools.prepare(packs?)` | 频道 `runtime:prepare`，主动准备指定包（省略 = 全部缺的；忙碌期重复调用返回一句提示）；**只触发，成败由 `runtime:progress` 回填** | `useRuntime.useRuntime().prepare()` → `App.vue` 横幅（下载 / 重试）/ `SettingsPage` / `useEnvGate.confirmDownload()` |
+| `window.runtimeTools.cancel()` | 频道 `runtime:cancel`，取消进行中的下载 / 解包（中断请求与 7za 子进程、清半成品） | `useRuntime.useRuntime().cancel()` → `App.vue` 横幅「取消」/ `SettingsPage`「取消下载」/ `useEnvGate.cancelDownload()` |
+| `window.settingsTools.pickRuntimePack()` | 频道 `settings:pick-runtime-pack`，选一个本地 `ffmpeg.7z` / `hyperframes.7z` 导入（离线兜底） | `pages/SettingsPage/index.vue`（`onPickLocalPack()`，成功后接着 `runtimeTools.prepare()`） |
 | `window.legacyTools.status()` | 频道 `legacy:status`，问一次有没有待处理的旧数据（返回 `LegacyDataInfo \| null`） | `useLegacyData.initLegacyData()` |
 | `window.legacyTools.resolve(action)` | 频道 `legacy:resolve`，回传 `'migrate' \| 'delete' \| 'later'` | `useLegacyData.useLegacyData().resolve()` → `components/LegacyDataDialog.vue` |
 
-`renderProgress` 不调用 `hfTools.renderVideo()`——**发起渲染的是 `pages/HtmlGenPage/index.vue`**（这里的「转视频」按钮），`pages/VideoPreviewPage/index.vue` 只在渲染结束后读 `renderProgress.text` 展示；本模块只消费日志流。`pages/index.ts` **不直接**调用 preload API，而是通过 `useAppStore` 间接使用。`useToast.ts`、`useNavIntent.ts`、`rate.ts`、`escape.ts`、`time.ts`、`render.ts` 均为**零依赖**（`useToast` / `render.ts` 中前者依赖 Vue 的 `ref`、后者只依赖 `@shared/types` 的类型），不接触主进程；`useRenderOptions.ts` 则依赖 `window.settingsTools` / `window.projectTools` 与 `appState`；`useRuntime.ts` 依赖 `window.runtimeTools`（订阅进度 + 查状态 + 重试）、`useLegacyData.ts` 依赖 `window.legacyTools`（问一次 + 回传选择），两者同样只经 preload 桥接触主进程。
+`renderProgress` 不调用 `hfTools.renderVideo()`——**发起渲染的是 `pages/HtmlGenPage/index.vue`**（这里的「转视频」按钮），`pages/VideoPreviewPage/index.vue` 只在渲染结束后读 `renderProgress.text` 展示；本模块只消费日志流。`pages/index.ts` **不直接**调用 preload API，而是通过 `useAppStore` 间接使用。`useToast.ts`、`useNavIntent.ts`、`rate.ts`、`escape.ts`、`time.ts`、`render.ts` 均为**零依赖**（`useToast` / `render.ts` 中前者依赖 Vue 的 `ref`、后者只依赖 `@shared/types` 的类型），不接触主进程；`useRenderOptions.ts` 则依赖 `window.settingsTools` / `window.projectTools` 与 `appState`；`useRuntime.ts` 依赖 `window.runtimeTools`（订阅进度 + 查状态 + `prepare` / `cancel`），`useEnvGate.ts` 依赖 `useRuntime`（读 `missing`）与同一个 `runtimeTools`（订阅进度 + `prepare` / `cancel`），`useLegacyData.ts` 依赖 `window.legacyTools`（问一次 + 回传选择），三者同样只经 preload 桥接触主进程。
 
 **谁用谁（被导入情况）**
 
@@ -451,7 +490,8 @@ export async function goPage(key: PageKey): Promise<void> {
 - `rateClamp` / `applyRate` / `stepRate`：见 §6「使用方」；`escTxt`：见 §7.1「调用方」；`fmtTime` / `fmtTimeMs`：见 §7.2「调用方」。
 - `pages` / `currentPage` / `pageNavKey` / `goPage`：`App.vue`（`currentPage`、`pageNavKey` 渲染容器；`goPage(item.key)` 绑定菜单点击；`watch(currentPage)` 做滚动复位；启动时**不**调 `goPage`（首页本就是初始页））、`components/StepBar.vue`（`goPage('content')`、`goPage('text-tts')`、`goPage('subtitle')`、`goPage('html-gen')`、`goPage('video-preview')`、`onCreated()` / `onSelect()` 里的 `goPage(props.page)` 回跳）、`pages/HomePage/index.vue`（流程图节点 `goPage(n.page)`；项目卡片 `openMy()` → `goPage('html-gen')`）、`pages/TextTtsPage/VoiceSection.vue`（`goSettingsVoice()` 先 `requestSettingsSection('voice')` 再 `goPage('settings')` 跳「API Key 设置」，卡内 `requireCfg()` 未配 Key 时同路径；原 `pages/SoundCopyPage/index.vue`）、`pages/SettingsPage/index.vue`（消费端：`applySectionIntent()` + `watch(useSettingsSectionRequest())` + `onMounted` 首句）、`pages/TextTtsPage/SynthSection.vue`（`goSettingsVoice()` = `requestSettingsSection('voice')` + `goPage('settings')`；**原「管理音色」按钮与 `goPage('text-tts')` 跨页请求已删除**）、`pages/SubtitlePage/TranscribeSection.vue`（`goPage('settings')`）、`pages/TextTtsPage/helpers.ts`（`goPage('settings')`）。
 
-- `initRuntime` / `useRuntime`（`runtime` / `busy` / `failed` / `retry`）：`App.vue`（`onMounted` 调 `initRuntime()`；横幅用 `busy` / `failed` / `runtime.message` / `percent` / `retry`）、`pages/SettingsPage/index.vue`（卡片 4 的运行环境状态行与「重新准备运行环境」按钮——同样只在「准备中 / 失败」时出现）。
+- `initRuntime` / `useRuntime`（`runtime` / `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` / `prepare` / `cancel`）：`App.vue`（`onMounted` 调 `initRuntime()`；横幅用 `busy` / `failed` / `hasMissing` / `runtime.message` / `percent` / `prepare` / `cancel`）、`pages/SettingsPage/index.vue`（运行环境一行三态 + 「下载运行环境」/「取消下载」/「从本地文件安装…」）。
+- `initEnvGate` / `useEnvGate`（`visible` / `packs` / `title` / `phase` / `percent` / `readyNow` / `message` / `detail` / `sizeText` / `guard` / `confirmDownload` / `cancelDownload` / `continueAction` / `close`）：`App.vue`（`onMounted` 调 `initEnvGate()`；模板内联渲染确认框）、`pages/HtmlGenPage/index.vue`、`pages/SubtitlePage/TranscribeSection.vue`、`pages/TextTtsPage/AlignSection.vue`（缺包时 `guard(...)`，用户点「继续」以 `skipEnvGuard = true` 重发原操作）。
 - `initLegacyData` / `useLegacyData`（`info` / `visible` / `busy` / `entryText` / `resolve`）：`App.vue`（`onMounted` 调 `initLegacyData()`；模板挂 `<LegacyDataDialog />`）、`components/LegacyDataDialog.vue`（唯一消费方：展示 `info.dir` / `entryText`，三个按钮分别 `resolve('later' / 'delete' / 'migrate')`，迁移后 `refreshProject()` + `toast(...)`）。
 
 典型协作链：`components/StepBar.vue` / `pages/HomePage/index.vue` 调 `switchProject()` → 内部 `refreshProject()` 更新 `appState.project` → 5 个 computed 变化 → 流程图与步骤条完成态同步刷新。
@@ -472,5 +512,6 @@ export async function goPage(key: PageKey): Promise<void> {
 - **`ProjectMeta` 只在共享层定义一处**：`useAppStore.ts` 用 `import type { ProjectMeta } from '@shared/types'` + `export type { ProjectMeta }` 引入并再导出（`project:list` 的条目结构因此与主进程同源）；而 `ProjectState` 仍是渲染层自己的视图模型（含 `htmlExists` / `videoExists` 这类由列表项推导出来的字段），不要与主进程结构混用。
 - **转义与格式化只在必要时使用**：`escTxt()` 仅用于手工拼 HTML 字符串（`v-html`、动态 `title`），`{{ }}` 插值不要重复转义；`fmtTime`（概览）与 `fmtTimeMs`（时间轴）结果可能不同分钟，不可互换。
 - **旧数据的弹窗显隐由 composable 单例决定，不由 `App.vue` 传参**：`<LegacyDataDialog />` 无 props / 无 emits，`visible` / `busy` / `info` 都是 `useLegacyData.ts` 的模块级 ref。想改显隐语义（例如加「本次不再提示」）要改 composable，而不是在 `App.vue` 里加 `v-if`。
-- **`initRuntime()` / `initLegacyData()` 都只在 `App.vue` 的 `onMounted` 调用一次**：两者都有 `bound` 幂等标志，但它们与 `useRenderProgress` 一样属于「全局副作用登记」，页面级组件不要重复调用。
-- **`useRuntime()` 只暴露「要用到的三件事」**（`runtime` / `busy` / `failed`）+ `retry()`：`ready` / `sizeText` 随「已就绪」不再展示而删除（外壳横幅与设置页状态行都只在「准备中 / 失败」时出现）。界面若将来要显示就绪体积 / 文件数，应从 `runtime` 载荷自己派生，不要重新引进已删字段。
+- **`initRuntime()` / `initEnvGate()` / `initLegacyData()` 都只在 `App.vue` 的 `onMounted` 调用一次**：它们都有 `bound` 幂等标志，属于「全局副作用登记」，页面级组件不要重复调用。
+- **`useRuntime()` 暴露状态与两个动作**（`runtime` / `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` / `prepare` / `cancel`）：`retry` 与 `sizeText` 随「已就绪不再展示、重试统一走 `prepare()`」而删除；界面若要显示就绪体积 / 文件数，应从 `runtime` 载荷自己派生，不要重新引进已删字段。
+- **`useEnvGate()` 不自动续做**：`continueAction()` 只是「关框 + 执行 `onContinue`」，且 `onContinue` 由调用方在 `guard()` 时传入（通常是 `() => { void doIt(true) }`，即带 `skipEnvGuard = true` 重发同一次操作）。主进程侧**不记**「待续做」，因此关框 / 取消都不会留下状态。

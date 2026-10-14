@@ -34,7 +34,9 @@ export const IPC = {
     Save: 'settings:save',
     SaveRender: 'settings:save-render',
     SaveUpdater: 'settings:save-updater',
-    Test: 'settings:test'
+    Test: 'settings:test',
+    // 运行环境「从本地文件安装」：选一个 <pack>.7z 导入（离线 / 内网机器的兜底入口）
+    PickRuntimePack: 'settings:pick-runtime-pack'
   },
   // 千问语音（voice.js / ttsAlign.js）
   Voice: {
@@ -109,11 +111,14 @@ export const IPC = {
     Render: 'video:render',
     Progress: 'video:progress'
   },
-  // 运行环境包（runtime.js）：把 ffmpeg / hyperframes / whisper 约 632MB 资源
-  // 从「随安装包展开」改成「首次启动解到 userData」，更新时不再重装它们
+  // 运行环境（分包）：ffmpeg / hyperframes 各一个 7z，首次用到时下载并解到 userData；
+  // whisper 随安装包（extraResources），不需要下载
   Runtime: {
     Status: 'runtime:status',
+    // 主动准备指定包（省略 = 全部）；取消用 Cancel
     Prepare: 'runtime:prepare',
+    // 取消正在进行的下载 / 解包（用户点「取消」⇒ 不下载，且发起该操作的动作一并作废）
+    Cancel: 'runtime:cancel',
     Progress: 'runtime:progress'
   },
   // 历史数据目录（index.js）：品牌/目录改名后，老目录里可能留着用户的全部数据（项目、模型、配置）。

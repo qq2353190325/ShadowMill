@@ -366,3 +366,12 @@
 34. **列表不再显示音色 ID**：表头与 `.voice-id` 单元格、以及 `main.css` 的 `.voice-id` 规则都已删除，网格随之从 5 列改为 4 列（`minmax(0,1.6fr) minmax(0,1.4fr) minmax(0,1fr) auto`）；没有中文名的克隆音色用「未命名克隆音色」兜底，靠「创建时间」列区分，映射下拉的标签同样不再拼 ID（改用「未命名克隆音色 · 月-日 时:分」）。
 35. **「配置形状」只能有一个读取入口**：`voice:get-config` 从「单厂家 `{ apiKey, targetModel }`」改成「按厂家 `{ active, providers, saveDir }`」后，`VoiceSection.vue` 里那份**自己解析形状的 `requireCfg` 拷贝**没跟着改——它读旧字段 `c.apiKey`，于是 `!c.apiKey` 永远为真，点「选择音频文件」（`onPick`）或「创建音色」（`onCreate`）会直接写到「尚未配置语音 API Key」并跳去设置页。现在 helpers 提供**唯一入口** `readActiveCfg()`，`refreshVoiceKeyState()` / `requireCfg()` / VoiceSection 的卡内 `requireCfg` 全部走它；源码注释要求**不要在别处再拼这个形状**。
 36. **「创建克隆音色」是弹窗、且必须 Teleport 到 body**：卡组只剩「我的音色」与「音色映射管理」两张卡，创建表单改为模板末尾的 `<Teleport to="body">` + `.hf-modal*` 复用（**没有新增任何 CSS**）。源码注释：`.card` 上有 `backdrop-filter`，它会让 `fixed` 定位相对卡片而不是视口（蒙层会被卡片裁住），所以必须挂到 `body`；HfSelect 弹层 `z-index: 9500` 高于蒙层 `9000`，仍浮在弹窗之上。`createBusy` 守卫（开头 `if (createBusy.value) return` + `try/finally`）防止双击建出两个音色（计费 0.01 元/个），成功路径都在 `loadAll(true)` 后 `closeCreate()`。弹窗里的「API Key 设置」与卡内 `requireCfg()` 未配 Key 时走同一条「带意图跳转」：`requestSettingsSection('voice')` + `goPage('settings')`，让设置页直接落在「语音服务」分类。**删除云端的那张确认弹窗同法**（`Teleport` + `.hf-modal*`，520px，`deleteBusy` 期间不许关）。
+
+## 9. 运行环境缺包守卫（`useEnvGate`）
+
+`voice:synth-aligned`（逐句对齐配音）整条链路都要 ffmpeg / ffprobe——试听分段、句间静音、`concat -c copy` 装配整轨、末尾时长终验全走它们；而 **ffmpeg 不随安装包**（ffmpeg 运行环境包，实测 **42.6 MB**，2026-10-14；首次用到时下载，见 `docs/runtime-pack-split.md`）。
+
+- `AlignSection.vue` 的 `startAlign(skipEnvGuard)`：动手前 `const g = await envGate.guard(['ffmpeg'], '逐句对齐配音', () => { void startAlign(true) })`，`!g.ok`（缺包已弹框或用户取消）就 `return`，**不发 IPC、不产生下载**；
+- 主进程返回 `fail.needPacks` 时再 `envGate.guard(fail.needPacks, '逐句对齐配音', …)` 一次；
+- 用户在确认框点「继续」时，`onContinue` 以 `skipEnvGuard = true` 重发本次对齐（**不自动续做**）；
+- 确认框由 `App.vue` 内联渲染（`useEnvGate` 是模块级单例，见 [common.md](../common.md) §4.2），本卡只调 `guard()`；**取消下载 = 取消这次对齐**，主进程不留半截状态。

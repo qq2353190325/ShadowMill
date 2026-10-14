@@ -4,12 +4,12 @@
 
 - **位置**：工程根
 - **类型**：npm 清单（同时承载 electron-builder 的 `build` 段）
-- **规模**：83 行
+- **规模**：93 行
 
 ## 1. 作用与职责
 
 - **项目身份**：声明 `name` / `version` / `description`，并指定 Electron 主进程入口 `main`。
-- **脚本入口**：`start` / `dev` / `build` / `typecheck` / `pack` / `dist` 六个脚本，覆盖「开发 → 构建 → 类型检查 → 打包 → 出安装包」全流程。
+- **脚本入口**：`start` / `dev` / `build` / `runtime:pack` / `typecheck` / `pack` / `dist` / `release` 八个脚本，覆盖「开发 → 构建 → 类型检查 → 打运行环境包 → 打包 → 出安装包 → 发版自检」全流程。
 - **依赖分层**：`devDependencies` 放构建期工具（electron、electron-vite、vite、typescript 等），`dependencies` 放**运行期真正被 require 的库**（openai、opencc-js、electron-updater、vue）。
 - **打包配置**：`build` 段直接内嵌 electron-builder 配置（appId、`files` 收口、asar、NSIS 安装器、`publish` 更新源、extraResources）。
 - **注意**：本文件**没有** `"type"` 字段，因此包根默认按 CommonJS 解析（见第 3 节）。
@@ -32,11 +32,13 @@
 | `start` | `electron-vite preview` | 用**已构建**的 `out/` 产物启动 Electron，做产物态预览（不跑 dev server、不热更新） |
 | `dev` | `electron-vite dev` | 开发模式：启动 renderer 的 Vite dev server（固定在 127.0.0.1:5173）并拉起 Electron，主进程/preload 改动自动重启，渲染层走 HMR |
 | `build` | `electron-vite build` | 一次性构建三端产物到 `out/`（`out/main`、`out/preload`、`out/renderer`） |
+| `runtime:pack` | `node scripts/pack-runtime.mjs` | 把 `resources/` 里**不进安装包**的两类资源打成运行环境包：`build/runtime-pack/ffmpeg.7z` + `ffmpeg.json`、`hyperframes.7z` + `hyperframes.json`（另有 `build/tools/7za.exe` 解包器，它随安装包发布）。支持 `--only <name>` / `--force` / `--list`；源指纹未变时跳过重打 |
 | `typecheck` | `tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.agent.json` | 依次对三份子工程做**纯类型检查**（三处均带 `--noEmit`，不产文件）；用 `&&` 串联，任一失败即整体失败 |
-| `pack` | `npm run build && npx electron-builder --dir` | 先构建，再打出**免安装的解包目录**（`--dir`，只生成 `dist/win-unpacked` 之类的目录，不做安装器），用于快速验证打包结果 |
-| `dist` | `npm run build && npx electron-builder --win` | 先构建，再按 `build.win.target` 生成 **Windows NSIS 安装包**（正式分发用） |
+| `pack` | `npm run runtime:pack && npm run build && npx electron-builder --dir` | 先打运行环境包、再构建，然后打出**免安装的解包目录**（`--dir`，只生成 `dist/win-unpacked` 之类的目录，不做安装器），用于快速验证打包结果 |
+| `dist` | `npm run runtime:pack && npm run build && npx electron-builder --win` | 先打运行环境包、再构建，最后按 `build.win.target` 生成 **Windows NSIS 安装包**（正式分发用） |
+| `release` | `node scripts/release.mjs` | 发版上传 + 自检：校验「安装包 + `.exe.blockmap` + `latest.yml` + `ffmpeg.{7z,json}` + `hyperframes.{7z,json}`」是否齐全（**漏 `.blockmap` 就是「差量退回全量」的根因**），支持 `--dry-run` / `--checklist` / `--verify-only` / `--oss --bucket <name>` / `--rclone <remote>` / `--copy <dir>`，并对远端做匿名 GET + `Range` 自检（206 = 支持 Range） |
 
-要点：`pack` / `dist` 都**先跑 `build`**，避免把过期产物打进包里。
+要点：`pack` / `dist` 都**先跑 `runtime:pack` 与 `build`**，避免把过期产物打进包里；`release` 只做「检查 + 上传 + 自检」，不会自己打包。
 
 ### 2.3 devDependencies
 
@@ -71,6 +73,7 @@
 | `asar` | `true` | 将应用代码打包为 `app.asar` 单文件（`out/**`、`vendor/**` 等被塞进 asar；extraResources 除外） |
 | `compression` | `normal` | 压缩级别 normal（非 `store` 非 `maximum`），体积与打包耗时的折中 |
 | `win.target` | `[{ target: "nsis", arch: ["x64"] }]` | 仅出 Windows x64 的 NSIS 安装包 |
+| `win.electronLanguages` | `["zh-CN", "en-US"]` | 只保留中英两套 Chromium 语言包（`locales/*.pak`）。Electron 发行版自带 55 个 pak（实测 48.3 MB），而 `zh-CN.pak` + `en-US.pak` 合计约 1.1 MB；其余是 Chromium 自带界面（右键菜单、文件选择框、证书/网络错误页）的其它语言文案，与影坊自己的 Vue 界面无关 |
 | `nsis.oneClick` | `false` | 走图形化安装向导（而非一键静默安装） |
 | `nsis.perMachine` | `true` | **全机安装**（装到 `Program Files`，安装/升级需要管理员权限，配合下面的 `allowElevation` / `packElevateHelper`） |
 | `nsis.allowElevation` | `true` | 允许安装器请求提权 |
@@ -79,8 +82,8 @@
 | `nsis.createDesktopShortcut` | `true` | 创建桌面快捷方式 |
 | `nsis.createStartMenuShortcut` | `true` | 创建开始菜单快捷方式 |
 | `nsis.differentialPackage` | `true` | 生成差分包元数据，配合安装包旁的 `.exe.blockmap` 让客户端只下变化部分 |
-| `publish` | `[{ "provider": "generic", "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/" }]` | 更新源（阿里云 OSS，公共读 + 尾斜杠必备）。**`npm run dist` 借此生成 `resources/app-update.yml` 与 `dist/latest.yml`；generic 源不会自动上传**，两个文件要手工传到该 URL 下 |
-| `extraResources` | `[{ "from": "resources", "to": "." }]` | 把工程根 `resources/` 原样复制到安装目录的 `resources/`（asar **外**） |
+| `publish` | `[{ "provider": "generic", "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/MarvisStudio/" }]` | 更新源（阿里云 OSS，公共读 + 尾斜杠必备）。**`npm run dist` 借此生成 `resources/app-update.yml` 与 `dist/latest.yml`；generic 源不会自动上传**，安装包 / `.exe.blockmap` / `latest.yml` / 两个运行环境包都要上传到该 URL 下（用 `npm run release` 做检查与上传，见 §3） |
+| `extraResources` | `[{ "from": "resources/whisper", "to": "whisper" }, { "from": "build/tools", "to": "tools" }]` | 只把两样东西复制到安装目录的 `resources/`（asar **外**）：**whisper**（12.5 MB / 15 文件，转录缺它就完全不能用，所以随包，装完即离线可用）与 **7za 解包器**（约 1 MB，用于解运行环境包）。`ffmpeg` / `hyperframes` 已**不再**随安装包，改为打成 `build/runtime-pack/<包名>.7z` 走更新源按需下载（见 `scripts/pack-runtime.mjs` 与 `src/main/runtime.ts`） |
 
 ### 2.6 files 收口（逐条）
 
@@ -113,9 +116,10 @@
 1. **开发**：`npm run dev` → electron-vite 起 dev server（127.0.0.1:5173，`strictPort`）→ Electron 主进程加载该 URL（首次运行会触发 Electron 二进制的懒下载，见 §5.3）。
 2. **检查**：`npm run typecheck` → 三个 `tsc -p` 串行执行，全部 `--noEmit`。
 3. **构建**：`npm run build` → `out/` 三端产物。
-4. **打包**：`npm run pack`（解包目录，快速验证；**不生成 `app-update.yml`，无法验证自动更新**）或 `npm run dist`（NSIS 安装包 + `latest.yml` + `.exe.blockmap` + `resources/app-update.yml`）。
-5. **运行期依赖解析**：`main` 指向的 `out/main/index.js` 里对 `openai` / `opencc-js` / `electron-updater` 保持 `require` 形态，由 asar 内 electron-builder 自动收集的 `node_modules` 提供（`build.files` 里没有 `!node_modules/**/*`，也没有逐包白名单）。**新增运行时依赖后仍建议 `npm run pack` 并用 `npx asar list dist/win-unpacked/resources/app.asar` 抽查关键包。**
-6. **运行时二进制**：ffmpeg/node 等大体积运行时不在 asar 内，而从安装目录 `resources/` 取（见第 4、5 节）。
+4. **打包**：`npm run pack`（解包目录，快速验证；**不生成 `app-update.yml`，无法验证自动更新**）或 `npm run dist`（NSIS 安装包 + `latest.yml` + `.exe.blockmap` + `resources/app-update.yml`）；`pack` / `dist` 都会先跑 `npm run runtime:pack` 产出 `ffmpeg.7z` / `hyperframes.7z` 与清单。
+5. **发版**：`npm run release`（`scripts/release.mjs`）——校验安装包 + `.exe.blockmap` + `latest.yml` + `ffmpeg.{7z,json}` + `hyperframes.{7z,json}` 是否齐全（**漏 `.blockmap` ⇒ 客户端每次全量下载**），按 `--dry-run` / `--copy <dir>` / `--rclone <remote>` / `--oss --bucket <name>` 上传，并对远端 `latest.yml` / `ffmpeg.json` / `hyperframes.json` 做匿名 GET + `Range` 自检（206 = 支持 Range，断点续传与差量下载都依赖它）。
+6. **运行期依赖解析**：`main` 指向的 `out/main/index.js` 里对 `openai` / `opencc-js` / `electron-updater` 保持 `require` 形态，由 asar 内 electron-builder 自动收集的 `node_modules` 提供（`build.files` 里没有 `!node_modules/**/*`，也没有逐包白名单）。**新增运行时依赖后仍建议 `npm run pack` 并用 `npx asar list dist/win-unpacked/resources/app.asar` 抽查关键包。**
+7. **运行时二进制**：安装包只带 `resources/whisper`（whisper-cli）与 `resources/tools`（7za 解包器）——它们都在 asar **之外**；`ffmpeg` / `hyperframes` 不在安装包里，由运行环境包在首次用到时下载并解到 `<userData>/runtime/<包名>/`（见 `src/main/runtime.ts` 与 [main/runtime.ts.md](./main/runtime.ts.md)）。
 
 ## 4. 与其他文件的关系
 
@@ -126,7 +130,7 @@
 | `tsconfig.node.json` / `tsconfig.web.json` / `tsconfig.agent.json` | `typecheck` 脚本按这三个 `-p` 逐个检查 |
 | `tsconfig.json` | 只是 solution 根，不被任何脚本直接使用（`tsc -b` 未被调用） |
 | `.gitignore` | 忽略 `node_modules/`、`dist/`、`out/`、`resources/`，与本文件的依赖目录、打包输出、extraResources 源一一对应 |
-| `resources/` | `extraResources.from` 的源目录；`.gitignore` 排除它是因为里面是 ffmpeg 等大体积运行时 |
+| `resources/` | `extraResources` 的**局部**源目录（现在只取 `resources/whisper`）；`.gitignore` 排除它是因为里面是 ffmpeg / hyperframes / whisper 等大体积运行时。`ffmpeg` / `hyperframes` 由 `scripts/pack-runtime.mjs` 打成 7z 上传更新源，`resources/node` 已整体删除 |
 | `vendor/gsap/` | `files` 白名单中 `vendor/**/*` 的源目录；`vendor/gsap/README.md` 记录版本、来源、sha512/SHA256 与更新步骤。该目录**未被 `.gitignore` 忽略**（受版本控制），与 `resources/` 的处理方式正好相反 |
 | `src/preload/index.d.ts` | 渲染层类型契约，与 `dependencies.vue` 一起支撑 renderer 的类型检查 |
 
@@ -160,12 +164,13 @@ findstr /C:"node_modules\debug\" list.txt    # 每个运行时依赖都要 >0
 
 > 对照记忆：`vue` 也在 `dependencies` 里，但它被 Vite **打进**了 renderer bundle，因此 asar 内不需要 `node_modules/vue`；`@vue/*`、`@babel/*` 同理只在构建期参与编译。
 
-### 5.2 为什么 `resources/` 走 `extraResources` 而不是 `files`
+### 5.2 为什么只有 `resources/whisper` 与 `build/tools` 走 `extraResources`
 
-- `resources/` 里放的是**外部可执行文件与运行时**（ffmpeg、node、hyperframes + chrome-headless-shell 等），见 `.gitignore` 注释。
+- `resources/` 里放的是**外部可执行文件与运行时**（`ffmpeg/` 179.9 MB、`hyperframes/` 439.9 MB、`whisper/` 12.5 MB，合计 632.3 MB / 4916 文件），见 `.gitignore` 注释。分包之后**只有 whisper 与 7za 解包器进安装包**，另两个各成一个 7z 走更新源按需下载（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14；比旧单包 `runtime.7z` 147.4 MB 还小 1.7 MB）。
 - **可执行文件不能从 asar 内运行**：`child_process.spawn` 需要一个真实存在的磁盘路径，asar 是归档文件无法直接 exec。因此这类二进制必须放在 asar **之外**。
-- `extraResources: [{ from: "resources", to: "." }]` 把整个目录复制到安装目录的 `resources/`（`to: "."` 即资源根），运行期以真实路径访问。
+- `extraResources: [{ from: "resources/whisper", to: "whisper" }, { from: "build/tools", to: "tools" }]` 把这两份复制到安装目录的 `resources/`（运行期分别以 `process.resourcesPath/whisper/...` 与 `<resources>/tools/7za.exe` 访问）。
 - `files` 进的是 `app.asar`，`extraResources` 进的是 asar 同级资源目录——两者职责不同，不能互换。
+- **为什么 whisper 必须随包**：它是「文字转字幕」的唯一天然依赖，只有 12.5 MB（gzip-9 后 4.4 MB），随包换来「装完即可离线转录」；`ffmpeg` / `hyperframes` 拆包后安装包实测 **257.6 MB → 105.08 MB**（`dist\ShadowMill Setup 0.0.3.exe` = 110,180,042 字节，−152.5 MB / −59%），且两者能各自独立升级（改渲染引擎不必让转录功能重下 ffmpeg）。
 
 ### 5.3 其他要点
 

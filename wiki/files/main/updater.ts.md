@@ -194,7 +194,7 @@ state.detail = (dev
   ```
 - **`npm run pack` 不生成 `app-update.yml`**：`--dir`（免安装目录）模式下不写更新配置，只有全量 `npm run dist` 才产出 `app-update.yml` 与 `latest.yml`。因此**验证更新功能必须用 `dist` 并安装后再试**。
 - **`stage` 刻意放宽为 `string`**：阶段由 electron-updater 的事件回调跨函数写入，若标注成 `UpdateStage` 联合类型，TS 的控制流分析会把函数内最后一次赋值当成当前类型，导致后续比较全被判成「不可能分支」（实测 9 处 `TS2367`）。交出前由 `toStage()` 白名单收口。**这也是两条沉默守卫必须显式比较 `state.stage` 字符串、而不能依赖类型窄化的原因。**
-- **`autoDownload = false` + `autoInstallOnAppQuit = false`**：下载必须用户点（安装包近 300 MB）；安装同样只由用户显式触发——NSIS 更新是「整体卸载旧版 → 解压复制新包」（实测一次约 97 秒），期间应用不存在、快捷方式指向空路径，这种长时间不可用不能因为「用户只是关了个窗」就在背后静默开始。
+- **`autoDownload = false` + `autoInstallOnAppQuit = false`**：下载必须用户点（源码注释：「安装包近百 MB，不在后台偷流量」；分包与 `electronLanguages` 收口后实测 `ShadowMill Setup 0.0.3.exe` = **105.08 MB**）；安装同样只由用户显式触发——NSIS 更新是「整体卸载旧版 → 解压复制新包」（实测一次约 97 秒），期间应用不存在、快捷方式指向空路径，这种长时间不可用不能因为「用户只是关了个窗」就在背后静默开始。
 - **与 `window-all-closed` 的配合**：`quitAndInstall()` 会关闭窗口；若入口的 `window-all-closed` 再 `app.quit()` 会与安装器抢退出流程，故 `installNow()` 先置 `quitFlag`，入口据此直接返回。
 - **dev 环境需 `dev-app-update.yml`**：未打包时需在项目根提供 `dev-app-update.yml`（内容同 `app-update.yml`）才会检查——`forceDevUpdateConfig` 由 `ensureUpdater()` 统一代为打开（见上文），启动静默检查则在缺该文件时直接跳过并写日志（该文件名已进 `.gitignore`）。
 - **`update:version` 是全工程唯一的同步 IPC**：`ipcMain.on` + `event.returnValue`，只回版本号字符串，供设置页首屏显示。
@@ -220,21 +220,31 @@ state.detail = (dev
 - **动作接口的失败分支也成对回带**：`checkNow()` 的 5 个返回分支、`downloadUpdate()` 的失败与静默放弃分支、`cancelDownload()` / `installNow()` 的异常分支都带 `message` + `detail`；`notReady()` 同样是双字段。
 - **日志**：所有动作与事件写 `userData/updater.log`（与 `preview-protocol.log` 同思路），路径由 `logPath()` 单点产出、`writeLog()` 与 `update:open-log` 共用；排查「检查更新失败」先看它，界面上则点「打开日志目录」。动作入口的行有 `check start trigger=` / `check declined trigger=` / `download start` / `download declined` / `cancel` / `quitAndInstall`，事件行有 `update-available <version>` / `update-downloaded <version>` / `error <原文>`。
 
-## 6. 发版流程（三个文件缺一不可）
+## 6. 发版流程（**五类七个文件缺一不可**，推荐用 `npm run release` 自检）
 
 ```powershell
 # 1. 升版本号（app.getVersion() 读的就是它）
 npm version patch --no-git-tag-version
 
-# 2. 全量打包（产出安装包 + latest.yml + .blockmap）
+# 2. 全量打包：先打两个运行环境包（ffmpeg.7z / hyperframes.7z + 同名 .json，产出在 build/runtime-pack/），
+#    再构建并出安装包；产出安装包 + latest.yml + .exe.blockmap
 npm run dist
 
-# 3. 上传到更新源（generic provider 不会自动上传）
-#    dist\ShadowMill Setup <版本>.exe
-#    dist\ShadowMill Setup <版本>.exe.blockmap      ← 差分下载靠它，不传则每次全量下
-#    dist\latest.yml                                ← 客户端检查更新的入口
+# 3. 一条命令检查 + 上传 + 远端自检（scripts/release.mjs）
+npm run release -- --dry-run                     # 只检查本地文件齐不齐 + 远端匿名 GET / Range 自检
+npm run release -- --copy .\publish              # 或 --rclone <remote:path> / --oss --bucket <bucket名>
+#    不带任何后端参数等价于 --dry-run；--checklist 只打印手工上传清单
 
-# 4. 本地验证
+# 4. 必传的五个东西（generic provider 不会自动上传；缺 .blockmap ⇒ 客户端每次全量下）
+#    dist\ShadowMill Setup <版本>.exe
+#    dist\ShadowMill Setup <版本>.exe.blockmap      ← 差分下载靠它
+#    dist\latest.yml                                ← 客户端检查更新的入口
+#    build\runtime-pack\ffmpeg.7z      + ffmpeg.json
+#    build\runtime-pack\hyperframes.7z  + hyperframes.json
+
+# 5. 本地验证
 npx http-server dist -p 8099
 #    应用内「设置 → 应用更新 → 更新源」填 http://127.0.0.1:8099/
 ```
+
+> **远端自检**（`release.mjs` 的 `verify()`）：对 `latest.yml`、`ffmpeg.json`、`hyperframes.json` 发匿名 GET + `Range: bytes=0-0`——`206` 表示支持 Range（断点续传与差量下载都依赖它），`200` 表示**不支持**（断点续传会退化为整包重下）。OSS 桶必须公共读（generic provider 匿名 GET）。

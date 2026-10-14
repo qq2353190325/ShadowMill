@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：设置存储模块（settings.json）
-- **规模**：406 行
+- **规模**：448 行
 - **对外导出**：`register`、`readSettings`、`writeSettings`、`loadOpenAI`、`isPristineSettings`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceSettings`、`getVoiceProviderConfig`、`saveVoiceProviderConfig`、**`saveVoiceSaveDir`**、`getUpdaterSettings`、`saveUpdaterSettings`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`（原 `getVoiceConfig` 已删除）
 
 ## 1. 作用与职责
@@ -17,7 +17,7 @@
 4. **视频渲染档位白名单**：`DEFAULT_RENDER` / `normalizeRenderOptions` / `pickRenderOverride`——**白名单只此一处**，`projects.ts`（项目级覆盖落盘）与 `video.ts`（渲染 CLI 参数）都复用，避免校验逻辑三处漂移。
 5. **应用自更新设置**：`updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`）由 `getUpdaterSettings` / `saveUpdaterSettings` 管理，`updater.ts` 读它决定更新源与启动检查。
 6. **「出厂状态」判定**：`isPristineSettings(file)` 回答「用户在这个位置配过东西吗」，供 `index.ts` 的 `migrateFrom()` 迁移老数据时决定能否用老 `settings.json` 覆盖新文件（见 §3.5）。
-7. **IPC 注册**：`register(ctx)` 注册 `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` 五个频道。
+7. **IPC 注册**：`register(ctx)` 共注册 **6 个频道**——`settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test`，以及运行环境「从本地文件安装…」的 **`settings:pick-runtime-pack`**（见 §3.4）。
 
 配置文件路径由 `settingsFile()` 计算：
 
@@ -100,7 +100,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 - `map`：`id` 缺省时由文件名派生 —— 去掉前缀 `ggml-`（`/^ggml-/i`）与后缀 `.bin`（`/\.bin$/i`），例如 `ggml-base-q5_1.bin → base-q5_1`；
 - 其余字段做类型兜底：`name`/`url`/`desc` 非字符串则为 `''`，`sizeMB` 用 `Number(...) || 0`。
 
-### 3.4 五个 IPC 的行为
+### 3.4 六个 IPC 的行为
 
 | 频道 | 处理函数要点 | 返回 |
 | --- | --- | --- |
@@ -109,6 +109,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `settings:save-render` | 先 `readSettings()`，**只覆盖 `render`**：`cur.render = normalizeRenderOptions(Object.assign({}, cur.render, payload.render))`——在现有值上合并本次传入的字段后再整体规范化，因此只改质量不会把帧率顶掉 | `{ ok: true, settings: cur }` |
 | `settings:save-updater` | **只覆盖 `updater`**：调 `saveUpdaterSettings(payload.updater)`（内部对现有值做字段级合并 + 规范化 + 写盘），再 `readSettings()` 回读整份设置返回。因此「保存更新源」不会影响 `autoCheck`，反之亦然 | `{ ok: true, settings: readSettings() }` |
 | `settings:test` | 见下 | `{ ok: boolean, message: string }` |
+| `settings:pick-runtime-pack` | **运行环境「从本地文件安装…」**（离线 / 内网机器的兜底入口，见 `docs/runtime-pack-split.md` §11.1）：以主窗口为父弹 `dialog.showOpenDialog`（`title: '选择运行环境包（ffmpeg.7z / hyperframes.7z）'`、`filters` 只收 `7z`、`properties: ['openFile']`）；从文件名里含 `ffmpeg` / `hyperframe` 判定包名（判不出返回「这个文件名看不出是哪个包…」）；把选中的 7z **复制**到 `userData/runtime/local-import/<包名>.7z`，并按字节数生成同名 `<包名>.json` 清单（`id = 'local-' + bytes.toString(16)`、`sha512: ''` ⇒ **跳过 sha512 校验**，文件是用户自己给的；`files` / `unpackedBytes` 置 0） | 取消 `{ ok: false, canceled: true, message: '已取消' }`；成功 `{ ok: true, pack, message: '已导入 <包名>（xx MB），正在解包…' }`；导入异常 `{ ok: false, message: '导入失败：…' }` |
 
 **`settings:test` 的成功判定**：先用 `getCustomModel()` 与 payload 中的 `customModel` 合并成待测配置 `m`，再依次判断：
 
@@ -162,9 +163,9 @@ function isPristineSettings(file: string): boolean
 | `src/main/htmlAgent.ts` | `getCustomModel`（取自定义模型配置发起对话）与 `loadOpenAI`（懒加载 SDK 构造函数） |
 | `src/main/projects.ts` | `pickRenderOverride`——`project:set-render` 写 / 清除项目级渲染档位覆盖时做白名单过滤 |
 | `src/main/video.ts` | `pickRenderOverride`——把 `video:render` 载荷里显式给出的档位拼成 `--quality` / `--fps` 参数 |
-| `src/preload/index.ts` | 暴露 `window.settingsTools = { get, save, saveRender, saveUpdater, test }`，分别 invoke `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` |
+| `src/preload/index.ts` | 暴露 `window.settingsTools = { get, save, saveRender, saveUpdater, test, pickRuntimePack }`，分别 invoke `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` / `settings:pick-runtime-pack` |
 | `src/main/updater.ts` | `import { getUpdaterSettings, saveUpdaterSettings }`——读 `feedUrl`（非空即覆盖打包内置更新源）、`autoCheck`（启动静默检查开关）、`skippedVersion`（跳过版本）；用户对已跳过版本点「下载更新」时清掉该标记 |
-| 渲染层设置页 `SettingsPage/index.vue` | 自定义模型分区通过 `window.settingsTools.get()` / `save()` / `test()` 读写；渲染默认档位经 `saveRenderDefaults()` 走 `saveRender()`；更新设置走 `saveUpdater()`（千问语音分区走 `window.voiceTools.saveConfig`） |
+| 渲染层设置页 `SettingsPage/index.vue` | 自定义模型分区通过 `window.settingsTools.get()` / `save()` / `test()` 读写；渲染默认档位经 `saveRenderDefaults()` 走 `saveRender()`；更新设置走 `saveUpdater()`（千问语音分区走 `window.voiceTools.saveConfig`）；运行环境「从本地文件安装…」走 `pickRuntimePack()`，成功后再调 `runtimeTools.prepare()` 触发解包 |
 | 渲染层 `composables/useRenderOptions.ts` | `settingsTools.get()` 读全局默认档位（`loadRenderDefaults()`）、`settingsTools.saveRender()` 保存（`saveRenderDefaults()`） |
 
 协作要点：

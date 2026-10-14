@@ -37,7 +37,7 @@
       </div>
       <div class="hf-modal-foot" v-show="!applyMode">
         <button class="hf-btn" @click="closeTw">取消</button>
-        <button class="hf-btn hf-btn-primary" :disabled="startDisabled" @click="doTranscribe">{{ startText }}</button>
+        <button class="hf-btn hf-btn-primary" :disabled="startDisabled" @click="doTranscribe()">{{ startText }}</button>
       </div>
       <div class="hf-modal-foot" v-show="applyMode">
         <button class="hf-btn" @click="applyTranscript('replace')">替换现有</button>
@@ -56,6 +56,10 @@ import { toast } from '@renderer/composables/useToast'
 import { goPage } from '@renderer/pages'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import { estDur, type SubtitleItem } from './helpers'
+import { useEnvGate } from '@renderer/composables/useEnvGate'
+
+// 运行环境缺包时的确认框：whisper-cli 随安装包，但「非 wav/flac/mp3/ogg 的音频要转码」依赖 ffmpeg 包
+const envGate = useEnvGate();
 
 const props = defineProps<{
   pageCtx: {
@@ -212,11 +216,17 @@ function closeTw(): void {
   applyMode.value = false;
 }
 
-async function doTranscribe(): Promise<void> {
+async function doTranscribe(skipEnvGuard = false): Promise<void> {
   if (transcribing.value) return;
   const audioPath = audioInput.value;
   if (!audioPath) { setTwStatus('请先选择要转录的音频', 'hf-error'); return; }
   if (!(twModel.value.id && twModel.value.downloaded)) { setTwStatus('识别模型不可用，请先到设置页下载并设为当前使用', 'hf-error'); return; }
+  // 转录主体用不到运行环境（whisper-cli 随安装包），但 mp4/m4a 这类格式要 ffmpeg 转码：
+  // 缺就直接问用户，别等主进程报「未找到内置 ffmpeg」；点「继续」回到这里时不再弹框
+  if (!skipEnvGuard) {
+    const g = await envGate.guard(['ffmpeg'], '文字转字幕', () => { void doTranscribe(true); });
+    if (!g.ok) return;
+  }
   transcribing.value = true;
   pendingResult = null;
   applyMode.value = false;
@@ -229,8 +239,13 @@ async function doTranscribe(): Promise<void> {
       language: lang.value
     });
     if (!res || !res.ok) {
-      showTwBar({ text: (res as { message?: string })?.message || '转录失败', kind: 'error' }, false);
-      setTwStatus((res as { message?: string })?.message || '转录失败', 'hf-error');
+      const fail = res as { message?: string; needPacks?: ('ffmpeg' | 'hyperframes')[] } | null;
+      const msg = (fail && fail.message) || '转录失败';
+      showTwBar({ text: msg, kind: 'error' }, false);
+      setTwStatus(msg, 'hf-error');
+      if (fail && fail.needPacks && fail.needPacks.length) {
+        void envGate.guard(fail.needPacks, '文字转字幕', () => { void doTranscribe(true); });
+      }
       return;
     }
     pendingResult = { segments: res.segments || [] };

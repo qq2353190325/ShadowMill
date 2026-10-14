@@ -4,8 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：821 行
-- **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境包 2 个（`RuntimeStage`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个
+- **规模**：851 行
+- **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境（**分包**）4 个（`RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个；另有 ① 节 `IpcFail.needPacks`（缺哪个运行环境包）与 ⑨ 节 `settingsTools.pickRuntimePack` 两处本轮新增成员
 
 ## 1. 作用与职责
 
@@ -26,7 +26,7 @@
 | ② 主进程装配上下文 | `RegisterCtx` | `src/main/*.ts` 的 `register(ctx)` |
 | ③ 设置 | `settings.json` 的 schema（含渲染档位 `render` 与更新设置 `updater`）与 `settings:*` / `voice:save-config` 载荷 | `src/main/settings.ts`、设置页、配音页 |
 | ③.5 应用自更新 | `update:*` 的检查结果（`message` + `detail` 分层）与进度载荷 | `src/main/updater.ts`、设置页 |
-| ③.6 运行环境包 | `RuntimeStage`、`RuntimeProgressPayload`（运行环境包阶段与下载 / 解包进度） | `src/main/runtime.ts`、设置页、`src/renderer/src/composables/useRuntime.ts` |
+| ③.6 运行环境（分包） | `RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`（包名、每包状态、阶段与下载 / 解包进度） | `src/main/runtime.ts`、设置页、`src/renderer/src/composables/useRuntime.ts`、`src/renderer/src/composables/useEnvGate.ts` |
 | ⑧b 历史数据目录 | `LegacyDataInfo`（扫描结论）、`LegacyResolveAction`（三选一）、`LegacyResolveResult`（执行结果与迁移计数） | `src/main/index.ts`、`src/renderer/src/composables/useLegacyData.ts`、`src/renderer/src/components/LegacyDataDialog.vue` |
 | ④ 音色与配音 | 系统音色、克隆音色、音色映射、合成/对齐载荷与结果 | `src/main/voice.ts`、`src/main/ttsAlign.ts` |
 | ⑤ 语音识别 | whisper 模型状态、转录载荷与结果 | `src/main/whisper.ts` |
@@ -41,8 +41,8 @@
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `IpcFail` | `interface` | 失败分支：`ok: false` + 可选 `message?: string` + 可选 `detail?: string` + 可选 `canceled?: boolean` |
-| `IpcResult<T = unknown>` | `type` | `({ ok: true } & T) \| IpcFail`，成功分支是 `{ ok: true }` 与业务字段 `T` 的**交叉类型**（业务字段平铺在结果对象上，没有 `data` 包装） |
+| `IpcFail` | `interface` | 失败分支：`ok: false` + 可选 `message?: string` + 可选 `detail?: string` + 可选 `canceled?: boolean` + 可选 **`needPacks?: RuntimePackName[]`**（缺哪个运行环境包；见 ③.6 节） |
+| `IpcResult<T = unknown>` | `type` | `({ ok: true; message?: string } & T) \| IpcFail`，成功分支是 `{ ok: true }` 与业务字段 `T` 的**交叉类型**（业务字段平铺在结果对象上，没有 `data` 包装）；成功分支的 `message` 可选，供「取消」「幂等复用（当前没有正在进行的下载）」等场景给一句话回执 |
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -50,6 +50,7 @@
 | `message` | 可选 `string` | 失败说明（人话）。**可选**的原因：`voice:pick-dir` 的「用户取消」分支只回 `{ ok: false, canceled: true }`，没有 `message` |
 | `detail` | 可选 `string` | **可选的技术详情**（原始报错 / HTTP 状态 / 请求 URL）：供 UI 的「查看详情」折叠展示，与面向用户的 `message` 分离——`message` 说人话，`detail` 给排障。见 `UpdateCheckResult.detail` |
 | `canceled` | 可选 `boolean` | 区分「用户取消」与「真实失败」，渲染层通常静默忽略取消 |
+| `needPacks` | 可选 `RuntimePackName[]` | **运行环境缺包**时回给界面的包名数组（`'ffmpeg'` / `'hyperframes'`）：消费点（`video:render` / `project:extract-video-audio` / `voice:synth-aligned` / 转码时的 `whisper:transcribe`）先纯校验，缺包就带上它返回，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），用户点「继续」才用原参数重发。`VideoRenderResult` 的失败分支另有同名字段 |
 
 `T` 缺省为 `unknown`，表示调用方只关心 `ok`（如 `clearAudio` / `clearVideo` / `delete` 等无载荷的写操作）。
 
@@ -129,23 +130,31 @@
 | `UpdateCheckResult` | `detail` | 可选 `string` | 排障详情（HTTP 状态、AccessDenied 原文、请求 URL 等）：只在 UI「查看详情」里展开；与 `message` 分离，是因为 403 / 404 / 缺 `app-update.yml` 的处置动作都在发布者那一侧 |
 | `UpdateProgressPayload` | `detail` | 可选 `string` | 同上；仅 `error` 阶段非空，UI 默认折叠 |
 
-### 2.3.2 ③.6 运行环境包（`src/main/runtime.ts`）
+### 2.3.2 ③.6 运行环境（分包）（`src/main/runtime.ts`）
+
+> 分包模型：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）不随安装包，各自一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）、首次用到时下载并解到 `<userData>/runtime/<包名>/`；`whisper`（12.5 MB）随安装包（`extraResources`），装完即可离线转录。方案见 `docs/runtime-pack-split.md`。
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `RuntimeStage` | `type` | `'idle' \| 'checking' \| 'downloading' \| 'extracting' \| 'ready' \| 'failed'`——`idle` 未检查；`checking` 找包 / 读清单；`downloading` 从更新源下载包；`extracting` 7za 解包；`ready` 就绪（含 dev / 旧版布局内置）；`failed` 失败（转录、渲染不可用） |
-| `RuntimeProgressPayload` | `interface` | `runtime:progress` 推送与 `runtime:status` 返回共用的载荷；字段见下 |
+| `RuntimePackName` | `type` | `'ffmpeg' \| 'hyperframes'`。**定义在本文件最前**（`IpcFail.needPacks` 与 ⑧ 节的进度载荷都要用），详细说明在本节 |
+| `RuntimePackState` | `type` | 单个包在本机的状态：`'ready'`（已就绪）/ `'missing'`（本机没有，需要下载）/ `'unknown'`（还没探测过） |
+| `RuntimePhase` | `type` | `'idle'`（未开始）/ `'checking'`（探测 / 取清单）/ `'downloading'`（下载中）/ `'extracting'`（解包中）/ `'ready'`（需要的包都就绪）/ `'cancelled'`（用户取消，**不是失败**）/ `'error'`（失败，有 `detail` 可排障） |
+| `RuntimeProgressPayload` | `interface` | `runtime:progress` 推送与 `runtime:status` 返回共用的载荷；字段见下。**旧的 `stage` / `id` 字段已删除**（阶段改叫 `phase`，包名改叫 `pack`，就绪与否看 `status` / `missing`） |
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `stage` | `RuntimeStage` | 当前阶段 |
-| `percent` | `number` | downloading / extracting 阶段有效；`ready` 为 100 |
-| `id` | `string` | 运行环境包的内容 id（sha512 前 12 位，也是解包目录名），未知时为空串 |
+| `phase` | `RuntimePhase` | 当前阶段 |
+| `pack` | `RuntimePackName \| null` | 正在处理的包；空闲 / 就绪时为 `null` |
+| `percent` | `number` | 当前包的百分比（downloading / extracting 阶段有效；`ready` 为 100） |
+| `packs` | `RuntimePackName[]` | 本次操作需要的全部包（供界面说明「要下什么」） |
+| `missing` | `RuntimePackName[]` | 当前仍缺的包（就绪后为空数组） |
+| `status` | `Record<RuntimePackName, RuntimePackState>` | 各包在本机的状态（设置页据此分项显示） |
 | `message` | `string` | 用户可见文案（人话：正在做什么 / 已经就绪 / 失败了怎么办） |
 | `detail` | 可选 `string` | 排障详情（7za 退出码、HTTP 状态、路径等），仅失败或降级时有值 |
-| `source` | `string` | `local` = 随安装包携带；`download` = 从更新源下载；`dev` / `legacy` = 安装目录内已是展开形态；`cache` = 复用已解包目录 |
-| `bytes` | `number` | 包体积（下载进度用） |
-| `unpackedBytes` / `files` | `number` | 解包后体积与文件数（解包进度的分母，也用于设置页展示「运行环境 716 MB / 4917 文件」） |
+| `source` | `string` | `remote` = 从更新源下载；`local` = 用户指定的本地 7z（`SHADOWMILL_RUNTIME_PACK` / 设置页「从本地文件安装…」）；`legacy` = 沿用旧版整体包已解开的目录；`dev` = 开发态项目根 `resources`；`cache` = 复用已解包目录 |
+| `bytes` | `number` | 当前包的下载体积（下载进度用） |
+| `unpackedBytes` / `files` | `number` | 解包后体积与文件数（解包进度的分母）；分包前 `resources/` 合计实测 632.3 MB / 4916 文件，可作口径参考 |
+| `cancellable` | `boolean` | 是否可取消（downloading / extracting 期间为 true，界面此时显示「取消」） |
 
 > 同一个接口也在 §2.8 的进度载荷表里列了一行（⑧ 进度推送视角），两处引用的是同一份定义。
 
@@ -290,11 +299,11 @@
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `VideoRenderPayload` | `interface` | `extends RenderOverride`，即 `{ htmlPath?: string; quality?: RenderQuality; fps?: RenderFps }`——档位字段缺省/非法时主进程不拼对应 CLI 参数 |
-| `VideoRenderResult` | `type` | 渲染结果联合：成功 `{ ok: true; outputVideo: string; projectDir: string }`，失败 `{ ok: false; message: string; compatible?: boolean }` |
+| `VideoRenderResult` | `type` | 渲染结果联合：成功 `{ ok: true; outputVideo: string; projectDir: string }`，失败 `{ ok: false; message: string; compatible?: boolean; needPacks?: RuntimePackName[] }` |
 
 > ⑦ 节只有上面两个类型：渲染载荷与渲染结果。渲染进度载荷 `VideoProgressPayload` 归 ⑧ 节（进度推送）。
 
-`VideoRenderResult` **不是** `IpcResult<T>` 的实例：它的失败分支 `message` 必填，且成功分支不复用 `IpcFail` 联合；失败分支的 `compatible: false` 表示 HTML 未通过 HyperFrames 合规校验（渲染层据此区分「环境错误」与「HTML 不合规」）。
+`VideoRenderResult` **不是** `IpcResult<T>` 的实例：它的失败分支 `message` 必填，且成功分支不复用 `IpcFail` 联合；失败分支的 `compatible: false` 表示 HTML 未通过 HyperFrames 合规校验（渲染层据此区分「环境错误」与「HTML 不合规」），`needPacks` 非空表示本机缺运行环境包（渲染层据此弹下载确认框，见 `docs/runtime-pack-split.md` §5.2）。
 
 ### 2.8 ⑧ 进度推送（6 路 main → renderer）
 
@@ -310,7 +319,7 @@
 | `VideoProgressPayload` | `interface` | `{ text }`（HyperFrames 渲染日志行，渲染层按 `[Render:trace]` 前缀自行解析）；频道 `video:progress` |
 | `UpdateStage` | `type` | `'idle' \| 'checking' \| 'available' \| 'skipped' \| 'downloading' \| 'downloaded' \| 'none' \| 'error'`（应用更新的阶段；`idle` 表示本进程尚未检查过） |
 | `UpdateProgressPayload` | `interface` | `{ stage, version, currentVersion, percent, transferred, total, bytesPerSecond, message, detail? }`；频道 `update:progress`（检查结果与下载进度共用一路）。`message` 是人话文案、`detail` 是排障详情（仅 `error` 阶段非空），与 `UpdateCheckResult` 同一分层约定（见 §2.3.1） |
-| `RuntimeProgressPayload` | `interface` | `{ stage, percent, id, message, detail?, source, bytes, unpackedBytes, files }`；频道 `runtime:progress`（运行环境包的就绪 / 下载 / 解包进度，类型定义在本文件 ③.6 节） |
+| `RuntimeProgressPayload` | `interface` | `{ phase, pack, percent, packs, missing, status, message, detail?, source, bytes, unpackedBytes, files, cancellable }`；频道 `runtime:progress`（运行环境分包的探测 / 下载 / 解包进度，类型定义在本文件 ③.6 节） |
 
 `HtmlAgentProgress` 与 `HtmlProgressPayload` 的分工：前者是 Agent 调用层（`htmlAgent.ts` 的 `emit` / `AgentProgress`）的形状，后者是**线上载荷**（`projects.ts` 补上 `text` 文案字段后推送）。`video:progress` 是 6 路里唯一**没有**单订阅包装的通道（preload 直接 `ipcRenderer.on`）。
 
@@ -330,12 +339,12 @@
 | `appTools` | 1 | `copyText` | `Promise<boolean>`（不走 `IpcResult`） |
 | `windowControls` | 4 | `minimize`、`toggleMaximize`、`close`、`onMaximizedChange` | 前三者 `void`（`send` 单向）；`onMaximizedChange(cb: (isMaximized: boolean) => void)` |
 | `hfTools` | 4 | `openHtml`、`renderVideo`、`showInFolder`、`onProgress` | `openHtml` → `Promise<string \| null>`（**保留但渲染层当前无调用方**）；`renderVideo` → `Promise<VideoRenderResult>`；`showInFolder` → `Promise<void>`；`onProgress(cb: (data: VideoProgressPayload) => void)` |
-| `settingsTools` | 5 | `get`、`save`、`saveRender`、`saveUpdater`、`test` | `get` → `Promise<AppSettings>`（**不经 `ok` 包裹**）；`save(customModel)` / `saveRender(render)` / `saveUpdater(updater)` → `Promise<IpcResult<SettingsSaveResult>>`（preload 分别包装为 `{ customModel }` / `{ render }` / `{ updater }`）；`test(customModel)` → `Promise<IpcResult>` |
+| `settingsTools` | 6 | `get`、`save`、`saveRender`、`saveUpdater`、`test`、**`pickRuntimePack`** | `get` → `Promise<AppSettings>`（**不经 `ok` 包裹**）；`save(customModel)` / `saveRender(render)` / `saveUpdater(updater)` → `Promise<IpcResult<SettingsSaveResult>>`（preload 分别包装为 `{ customModel }` / `{ render }` / `{ updater }`）；`test(customModel)` → `Promise<IpcResult>`；`pickRuntimePack()` → `Promise<IpcResult<{ pack?: RuntimePackName }>>`（弹文件框选 `ffmpeg.7z` / `hyperframes.7z`，导入 `userData/runtime/local-import/`；取消时 `{ ok:false, canceled:true }`，导入成功后由调用方接着 `runtimeTools.prepare()`） |
 | `voiceTools` | 19 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、**`deleteCloudVoice`**、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` | 见下 |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` | 见下 |
 | `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下 |
 | `updateTools` | 8 | `version`、`check`、`download`、`cancel`、`install`、**`status`**、`openLog`、`onProgress` | 见下 |
-| `runtimeTools` | 3 | `status`、`prepare`、`onProgress` | `status()` → `Promise<RuntimeProgressPayload>`；`prepare()` → `Promise<IpcResult>`（幂等，进度仍由 `runtime:progress` 回推）；`onProgress(cb: (data: RuntimeProgressPayload) => void)`（单订阅） |
+| `runtimeTools` | 4 | `status`、`prepare`、**`cancel`**、`onProgress` | `status()` → `Promise<RuntimeProgressPayload>`；`prepare(packs?: RuntimePackName[])` → `Promise<IpcResult>`（省略 `packs` = 全部缺的包；忙碌期重复调用返回 `{ ok:false, message }`）；`cancel()` → `Promise<IpcResult>`（中断下载 / 解包并清半成品，成功后 `message` 为「已取消下载」）；`onProgress(cb: (data: RuntimeProgressPayload) => void)`（单订阅） |
 | `legacyTools` | 2 | `status`、`resolve` | `status()` → `Promise<LegacyDataInfo \| null>`；`resolve(action: LegacyResolveAction)` → `Promise<LegacyResolveResult>`（preload 只把 `action` 字符串透传，见 §2.3.3） |
 
 `voiceTools` 逐个签名（含未单独命名的内联载荷）：
@@ -408,7 +417,7 @@
       ┌──────────────────────┬────────────────────────┬─────────────────────┐
       ▼                      ▼                        ▼                     ▼
   src/main/*             src/preload/index.ts    src/preload/index.d.ts   渲染层
-  (10 个模块 import 类型)   (导入 PreloadApi + 3 个进度载荷)  (导入 PreloadApi)   （经 Window 间接获得）
+  (10 个模块 import 类型)   (导入 PreloadApi + 7 个类型)  (导入 PreloadApi)   （经 Window 间接获得）
 ```
 
 `tsconfig.web.json` 的 `include` 含 `"src/shared/**/*.ts"` 与 `"src/preload/index.d.ts"`；`tsconfig.node.json` 覆盖主进程与 `src/preload/index.ts`；`npm run typecheck` 依次跑 `tsconfig.node.json`、`tsconfig.web.json`、`tsconfig.agent.json`，因此本文件的任何字段改动会同时触发三端编译报错定位。
@@ -453,10 +462,10 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | 被 import | `src/main/voice.ts` | `RegisterCtx`、`SystemVoice`、`VoiceModel`、`VoiceProviderView`、`VoiceSettings`、`VoiceProfile`、`VoiceCreatePayload`、`VoiceProfileKeyPayload`、`VoiceProfilePayload`、`VoiceSaveConfigPayload`、`VoiceSaveDirPayload`、`VoiceSynthPayload` |
 | 被 import | `src/main/ttsAlign.ts` | `RegisterCtx`、`AlignProgressPayload`（取代原本地 `AlignProgressInfo`）、`VoiceAlignPayload` |
 | 被 import | `src/main/video.ts` | `RegisterCtx`、`VideoRenderPayload`、`VideoRenderResult`（取代原本地声明的 `RenderPayload` / `RenderResult`） |
-| 被 import | `src/main/runtime.ts` | `RegisterCtx`、`RuntimeProgressPayload`（③.6 节；`RuntimeStage` 由该接口的 `stage` 字段内联引用） |
+| 被 import | `src/main/runtime.ts` | `RegisterCtx`、`IpcResult`、`RuntimePackName`、`RuntimePackState`、`RuntimeProgressPayload`（③.6 节） |
 | 被 import | `src/main/htmlAgent.ts` | `HtmlAgentProgress`（以 `export type AgentProgress = HtmlAgentProgress` 对外保留 `AgentProgress` 名） |
 | 被 import | `src/main/systemVoices.ts` | `SystemVoice` |
-| 被 import（仅类型） | `src/preload/index.ts` | `PreloadApi`、`AlignProgressPayload`、`HtmlProgressPayload`、`WhisperProgressPayload` |
+| 被 import（仅类型） | `src/preload/index.ts` | `PreloadApi`、`AlignProgressPayload`、`HtmlProgressPayload`、`RenderOverride`、`RuntimePackName`、`RuntimeProgressPayload`、`UpdateProgressPayload`、`WhisperProgressPayload` |
 | 被 import（仅类型） | `src/preload/index.d.ts` | `PreloadApi`，供 `declare global Window` 使用 |
 | 被 import（仅类型） | `src/renderer/src/composables/useAppStore.ts` | `ProjectMeta`（并 `export type { ProjectMeta }` 再导出，取代原本地同名 interface） |
 
@@ -471,7 +480,7 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 - **`VoiceProfile.type` 是字面量联合**：类型为 `VoiceProfileType`（`'system' | 'custom'`），不再是宽泛 `string`；但线上保存分支的 `VoiceProfilePayload.profile.type` 仍是 `type?: string`（主进程按「非 `system` 一律归 `custom`」归一），两者不要混用。
 - **`AppSettings.whisper` 有独立 interface**：即 `WhisperSettings`，需要复用该分区时直接引用，不要重复内联声明。
 - **`SystemVoice` 与 `SystemVoiceItem` 的分工**：`SystemVoice` 是内置音色表的 4 字段条目（由 `src/main/systemVoices.ts` 提供）；`voice:list-system-voices` 下发的元素是 `SystemVoiceItem`（多一个 `model` 字段）。历史上 `index.d.ts` 的元素类型与共享 `SystemVoice` 不同步的问题，已由这两个类型显式区分解决。
-- **`VideoRenderResult` 不是 `IpcResult`**：失败分支 `message` 必填、成功分支带 `outputVideo` / `projectDir`，且失败可带 `compatible?: boolean`；文档与代码不要一律按 `IpcResult` 处理。
+- **`VideoRenderResult` 不是 `IpcResult`**：失败分支 `message` 必填、成功分支带 `outputVideo` / `projectDir`，且失败可带 `compatible?: boolean`（HTML 不合规）与 `needPacks?: RuntimePackName[]`（缺运行环境包）；文档与代码不要一律按 `IpcResult` 处理。
 - **少数 API 不走 `ok` 包裹**：`settingsTools.get()` → `AppSettings`、`projectTools.list()` → 数组、`projectTools.load()` → `Project | null`、`hfTools.openHtml` / `pickAudio` / `pickVideo` → `string | null`、`appTools.copyText` → `boolean`、`updateTools.version()` → `string`（同步）。其中 `projectTools.load()` 在项目名为空时**确实返回 `null`**，调用方必须做空值守卫（`useAppStore.refreshProject` 已据此加守卫）。
 - **`RegisterCtx.getWindow` 可为 `null`**：所有 `webContents.send` 前必须判空，否则窗口关闭或重载期间会抛异常。
 - **结构类型靠「再导出」保引用面**：`src/main/projects.ts` 的 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'`、`src/renderer/src/composables/useAppStore.ts` 的 `export type { ProjectMeta }` 都只是转发 —— `projects.Project`、`from './projects'`、`import { ProjectMeta } from '@renderer/composables/useAppStore'` 这类既有引用不需要改动，但结构本身只在本文档定义一处。新增字段时改这里即可，不要在被再导出的文件里重建 interface。

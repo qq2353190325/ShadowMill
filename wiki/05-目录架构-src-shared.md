@@ -8,8 +8,8 @@
 
 | 文件 | 行数 | 角色 |
 |---|---|---|
-| [ipc.ts](./files/shared/ipc.ts.md) | 127 | IPC 频道名常量（10 个分组、83 个频道）+ `IpcChannel` 类型 |
-| [types.ts](./files/shared/types.ts.md) | 821 | 跨进程载荷类型（12 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情）、`RegisterCtx`、设置（含**按厂家的 `VoiceSettings` / `VoiceProviderConfig`（只有 `apiKey`）**、渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境包（`RuntimeStage` / `RuntimeProgressPayload`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音（含 `VoiceProviderView`；`VoiceCreatePayload.audioPath` 可为本地路径 / 公网 URL / `data:audio/...` URI，本地文件裁 15 秒后走复刻接口的 `input.url`；`VoiceCreateResult` 已收缩为 `{ voice, targetModel }`）、语音识别、项目与字幕、预览/转视频、进度推送，以及 `PreloadApi`（`window.*` 契约唯一真源）；其中 `ProjectHtmlMaterials` 已删 `audioPath`（背景音轨由主进程注入 HTML），`ProjectSetAudioResult` 增加可选 `htmlUpdated` |
+| [ipc.ts](./files/shared/ipc.ts.md) | 132 | IPC 频道名常量（10 个分组、**85** 个频道）+ `IpcChannel` 类型 |
+| [types.ts](./files/shared/types.ts.md) | 851 | 跨进程载荷类型（12 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情）、`RegisterCtx`、设置（含**按厂家的 `VoiceSettings` / `VoiceProviderConfig`（只有 `apiKey`）**、渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境（**分包**：`RuntimePackName` / `RuntimePackState` / `RuntimePhase` / `RuntimeProgressPayload`；`IpcFail.needPacks` 与 `IpcResult` 成功分支的可选 `message`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音（含 `VoiceProviderView`；`VoiceCreatePayload.audioPath` 可为本地路径 / 公网 URL / `data:audio/...` URI，本地文件裁 15 秒后走复刻接口的 `input.url`；`VoiceCreateResult` 已收缩为 `{ voice, targetModel }`）、语音识别、项目与字幕、预览/转视频、进度推送，以及 `PreloadApi`（`window.*` 契约唯一真源）；其中 `ProjectHtmlMaterials` 已删 `audioPath`（背景音轨由主进程注入 HTML），`ProjectSetAudioResult` 增加可选 `htmlUpdated` |
 | [constants.ts](./files/shared/constants.ts.md) | 30 | 应用级公共常量：品牌文案 `APP_NAME`（`'影坊'`）/ `APP_NAME_EN`（`'ShadowMill'`）/ `APP_SLOGAN` / `APP_SLOGAN_SHORT` 与出网请求标识 `APP_USER_AGENT`（`APP_NAME_EN + '/1.0'`） |
 
 > 前两个文件是**契约**（频道名与载荷格式禁止改动）；`constants.ts` 是**文案与请求标识**，改它不影响任何频道名或载荷格式。
@@ -25,15 +25,15 @@
 | `Window` | 4 | `window:minimize`、`window:toggle-maximize`、`window:close`、`window:maximized-change` |
 | `App` | 1 | `app:copy-text` |
 | `Update` | 8 | `update:check`、`update:download`、`update:cancel`、`update:install`、`update:version`、**`update:status`**、`update:open-log`、`update:progress` |
-| `Settings` | 5 | `settings:get`、`settings:save`、`settings:save-render`、`settings:save-updater`、`settings:test` |
+| `Settings` | 6 | `settings:get`、`settings:save`、`settings:save-render`、`settings:save-updater`、`settings:test`、**`settings:pick-runtime-pack`** |
 | `Voice` | 19 | `voice:get-config`、`voice:get-save-dir`、`voice:save-config`、`voice:pick-audio`、`voice:create`、`voice:list-system-voices`、`voice:list-models`、`voice:get-profiles`、`voice:save-profile`、`voice:delete-profile`、**`voice:delete-cloud`**、`voice:list`、`voice:list-all`、`voice:pick-dir`、`voice:list-generated`、`voice:synth`、`voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | `Whisper` | 12 | `whisper:status`、`whisper:download`、`whisper:delete`、`whisper:set-current`、`whisper:add-model`、`whisper:update-model`、`whisper:remove-model`、`whisper:open-dir`、`whisper:project-audio`、`whisper:pick-audio`、`whisper:transcribe`、`whisper:progress` |
 | `Project` | 25 | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-video`、`project:set-video`、`project:clear-video`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、`project:html-progress` |
 | `Video` | 4 | `dialog:open-html`、`video:show-in-folder`、`video:render`、`video:progress` |
-| `Runtime` | 3 | `runtime:status`、`runtime:prepare`、`runtime:progress` |
+| `Runtime` | 4 | `runtime:status`、`runtime:prepare`（载荷 `packs?: RuntimePackName[]`，省略 = 全部）、**`runtime:cancel`**、`runtime:progress` |
 | `Legacy` | 2 | `legacy:status`、`legacy:resolve`（历史数据目录：问一次「有没有 / 是什么」+ 回传处置选择；**没有推送频道**，界面在渲染层） |
 
-合计 **83** 个频道（Window 4 + App 1 + Update 8 + Settings 5 + Voice 19 + Whisper 12 + Project 25 + Video 4 + Runtime 3 + Legacy 2）。
+合计 **85** 个频道（Window 4 + App 1 + Update 8 + Settings 6 + Voice 19 + Whisper 12 + Project 25 + Video 4 + Runtime 4 + Legacy 2）。
 
 三个容易踩的点：
 
@@ -51,18 +51,18 @@
 
 | 小节 | 内容 | 代表类型 |
 |---|---|---|
-| ① 通用 IPC 结果 | 全部 `{ ok, ... }` 结果的形状 | `IpcFail`（`ok:false` + 可选 `message` / `detail` / `canceled`）、`IpcResult<T> = ({ ok: true } & T) \| IpcFail`（**取代**旧版只存在于 `preload/index.d.ts` 内部的 `OkResult` / `FailResult`） |
+| ① 通用 IPC 结果 | 全部 `{ ok, ... }` 结果的形状 | `IpcFail`（`ok:false` + 可选 `message` / `detail` / `canceled` / **`needPacks`**——运行环境缺包时回给界面的包名数组）、`IpcResult<T> = ({ ok: true; message?: string } & T) \| IpcFail`（**取代**旧版只存在于 `preload/index.d.ts` 内部的 `OkResult` / `FailResult`；成功分支的 `message` 供取消、幂等复用等场景给一句话回执） |
 | ② 主进程装配上下文 | `register(ctx)` 的能力面 | `RegisterCtx`（`getWindow: () => BrowserWindow \| null`） |
 | ③ 设置 | `userData/settings.json` 的完整 schema 与 `settings:*` 载荷 | `CustomModelConfig`、**`VoiceSettings` + `VoiceProviderConfig`**、`VoiceTTSConfig`（旧结构，仅迁移来源）、`VoiceProfile`、`VoiceProfileType`、`VoiceProfileInput`、`WhisperCustomModel`、`WhisperSettings`、`UpdaterSettings`、`AppSettings`、`SettingsSaveResult` |
 | ③.5 应用自更新 | `update:*` 的检查结果与进度载荷 | `UpdateCheckState`、`UpdateCheckResult`（**`message` 必填** + 可选 `detail`）、`UpdateStage`、`UpdateProgressPayload`（含可选 `detail`） |
-| ③.6 运行环境包 | 运行环境包的阶段与进度载荷 | `RuntimeStage`、`RuntimeProgressPayload`（`stage` / `percent` / `id` / `message` / `detail?` / `source` / `bytes` / `unpackedBytes` / `files`） |
+| ③.6 运行环境（分包） | 包名、单包状态、阶段与进度载荷 | `RuntimePackName`（`'ffmpeg' \| 'hyperframes'`，定义在文件最前）、`RuntimePackState`（`'ready' \| 'missing' \| 'unknown'`）、`RuntimePhase`（`idle \| checking \| downloading \| extracting \| ready \| cancelled \| error`）、`RuntimeProgressPayload`（`phase` / `pack` / `percent` / `packs` / `missing` / `status` / `message` / `detail?` / `source` / `bytes` / `unpackedBytes` / `files` / `cancellable`；**旧的 `stage` / `id` 字段已删**） |
 | ⑧b 历史数据目录 | 旧数据扫描结论与处置契约 | `LegacyDataInfo`（`dir` / `entries` / `projects`）、`LegacyResolveAction`（`'migrate' \| 'delete' \| 'later'`）、`LegacyResolveResult`（`ok` / `action` / `moved?` / `skipped?` / `failed?` / `message?`） |
 | ④ 音色与配音 | 系统/克隆音色、映射、合成与逐句对齐 | `SystemVoice`、`SystemVoiceItem`、`VoiceModel`、`VoiceListItem`、`VoiceCreateResult`、`VoiceSynthResult`、`VoiceAlignPayload`、`VoiceAlignResult` |
 | ⑤ 语音识别 | whisper 模型状态与转录 | `WhisperModelItem`、`WhisperStatusResult`、`WhisperTranscribePayload`、`WhisperTranscribeResult` |
 | ⑥ 项目与字幕 | `project.json`、字幕行、HTML 生成载荷 | `Scene`、`ContentScript`、`Project`、`SubtitleLine`、`ProjectMeta`、`ProjectAgentPayload`、`ProjectHtmlResult` |
-| ⑦ 预览 / 转视频 | 渲染载荷与结果、进度 | `VideoRenderPayload`、`VideoRenderResult`、`VideoProgressPayload` |
+| ⑦ 预览 / 转视频 | 渲染载荷与结果、进度 | `VideoRenderPayload`、`VideoRenderResult`（失败分支新增可选 **`needPacks?`**）、`VideoProgressPayload` |
 | ⑧ 进度推送 | 6 路 main → renderer 推送载荷 | `HtmlProgressPayload`、`WhisperProgressPayload`、`AlignProgressPayload`、`VideoProgressPayload`、`UpdateProgressPayload`、`RuntimeProgressPayload` |
-| ⑨ `window.*` 契约 | 11 个命名空间的完整方法签名 | `PreloadApi`（preload 实现与渲染层消费的唯一真源；`updateTools` 含 `status`（取一次常驻更新状态）与 `openLog`，`runtimeTools` / `legacyTools` 分别对应运行环境包与旧数据处置） |
+| ⑨ `window.*` 契约 | 11 个命名空间的完整方法签名 | `PreloadApi`（preload 实现与渲染层消费的唯一真源；`updateTools` 含 `status`（取一次常驻更新状态）与 `openLog`，`settingsTools` 新增 `pickRuntimePack()`（运行环境「从本地文件安装」），`runtimeTools` = `status()` / `prepare(packs?)` / `cancel()` / `onProgress()`，`legacyTools` 对应旧数据处置） |
 
 四条关键约定：
 
@@ -107,7 +107,7 @@
 | 消费方 | 引入方式 | 归属 tsconfig |
 |---|---|---|
 | `src/main/*.ts` | `import { IPC } from '../shared/ipc'`、`import type { … } from '../shared/types'`（10 个模块引入类型；`projects.ts` 还再导出四个项目结构）；`whisper.ts` 另有 `import { APP_USER_AGENT } from '../shared/constants'` | `tsconfig.node.json`（`include: src/shared/**/*.ts`，`paths: @shared/*`） |
-| `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`（构建时内联）+ `import type { PreloadApi, AlignProgressPayload, HtmlProgressPayload, RenderOverride, UpdateProgressPayload, WhisperProgressPayload } from '../shared/types'` | `tsconfig.node.json` |
+| `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`（构建时内联）+ `import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, RenderOverride, RuntimePackName, RuntimeProgressPayload, UpdateProgressPayload, WhisperProgressPayload } from '../shared/types'` | `tsconfig.node.json` |
 | `src/preload/index.d.ts` | `import type { PreloadApi } from '../shared/types'`，再 `interface Window extends PreloadApi {}` | `tsconfig.web.json` |
 | `src/renderer/src/**` | 主要经 `window.*` 类型（由 `index.d.ts` 挂载）；如需共享类型/常量可用别名 `@shared/*`（如 `useAppStore.ts` 的 `import type { ProjectMeta } from '@shared/types'`、`App.vue` 的 `import { APP_NAME } from '@shared/constants'`） | `tsconfig.web.json`（`include: src/shared/**/*.ts`，`paths: @shared/*`） |
 | `electron.vite.config.ts` | `import { APP_NAME, APP_NAME_EN, APP_SLOGAN_SHORT } from './src/shared/constants'`（构建配置是**第四个**消费端：注入 HTML 占位符 + 校验 `productName`） | `tsconfig.node.json`（本配置文件被其 `include` 纳入） |
@@ -121,7 +121,7 @@
 
 ## 6. 维护约定
 
-1. **新增 IPC 必须三处齐改**：`shared/ipc.ts` 加频道常量 → 主进程对应 `register()` 内 `ipcMain.handle/on`（载荷用本层的 `*Payload` 类型标注；`legacy:*` 是直接写在 `src/main/index.ts` 的 `createWindow()` 之后，同属这一环）→ preload 命名空间加方法，并在 `shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`index.d.ts` 只做 `extends`，无需再改）。`update:open-log` 就是按这条流程加的：`ipc.ts` 加 `Update.OpenLog` → `updater.ts` 注册 handler → `preload/index.ts` 加 `openLog` → `PreloadApi.updateTools.openLog` 补签名；本轮的 `legacy:status` / `legacy:resolve` 同法（`ipc.ts` 加 `Legacy` 分组 → `main/index.ts` 注册两个 handler → preload 加 `legacyTools` → `PreloadApi.legacyTools` 补签名）。
+1. **新增 IPC 必须三处齐改**：`shared/ipc.ts` 加频道常量 → 主进程对应 `register()` 内 `ipcMain.handle/on`（载荷用本层的 `*Payload` 类型标注；`legacy:*` 是直接写在 `src/main/index.ts` 的 `createWindow()` 之后，同属这一环）→ preload 命名空间加方法，并在 `shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`index.d.ts` 只做 `extends`，无需再改）。`update:open-log` 就是按这条流程加的：`ipc.ts` 加 `Update.OpenLog` → `updater.ts` 注册 handler → `preload/index.ts` 加 `openLog` → `PreloadApi.updateTools.openLog` 补签名；本轮的 `legacy:status` / `legacy:resolve` 同法（`ipc.ts` 加 `Legacy` 分组 → `main/index.ts` 注册两个 handler → preload 加 `legacyTools` → `PreloadApi.legacyTools` 补签名）；运行环境分包的 `runtime:cancel`（`runtime.ts` handler + `runtimeTools.cancel`）与 `settings:pick-runtime-pack`（`settings.ts` handler + `settingsTools.pickRuntimePack`）也是这条流程的实例，且都顺带在 `IpcFail` / 结果类型上补了 `needPacks`。
 2. **不要在本层放业务逻辑**：只放常量与类型；任何函数实现都会同时进入 main 与 preload 两个 bundle，带来不必要的重复。
 3. **类型与实现同源**：`PreloadApi`（⑨ 节）是唯一真源 —— `preload/index.ts` 用 `PreloadApi['<命名空间>']` 标注实现、`preload/index.d.ts` 用 `interface Window extends PreloadApi` 交给渲染层，因此「实现」与「渲染层签名」由同一份契约约束；不要再在别处复制一份方法签名（旧版 `index.d.ts` 内联签名的做法已废弃）。
 4. **载荷类型不再宽松**：语音 / whisper / 项目的复杂入参已从 `Record<string, unknown>` 收敛为具名 `*Payload`（如 `VoiceSaveDirPayload`、`WhisperTranscribePayload`、`ProjectAgentPayload`），字段写错会在编译期暴露；确实需要动态字段时才用可选字段表达。

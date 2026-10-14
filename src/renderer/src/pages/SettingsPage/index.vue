@@ -118,13 +118,17 @@
         <button v-if="updateLogVisible" class="hf-btn" @click="onOpenUpdateLog">打开日志目录</button>
       </div>
       <div v-if="updateDetail && showUpdateDetail" class="hf-detail">{{ updateDetail }}</div>
-      <!-- 运行环境包（ffmpeg / hyperframes / whisper 约 632MB）：安装包里只带一个 7z，
-           首次启动由主进程解到 userData。只在「准备中 / 失败」时占一行：
-           就绪是常态，常驻一句「已就绪」对用户没有信息量（外壳顶部横幅同此口径） -->
-      <div v-if="runtimeBusy || runtimeFailed" class="hf-status" :class="runtimeStatusClass">{{ runtimeStatusText }}</div>
-      <div v-if="runtimeFailed" class="hgen-actions" style="margin-top:0">
-        <button class="hf-btn hf-btn-primary" :disabled="runtimeBusy" @click="onPrepareRuntime">重新准备运行环境</button>
+      <!-- 运行环境（分包）：ffmpeg / hyperframes 不随安装包，用到时下载（whisper 随包，无需下载）。
+           只在「下载中 / 缺包 / 失败」时占一行；就绪是常态，不显示（外壳顶部横幅同此口径） -->
+      <div v-if="runtimeBusy || runtimeFailed || runtimeHasMissing" class="hf-status" :class="runtimeStatusClass">{{ runtimeStatusText }}</div>
+      <div v-if="runtimeFailed || runtimeHasMissing" class="hgen-actions" style="margin-top:0">
+        <button class="hf-btn hf-btn-primary" :disabled="runtimeBusy" @click="onPrepareRuntime">
+          {{ runtimeHasMissing ? '下载运行环境' : '重试' }}
+        </button>
+        <button v-if="runtimeCancellable" class="hf-btn" @click="cancelRuntime">取消下载</button>
+        <button v-if="runtimeMissing.length" class="hf-btn" @click="onPickLocalPack">从本地文件安装…</button>
       </div>
+      <div v-if="runtimeNotice" class="hf-detail">{{ runtimeNotice }}</div>
       <!-- 保存 / 重置的反馈独立成行：与检查更新共行会被随后的进度文案盖掉，看起来像「没保存」-->
       <div v-if="updaterStatus" class="hf-status" :class="updaterStatusClass">{{ updaterStatus }}</div>
       <div v-if="updateStage === 'available'" class="hgen-actions" style="margin-top:8px">
@@ -428,19 +432,43 @@ const feedDialogVisible = ref(false);
 const feedDraft = ref('');
 const autoCheckDraft = ref(true);
 
-// ===== 运行环境包状态（模块级单例，外壳也能读到；见 composables/useRuntime.ts）=====
-const { runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, retry: retryRuntime } = useRuntime();
-// 只在「准备中 / 失败」时占一行：就绪是常态，不显示（外壳顶部横幅同此口径）；
-// 失败时文案取主进程产出的人话，并给「重新准备运行环境」入口（本地转录 / 转视频依赖它）
+// ===== 运行环境（分包 ffmpeg / hyperframes；whisper 随安装包）=====
+// 模块级单例，外壳横幅与本页读同一份（见 composables/useRuntime.ts、docs/runtime-pack-split.md）
+const {
+  runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, hasMissing: runtimeHasMissing,
+  cancelable: runtimeCancellable, missing: runtimeMissing, missingText: runtimeMissingText,
+  prepare: prepareRuntime, cancel: cancelRuntime
+} = useRuntime();
+// 状态行：下载中 / 解包中 / 缺包 / 失败 各一句人话；就绪是常态，不显示（免占位）
 const runtimeStatusText = computed(() => {
   if (runtimeBusy.value) return runtimeState.value.message || '正在准备运行环境…';
   if (runtimeFailed.value) return runtimeState.value.message || '运行环境准备失败';
+  if (runtimeHasMissing.value) return '运行环境需要下载：' + runtimeMissingText.value;
   return '';
 });
 const runtimeStatusClass = computed(() => (runtimeFailed.value ? 'hf-error' : ''));
+// 「从本地文件安装」的即时反馈（导入成功 / 失败），与主进程推来的状态分开显示
+const runtimeNotice = ref('');
+function setRuntimeNotice(msg: string): void { runtimeNotice.value = msg; }
 
 async function onPrepareRuntime(): Promise<void> {
-  await retryRuntime();
+  await prepareRuntime();
+}
+
+// 「从本地文件安装…」：选一个 <pack>.7z 导入（离线 / 内网机器访问不到更新源时的兜底），
+// 导入成功后立刻走同一条解包路径。只在缺包 / 失败时这个按钮才出现（见模板）。
+async function onPickLocalPack(): Promise<void> {
+  try {
+    const r = await window.settingsTools.pickRuntimePack();
+    if (!r || !r.ok) {
+      if (!(r && (r as { canceled?: boolean }).canceled)) setRuntimeNotice((r && r.message) || '导入失败');
+      return;
+    }
+    setRuntimeNotice((r.message as string) || '已导入本地运行环境包，正在解包…');
+    await prepareRuntime();
+  } catch (e) {
+    setRuntimeNotice('导入失败：' + ((e as Error).message || String(e)));
+  }
 }
 
 function openFeedDialog(): void {

@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（项目化流水线 + project:* IPC）
-- **规模**：913 行
+- **规模**：919 行
 - **对外导出**：
   - 函数/常量：`register`、`scanProjects`、`projectsRoot`（**函数**，见 §3）、`projectDir`、`projectFilePath`、`readProject`、`writeProject`、`ensureProject`、`parseSubtitle`、`normalizeContent`、`copyAudioIntoProject`、`copyVideoIntoProject`
   - 类型（**再导出**，定义在 `src/shared/types.ts`）：`Scene`、`ContentScript`、`Project`、`SubtitleLine` —— 本文件用 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'` 转发，因此 `projects.Project` / `from './projects'` 的既有引用面不变
@@ -75,7 +75,7 @@
 > }
 > ```
 >
-> 这与 `whisper.modelsDir()` / `runtime.runtimeRoot()` / `settings.settingsFile()` 是同一约定：**业务模块的 userData 路径一律惰性求值**（零代价纯保险，详见 [index.ts.md](./index.ts.md) §3.1① 与 §5）。
+> 这与 `whisper.modelsDir()` / `runtime.runtimeDir()` / `settings.settingsFile()` 是同一约定：**业务模块的 userData 路径一律惰性求值**（零代价纯保险，详见 [index.ts.md](./index.ts.md) §3.1① 与 §5）。
 >
 > **三个内部调用点**（导出名不变，导出的现在就是这个函数）：
 >
@@ -212,7 +212,7 @@
 | `project:pick-video` | 无 | 绝对路径 \| `null` | 打开文件选择框（`mp4/webm/mov/mkv/m4v/avi`） |
 | `project:set-video` | `ProjectSetVideoPayload`（`{ name?, videoPath? }`） | `{ ok, videoFile, abs }` | 复制进 `video/` → 写 `proj.videoMaterial`；`abs` 为项目内绝对路径供预览 |
 | `project:clear-video` | `ProjectNamePayload`（`{ name: string }`） | `{ ok }` | 仅清空 `proj.videoMaterial` 引用（保留视频文件） |
-| `project:extract-video-audio` | `name?: string`（裸字符串） | `{ ok, audioFile, htmlUpdated }` | 用内置 ffmpeg 从 `videoMaterial` 提取音轨为 `audio/<同名>.m4a`（AAC 192k）并设为背景音频，随后 `applyBgmToHtml` 立即注入 HTML（提取出的原声同样走音轨路线） |
+| `project:extract-video-audio` | `name?: string`（裸字符串） | 成功 `{ ok, audioFile, htmlUpdated }`；**缺 ffmpeg 运行环境包时 `{ ok: false, needPacks: ['ffmpeg'], message }`** | 先按 `FFMPEG_PACKS = ['ffmpeg']` 做缺包纯校验（不下载、不阻塞），通过后用 ffmpeg 从 `videoMaterial` 提取音轨为 `audio/<同名>.m4a`（AAC 192k）并设为背景音频，随后 `applyBgmToHtml` 立即注入 HTML（提取出的原声同样走音轨路线） |
 | `project:read-html` | `name?: string`（裸字符串） | `{ ok, html }` | 读取当前 `index.html` 源码供编辑器载入 |
 | `project:preview-html` | `name?: string`（裸字符串） | `{ ok, previewPath }` | 生成去掉 CSP、**对副本做 GSAP 本地化**、注入 `HG_PREVIEW_CTRL` 的 `index.preview.html` 副本；注入片段落位复用的是音轨注入同一助手 `insertHtmlSnippet()` |
 | `project:save-html` | `ProjectSaveHtmlPayload`（`{ name?, html? }`） | `{ ok, htmlPath, compatible }`（**未新增 `htmlUpdated`**） | 先 `hfEnv.localizeGsapHtml` 改写 CDN 引用（**合规校验也用改写后的 `localHtml`**），再在引用本地时 `copyGsapIntoProject`、**复制失败则 `externalizeGsapHtml` 退回 CDN**，然后覆盖保存编辑器中的 HTML；置空 `videoPath` 表示旧视频失效；随后调 `applyBgmToHtml` 把音轨补回（手改 / 粘贴进来的 HTML 可能没有音轨）。该频道目前在渲染层**没有调用方**（预留接口） |
@@ -275,7 +275,7 @@
 2. `ensureProject(name)` → `proj.videoPath = String(videoPath)`。
 3. `writeProject(proj)`，返回项目对象；渲染层据此点亮链路「视频」节点。
 4. 与素材字段区分：`videoMaterial` 是参与 HTML 制作的输入素材，`videoPath` 是流水线产出成品。
-5. `project:extract-video-audio` 则反向从 `videoMaterial` 提取音轨：用 `hfEnv.BUILTIN_RESOURCES.ffmpeg` 执行 `-hide_banner -loglevel error -y -i <video> -vn -ac 2 -c:a aac -b:a 192k <out>`；失败或产物为空都会清理文件并返回中文错误，成功后 `proj.audioFile = 'audio/' + outName`、`writeProject`，然后 `applyBgmToHtml` 立即把这条音轨注入 HTML，返回 `{ ok, audioFile, htmlUpdated }`。
+5. `project:extract-video-audio` 先按 `FFMPEG_PACKS`（`const FFMPEG_PACKS: RuntimePackName[] = ['ffmpeg']`，第 39 行）调 `runtime.missingPacks()` 做**纯校验**：缺包立刻返回 `{ ok: false, needPacks: lack, message: '提取视频音轨需要先下载运行环境（' + runtime.packSizeText(lack) + '）' }`（**不再** `await runtime.ensureRuntime()` 等下载）；校验通过后才反向从 `videoMaterial` 提取音轨：用 `hfEnv.BUILTIN_RESOURCES.ffmpeg`（来自 ffmpeg 运行环境包）执行 `-hide_banner -loglevel error -y -i <video> -vn -ac 2 -c:a aac -b:a 192k <out>`；失败或产物为空都会清理文件并返回中文错误，成功后 `proj.audioFile = 'audio/' + outName`、`writeProject`，然后 `applyBgmToHtml` 立即把这条音轨注入 HTML，返回 `{ ok, audioFile, htmlUpdated }`。
 
 ### 5.7 目录穿越防护
 
@@ -355,8 +355,8 @@
 | `node:path` / `node:fs` | `path` / `fs` | 路径拼接与全部同步文件读写 |
 | `node:child_process` | `spawn` | 调用内置 ffmpeg 提取视频音轨 |
 | `./htmlAgent` | `chatWithCustomModel`、`extractHtmlFromReply`、`type AgentProgress` | 调用自定义模型生成/修改 HTML、抽取回复中的 HTML、进度事件类型 |
-| `./hfEnv` | **命名空间导入** `import * as hfEnv from './hfEnv'`：`hfEnv.BUILTIN_RESOURCES`（取 `ffmpeg`）、`hfEnv.isHyperframesComposition`、`hfEnv.localizeGsapHtml`、`hfEnv.referencesLocalGsap`、`hfEnv.copyGsapIntoProject`、`hfEnv.externalizeGsapHtml` | 内置 ffmpeg 路径、HyperFrames composition 合规校验、生成 / 修改 / 保存 / 预览四个写盘环节的 GSAP 本地化，以及两个导出频道的反向外部化 |
-| `./runtime` | `import * as runtime` → `runtime.ensureRuntime()` | `project:extract-video-audio` 前先等运行环境包就绪（ffmpeg 等约 716MB 首次启动可能还在解包），未就绪时返回 `rt.message` + `rt.detail` |
+| `./hfEnv` | **命名空间导入** `import * as hfEnv from './hfEnv'`：`hfEnv.BUILTIN_RESOURCES`（取 `ffmpeg`，来自 ffmpeg 运行环境包）、`hfEnv.isHyperframesComposition`、`hfEnv.localizeGsapHtml`、`hfEnv.referencesLocalGsap`、`hfEnv.copyGsapIntoProject`、`hfEnv.externalizeGsapHtml` | ffmpeg 路径（ffmpeg 运行环境包）、HyperFrames composition 合规校验、生成 / 修改 / 保存 / 预览四个写盘环节的 GSAP 本地化，以及两个导出频道的反向外部化 |
+| `./runtime` | `import * as runtime` → `runtime.missingPacks()` / `runtime.packSizeText()` | `project:extract-video-audio` 先做**缺包纯校验**（`FFMPEG_PACKS = ['ffmpeg']`）：缺包即返回 `{ ok: false, needPacks, message }`，**不下载、不阻塞**；是否下载由界面（`useEnvGate`）问用户。ffmpeg 属于「ffmpeg 运行环境包」（包实测 **42.6 MB**，2026-10-14；解包 179.9 MB），不再随安装包 |
 | `../shared/ipc` | `IPC` | 频道常量（`IPC.Project.*`） |
 | `./settings` | `pickRenderOverride` | `project:set-render` 的项目级档位覆盖白名单过滤（与 `settings.ts` / `video.ts` 复用同一实现） |
 | `../shared/types` | `type RegisterCtx`、`type ProjectAgentPayload`、`type ProjectExportSrtPayload`、`type ProjectNamePayload`、`type ProjectSaveContentPayload`、`type ProjectSaveHtmlPayload`、`type ProjectSaveSubtitlePayload`、`type ProjectSetAudioPayload`、`type ProjectSetVideoPayload`、`type ProjectSetRenderPayload`，以及 `type ContentScript` / `type Project` / `type Scene` / `type SubtitleLine`（后者四个在 import 后立即 `export type { … } from '../shared/types'` 再导出） | `register(ctx)` 的窗口上下文类型 + 全部 `project:*` handler 的载荷类型 + 项目结构（单一真源，本文件不再自行声明 interface） |
@@ -385,7 +385,7 @@
 10. **HTML 变更即令视频失效**：生成、修改、直接保存 HTML 三处都会把 `videoPath` 置空，防止链路状态误报。
 11. **合规检查只提示不阻断**：`compatible` 为 `false` 时仍返回 `ok: true` 并允许预览，仅在 `message` 中提示转视频前需调整（缺 `data-composition-id` / `__timelines` / `gsap`）。
 12. **预览副本专供应用内预览**：CSP 剥离与脚本注入只作用于 `index.preview.html`，原件始终保持模型产出的原貌；注入音轨则相反——它写进**原件** `index.html`（预览副本从原件派生，因此自动带上）。
-13. **ffmpeg 依赖内置资源、且先等运行环境包就绪**：`project:extract-video-audio` 先 `await runtime.ensureRuntime()`（未就绪返回其 `message` / `detail`），再判 `hfEnv.BUILTIN_RESOURCES.ffmpeg` 是否存在（缺失返回「未找到内置 ffmpeg（resources/ffmpeg/bin）」）；提取失败会删除半成品 `.m4a`。
+13. **ffmpeg 来自运行环境包、缺包即回 `needPacks`**：`project:extract-video-audio` 第一步就 `runtime.missingPacks(FFMPEG_PACKS)`（纯探测、不下载），缺包返回 `{ ok: false, needPacks: ['ffmpeg'], message: '提取视频音轨需要先下载运行环境（约 43 MB）' }`（体积文案由 `runtime.packSizeText()` 按 `PACK_DEFS.hint` 生成；ffmpeg 包实测 42.6 MB），由渲染层弹确认框；校验通过后才用 `hfEnv.BUILTIN_RESOURCES.ffmpeg`（`<userData>/runtime/ffmpeg/ffmpeg/bin/ffmpeg.exe`）提取，提取失败会删除半成品 `.m4a`。**旧行为「`await runtime.ensureRuntime()` 静默等下载」已删除**。
 14. **结构类型只在 `shared/types.ts` 定义一处**：本文件已删掉本地的 `Scene` / `ContentScript` / `Project` / `SubtitleLine` interface，改为顶部的 `export type { … } from '../shared/types'` 再导出；因此 `from './projects'` 取到这些类型的既有代码（如 `ttsAlign.ts` 的 `type SubtitleLine`、`projects.Project` 形式的引用）字段完全同源。修改字段请改共享层，不要在本文件重建 interface（否则又会出现两份会漂移的定义）。
 15. **handler 载荷全部有契约类型**：原先多处写作 `Record<string, unknown>` 或省略类型，现统一为 `Project*Payload`。注意 `ProjectNamePayload.name` 是**必填** `string`（用于 `clear-audio` / `clear-video`），而 `ProjectSaveSubtitlePayload` / `ProjectSetAudioPayload` / `ProjectSetVideoPayload` 等字段全部可选，运行时依旧保留 `payload && payload.name` 式的判空写法。
 16. **GSAP 本地化的兜底语义**：改写只在「随包 `vendor/gsap/gsap.min.js` 存在」时发生，否则 `localizeGsapHtml` 原样返回（继续走 CDN，在线可用），因此这是**能力增强而非硬依赖**。`copyGsapIntoProject` 的返回值在本文件**只剩 `project:preview-html` 一处被忽略**：generate / modify / save-html 三处现在都用它做兜底——复制失败即 `externalizeGsapHtml` 退回 CDN，保证落盘的 HTML 不会引用一个不存在的 `gsap.min.js`。`video.ts` 的渲染副本仍忽略返回值。

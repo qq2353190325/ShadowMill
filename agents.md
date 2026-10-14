@@ -25,7 +25,7 @@
 |---|---|
 | 知识库索引（阅读顺序 + 逐文件文档总表） | [`wiki/README.md`](wiki/README.md) |
 | 项目结构（技术栈、目录树、构建打包、运行时目录） | [`wiki/00-项目结构.md`](wiki/00-项目结构.md) |
-| 架构总览（进程模型、IPC 契约 75 频道、数据流、安全边界） | [`wiki/01-架构总览.md`](wiki/01-架构总览.md) |
+| 架构总览（进程模型、IPC 契约 85 频道、数据流、安全边界） | [`wiki/01-架构总览.md`](wiki/01-架构总览.md) |
 | 目录架构 · 主进程 | [`wiki/02-目录架构-src-main.md`](wiki/02-目录架构-src-main.md) |
 | 目录架构 · 桥接层 | [`wiki/03-目录架构-src-preload.md`](wiki/03-目录架构-src-preload.md) |
 | 目录架构 · 渲染层 | [`wiki/04-目录架构-src-renderer.md`](wiki/04-目录架构-src-renderer.md) |

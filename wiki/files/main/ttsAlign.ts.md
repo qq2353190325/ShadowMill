@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（字幕配音逐句对齐）
-- **规模**：332 行
+- **规模**：338 行
 - **对外导出**：
   - `interface AlignSeg`（对齐段描述，类型导出）
   - `fmtTime(sec)`、`planModeA(...)`、`planModeB(...)`、`buildTrack(...)`、`register(ctx?)`
@@ -95,19 +95,20 @@
 
 | 频道名 | 方向 / 注册方式 | 参数载荷 | 返回结果 | 行为说明 |
 | --- | --- | --- | --- | --- |
-| `voice:synth-aligned` | 渲染 → 主，`ipcMain.handle`（invoke） | `VoiceAlignPayload`（`{ subtitleText, voice, mode?, gapSec?, voiceModel?, projectName? }`，handler 形参写作 `payload?: VoiceAlignPayload`） | 成功 `{ ok: true, mode, subtitleText, audioPath, totalDur, details }`；失败 `{ ok: false, message }`；取消 `{ ok: false, canceled: true, message }` | 逐句合成 + 对齐 + 装配整轨的主入口 |
+| `voice:synth-aligned` | 渲染 → 主，`ipcMain.handle`（invoke） | `VoiceAlignPayload`（`{ subtitleText, voice, mode?, gapSec?, voiceModel?, projectName? }`，handler 形参写作 `payload?: VoiceAlignPayload`） | 成功 `{ ok: true, mode, subtitleText, audioPath, totalDur, details }`；失败 `{ ok: false, message, needPacks? }`（缺 ffmpeg 运行环境包时带 `needPacks: ['ffmpeg']`）；取消 `{ ok: false, canceled: true, message }` | 逐句合成 + 对齐 + 装配整轨的主入口 |
 | `voice:align-cancel` | 渲染 → 主，`ipcMain.on`（send） | 无 | 无（不返回） | 仅把 `alignCancelled` 置 `true`；主进程在句间检查并中断 |
 | `voice:align-progress` | 主 → 渲染，`event.sender.send` | `AlignProgressPayload`（`stage/index?/total?/percent?/message`，定义在 `shared/types.ts`） | 无 | 逐句合成与装配阶段的进度回推；发送前校验 `event.sender` 存在且未 `isDestroyed()` |
 
 `voice:synth-aligned` 的入口校验与取值规则（按源码顺序）：
 
-1. `alignRunning` 为真 → 直接返回 `{ ok: false, message: '已有对齐任务进行中，请稍候' }`；
-2. 内置 `ffmpeg`/`ffprobe` 任一不存在 → `'未找到内置 ffmpeg/ffprobe（resources/ffmpeg/bin）'`；
-3. `subtitleText` trim 后为空 → `'字幕为空，请先在字幕页生成或填写字幕'`；
-4. `voice` trim 后为空 → `'请先选择（或创建）音色'`；
-5. `gapSec` 非有限数时取默认 `0.5`，再夹到 `[0, 10]`（仅模式 A 使用）；
-6. `parseSubtitle(subtitleText)` 结果为空 → 同第 3 条提示；
-7. 合成模型 `useModel = payload.voiceModel || resolveVoiceModel(voiceId, ctx)`（音色绑定模型优先，否则按音色解析，含全局默认兜底）。
+1. **缺包校验（最先做）**：`const lack = runtime.missingPacks(['ffmpeg'])`，非空立刻返回 `{ ok: false, needPacks: lack, message: '逐句对齐需要先下载运行环境（' + runtime.packSizeText(lack) + '）' }`——**不下载、不阻塞**，由渲染层（`useEnvGate`）弹「下载运行环境」确认框，用户点「继续」再重发本次操作（见 `docs/runtime-pack-split.md` §5.2）；
+2. `alignRunning` 为真 → 直接返回 `{ ok: false, message: '已有对齐任务进行中，请稍候' }`；
+3. `ffmpeg` / `ffprobe` 任一取不到（`BUILTIN_RESOURCES.ffmpeg` / `ffprobe` 为空串，即 **ffmpeg 运行环境包**未就绪）→ 返回缺 ffmpeg 的提示（正常情况下第 1 步已经拦下）；
+4. `subtitleText` trim 后为空 → `'字幕为空，请先在字幕页生成或填写字幕'`；
+5. `voice` trim 后为空 → `'请先选择（或创建）音色'`；
+6. `gapSec` 非有限数时取默认 `0.5`，再夹到 `[0, 10]`（仅模式 A 使用）；
+7. `parseSubtitle(subtitleText)` 结果为空 → 同第 4 条提示；
+8. 合成模型 `useModel = payload.voiceModel || resolveVoiceModel(voiceId, ctx)`（音色绑定模型优先，否则按音色解析，含全局默认兜底）。
 
 ## 5. 关键流程
 
@@ -170,7 +171,7 @@
 
 ### 5.8 ffmpeg / ffprobe 调用方式
 
-- 可执行文件一律取自 `BUILTIN_RESOURCES.ffmpeg` / `BUILTIN_RESOURCES.ffprobe`（即 `resources/ffmpeg/bin/ffmpeg.exe`、`ffprobe.exe`），入口处先做存在性检查。
+- 可执行文件一律取自 `BUILTIN_RESOURCES.ffmpeg` / `BUILTIN_RESOURCES.ffprobe`——分包后它们指向 **ffmpeg 运行环境包**解出的 `<userData>/runtime/ffmpeg/ffmpeg/bin/ffmpeg.exe` / `ffprobe.exe`（该包未就绪时为空串），入口处先做存在性检查、并对「缺包」单独返回 `needPacks`。
 - 所有调用走同一个 `runProc`：`spawn(exe, args, { windowsHide: true })`，参数以数组形式传入（不拼 shell 字符串），凭 `close` 事件与退出码判定成败；ffmpeg 统一带 `-hide_banner -loglevel error -y`。
 
 ## 6. 依赖与协作
@@ -184,7 +185,7 @@
 | `node:child_process` | `spawn` | 调用 ffmpeg / ffprobe |
 | `./voice` | `synthOne`、`resolveVoiceModel`、`voiceFriendlyError` | 单句 TTS 合成、按音色解析模型、错误转中文文案 |
 | `./projects` | `parseSubtitle`、`type SubtitleLine` | 把字幕文本解析成带 `time/end` 的行数组 |
-| `./hfEnv` | `BUILTIN_RESOURCES` | 内置 ffmpeg / ffprobe 路径 |
+| `./hfEnv` | `BUILTIN_RESOURCES` | ffmpeg / ffprobe 路径（来自 ffmpeg 运行环境包） |
 | `../shared/ipc` | `IPC` | 频道名常量（`IPC.Voice.SynthAligned` / `AlignCancel` / `AlignProgress`） |
 | `../shared/types` | `type RegisterCtx`、`type AlignProgressPayload`、`type VoiceAlignPayload` | `register` 与 `resolveVoiceModel` 的上下文参数类型、进度载荷、`voice:synth-aligned` 载荷（三者此前分别为本地接口 / 内联字面量） |
 
@@ -198,6 +199,7 @@
 
 - **Windows 路径处理**：临时目录、输出路径全部用 `path.join` 拼接；仅 concat 列表需要 `win2posix` 转换（正斜杠 + 单引号包裹 + `'\''` 转义），因为 ffmpeg 的 concat demuxer 对反斜杠与引号敏感。concat 调用必须带 `-safe 0` 才允许绝对路径。
 - **spawn 参数**：所有 ffmpeg/ffprobe 参数以数组传递，不做 shell 拼接，避免含空格/引号/中文的路径被拆词；`windowsHide: true` 防止 Windows 上闪出控制台窗口。音频相关数值统一 `String()` 后传入。
+- **ffmpeg 不再随安装包**：逐句对齐整条链路（试听分段、句间静音、`concat` 装配、时长终验）都依赖 ffmpeg / ffprobe，它们属于 ffmpeg 运行环境包（**包实测 42.6 MB**，解包 179.9 MB；2026-10-14），首次用到时由用户确认后下载并解到 `<userData>/runtime/ffmpeg/`。因此入口第一步就是 `runtime.missingPacks(['ffmpeg'])` 纯校验：缺包只回 `needPacks`，界面弹确认框；**取消下载 = 取消这次对齐**（主进程不下载、不排队、不留半截状态）。
 - **统一音频格式**：所有分段、静音、变速产物均为 24kHz 单声道 `pcm_s16le`。这正是 `buildTrack` 能用 `-c copy` 零重编码拼接的前提；`SR = 24000` 与 Qwen-Audio-TTS 原生采样率一致。
 - **atempo 后必须重测**：`tempoTo` 在帧粒度下会引入毫秒级偏差，因此模式 B 变速后必须再 `probeDur`，`status`/`delta` 判定都基于重测值；`EPS = 0.05` 用于吸收该误差。
 - **加速上限与顺延**：单句最多加速到 `MAX_RATE = 1.15`，超出部分不硬压，而是顺延后续句子并同步平移后续字幕时间；末句无槽位（`Infinity`），永不加速、也不自发顺延。

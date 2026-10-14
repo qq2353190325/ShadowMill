@@ -21,7 +21,7 @@
           <!-- 视频素材只有一个入口：选项目现有素材、或当场导入自定义文件（导入后自动选中） -->
           <HfSelect v-model="videoSel" :groups="videoSelGroups" title="把哪个视频片段放进页面；没有现成素材时可当场导入" @change="onVideoSelect" />
           <button class="hf-btn" :disabled="!appState.project?.videoMaterial" @click="onClearVideo">移除视频</button>
-          <button class="hf-btn" :disabled="!appState.project?.videoMaterial" title="把视频里的声音提取出来，作为背景音频" @click="onExtractAudio">{{ extractText }}</button>
+          <button class="hf-btn" :disabled="!appState.project?.videoMaterial" title="把视频里的声音提取出来，作为背景音频" @click="onExtractAudio()">{{ extractText }}</button>
         </div>
         <div class="hgen-row" v-show="videoPrevRowVisible">
           <video ref="videoPrevEl" :src="videoPrevSrc" controls style="flex:1;max-height:200px;border-radius:8px;background:#000"></video>
@@ -145,6 +145,7 @@ import { toast } from '@renderer/composables/useToast'
 import { escTxt } from '@renderer/utils/escape'
 import { applyRate, stepRate } from '@renderer/utils/rate'
 import { renderProgress, resetRenderProgress } from '@renderer/composables/useRenderProgress'
+import { useEnvGate } from '@renderer/composables/useEnvGate'
 import {
   FALLBACK_RENDER,
   RENDER_FPS_OPTIONS,
@@ -157,6 +158,7 @@ import StepBar from '@renderer/components/StepBar.vue'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 
 // ===== 生成/修改 =====
+const envGate = useEnvGate();
 const prompt = ref('');
 const subSel = ref('');
 const videoSel = ref('');
@@ -495,12 +497,18 @@ function onModalKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && renderModalVisible.value) closeRenderModal();
 }
 
-async function onRenderVideo(): Promise<void> {
+async function onRenderVideo(skipEnvGuard = false): Promise<void> {
   if (rendering.value) return;
   if (agentRunning) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
   const htmlPath = appState.project && appState.project.htmlPath;
   if (!htmlPath || !(appState.project && appState.project.htmlExists)) { toast('还没有 HTML，请先「生成 HTML」'); return; }
   const options = { quality: quality.value, fps: fps.value };
+  // 渲染要 ffmpeg + hyperframes 两个运行环境包（不随安装包）：缺则在确认框里问用户，
+  // 用户在框里点「继续」时回到这里（skipEnvGuard=true），不再重复弹框
+  if (!skipEnvGuard) {
+    const g = await envGate.guard(['ffmpeg', 'hyperframes'], '转成视频', () => { void onRenderVideo(true); });
+    if (!g.ok) return;
+  }
   status.value = '已提交渲染（' + renderOptionsText(options) + '，约 30 秒）...';
   statusClass.value = '';
   rendering.value = true;
@@ -514,6 +522,11 @@ async function onRenderVideo(): Promise<void> {
       await window.projectTools.saveVideo(appState.currentName, res.outputVideo);
       await refreshProject();
       toast('视频已生成，可到「视频预览」页查看');
+    } else if (res.needPacks && res.needPacks.length) {
+      // 主进程校验发现缺包（例如并发期间被清理）：弹同一个框，确认后重来
+      status.value = res.message || '需要先下载运行环境';
+      statusClass.value = 'hf-error';
+      void envGate.guard(res.needPacks, '转成视频', () => { void onRenderVideo(true); });
     } else {
       status.value = (res as { message?: string }).message || '渲染失败';
       statusClass.value = 'hf-error';
@@ -654,12 +667,26 @@ async function onClearVideo(): Promise<void> {
 
 // ===== 提取视频原声 =====
 const extractText = ref('提取原声为背景音频');
-async function onExtractAudio(): Promise<void> {
+async function onExtractAudio(skipEnvGuard = false): Promise<void> {
   if (!(appState.project && appState.project.videoMaterial)) { toast('还没有视频素材：可在上方「视频素材」里选「选择本地视频文件…」导入'); return; }
+  // 提取音轨要 ffmpeg 包（不随安装包）：缺则先问用户；点「继续」回到这里时不再弹框
+  if (!skipEnvGuard) {
+    const g = await envGate.guard(['ffmpeg'], '提取视频原声', () => { void onExtractAudio(true); });
+    if (!g.ok) return;
+  }
   extractText.value = '提取中…';
   const res = await window.projectTools.extractVideoAudio(appState.currentName).catch(() => null);
   extractText.value = '提取原声为背景音频';
-  if (!res || !res.ok) { toast((res as { message?: string })?.message || '提取失败'); return; }
+  if (!res || !res.ok) {
+    const fail = res as { message?: string; needPacks?: ('ffmpeg' | 'hyperframes')[] } | null;
+    if (fail && fail.needPacks && fail.needPacks.length) {
+      toast(fail.message || '需要先下载运行环境');
+      void envGate.guard(fail.needPacks, '提取视频原声', () => { void onExtractAudio(true); });
+      return;
+    }
+    toast((fail && fail.message) || '提取失败');
+    return;
+  }
   await refreshProject();
   setAudioPreview('');   // 项目内音频没有渲染层可用的绝对路径：试听交给预览 iframe 里的音轨
   await loadFrame();

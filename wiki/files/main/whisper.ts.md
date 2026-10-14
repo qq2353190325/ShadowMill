@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（whisper.cpp 转录 + 模型管理）
-- **规模**：705 行
+- **规模**：729 行
 - **对外导出**：`WHISPER_MODELS`、`WHISPER_LANGS`、`MODEL_BASE_URL`、`modelsDir`、`resolveCliPath`、`allModels`、`findModel`、`resolveModelFile`、`unknownModelFiles`、`register`，以及从 `./vad` 复用的 `readWavSamples`、`toVadSamples`、`vadTrimSegments`
 
 ## 1. 作用与职责
@@ -15,7 +15,7 @@
 |------|----------|
 | 维护内置模型档位枚举与语言选项 | `WHISPER_MODELS`、`WHISPER_LANGS` |
 | 统一「内置 + 自定义」的模型视图结构 | `WhisperMeta`、`allModels`、`customToMeta` |
-| 定位 `whisper-cli.exe`（打包 / 开发两种路径） | `resolveCliPath` |
+| 定位 `whisper-cli.exe`（**随安装包**优先，旧布局与开发态兜底） | `resolveCliPath` |
 | 模型文件下载（国内镜像、`\.part` 边下边写、原子 rename） | `httpGetFollow`、`downloadFile`、`whisper:download` |
 | 转录前音频预处理（不受支持格式经 ffmpeg 转 16kHz 单声道 wav） | `prepareAudio`、`WHISPER_AUDIO_EXTS` |
 | 调 whisper-cli 并解析 `-oj` 输出的 JSON | `runCli`、`parseWhisperJson` |
@@ -62,7 +62,7 @@
 | 名称 | 签名要点 | 说明 |
 |------|----------|------|
 | `modelsDir()` | `() => string` | 模型目录：`path.join(app.getPath('userData'), 'whisper', 'models')` |
-| `resolveCliPath()` | `() => string` | 依次探测 `process.resourcesPath/whisper/whisper-cli.exe`、`app.getAppPath()/resources/whisper/whisper-cli.exe`，取第一个存在的文件；都不存在时返回第一个候选路径（供 UI 提示用户放置） |
+| `resolveCliPath()` | `() => string` | 依次探测 **`process.resourcesPath/whisper/whisper-cli.exe`（优先——whisper 现在随安装包，走 `package.json` 的 `extraResources`）** → `BUILTIN_RESOURCES.root/whisper/whisper-cli.exe`（旧版整体运行环境目录 / dev 的兜底） → `app.getAppPath()/resources/whisper/whisper-cli.exe`（开发态），取第一个存在的文件；都不存在时返回第一个候选路径（供 UI 提示用户放置）。顺序刻意把 `process.resourcesPath` 放在最前：运行环境包解到 `userData/runtime/<包名>/` 之后，`BUILTIN_RESOURCES.root` 指向的那个根里**没有** `whisper/` |
 | `listModelBins()` | `() => { name; path; bytes }[]` | 扫描模型目录，只收集匹配 `/^ggml-.*\.bin$/i`、非 `\.part`、且 `bytes > 0` 的文件；目录不可读时返回 `[]` |
 | `customModels()` | `() => WhisperCustomModel[]` | 读 `settings.getWhisperCustomModels()`（持久化在 settings.json 的 `whisper.customModels`） |
 | `customToMeta(c)` | `(c: WhisperCustomModel) => WhisperMeta` | 自定义条目 → 统一结构：`label` 取 `c.name || c.id`，`speed` 为空串，`desc` 缺省为 `'用户自定义模型'`，`url` 缺省为 `MODEL_BASE_URL + c.file` |
@@ -133,7 +133,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ⑤ 节（本文件**�
 
 1. 前置校验：`id` 存在 → `audioPath` 存在 → `findModel(id)` 命中 → `resolveCliPath()` 文件存在 → `resolveModelFile(id)` 已下载 → `transcribing` 未被占用。
 2. 生成输出前缀 `outPrefix = userData/whisper/out_<时间戳>`，JSON 路径为 `outPrefix + '.json'`；置 `transcribing = true`。
-3. **音频预处理** `prepareAudio`：扩展名在 `WHISPER_AUDIO_EXTS`（`wav / flac / mp3 / ogg`）内则原样直传；否则 emit `{ stage: 'loading', message: '正在提取音频（ffmpeg 转换为 16kHz WAV）…' }`，用内置 ffmpeg（`BUILTIN_RESOURCES.ffmpeg`）以 `-vn -ac 1 -ar 16000 -c:a pcm_s16le` 转为临时 wav。临时路径记录到 `tmpAudio` 以便收尾清理。
+3. **音频预处理** `prepareAudio`：扩展名在 `WHISPER_AUDIO_EXTS`（`wav / flac / mp3 / ogg`）内则原样直传；否则 emit `{ stage: 'loading', message: '正在提取音频（ffmpeg 转换为 16kHz WAV）…' }`，用 ffmpeg（`BUILTIN_RESOURCES.ffmpeg`，来自 **ffmpeg 运行环境包**）以 `-vn -ac 1 -ar 16000 -c:a pcm_s16le` 转为临时 wav。临时路径记录到 `tmpAudio` 以便收尾清理。**这条路径是唯一依赖 ffmpeg 的环节**：ffmpeg 包未安装时抛内部的 `FfmpegNeededError`（自带 `needPacks = ['ffmpeg']` 标记），不再默默等待下载。
 4. emit `{ stage: 'loading', message: '正在加载模型（<label>）…' }`，并做语言归一：`zh-hant` 一律按 `zh` 传给 whisper-cli（是否繁转简在后续步骤处理）。
 5. **spawn whisper-cli** `runCli`：参数 `-m 模型 -f 音频 -oj -of 前缀 --no-prints -pp`，非 `auto` 语言追加 `-l`；`--no-prints` 抑制横幅，`-pp` 让进度输出到 stderr；等待进程 `close`。
 6. **解析 JSON** `parseWhisperJson(jsonPath)`：兼容新版 `transcription` 段落数组（`offsets.from/to` 毫秒）与旧版 `segments`（`start/end` 秒）与兜底顶层 `segments`，过滤空文本后得到 `segs`；解析结果 `null` 时区分两种情况——JSON 文件不存在（whisper-cli 读取/解码失败但退出码为 0，附 stderr 尾部）与文件存在但无文本（可能音频过短或无人声）。
@@ -141,6 +141,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ⑤ 节（本文件**�
 8. **段尾静音裁剪（VAD）**：`toVadSamples(prepared.path)` 取 16k 单声道样本后调用 `vadTrimSegments(samples, 16000, segs)`，把每段 `end` 收敛到实际语音结束；整段裁剪失败仅静默跳过，不影响转录结果。
 9. **组装结果**：`text` 为各段文本按 `\n` 拼接；`subtitleText` 为每段 `[MM:SS.mmm-MM:SS.mmm] 文本`（起止相同或逆序时省略后半段），使用 `fmtTsMs`；随后 emit `{ stage: 'done', message: '转录完成：<段数> 条字幕' }`，返回 `{ ok: true, id, text, subtitleText, segments, model }`。
 10. `finally`：复位 `transcribing`，`cleanupTmp(tmpAudio)` 删除转换出的临时音频，并删除本次的 JSON 结果文件。
+11. **失败分支带 `needPacks`**：`catch` 里先 emit `{ stage: 'error', message }`，再检查错误上是否带 `needPacks` 标记——是则返回 `{ ok: false, message: msg + '（约 ' + runtime.packSizeText(['ffmpeg']) + '）', needPacks: ['ffmpeg'] }`（界面据此弹「下载运行环境」确认框），否则返回 `{ ok: false, message: msg }`。**转录入口不再 `await runtime.ensureRuntime()`**：whisper 随安装包，装完即可转录；只有「非 wav/flac/mp3/ogg 要转码」才需要 ffmpeg。
 
 ### 5.4 两阶段进度回推（`whisper:progress`）
 
@@ -164,7 +165,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ⑤ 节（本文件**�
 | `node:path` / `node:fs` / `node:https` / `node:child_process` | 默认导入 | 路径拼接、文件与流操作、镜像下载、spawn ffmpeg 与 whisper-cli |
 | `./projects` | `ensureProject`、`projectDir`、类型 `Project` | `whisper:project-audio` 解析项目音频绝对路径 |
 | `./settings` | `getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels` | 当前档位与自定义模型条目的持久化 |
-| `./hfEnv` | `BUILTIN_RESOURCES`（使用 `BUILTIN_RESOURCES.ffmpeg`，即 `resources/ffmpeg/bin/ffmpeg.exe`） | 音频格式转换与 VAD 取样 |
+| `./hfEnv` | `BUILTIN_RESOURCES`（用 `BUILTIN_RESOURCES.ffmpeg`——分包后指向 **ffmpeg 运行环境包**解出的目录 `<userData>/runtime/ffmpeg/ffmpeg/bin/ffmpeg.exe`，未就绪时为空串；`resolveCliPath()` 另用 `BUILTIN_RESOURCES.root` 作旧布局兜底） | 音频格式转换与 VAD 取样 |
 | `./vad` | `readWavSamples`、`vadTrimSegments`、类型 `VadSegment` | WAV 采样读取与静音裁剪（纯函数） |
 | `../shared/ipc` | `IPC` | `IPC.Whisper.*` 频道常量 |
 | `../shared/constants` | `APP_USER_AGENT` | 出网下载请求的 `User-Agent`（原为字面量 `'ShadowMill/1.0'`）；常量定义在 `src/shared/constants.ts`，由 `APP_NAME_EN` 派生 |
@@ -185,7 +186,8 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ⑤ 节（本文件**�
 
 ## 7. 注意事项与实现要点
 
-- **模型不打包进应用**：`.bin` 模型由用户按需下载到 `userData/whisper/models/`；打包只携带 `whisper-cli.exe` 与 ffmpeg（`extraResources` 把 `resources` 目录映射到安装目录根，故打包后 cli 位于 `process.resourcesPath/whisper/`，开发期位于项目 `resources/whisper/`）。缺少 cli 时转录直接返回可读提示，不抛异常。
+- **模型不打包进应用**：`.bin` 模型由用户按需下载到 `userData/whisper/models/`；**whisper-cli 随安装包**（`package.json` 的 `extraResources` 把 `resources/whisper` 映射到安装目录的 `whisper/`，故打包后位于 `process.resourcesPath/whisper/`，开发期位于项目 `resources/whisper/`）。ffmpeg **不再随安装包**——它属于 ffmpeg 运行环境包，首次用到转码时下载并解到 `<userData>/runtime/ffmpeg/`（`BUILTIN_RESOURCES.ffmpeg` 会指向那里）。缺少 cli 时转录直接返回可读提示，不抛异常。
+- **缺 ffmpeg 走「回 `needPacks`」而不是等待**：`prepareAudio` 只在需要转码时检查 ffmpeg，缺失即抛 `FfmpegNeededError`（`needPacks = ['ffmpeg']`）；转录的 `catch` 把它转成 `{ ok: false, needPacks: ['ffmpeg'], message: '…（约 <packSizeText(['ffmpeg'])>）' }`，由渲染层（`useEnvGate`）问用户是否下载，**不阻塞、不静默下载**。这也是本文件与 `runtime.ts` 唯一的关系（只用 `runtime.packSizeText()` 组文案，不再调 `ensureRuntime()`）。
 - **临时文件与清理**：`conv_*.wav`（转码结果）、`vad_*.wav`（VAD 取样）、`out_*.json`（whisper 输出）全部落在 `userData/whisper/`；转码与 JSON 由 `transcribe` 的 `finally` 清理，VAD 临时文件在 `toVadSamples` 内 `finally cleanupTmp`，删除失败一律静默忽略，不会污染业务结果。
 - **`.part` 与原子性**：下载过程写在 `<file>.part`，`listModelBins` 与 `resolveModelFile` 都不会把 `.part` 或 0 字节文件当作可用模型，因此下载中途关掉应用不会留下「看似已下载」的坏档。
 - **一次一个任务**：`downloading` / `transcribing` 两个闭包变量做互斥（进程内单实例语义），转录期间禁止删除模型、切换当前档位与移除自定义模型。

@@ -227,13 +227,15 @@ function register(ctx?: RegisterCtx): void {
   // 逐句合成 + 对齐：payload { projectName, subtitleText, voice, voiceModel, mode, gapSec }
   ipcMain.handle(IPC.Voice.SynthAligned, async (event, payload?: VoiceAlignPayload) => {
     if (alignRunning) return { ok: false, message: '已有对齐任务进行中，请稍候' };
-    // 运行环境（ffmpeg / ffprobe 共约 632MB）首次启动可能还在解包：等它就绪再判可执行文件
-    const rt = await runtime.ensureRuntime();
-    if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好', detail: rt.detail };
+    // 分包之后 ffmpeg / ffprobe 不再随安装包：纯校验（不下载），缺包交给界面问用户是否下载（可取消）
+    const lack = runtime.missingPacks(['ffmpeg']);
+    if (lack.length) {
+      return { ok: false, needPacks: lack, message: '逐句对齐需要先下载运行环境（' + runtime.packSizeText(lack) + '）' };
+    }
     const ffmpeg = BUILTIN_RESOURCES.ffmpeg;
     const ffprobe = BUILTIN_RESOURCES.ffprobe;
-    if (!fs.existsSync(ffmpeg) || !fs.existsSync(ffprobe)) {
-      return { ok: false, message: '未找到内置 ffmpeg/ffprobe（resources/ffmpeg/bin）' };
+    if (!ffmpeg || !ffprobe || !fs.existsSync(ffmpeg) || !fs.existsSync(ffprobe)) {
+      return { ok: false, message: '未找到 ffmpeg/ffprobe（运行环境包可能损坏，可在设置页重新下载）' };
     }
     const subtitleText = String((payload && payload.subtitleText) || '').trim();
     const voiceId = String((payload && payload.voice) || '').trim();

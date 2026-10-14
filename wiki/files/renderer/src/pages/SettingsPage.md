@@ -6,7 +6,7 @@
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `src/renderer/src/pages/SettingsPage/index.vue` | 714 | 页面主体：左侧分类导航 + 自定义模型卡片、**语音服务卡片（按厂家）**、视频渲染默认档位卡片、应用更新卡片，末张卡片挂载子组件；分类记忆键与服务商预设表取 `@renderer/constants`，**分类枚举取 `@renderer/composables/useNavIntent`** |
+| `src/renderer/src/pages/SettingsPage/index.vue` | 742 | 页面主体：左侧分类导航 + 自定义模型卡片、**语音服务卡片（按厂家）**、视频渲染默认档位卡片、应用更新卡片、**运行环境一行（分包三态 + 本地导入）**，末张卡片挂载子组件；分类记忆键与服务商预设表取 `@renderer/constants`，**分类枚举取 `@renderer/composables/useNavIntent`** |
 | `src/renderer/src/pages/SettingsPage/WhisperSection.vue` | 274 | 页面子组件：语音识别模型区块（原 `pages/settings/whisper.js` 的 `window.__settings.initWhisper`） |
 
 - **类型**：页面 + 页面子组件（均为 SFC，`<script setup lang="ts">`）
@@ -341,4 +341,15 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 23. **选项文字就是 URL 本身，不拼接任何说明**：`baseUrlGroups` 的选项由 `p.baseUrls.map((u) => ({ value: u, label: u }))` 生成——Base URL 没有需要额外解释的地方，加了反而是噪音（源码注释）。早前选项文案是 `url + '（' + note + '）'`，`note` 只用来标「OpenAI 格式 / Anthropic 格式，当前不支持」，**这一整套已随预设表删掉 `note` 字段而移除**；`/v1` 只是同一格式下的写法差异，所以**每家用一条官方写法就够**（DeepSeek 两种拼法都能用，但只列不带 `/v1` 的那条；百炼的 `/v1` 是它路径的固定组成部分，照原样保留）。「当前配置」兜底项仍带 `title: '你当前保存的值'`，那是**它自己的说明**，与预设表的 `note` 无关。HfSelect 组件支持 `disabled` 选项（不可点选），但**预设里已无 `disabled` 端点**：卡片提示已经写明「只支持 OpenAI 格式的端点，Anthropic 格式暂不支持」，再在下拉里列两个灰项等于同一句话说两遍（与 §5.24 同一条判据）。
 24. **界面文案不写「OpenAI 兼容模式」这类术语**（2026-10 起）：它原本想告诉用户"这个端点是 OpenAI 接口规范的、本应用能用"，但对用户是纯噪音——用户选的是**哪家服务商**，不是"某个协议"；能不能用已经由**选项列表本身**表达（列出来的都是能用的，不支持的端点不列，见 §5.23）；而且 `/compatible-mode/` 就写在 URL 里，说一遍等于重复。所以服务商组标题只说名字（`阿里云百炼`，不带括号补充），选项文字就是裸 URL。**判断标准**：这句话删掉会不会让用户少知道一件"他需要据此做决定"的事？不会就删。
 25. **跨页「带意图跳转」在本页落地**：配音页「音色管理」弹窗里的「API Key 设置」（以及它未配 Key 时的自动跳转）会先 `requestSettingsSection('voice')` 再 `goPage('settings')`；本页 `onMounted` 第一句 `applySectionIntent()` 消费它（`watch(useSettingsSectionRequest())` 作兜底），因此进设置页直接落在「语音服务」。分类枚举只在 `@renderer/composables/useNavIntent` 定义一处（`SETTINGS_SECTIONS`），本页不再有本地字面量数组——新增分类必须同时改 `useNavIntent.ts` 与这里引用的 `SECTIONS` 消费者。详见 [common.md](../common.md) §10。
+
+## 6. 运行环境（分包）一行（`useRuntime`）
+
+运行环境改成「`ffmpeg` / `hyperframes` 各成一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）、首次用到时由用户确认后下载并解到 `<userData>/runtime/<包名>/`，`whisper` 随安装包」之后，卡片 4 的这一行是**三态**（分包方案见 `docs/runtime-pack-split.md`）：
+
+- **显隐**：`v-if="runtimeBusy || runtimeFailed || runtimeHasMissing"`（就绪是常态，不再占位、也不再显示「运行环境已就绪（体积）」）；
+- **文案**：`runtimeStatusText` —— busy → `runtime.message || '正在准备运行环境…'`；failed → `runtime.message || '运行环境准备失败'`；hasMissing → `'运行环境需要下载：' + runtimeMissingText`。`runtimeStatusClass` 只在 `runtimeFailed` 时给 `hf-error`；
+- **按钮**：「下载运行环境 / 重试」（`onPrepareRuntime()`，`:disabled="runtimeBusy"`）、`runtimeCancellable` 时「取消下载」（`cancelRuntime`）、`runtimeMissing.length` 时**「从本地文件安装…」**（`onPickLocalPack()`，按 `docs/runtime-pack-split.md` §11.1：这个入口只在缺包 / 失败时出现）；
+- **`onPickLocalPack()`**：调 `window.settingsTools.pickRuntimePack()`（频道 `settings:pick-runtime-pack`，弹文件框选 `ffmpeg.7z` / `hyperframes.7z`）；取消或失败写 `runtimeNotice`，成功后写「已导入本地运行环境包，正在解包…」并 `await prepareRuntime()` 触发解包；
+- **`runtimeNotice`**：这一行下方的反馈文本（`v-if`），与卡片自身的 `status` / `updaterStatus` 相互独立；
+- **数据来源**：`useRuntime()` 解构出的 `{ runtime, busy, failed, hasMissing, cancelable, missing, missingText, prepare, cancel }`（旧的 `retry` / `sizeText` 已删，见 [common.md](../common.md) §4.1）。
 26. **「跳过版本」必须写目标版本（`updateNewVersion`），不能写当前版本（`updateVersion`）**（2026-10 修复）：主进程在 `updater.ts` 的 `update-available` 分支里是拿 **available 的那个版本号**与 `settings.json` 的 `skippedVersion` 比较，而本页原先两个按钮的标签与 `onSkipVersion()` 读写都用了 `updateVersion`（当前版本）——写进去的当前版本**永远不命中**，「跳过该版本」等于没生效；按钮标签还把「新版本」显示成了「当前版本」。现在新增 `const updateNewVersion = ref('')`（源码注释写明它专供跳过逻辑），四处使用：`applyUpdateProgress()`（`updateNewVersion.value = d.version || ''`，`UpdateProgressPayload.version` 即目标版本；`currentVersion` 仍写 `updateVersion`）、`onCheckUpdate()` 成功分支（`res.version || updateNewVersion.value`）、模板两个按钮的标签、`onSkipVersion()` 的写入值与两条提示文案。`updateVersion` 收窄为**只做「当前版本」显示**（模板 `{{ updateVersion || '—' }}`、`applyUpdateProgress()` 的 `currentVersion`、`onCheckUpdate()` 的 `currentVersion`、`onMounted` 的 `window.updateTools.version()`）。

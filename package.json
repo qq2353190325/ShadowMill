@@ -1,6 +1,6 @@
 {
   "name": "shadowmill",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "ShadowMill（影坊）：Electron 桌面应用，以「项目」为粒度的一站式音视频创作流水线",
   "main": "out/main/index.js",
   "scripts": {
@@ -10,7 +10,10 @@
     "runtime:pack": "node scripts/pack-runtime.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.agent.json",
     "pack": "npm run runtime:pack && npm run build && npx electron-builder --dir",
-    "dist": "npm run runtime:pack && npm run build && npx electron-builder --win"
+    "dist": "npm run runtime:pack && npm run build && npx electron-builder --win",
+    "stage": "node scripts/release.mjs --stage",
+    "ship": "npm run dist && npm run stage",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
@@ -74,8 +77,8 @@
     ],
     "extraResources": [
       {
-        "from": "build/runtime-pack",
-        "to": "runtime-pack"
+        "from": "resources/whisper",
+        "to": "whisper"
       },
       {
         "from": "build/tools",

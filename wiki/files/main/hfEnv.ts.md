@@ -1,30 +1,33 @@
 # src/main/hfEnv.ts
 
-> 内置依赖定位与环境探测：chrome-headless-shell / node / ffmpeg / HyperFrames CLI；另有 GSAP 本地化（离线可用）与导出外部化辅助
+> **按包解析**的内在依赖定位与环境探测：ffmpeg（ffmpeg 运行环境包）/ chrome-headless-shell、HyperFrames CLI（hyperframes 运行环境包）/ Node（Electron 内嵌或系统）；另有 GSAP 本地化（离线可用）与导出外部化辅助
 
 - **所在目录**：src/main/
 - **类型**：环境探测 + GSAP 本地化辅助模块（无 IPC 注册、无业务依赖）
-- **规模**：294 行
-- **对外导出**：常量 `BUILTIN_RESOURCES`，函数 `findHyperframesCli`、`resolveNodePath`、`findNode`（返回 `{ cmd, env }` 而非纯路径）、`findFfmpegBin`、`isHyperframesComposition`、`findLocalGsap`、`hasGsapCdnRef`、`referencesLocalGsap`、`localizeGsapHtml`、`externalizeGsapHtml`、`copyGsapIntoProject`
+- **规模**：339 行
+- **对外导出**：常量 `BUILTIN_RESOURCES`，函数 `refreshBuiltinResources`（兼容保留）、**`refreshPack`**、**`packReady`**、`findHyperframesCli`、`resolveNodePath`、`findNode`（返回 `{ cmd, env }` 而非纯路径）、`findFfmpegBin`、`isHyperframesComposition`、`findLocalGsap`、`hasGsapCdnRef`、`referencesLocalGsap`、`localizeGsapHtml`、`externalizeGsapHtml`、`copyGsapIntoProject`（共 15 个）
 
 ## 1. 作用与职责
 
 - **资源根解析**：区分开发版与打包版两种资源根，并一次性算出内置依赖的全部绝对路径。
-- **可执行文件探测**：为 HyperFrames 渲染链寻找 Chrome headless-shell、Node（要求 >= 22；三级优先：**Electron 内嵌 Node** → 随包 `resources/node/node.exe` → 系统 Node）、FFmpeg（WinGet 安装目录）。
+- **可执行文件探测**：为 HyperFrames 渲染链寻找 Chrome headless-shell、Node（要求 >= 22；**两级优先：Electron 内嵌 Node → 系统 Node**）、FFmpeg（WinGet 安装目录）。
 - **CLI 入口探测**：定位 `hyperframes.mjs`，内置优先、环境变量兜底。
 - **合规校验**：判断一段 HTML 是否为 HyperFrames 规范的 composition。
 - **GSAP 本地化（离线可用）**：定位随包携带的 `vendor/gsap/gsap.min.js`，把 HTML 里的 GSAP CDN 引用改写为项目内相对引用 `./gsap.min.js`，并按需把该文件复制进项目目录——让生成的 composition 在离线或 CDN 抖动时也能预览与渲染；复制失败（返回值 `false`）时由调用方退回 CDN 引用，保证「引用存在的文件」。
 - **导出外部化（反向）**：导出/下载的是**单个 HTML 文件**，同目录没有 `gsap.min.js`，故 `externalizeGsapHtml()` 把 `./gsap.min.js` 换回固定版本的 CDN 地址（`GSAP_CDN_PINNED`），让导出物脱离项目目录也能独立打开（联网即可）。
-- 本模块不注册任何 IPC，也不读写业务数据（`project.json`、字幕等一概不碰）；唯一的写盘行为是 GSAP 本地化的 `copyGsapIntoProject()`，它只把随包文件复制到调用方指定的目录。`BUILTIN_RESOURCES` 的字段是 **getter + 模块级缓存**（`cachedRoot` / `cachedChrome`，Node 探测另有 `cachedNode`），路径在首次访问时求值，之后复用缓存值，直到 `refreshBuiltinResources()` 清缓存（详见 3.4 / 5）。
+- 本模块不注册任何 IPC，也不读写业务数据（`project.json`、字幕等一概不碰）；唯一的写盘行为是 GSAP 本地化的 `copyGsapIntoProject()`，它只把随包文件复制到调用方指定的目录。`BUILTIN_RESOURCES` 的字段是 **getter + 按包缓存**（`cachedPackRoots`，另有 `cachedChrome`；Node 探测另有 `cachedNode`），路径在首次访问时求值，之后复用缓存值，直到 `refreshPack(name, root?)` 按包清缓存（或 `refreshBuiltinResources()` 清全部）（详见 3.4 / 5）。
 
 ## 2. 导出与关键实现
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `BUILTIN_RESOURCES` | 常量对象（字段为 getter） | 字段：`root`、`node`、`ffmpegBin`、`ffmpeg`、`ffprobe`、`hfCli`、`hivePlayer`、`chromeShell` |
+| `BUILTIN_RESOURCES` | 常量对象（字段为 getter） | 字段：`root`、`ffmpegBin`、`ffmpeg`、`ffprobe`、`hfCli`、`hivePlayer`、`chromeShell`（**已无 `node` 字段**：`resources/node` 整体删除；`root` 只作旧布局 / dev 的兜底，不再是一切资源的父目录） |
+| `refreshPack(name, root?)` | `(name: 'ffmpeg' \| 'hyperframes', root?: string) => void` | **按包失效路径缓存**：传 `root` 则把该包钉到该目录，不传（或空串）则删掉该包缓存、下次按盘上标记重新解析；同时清 `cachedChrome`，`name === 'hyperframes'` 时另清 `cachedNode`。由 `runtime.ts` 在「探测到某包就绪」与「解包完成」时调用 |
+| `packReady(name)` | `(name: 'ffmpeg' \| 'hyperframes') => boolean` | 纯查询：该包根是否解析得到（不触发下载、不写盘），供消费点校验 |
+| `refreshBuiltinResources(root?)` | `(root?: string) => string` | **兼容保留**的旧接口：把传入的根同时钉给两个包（不传则清两个包缓存），再清 `cachedChrome` / `cachedNode`，返回 hyperframes 包根；分包后 `runtime.ts` 主要走 `refreshPack()` |
 | `findHyperframesCli()` | `() => string \| null` | 返回 `hyperframes.mjs` 绝对路径或 `null` |
 | `resolveNodePath()` | `() => string \| null` | 返回 Node 可执行文件真实绝对路径或 `null` |
-| `findNode()` | `() => { cmd: string; env: Record<string, string> } \| null` | 返回可用的 Node **运行方式**：`cmd` 是绝对路径（Electron 内嵌时为 `process.execPath`），`env` 是**必须合并进子进程环境**的附加变量（内嵌时为 `{ ELECTRON_RUN_AS_NODE: '1' }`，其余两种途径为 `{}`）；三级优先：Electron 内嵌 Node（>= 22 探针）→ 随包 Node → 系统 Node（>= 22） |
+| `findNode()` | `() => { cmd: string; env: Record<string, string> } \| null` | 返回可用的 Node **运行方式**：`cmd` 是绝对路径（Electron 内嵌时为 `process.execPath`），`env` 是**必须合并进子进程环境**的附加变量（内嵌时为 `{ ELECTRON_RUN_AS_NODE: '1' }`，系统 Node 途径为 `{}`）；**两级优先**：Electron 内嵌 Node（>= 22 探针）→ 系统 Node（>= 22） |
 | `findFfmpegBin()` | `() => string \| null` | 返回 WinGet 安装的 Gyan.FFmpeg 的 `bin` 目录或 `null` |
 | `isHyperframesComposition(raw)` | `(raw: string) => boolean` | 三个正则全部命中才返回 `true` |
 | `findLocalGsap()` | `() => string \| null` | 返回随包 `vendor/gsap/gsap.min.js` 的绝对路径；两个候选都不存在则 `null` |
@@ -38,16 +41,15 @@
 
 | 字段 | 类型 | 取值 |
 | --- | --- | --- |
-| `root` | `string` | 打包态：运行环境包指针（`<userData>/runtime/current.json` 的 `id` → `<userData>/runtime/<id>`，该目录需存在 `ok.json`）优先，解析不到才回落 `process.resourcesPath`；开发态：`path.join(app.getAppPath(), 'resources')`（刻意不看指针，改 `resources/` 立即生效） |
-| `node` | `string` | `<root>/node/node.exe`（**仅作 `findNode()` 的第 ② 候选**；首选是 Electron 内嵌 Node，该目录已不进运行环境包） |
-| `ffmpegBin` | `string` | `<root>/ffmpeg/bin` |
-| `ffmpeg` | `string` | `<root>/ffmpeg/bin/ffmpeg.exe` |
-| `ffprobe` | `string` | `<root>/ffmpeg/bin/ffprobe.exe` |
-| `hfCli` | `string` | `<root>/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs` |
-| `hivePlayer` | `string` | `<root>/hyperframes/node_modules/hyperframes/dist/hyperframes-player.global.js` |
-| `chromeShell` | `string \| null` | 在 `<root>/hyperframes/chrome/chrome-headless-shell` 子树中递归找出的 `chrome-headless-shell.exe` |
+| `root` | `string` | **只作兜底**（旧布局 / dev 的资源根）：旧版整体包目录（`<userData>/runtime/current.json` 的 `id` → `<userData>/runtime/<id>`，该目录需存在 `ok.json`）优先，解析不到则回落 `process.resourcesPath`（打包）/ `path.join(app.getAppPath(), 'resources')`（开发态，刻意不看盘上标记，改 `resources/` 立即生效）。**分包后它不再是一切资源的父目录** |
+| `ffmpegBin` | `string` | `resolvePackRoot('ffmpeg')` + `/ffmpeg/bin`（该包未就绪时为空串） |
+| `ffmpeg` | `string` | 同上 + `/ffmpeg/bin/ffmpeg.exe` |
+| `ffprobe` | `string` | 同上 + `/ffmpeg/bin/ffprobe.exe` |
+| `hfCli` | `string` | `resolvePackRoot('hyperframes')` + `/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs` |
+| `hivePlayer` | `string` | hyperframes 包根 + `/hyperframes/node_modules/hyperframes/dist/hyperframes-player.global.js` |
+| `chromeShell` | `string \| null` | 在 hyperframes 包根 + `/chrome/chrome-headless-shell` 子树中递归找出的 `chrome-headless-shell.exe`（该包未就绪时 `null`） |
 
-开发版资源根为项目根 `resources`（以 `app.getAppPath()` 为基准）；打包后这些运行时由随包分发的**运行环境包**在首次启动时解到 `userData/runtime/<id>/`，故两种情形的子路径结构一致（这也是 `root` 必须优先按指针解析、而不是直接用 `process.resourcesPath` 的原因）。
+`resolvePackRoot(name)` 是分包后的核心（候选顺序）：① `<userData>/runtime/<包名>/`——目录内有 `ok.json` 才算完整（与 `runtime.ts` 先写 `ok.json` 再写记录的顺序一致）；② 旧版整体包目录（`current.json` + `ok.json` 的 `<id>` 目录，实现于 `legacyRoots()`）；③ `process.resourcesPath`（打包态）或项目根 `resources`（开发态，走 `devResourceRoot()`）。候选目录下必须存在与包名同名的子目录（`<候选>/ffmpeg` 或 `<候选>/hyperframes`）才算命中。命中结果按包写入 `cachedPackRoots`；解包完成或包切换时由 `runtime.ts` 调 `refreshPack(name, root?)` 失效。**这解释了为什么 `root` 不能再直接用 `process.resourcesPath`**：打包后 ffmpeg / hyperframes 各在 `userData/runtime/<包名>/` 下，安装目录里根本没有它们。
 
 ### 2.2 GSAP 本地化 / 导出外部化的内部常量（不导出）
 
@@ -64,11 +66,11 @@
 
 ### 3.1 chrome-headless-shell 定位（首次访问 `chromeShell` 时执行）
 
-1. `base = <root>/hyperframes/chrome/chrome-headless-shell`；`base` 不存在则 `chromeShell` 保持 `null`。
+1. `hfRoot = resolvePackRoot('hyperframes')`（未就绪则 `chromeShell` 直接为 `null`）；`base = <hfRoot>/chrome/chrome-headless-shell`；`base` 不存在则 `chromeShell` 保持 `null`。
 2. 用数组 `stack` 做栈式深度优先遍历：`stack.pop()` 取当前目录。
 3. 对 `fs.readdirSync(cur, { withFileTypes: true })` 的每个条目：目录则 `push(path.join(cur, e.name))`；文件名匹配 `/^chrome-headless-shell\.exe$/i` 则记录绝对路径并 `break` 内层循环。
 4. 整个遍历包在 `try/catch` 中，任何异常（如权限、竞态）都把 `chromeShell` 置为 `null`，不影响其余字段。
-5. 结果写入 `cachedChrome`（含「未找到 = `null`」这一结论），后续访问直接复用，直到 `refreshBuiltinResources()` 把它置回 `undefined`。
+5. 结果写入 `cachedChrome`（含「未找到 = `null`」这一结论），后续访问直接复用，直到 `refreshPack()` / `refreshBuiltinResources()` 把它置回 `undefined`。
 
 ### 3.2 `findHyperframesCli` 候选顺序
 
@@ -87,15 +89,14 @@
 
 ### 3.4 `findNode` 判定流程（HyperFrames 要求 Node >= 22）
 
-**返回值不是路径而是 `{ cmd, env }`**：`env` 必须合进子进程环境后再 `spawn`，否则复用 Electron 时会把它当应用启动（见 3.4 的 ①）。结果缓存在模块级 `cachedNode`（含「确认为不可用」的 `null`）；探针要 `spawnSync` 一次 `electron.exe`（约 200–400ms，且会阻塞主进程），故一次会话只探一次，`refreshBuiltinResources()` 时把 `cachedNode` 置回 `undefined` 一并失效。
+**返回值不是路径而是 `{ cmd, env }`**：`env` 必须合进子进程环境后再 `spawn`，否则复用 Electron 时会把它当应用启动（见 3.4 的 ①）。结果缓存在模块级 `cachedNode`（含「确认为不可用」的 `null`）；探针要 `spawnSync` 一次 `electron.exe`（约 200–400ms，且会阻塞主进程），故一次会话只探一次，`refreshPack('hyperframes')`（或 `refreshBuiltinResources()`）时把 `cachedNode` 置回 `undefined` 一并失效。
 
-1. **① Electron 内嵌 Node（首选，免下载、免随包 83MB）**：以 `env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }` 执行 `process.execPath -e 'process.stdout.write(String(process.versions.node || ""))'`；仅当 `status === 0`、输出可解析出主版本号且 **>= 22** 时，缓存并返回 `{ cmd: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } }`（Electron 44.7.0 实测内置 Node 24.21.0）。整段包在 `try/catch` 中，探针失败即静默回落、不影响启动。
+1. **① Electron 内嵌 Node（首选；免下载，也不需要随包 Node）**：以 `env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }` 执行 `process.execPath -e 'process.stdout.write(String(process.versions.node || ""))'`；仅当 `status === 0`、输出可解析出主版本号且 **>= 22** 时，缓存并返回 `{ cmd: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } }`（Electron 44.7.0 实测内置 Node 24.21.0）。整段包在 `try/catch` 中，探针失败即静默回落、不影响启动。
    - 探针刻意用 **`-e` 而不是 `-v`**：若 Electron 的 `RunAsNode` 熔丝被关闭，`-e` 会被当作应用路径而直接失败；而 `-v` 会打印 **Electron** 版本（44 >= 22），会造成「复用可用」的误判。
-2. **② 随包 Node**：`BUILTIN_RESOURCES.node`（`<root>/node/node.exe`）存在则 `spawnSync(..., ['-v'])`，`status === 0` 即返回 `{ cmd: <该路径>, env: {} }`——**这一分支不校验版本**。
-3. **③ 系统 Node**：`spawnSync('node', ['-v'])`，`status === 0` 时取 `stdout`、`trim()` 后去掉前缀 `v`，取首个 `.` 前的段做 `parseInt(..., 10)`；当 `major` 非 `NaN` 且 `major >= 22` 时返回 `{ cmd: resolveNodePath() 的结果, env: {} }`（有绝对路径就用绝对路径）。
-4. **兜底**：前面都不成立时仍会尝试 `resolveNodePath()`——拿到路径就返回 `{ cmd: <绝对路径>, env: {} }`，拿不到则缓存并返回 `null`；`null` 由调用方（`video.ts`）转成可读提示。
+2. **② 系统 Node**：`spawnSync('node', ['-v'])`，`status === 0` 时取 `stdout`、`trim()` 后去掉前缀 `v`，取首个 `.` 前的段做 `parseInt(..., 10)`；当 `major` 非 `NaN` 且 `major >= 22` 时返回 `{ cmd: resolveNodePath() 的结果, env: {} }`（有绝对路径就用绝对路径）。
+3. **兜底**：前面都不成立时仍会尝试 `resolveNodePath()`——拿到路径就返回 `{ cmd: <绝对路径>, env: {} }`，拿不到则缓存并返回 `null`；`null` 由调用方（`video.ts`）转成可读提示。
 
-> ① 的复用依赖 Electron 的 **`RunAsNode` 熔丝处于默认开启状态**。若将来在 `package.json` 的 `build.electronFuses` 里把它关掉，探针会失败并自动回落到 ②/③——不报错，但 `resources/node/node.exe` 会重新变成必需品（届时还需把它从 `scripts/pack-runtime.mjs` 的 `EXCLUDE_TOP` 里移除、让它重新进入运行环境包）。源码内有一段长注释记录了实测结论（onnxruntime-node 与 sharp 均可在 Electron 的 Node 24 下加载；同一 composition 的成片与用 node 22 渲染逐项相同，含字节数；hyperframes 内部三处 `spawn(process.execPath)` 都继承 `process.env`，标志会传到子进程）。
+> ① 的复用依赖 Electron 的 **`RunAsNode` 熔丝处于默认开启状态**。若将来在 `package.json` 的 `build.electronFuses` 里把它关掉，探针会失败并自动回落到 ② 系统 Node——不报错，但那时**必须**重新提供一份 Node：要么把 `resources/node/node.exe` 放回来并让它进运行环境包（`scripts/pack-runtime.mjs` 的 `PACKS` 与 `EXCLUDE_TOP` 两处都要改），要么把「系统 Node >= 22」变成硬性前置条件。源码内有一段长注释记录了实测结论（onnxruntime-node 与 sharp 均可在 Electron 的 Node 24 下加载；同一 composition 的成片与用 node 22 渲染逐项相同，含字节数；hyperframes 内部三处 `spawn(process.execPath)` 都继承 `process.env`，标志会传到子进程）。
 
 ### 3.5 `findFfmpegBin` 探测流程
 
@@ -188,8 +189,8 @@ if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = h
 | `src/main/projects.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`isHyperframesComposition`（HTML 生成/修改/保存侧的合规判断），GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（生成 / 修改 / 保存 / 预览四个写盘环节；其中**前三个用 `copyGsapIntoProject` 的返回值做「复制失败即退回 CDN」兜底**），以及 `externalizeGsapHtml`（兜底改写 + `project:download-html` 的导出改写） |
 | `src/main/ttsAlign.ts` | `BUILTIN_RESOURCES`（取 `ffmpeg` / `ffprobe`） |
 | `src/main/voice.ts` | `import { BUILTIN_RESOURCES } from './hfEnv'`：`voice:create` 创建克隆音色时取 `BUILTIN_RESOURCES.ffmpeg` / `BUILTIN_RESOURCES.ffprobe`，把本地参考音频裁成前 15 秒 / 24 kHz / 单声道 `pcm_s16le` wav（见 [voice.ts.md](./voice.ts.md) §4.1.1） |
-| `src/main/whisper.ts` | `BUILTIN_RESOURCES`（取其内的 `ffmpeg`） |
-| `src/main/runtime.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `refreshBuiltinResources(...)`（四条就绪路径，把解包目录交给 `hfEnv` 重算内置资源缓存）与 `BUILTIN_RESOURCES.root`（`runtimeRoot()` 取资源根） |
+| `src/main/whisper.ts` | `BUILTIN_RESOURCES`（取 `ffmpeg`；并把它当作 `resolveCliPath()` 的第二候选根——whisper 现在**随安装包**，首选 `<resources>/whisper`，`root` 只是旧布局兜底） |
+| `src/main/runtime.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，**主要用 `refreshPack(name, root)`**（探测到某包就绪、以及解包完成时，把该包目录交给 `hfEnv` 重算该包缓存）；`refreshBuiltinResources(...)` 与 `packReady(...)` 也已导出但当前调用点在 `runtime.ts` 内以 `refreshPack` 为主 |
 
 `findLocalGsap` 仅在本模块内部被 `localizeGsapHtml` / `copyGsapIntoProject` 使用；`hasGsapCdnRef` 现由 `localizeGsapHtml` 调用——**本模块已无「零调用点」的导出**。
 
@@ -201,12 +202,12 @@ if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = h
 
 ## 5. 注意事项与实现要点
 
-- **资源根是「缓存 + 可失效」而非一次性快照**：`BUILTIN_RESOURCES` 的字段都是 getter，`root` 由 `resolveRoot()` 在首次访问时解析并写入 `cachedRoot`；打包态优先按运行环境包指针解析（`<userData>/runtime/current.json` → `<userData>/runtime/<id>`，需 `ok.json`），解析不到才回落 `process.resourcesPath`；开发态固定 `app.getAppPath()/resources`。运行环境包解包完成或切换目录时由调用方 `refreshBuiltinResources(root?)` 清掉 `cachedRoot` / `cachedChrome` / `cachedNode` 三个缓存后重新解析。
+- **路径解析是「按包缓存 + 可失效」而非一次性快照**：`BUILTIN_RESOURCES` 的字段都是 getter，`ffmpeg` 一族与 `hfCli` 一族各自经 `resolvePackRoot(name)` 解析并按包写入 `cachedPackRoots`；候选依次是「该包已解到 `<userData>/runtime/<包名>/`（需 `ok.json`）」→「旧版整体包目录（`current.json` + `ok.json`）」→「`process.resourcesPath` / 开发态项目根 `resources`」。`root` 只作后两者的兜底。运行环境包解包完成或切换目录时由调用方 `refreshPack(name, root?)` 失效该包缓存（并清 `cachedChrome`，hyperframes 时另清 `cachedNode`），`refreshBuiltinResources(root?)` 则一次清两个包 + 两个探测缓存（兼容保留）。
 - **平台假设为 Windows**：路径与文件名硬编码 `node.exe`、`ffmpeg.exe`、`ffprobe.exe`、`chrome-headless-shell.exe`、`where.exe`、`C:\Program Files\nodejs`，非 Windows 平台这些分支会全部落空。
 - **只做“存在 + 能跑”的轻量验证**：所有探测都是 `existsSync` 加 `spawnSync(..., ['-v'])` 的 `status === 0` 判定，不解析版本（`resolveNodePath`、`findHyperframesCli`、`findFfmpegBin` 均不校验版本）；**唯一例外是 `findNode`**——① 与 ③ 分支都解析主版本并要求 >= 22。
-- **`findNode` 的版本门槛只覆盖 ① 与 ③**：① 用 `-e` 探针取 `process.versions.node` 并要求 >= 22；③ 用 `node -v` 的输出判 >= 22；而 **② 随包 `resources/node/node.exe` 只验证能否执行、不校验版本**（它的版本随打包时的 resources 决定）。
+- **`findNode` 的版本门槛覆盖两条分支**：① 用 `-e` 探针取 `process.versions.node` 并要求 >= 22；② 用 `node -v` 的输出判 >= 22。**原先的 ② 「随包 `resources/node/node.exe`」已随该目录整体删除**——它当年不校验版本，且在打包态本来就够不着（`build.files` / `extraResources` 都不带 `resources/**`，只有 dev 的 `resolveRoot()` 指向项目根 `resources` 才会命中）。
 - **`findNode` 的返回值必须成对使用**：只取 `cmd` 而丢掉 `env` 会让 `electron.exe` 以应用身份启动（渲染直接失败）。这是本模块唯一「返回值不只是路径」的函数，`video.ts` 用 `{ ...process.env, ...nodeRt.env }` 合并它。
-- **① 的复用依赖 `RunAsNode` 熔丝**：熔丝默认开启；一旦在 `build.electronFuses` 里关掉，探针（`-e`）失败并静默回落到 ②/③，不报错但 `node.exe` 重新成为必需品。探针刻意不用 `-v`，因为 `-v` 打印的是 Electron 版本（44 >= 22），会把「不可复用」误判成可用。
+- **① 的复用依赖 `RunAsNode` 熔丝**：熔丝默认开启；一旦在 `build.electronFuses` 里关掉，探针（`-e`）失败并静默回落到 ② 系统 Node，不报错但那时必须重新提供 Node（见 3.4 的注）。探针刻意不用 `-v`，因为 `-v` 打印的是 Electron 版本（44 >= 22），会把「不可复用」误判成可用。
 - **探测失败一律返回 `null`，不抛出**：`chromeShell` 的遍历异常被 `catch` 吞掉，`where.exe` 分支同样被 `catch` 包住，`findNode` 的 ① 探针也包在 `try/catch` 里；调用方必须自行处理 `null` 并给出可读提示。
 - **可执行路径都是绝对路径**：源码注释强调“一律返回绝对路径”，以规避 `spawn('node')` 在部分环境下 ENOENT。
 - **DFS 不是纯递归**：`stack.pop()` 为后进先出，命中顺序取决于目录读取顺序；只要存在一个匹配的 `chrome-headless-shell.exe` 即可，不保证选中最外层或版本最新的那个。

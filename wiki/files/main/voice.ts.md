@@ -18,7 +18,7 @@
 | 职责 | 关键实现 |
 |------|----------|
 | **按厂家**读写语音配置（每家只有一份 API Key；保存目录仍是全局一份） | `IPC.Voice.GetConfig` / `SaveConfig`，底层走 `settings.getVoiceSettings` / `saveVoiceProviderConfig` |
-| **克隆参考音频的本地准备**（本地文件 → 前 15 秒 / 24 kHz / 单声道 wav） | `runProc` / `probeDuration` / `makeCloneSample`（走 `hfEnv.BUILTIN_RESOURCES` 的内置 ffmpeg / ffprobe） |
+| **克隆参考音频的本地准备**（本地文件 → 前 15 秒 / 24 kHz / 单声道 wav） | `runProc` / `probeDuration` / `makeCloneSample`（走 `hfEnv.BUILTIN_RESOURCES` 的 ffmpeg / ffprobe，**来自 ffmpeg 运行环境包**） |
 | 克隆音色创建：本地文件、公网 URL / `oss://`、`data:audio/...` URI 三种输入（**只支持 Qwen-Audio-TTS 模型**） | `IPC.Voice.Create` |
 | 云端克隆音色列表查询（**单一接口**：厂家克隆模型 + `action:'list_voice'`） | `fetchClonedVoices` |
 | 云端克隆音色删除（**单一写法**：`action:'delete_voice'`） | `IPC.Voice.DeleteCloud` |
@@ -145,7 +145,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 
 | 步骤 | 实现 |
 |------|------|
-| 工具存在性 | `fs.existsSync(BUILTIN_RESOURCES.ffmpeg)` 与 `ffprobe` 任一缺失 → throw `'未找到内置 ffmpeg/ffprobe（运行环境包可能还没解包完成），无法裁取参考音频'` |
+| 工具存在性 | `fs.existsSync(BUILTIN_RESOURCES.ffmpeg)` 与 `ffprobe` 任一缺失 → throw `'未找到内置 ffmpeg/ffprobe（运行环境包可能还没解包完成），无法裁取参考音频'`——分包后这两个路径由 **ffmpeg 运行环境包**提供（`<userData>/runtime/ffmpeg/ffmpeg/bin/`），包没装好时就是这条文案（本文件**不在** `needPacks` 三处消费点之内，不返回 `needPacks`） |
 | 量时长 | `probeDuration(src)`：ffprobe `-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 <src>` → `parseFloat` |
 | 时长下限 | `dur < 3` → throw `'参考音频太短（' + dur.toFixed(1) + ' 秒）：声音复刻要求 3~30 秒的清晰人声'`（**服务端要求 3~30 秒**） |
 | 输出路径 | `path.join(app.getPath('temp'), 'shadowmill-clone-' + Date.now() + '.wav')` |
@@ -260,7 +260,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 | `node:child_process` 的 `spawn` | `runProc` 调内置 ffmpeg / ffprobe（`windowsHide: true`，参数数组传递，不经 shell） |
 | `./settings` | `getVoiceSettings` / `getVoiceProviderConfig` / `saveVoiceProviderConfig`（第三参可带 `saveDir`）/ **`saveVoiceSaveDir`**（只存目录）/ `getVoiceProfiles` / `saveVoiceProfile` / `deleteVoiceProfile` / `readSettings`（**无 `writeSettings`**：头注释列了它，代码里实际只经上面这些封装落盘） |
 | `./voiceCatalog` | `VOICE_MODELS` / `VOICE_PROVIDERS` / `providerByKey` / `providerOfModel` / `providerOfSystemVoice` / `seriesDefaultModel`（含类型 `VoiceProviderDef`）：模型表 / 端点 / Key 提示 / 克隆模型名 / 出厂默认模型 / 系统音色表，全部**按厂家**组织；**`systemVoices.ts` 由它引用，本文件不直接 import** |
-| `./hfEnv` | `BUILTIN_RESOURCES.ffmpeg` / `BUILTIN_RESOURCES.ffprobe`，用于裁剪克隆参考音频（见 §4.1.1）；依赖图据此有一条 `voice → hfEnv` |
+| `./hfEnv` | `BUILTIN_RESOURCES.ffmpeg` / `BUILTIN_RESOURCES.ffprobe`，用于裁剪克隆参考音频（见 §4.1.1）；**分包后这两个路径来自 ffmpeg 运行环境包**（`<userData>/runtime/ffmpeg/ffmpeg/bin/…`），该包未就绪时为空串；依赖图据此有一条 `voice → hfEnv` |
 | `./projects` | `projects.projectsRoot()`（**函数，惰性求值**）与 `scanProjects()`，用于项目 `audio/` 定位与列表扫描 |
 | ~~`./systemVoices`~~ | **已无此 import**：`voice.ts` 改用 `./voiceCatalog` 的 `providerOfSystemVoice` / `seriesDefaultModel` 间接使用音色表；`systemVoices.ts` 现在只导出 `SYSTEM_VOICES` |
 | `../shared/ipc` | `IPC.Voice.*` 频道常量 |

@@ -20,6 +20,7 @@ import { IPC } from '../shared/ipc'
 import { APP_USER_AGENT } from '../shared/constants'
 import type {
   RegisterCtx,
+  RuntimePackName,
   WhisperAddModelPayload,
   WhisperCustomModel,
   WhisperIdPayload,
@@ -67,10 +68,13 @@ function modelsDir(): string {
 
 // 定位 whisper-cli.exe：随「运行环境包」解到 userData/runtime/<id>/whisper/（BUILTIN_RESOURCES.root 已按此解析），
 // 旧版布局（安装目录内展开）与开发态（项目根/resources）仍在 root 下，故统一走 root 即可
+// 定位 whisper-cli.exe：**随安装包**（package.json 的 extraResources → <resources>/whisper/），
+// 所以 process.resourcesPath 那条永远优先——它不受「运行时包解到 userData 哪个目录」影响。
+// 另外两条只是兜底：旧版布局（整体运行环境包里带的 whisper/）与开发态（项目根 resources/）。
 function resolveCliPath(): string {
   const candidates = [
+    path.join(process.resourcesPath || '', 'whisper', 'whisper-cli.exe'),
     path.join(BUILTIN_RESOURCES.root, 'whisper', 'whisper-cli.exe'),
-    path.join(process.resourcesPath, 'whisper', 'whisper-cli.exe'),
     path.join(app.getAppPath(), 'resources', 'whisper', 'whisper-cli.exe')
   ];
   for (const p of candidates) {
@@ -354,6 +358,15 @@ async function toVadSamples(src: string): Promise<Int16Array | null> {
 // 因此先用内置 ffmpeg 提取音轨并转为 16kHz 单声道 PCM wav，临时文件由调用方清理。
 const WHISPER_AUDIO_EXTS = ['wav', 'flac', 'mp3', 'ogg'];
 
+// 「这个格式要 ffmpeg 转码、而 ffmpeg 运行环境还没装」：抛这个带标记的错误，调用方据此返回 needPacks，
+// 让界面弹「需要下载 ffmpeg 运行环境（约 60 MB）」而不是一句干巴巴的「未找到内置 ffmpeg」。
+class FfmpegNeededError extends Error {
+  readonly needPacks: string[] = ['ffmpeg'];
+  constructor(ext: string) {
+    super('音频格式 ' + (ext || '未知') + ' 不受 whisper-cli 支持，需要先下载运行环境（ffmpeg）用于转码');
+  }
+}
+
 function cleanupTmp(p: string): void {
   try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { /* ignore */ }
 }
@@ -364,8 +377,8 @@ function prepareAudio(audioPath: string, onConvert?: () => void): Promise<{ path
   const ext = path.extname(String(audioPath)).slice(1).toLowerCase();
   if (WHISPER_AUDIO_EXTS.indexOf(ext) >= 0) return Promise.resolve({ path: audioPath, tmp: false });
   const ffmpeg = BUILTIN_RESOURCES.ffmpeg;
-  if (!fs.existsSync(ffmpeg)) {
-    return Promise.reject(new Error('音频格式 ' + (ext || '未知') + ' 不受 whisper-cli 支持，且未找到内置 ffmpeg（resources/ffmpeg/bin/ffmpeg.exe）用于转换'));
+  if (!ffmpeg || !fs.existsSync(ffmpeg)) {
+    return Promise.reject(new FfmpegNeededError(ext));
   }
   const outPath = path.join(app.getPath('userData'), 'whisper', 'conv_' + Date.now() + '.wav');
   try { fs.mkdirSync(path.dirname(outPath), { recursive: true }); } catch (e) { /* ignore */ }
@@ -623,12 +636,11 @@ function register(ctx?: RegisterCtx): void {
     if (!audioPath || !fs.existsSync(audioPath)) return { ok: false, message: '音频文件不存在' };
     const meta = findModel(id);
     if (!meta) return { ok: false, message: UNKNOWN_MODEL_MSG + (id || '(空)') };
-    // 运行环境（whisper-cli + ffmpeg 共约 632MB）首次启动可能还在解包：等它就绪，否则下面
-    // 的 resolveCliPath() 会找不到文件、报成「未找到 whisper-cli.exe」误导用户
-    const rt = await runtime.ensureRuntime();
-    if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好', detail: rt.detail };
+    // whisper-cli 随安装包（extraResources），正常情况必然存在；不存在只可能是安装包被破坏
     const cliPath = resolveCliPath();
-    if (!fs.existsSync(cliPath)) return { ok: false, message: '未找到 whisper-cli.exe，请将其放置到 resources/whisper/whisper-cli.exe（打包后自动随应用携带）' };
+    if (!fs.existsSync(cliPath)) {
+      return { ok: false, message: '未找到 whisper-cli.exe（应为 <安装目录>/resources/whisper/whisper-cli.exe）。若为手动放置的开发环境，请把文件放到 resources/whisper/ 下' };
+    }
     const modelFile = resolveModelFile(id);
     if (!modelFile) return { ok: false, message: '模型未下载：' + meta.label + '，请先下载，或将 ggml 模型文件放入 ' + modelsDir() };
     const modelPath = modelFile.path;
@@ -685,6 +697,11 @@ function register(ctx?: RegisterCtx): void {
     } catch (err) {
       const msg = String(((err as Error) && (err as Error).message) || err);
       emit({ id, stage: 'error', message: msg });
+      // 缺 ffmpeg（这个音频格式要转码）：把缺哪个包一并回给界面，由它问用户是否下载（可取消）
+      const need = (err as { needPacks?: string[] })?.needPacks;
+      if (need && need.length) {
+        return { ok: false, message: msg + '（约 ' + runtime.packSizeText(['ffmpeg'] as RuntimePackName[]) + '）', needPacks: ['ffmpeg'] as RuntimePackName[] };
+      }
       return { ok: false, message: msg };
     } finally {
       transcribing = false;

@@ -242,3 +242,11 @@ helpers 不调用任何 preload 方法；弹窗不落盘字幕本身（主进程
 - **ESC 监听与 `onProgress` 单订阅**：旧 `transcribe.js` 的 `escHandler` 重绑 guard 逻辑与 `escTxt` 已删除，改为 `onMounted` / `onBeforeUnmount` 成对注册与注销 `document` 的 `keydown`；preload 的 `onProgress` 只保留一个回调，重复注册会替换，回调内以 `maskVisible` 为门槛，弹窗关闭时不会误刷进度。
 - **保存提示的可见性与「回填即落盘」**：`applyTranscript()` 先 `closeTw()`（会清空状态）再在 `saveToProject` 回调里写状态，此时遮罩已隐藏（`v-show`），成功 / 失败文案需重开弹窗才可见；条目本身已写入编辑器，失败时提示「已回填，但自动保存失败」。`saveToProject({ silent: true })` 静默保存是刻意设计，避免用户忘记保存，失败不丢数据。
 - **语言与简繁、转码语义都在主进程**：本组件只负责传 `language`；`zh-hant` 在主进程被映射为 whisper 的 `zh` 且不做繁转简，`zh` 与 `auto`（识别为 `zh` 时）会做繁转简——这些逻辑都在主进程 `whisper.ts`，渲染层无相关代码。
+
+## 7. 运行环境缺包守卫（`useEnvGate`）
+
+`whisper-cli` **随安装包**（`extraResources`），所以「文字转字幕」装完即可离线用；**只有音频格式不在 `wav / mp3 / flac / ogg` 里、需要 ffmpeg 转码时**才会缺包——ffmpeg 属于**不随安装包**的 ffmpeg 运行环境包（实测 **42.6 MB**，2026-10-14；首次用到时下载，见 `docs/runtime-pack-split.md`）。
+
+- `TranscribeSection.vue` 的 `doTranscribe(skipEnvGuard)`：动手前 `const g = await envGate.guard(['ffmpeg'], '文字转字幕', () => { void doTranscribe(true) })`，`!g.ok`（缺包已弹框或用户取消）就 `return`，**不发 IPC、不产生下载**；
+- 主进程返回 `fail.needPacks`（转码时才发现缺 ffmpeg，主进程侧抛 `FfmpegNeededError` 后回传）时再 `envGate.guard(fail.needPacks, '文字转字幕', …)` 一次；
+- 「继续」以 `skipEnvGuard = true` 重发本次转录；确认框由 `App.vue` 内联渲染（`useEnvGate` 是模块级单例），本组件只调 `guard()`。

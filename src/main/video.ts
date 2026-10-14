@@ -13,6 +13,7 @@ import { pickRenderOverride } from './settings'
 import { IPC } from '../shared/ipc'
 import type {
   RegisterCtx,
+  RuntimePackName,
   VideoRenderPayload,
   VideoRenderResult
 } from '../shared/types'
@@ -20,6 +21,10 @@ import type {
 // 载荷与结果类型统一取自 shared/types.ts（⑦ 节），此处不再重复声明：
 // RenderPayload / PreviewShellPayload / RenderResult（见 VideoRenderPayload / VideoPreviewShellPayload / VideoRenderResult）
 // 渲染档位（质量 / 帧率）也在 VideoRenderPayload 内：只接受白名单内的显式值，缺省不传参数、走 CLI 默认（standard / 30）
+
+// 渲染要哪几包：HyperFrames CLI 与浏览器壳在 hyperframes 包，编码与素材探测在 ffmpeg 包；
+// 分包后两者都在安装包之外，缺哪个就提示下载哪个（见 docs/runtime-pack-split.md）
+const RENDER_PACKS: RuntimePackName[] = ['ffmpeg', 'hyperframes']
 
 function register(ctx?: RegisterCtx): void {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
@@ -44,10 +49,17 @@ function register(ctx?: RegisterCtx): void {
   });
 
   ipcMain.handle(IPC.Video.Render, async (event, payload?: VideoRenderPayload) => {
-    // 运行环境（hyperframes / chrome-headless-shell / ffmpeg 共约 632MB）首次可能还在解包：
-    // 这里等它就绪再找可执行文件，否则会以「未找到 hyperframes CLI」误导用户
-    const rt = await runtime.ensureRuntime();
-    if (!rt.ok) return { ok: false, message: rt.message || '运行环境尚未准备好' } as VideoRenderResult;
+    // 分包之后运行环境**不再随安装包**：渲染要 ffmpeg + hyperframes 两包。
+    // 这里只做纯校验（不下载、不阻塞）——缺包就把 needPacks 回给界面，由它问用户是否下载（可取消）；
+    // 否则会以「未找到 hyperframes CLI」误导用户，或者让这次请求无声地卡在下载上。
+    const lack = runtime.missingPacks(RENDER_PACKS);
+    if (lack.length) {
+      return {
+        ok: false,
+        needPacks: lack,
+        message: '转视频需要先下载运行环境（' + runtime.packSizeText(lack) + '）'
+      } as VideoRenderResult;
+    }
     return new Promise<VideoRenderResult>((resolve) => {
       const htmlPath = payload && payload.htmlPath;
       if (!htmlPath || !fs.existsSync(htmlPath)) {

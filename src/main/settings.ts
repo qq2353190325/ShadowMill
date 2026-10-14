@@ -7,7 +7,7 @@
 //       + 视频渲染档位的白名单校验（DEFAULT_RENDER / normalizeRenderOptions / pickRenderOverride，供 projects.ts / video.ts 复用）
 //       + OpenAI SDK 懒加载入口（loadOpenAI，供 settings:test 与 htmlAgent 共用）
 // 依赖：app / ipcMain / fs / path（openai 为懒加载，不在启动路径上）
-import { app, ipcMain } from 'electron'
+import { app, ipcMain, dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { IPC } from '../shared/ipc'
@@ -278,6 +278,48 @@ function register(ctx?: RegisterCtx): void {
   void ctx;
 
   ipcMain.handle(IPC.Settings.Get, () => readSettings());
+
+  // 运行环境「从本地文件安装」：选一个 <pack>.7z，放进 userData/runtime/local-import/<pack>.7z，
+  // 并按 7z 字节数生成 <pack>.json（不带 sha512 期望值 ⇒ 跳过校验，文件是用户自己给的），
+  // 之后 runtime 以「本地包」来源解包。返回哪个包给了文件用不上/没给。
+  // 只为访问不到更新源的内网 / 离线机器准备（见 docs/runtime-pack-split.md §11.1）。
+  ipcMain.handle(IPC.Settings.PickRuntimePack, async () => {
+    const win = ctx && ctx.getWindow ? ctx.getWindow() : null;
+    const r = await dialog.showOpenDialog(win as never, {
+      title: '选择运行环境包（ffmpeg.7z / hyperframes.7z）',
+      filters: [{ name: '运行环境包', extensions: ['7z'] }],
+      properties: ['openFile']
+    });
+    if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true, message: '已取消' };
+    const src = r.filePaths[0];
+    const base = path.basename(src).toLowerCase();
+    const name: 'ffmpeg' | 'hyperframes' | null =
+      base.indexOf('ffmpeg') >= 0 ? 'ffmpeg' : (base.indexOf('hyperframe') >= 0 ? 'hyperframes' : null);
+    if (!name) {
+      return { ok: false, message: '这个文件名看不出是哪个包：请选择 ffmpeg.7z 或 hyperframes.7z（文件名里要含包名）' };
+    }
+    try {
+      const dir = path.join(app.getPath('userData'), 'runtime', 'local-import');
+      fs.mkdirSync(dir, { recursive: true });
+      const dest = path.join(dir, name + '.7z');
+      fs.copyFileSync(src, dest);
+      const bytes = fs.statSync(dest).size;
+      fs.writeFileSync(path.join(dir, name + '.json'), JSON.stringify({
+        name,
+        id: 'local-' + bytes.toString(16),
+        file: name + '.7z',
+        sha512: '',
+        bytes,
+        files: 0,
+        unpackedBytes: 0,
+        appVersion: app.getVersion(),
+        createdAt: new Date().toISOString()
+      }, null, 2), 'utf8');
+      return { ok: true, pack: name, message: '已导入 ' + name + '（' + (bytes / 1024 / 1024).toFixed(1) + ' MB），正在解包…' };
+    } catch (e) {
+      return { ok: false, message: '导入失败：' + ((e as Error).message || String(e)) };
+    }
+  });
 
   ipcMain.handle(IPC.Settings.Save, (_event, payload?: { customModel?: Partial<CustomModelConfig> }) => {
     const raw = readSettings();

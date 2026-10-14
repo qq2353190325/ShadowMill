@@ -30,12 +30,15 @@
     </div>
   </header>
 
-  <!-- 运行环境包（ffmpeg/hyperframes/whisper 约 632MB）首次解包提示：
-       安装包里只带一个 7z，主进程在后台解到 userData；解包期间转录 / 转视频 / 逐句对齐会等它完成 -->
+  <!-- 运行环境横幅（ffmpeg / hyperframes 分包，见 docs/runtime-pack-split.md）：
+       安装包里不再带这两个包，用到时由用户确认下载。这里显示三类状态：
+       ① 正在下载 / 解包（带进度与取消）② 缺包（带「下载」）③ 失败（带「重试」+ 详情） -->
   <div v-if="runtimeVisible" class="runtime-banner" :class="{ 'is-error': runtimeFailed }">
-    <span class="runtime-banner-text">{{ runtimeState.message }}</span>
+    <span class="runtime-banner-text">{{ runtimeState.message || runtimeMissingText }}</span>
     <span v-if="runtimeBusy" class="runtime-banner-bar"><i :style="{ width: runtimeState.percent + '%' }"></i></span>
-    <button v-if="runtimeFailed" class="runtime-banner-btn" @click="retryRuntime">重新准备</button>
+    <button v-if="runtimeCancellable" class="runtime-banner-btn" @click="cancelRuntime">取消</button>
+    <button v-else-if="runtimeFailed" class="runtime-banner-btn" @click="retryRuntime">重试</button>
+    <button v-else-if="runtimeHasMissing" class="runtime-banner-btn" @click="downloadRuntime">下载运行环境</button>
   </div>
 
   <div class="layout">
@@ -63,6 +66,49 @@
   <!-- 历史数据目录（品牌/目录改名留下的老数据）：有就由这个应用内弹窗问「迁移 / 删除 / 稍后」 -->
   <LegacyDataDialog />
 
+  <!-- 运行环境缺包时的统一确认框（任何功能触发 → 下载 → 继续），全局只此一处 -->
+  <div v-if="gate.visible.value" class="hf-modal-mask" @click.self="gate.close()">
+    <div class="hf-modal" style="width:min(480px,92vw)">
+      <div class="hf-modal-head">
+        <span class="hf-modal-title">需要下载运行环境</span>
+        <button class="hf-modal-close" title="关闭" @click="gate.close()">×</button>
+      </div>
+      <div class="hf-modal-body">
+        <div class="env-gate-line">
+          「{{ gate.title.value }}」需要以下运行环境（不随安装包发布，只在用到时下载）：
+        </div>
+        <div class="env-gate-packs">{{ gate.sizeText.value }}</div>
+
+        <template v-if="gate.phase.value === 'downloading'">
+          <div class="runtime-banner-bar" style="width:100%"><i :style="{ width: gate.percent.value + '%' }"></i></div>
+          <div class="hf-status" style="margin-top:8px">{{ gate.message.value || '正在下载…' }}</div>
+        </template>
+        <div v-else-if="gate.readyNow.value" class="hf-status">
+          运行环境已就绪。点「继续」接着做刚才那件事，或关闭本框稍后自己再点。
+        </div>
+        <div v-else-if="gate.message.value" class="hf-status">{{ gate.message.value }}</div>
+        <div v-if="gate.detail.value" class="hf-detail">{{ gate.detail.value }}</div>
+
+        <div class="hgen-actions" style="margin-top:12px">
+          <template v-if="gate.phase.value === 'downloading'">
+            <button class="hf-btn" @click="gate.cancelDownload()">取消下载</button>
+          </template>
+          <template v-else-if="gate.readyNow.value">
+            <button class="hf-btn hf-btn-primary" @click="gate.continueAction()">继续</button>
+            <button class="hf-btn" @click="gate.close()">关闭</button>
+          </template>
+          <template v-else>
+            <button class="hf-btn hf-btn-primary" @click="gate.confirmDownload()">下载运行环境</button>
+            <button class="hf-btn" @click="gate.close()">取消</button>
+          </template>
+        </div>
+        <div class="hgen-tip" style="margin-bottom:0">
+          取消＝不下载，这次操作也随之作废（不会留下半截状态，也不会在后台偷偷下载）。
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻提示（原 window.App.toast 的固定定位 div） -->
   <TransitionGroup tag="div" name="toast" class="toast-host">
     <div v-for="t in toasts" :key="t.id" class="toast-item">{{ t.msg }}</div>
@@ -81,15 +127,23 @@ import { useToasts } from './composables/useToast'
 import { initRenderProgress } from './composables/useRenderProgress'
 import { loadRenderDefaults } from './composables/useRenderOptions'
 import { initRuntime, useRuntime } from './composables/useRuntime'
+import { initEnvGate, useEnvGate } from './composables/useEnvGate'
 import { initLegacyData } from './composables/useLegacyData'
 import LegacyDataDialog from './components/LegacyDataDialog.vue'
 
 const toasts = useToasts();
 const contentEl = ref<HTMLElement | null>(null);
 const isMaximized = ref(false);
-// 运行环境横幅：仅在「正在准备」或「准备失败」时出现（已就绪时保持界面干净）
-const { runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, retry: retryRuntime } = useRuntime();
-const runtimeVisible = computed(() => runtimeBusy.value || runtimeFailed.value);
+// 运行环境横幅：正在下载 / 缺包 / 失败时出现（已就绪时保持界面干净）
+const {
+  runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, hasMissing: runtimeHasMissing,
+  cancelable: runtimeCancellable, missingText: runtimeMissingText, prepare: prepareRuntime, cancel: cancelRuntime
+} = useRuntime();
+const runtimeVisible = computed(() => runtimeBusy.value || runtimeFailed.value || runtimeHasMissing.value);
+// 运行环境缺包的统一确认框（各功能页经 useEnvGate().guard 触发）
+const gate = useEnvGate();
+function retryRuntime(): void { void prepareRuntime(); }
+function downloadRuntime(): void { void prepareRuntime(); }
 const menuItems: { key: PageKey; label: string; title: string }[] = [
   { key: 'home', label: '首页', title: '首页' },
   { key: 'content', label: '内容脚本', title: '内容脚本' },
@@ -130,6 +184,7 @@ onMounted(() => {
   window.windowControls.onMaximizedChange((v: boolean) => { isMaximized.value = v; });
   initRenderProgress();
   initRuntime();
+  initEnvGate();
   initLegacyData();
   void initApp();
 });
@@ -191,6 +246,20 @@ onMounted(() => {
 .runtime-banner-btn:hover {
   background: rgba(0, 212, 255, .16);
   box-shadow: var(--glow-primary);
+}
+
+/* 「需要下载运行环境」确认框里的两行说明（体积清单是重点，单独一行加主色） */
+.env-gate-line {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.7;
+}
+.env-gate-packs {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary);
+  line-height: 1.7;
 }
 
 /* 轻提示（样式自原 app.js toast 内联样式移植） */

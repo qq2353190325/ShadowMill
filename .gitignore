@@ -12,6 +12,9 @@ build/
 # electron-builder 输出（安装包 / 便携版 / 缓存）
 dist/
 
+# 发版暂存目录（scripts/release.mjs --stage 把七个待上传文件集中到这里，含 ~146MB 运行环境包）
+release-output/
+
 # electron-vite 构建输出
 out/
 

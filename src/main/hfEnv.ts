@@ -7,51 +7,104 @@ import fs from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { app } from 'electron'
 
-// ===== 内置依赖资源定位（ffmpeg / hyperframes / whisper）=====
-// 资源根按优先级解析：
-//   ① <userData>/runtime/<id>：运行环境包解出来的那一份（安装版常态，见 src/main/runtime.ts）
-//   ② <resources>：dev 下为 项目根/resources，打包后为 process.resourcesPath（旧版布局 / 兜底）
-// 为什么搬到 userData：ffmpeg+hyperframes+whisper 合计约 632MB、4900+ 文件，占安装体积大头，
-// 却跨版本几乎不变；而 NSIS 的更新是「整体卸载旧版 → 解压复制新包」，这些文件每次更新都要重来一遍
-// （实测一次更新 97 秒，期间应用不存在、快捷方式失效）。拆成运行环境包后更新不再碰它们。
-// 实现上刻意用 getter 而不是快照：userData 目录迁移（my-app → shadowmill）与本模块的 import 顺序
-// 不确定，解包又是运行时才完成，快照会把路径永久钉在旧值上；getter 每次按当前状态算（结果带缓存，
-// 解包完成后由 refreshBuiltinResources() 失效）。
-let cachedRoot: string | null = null;
+// ===== 内置依赖资源定位（ffmpeg / hyperframes；whisper 由 whisper.ts 自己解析）=====
+// 分包之后不再有「一个包含所有资源的根」：ffmpeg 与 hyperframes 各自解到
+//   <userData>/runtime/ffmpeg/ 与 <userData>/runtime/hyperframes/（见 src/main/runtime.ts）
+// 所以这里**按单项资源解析**，每个路径自己找：
+//   ① 该包已就绪的目录（runtime.ts 解包完成后用 refreshPack() 告诉本模块；也会按盘上标记现查）
+//   ② 旧版整体运行环境目录（<userData>/runtime/<id>，安装包里带 runtime.7z 的那一版的遗留）
+//   ③ <resources>：dev 下为 项目根/resources，打包后为 process.resourcesPath（旧布局兜底）
+// 为什么搬走：ffmpeg(180MB)+hyperframes(440MB) 合计约 620MB、4900+ 文件，占安装体积大头，却跨版本几乎
+// 不变；而 NSIS 的更新是「整体卸载旧版 → 解压复制新包」，这些文件每次更新都要重来一遍（实测一次更新
+// 97 秒，期间应用不存在、快捷方式失效）。分包后安装包不再携带它们，用到时由用户确认下载（可取消）。
+// 实现上刻意用 getter 而不是快照：userData 目录迁移（my-app → shadowmill）与本模块的 import 顺序不确定，
+// 解包又是运行时才完成，快照会把路径永久钉在旧值上；getter 每次按当前状态算，结果按包缓存，
+// 解包完成后由 refreshPack() 失效。
+export type RuntimePackDirName = 'ffmpeg' | 'hyperframes';
+const PACK_DIRS: RuntimePackDirName[] = ['ffmpeg', 'hyperframes'];
+// 包根缓存：undefined=还没查过；''=查过但没有；非空=已就绪的目录
+const cachedPackRoots: Partial<Record<RuntimePackDirName, string>> = {};
 let cachedChrome: string | null | undefined;
 // 探针结果缓存：探针要 spawn 一次 electron.exe（约 200-400ms，且 spawnSync 会阻塞主进程），
-// 而结果在一次会话里不会变。资源根变化时由 refreshBuiltinResources() 一并失效。
+// 而结果在一次会话里不会变。包根变化时由 refreshPack() 一并失效。
 let cachedNode: { cmd: string; env: Record<string, string> } | null | undefined;
 
-// 运行环境包指针：<userData>/runtime/current.json 指向 id，那一份目录里有 ok.json 才算解包完整
-function packRootFromMarker(): string {
+const runtimeBase = (): string => path.join(app.getPath('userData'), 'runtime');
+
+// 开发态刻意不看作何运行环境包标记：改 resources/ 就该马上生效，不该被上次打包解出来的那份顶掉
+// （要测解包路径时用 SHADOWMILL_RUNTIME_PACK 指向包里目录，runtime.ts 会在解包后显式刷新包根）
+const devResourceRoot = (): string => path.join(app.getAppPath(), 'resources');
+
+// 旧版布局：<userData>/runtime/<id>/（整体包时代解出来的那一份，里面 ffmpeg/ hyperframes/ whisper/ 俱全）
+function legacyRoots(): string[] {
   try {
-    const base = path.join(app.getPath('userData'), 'runtime');
+    const base = runtimeBase();
+    const out: string[] = [];
     const cur = JSON.parse(fs.readFileSync(path.join(base, 'current.json'), 'utf8'));
     const id = cur && typeof cur.id === 'string' ? cur.id : '';
-    if (!id) return '';
-    const dir = path.join(base, id);
+    if (id && fs.existsSync(path.join(base, id, 'ok.json'))) out.push(path.join(base, id));
+    return out;
+  } catch (e) { return []; }
+}
+
+// 某包的解包结果目录：目录里有 ok.json 才算完整（与 runtime.ts 的写标记顺序一致）
+function packRootFromDisk(name: RuntimePackDirName): string {
+  try {
+    const dir = path.join(runtimeBase(), name);
     return fs.existsSync(path.join(dir, 'ok.json')) ? dir : '';
   } catch (e) { return ''; }
 }
 
-function resolveRoot(): string {
-  if (cachedRoot !== null) return cachedRoot;
-  // 开发态刻意不看运行环境包指针：改 resources/ 就该马上生效，不该被上次打包解出来的那份顶掉
-  // （要测解包路径时用 SHADOWMILL_RUNTIME_PACK 指向包里目录，runtime.ts 会在解包后显式刷新根）
-  cachedRoot = app.isPackaged
-    ? (packRootFromMarker() || process.resourcesPath)
-    : path.join(app.getAppPath(), 'resources');
-  return cachedRoot;
+function resolvePackRoot(name: RuntimePackDirName): string {
+  const cached = cachedPackRoots[name];
+  if (typeof cached === 'string' && cached) return cached;
+  const candidates: string[] = [packRootFromDisk(name)];
+  if (app.isPackaged) candidates.push(...legacyRoots(), process.resourcesPath || '');
+  else candidates.push(...legacyRoots(), devResourceRoot());
+  for (const c of candidates) {
+    if (c && fs.existsSync(path.join(c, name))) {
+      cachedPackRoots[name] = c;
+      return c;
+    }
+  }
+  cachedPackRoots[name] = '';
+  return '';
 }
 
-// chrome-headless-shell 可执行：<root>\hyperframes\chrome\chrome-headless-shell\**\chrome-headless-shell.exe
-// （目录层级随 hyperframes 版本变化，按文件名递归找；结果缓存，缺资源时返回 null）
-function findChromeShell(root: string): string | null {
+// runtime.ts 在某个包解包完成后调用：把该包解析到指定目录（传空串 = 重新按盘上标记解析）
+function refreshPack(name: RuntimePackDirName, root?: string): void {
+  cachedPackRoots[name] = typeof root === 'string' && root ? root : ('' as string);
+  if (typeof root !== 'string' || !root) delete cachedPackRoots[name];
+  cachedChrome = undefined;
+  if (name === 'hyperframes') cachedNode = undefined;
+}
+
+// 兼容旧调用（runtime.ts 换分包后主要用 refreshPack；这里保留以免外部调用点全改）
+function refreshBuiltinResources(root?: string): string {
+  for (const n of PACK_DIRS) {
+    if (typeof root === 'string' && root) cachedPackRoots[n] = root;
+    else delete cachedPackRoots[n];
+  }
+  cachedChrome = undefined;
+  cachedNode = undefined;
+  return resolvePackRoot('hyperframes');
+}
+
+// 兜底根（仅用于「旧布局 / dev 的资源根」判断，不再是所有资源的父目录）
+function resolveRoot(): string {
+  const legacy = legacyRoots()[0];
+  if (legacy) return legacy;
+  return app.isPackaged ? (process.resourcesPath || '') : devResourceRoot();
+}
+
+// chrome-headless-shell 可执行：<hfRoot>\chrome\chrome-headless-shell\**\chrome-headless-shell.exe
+// （hfRoot 是 hyperframes 包解出来的目录，其下第一层就是 hyperframes/；目录层级随 hyperframes 版本
+//   变化，按文件名递归找；结果缓存，缺资源时返回 null）
+function findChromeShell(hfRoot: string): string | null {
   if (cachedChrome !== undefined) return cachedChrome;
   cachedChrome = null;
   try {
-    const base = path.join(root, 'hyperframes', 'chrome', 'chrome-headless-shell');
+    const base = path.join(hfRoot, 'chrome', 'chrome-headless-shell');
     if (fs.existsSync(base)) {
       const stack = [base];
       while (stack.length && !cachedChrome) {
@@ -78,22 +131,19 @@ const BUILTIN_RESOURCES: {
   readonly hivePlayer: string
   readonly chromeShell: string | null
 } = {
+  // root 只是「旧布局 / dev 的资源根」兜底（不再是所有资源的父目录）；ffmpeg / hyperframes 各自解析
   get root() { return resolveRoot(); },
-  get ffmpegBin() { return path.join(resolveRoot(), 'ffmpeg', 'bin'); },
-  get ffmpeg() { return path.join(resolveRoot(), 'ffmpeg', 'bin', 'ffmpeg.exe'); },
-  get ffprobe() { return path.join(resolveRoot(), 'ffmpeg', 'bin', 'ffprobe.exe'); },
-  get hfCli() { return path.join(resolveRoot(), 'hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs'); },
-  get hivePlayer() { return path.join(resolveRoot(), 'hyperframes', 'node_modules', 'hyperframes', 'dist', 'hyperframes-player.global.js'); },
-  get chromeShell() { return findChromeShell(resolveRoot()); }
+  get ffmpegBin() { const r = resolvePackRoot('ffmpeg'); return r ? path.join(r, 'ffmpeg', 'bin') : ''; },
+  get ffmpeg() { const r = resolvePackRoot('ffmpeg'); return r ? path.join(r, 'ffmpeg', 'bin', 'ffmpeg.exe') : ''; },
+  get ffprobe() { const r = resolvePackRoot('ffmpeg'); return r ? path.join(r, 'ffmpeg', 'bin', 'ffprobe.exe') : ''; },
+  get hfCli() { const r = resolvePackRoot('hyperframes'); return r ? path.join(r, 'hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs') : ''; },
+  get hivePlayer() { const r = resolvePackRoot('hyperframes'); return r ? path.join(r, 'hyperframes', 'node_modules', 'hyperframes', 'dist', 'hyperframes-player.global.js') : ''; },
+  get chromeShell() { const r = resolvePackRoot('hyperframes'); return r ? findChromeShell(r) : null; }
 };
 
-// 资源根变化（运行环境包解包完成 / 切换到指定目录）后调用：清缓存并返回新的根。
-// 不传参数即回到「按指针重新解析」。
-function refreshBuiltinResources(root?: string): string {
-  cachedRoot = (typeof root === 'string' && root) ? root : null;
-  cachedChrome = undefined;
-  cachedNode = undefined;
-  return resolveRoot();
+// 某包是否已就绪（纯查询，不触发下载）：供消费点在动手前校验
+function packReady(name: RuntimePackDirName): boolean {
+  return !!resolvePackRoot(name);
 }
 
 // 探测 HyperFrames CLI 入口（hyperframes.mjs）：内置优先，回退环境变量
@@ -273,6 +323,8 @@ function copyGsapIntoProject(dir: string): boolean {
 export {
   BUILTIN_RESOURCES,
   refreshBuiltinResources,
+  refreshPack,
+  packReady,
   findHyperframesCli,
   resolveNodePath,
   findNode,

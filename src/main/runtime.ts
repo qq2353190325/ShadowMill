@@ -1,29 +1,52 @@
 // src/main/runtime.ts
-// 运行环境包（runtime pack）——把 ffmpeg / hyperframes / whisper 这些**跨版本几乎不变**的重型资源
-// 从「随安装包展开」改成「随安装包携带一个 7z 包，首次启动解到 userData」。
+// 运行环境（分包）——把 ffmpeg / hyperframes 这些**跨版本几乎不变**的重型资源从「随安装包展开」
+// 改成「首次用到时从更新源下载 7z，再由应用自己解到 userData」。
 //
-// 为什么：NSIS 的更新是「整体卸载旧版 → 解压复制新包」，而这 632MB / 4916 文件的资源每次更新都要
-// 重新解压+复制一遍（实测一次更新 97 秒，期间应用不存在、桌面快捷方式指向空路径）。拆成包之后：
-//   ① 安装目录里的运行资源从 4916 个文件变成 1 个 runtime.7z（安装期的复制/改名开销大幅下降）；
-//   ② 解包由应用自己做（可展示进度），且包内容没变时**下一次更新完全不碰**这 632MB。
-// 包与清单由 scripts/pack-runtime.mjs 生成（build/runtime-pack/），随 extraResources 进安装目录；
-// 也可把同一份包与清单上传到更新源（app-update.yml 的 url 目录），本地包缺失时自动回退到下载。
+// 为什么：NSIS 的更新是「整体卸载旧版 → 解压复制新包」，而这 632MB / 4916 文件的资源每次更新都要重新
+// 解压+复制一遍（实测一次更新 97 秒，期间应用不存在、桌面快捷方式指向空路径）。分包之后：
+//   ① 安装包只带代码 + whisper（12.5MB，转录缺它就完全不能用，所以随包，见 package.json 的 extraResources）
+//      ⇒ 安装包**实测 257.6MB → 105.08MB**（−59%，2026-10-14；当初预估的「约 145MB」偏高，因为把
+//      「runtime.7z 在安装包里被压到约 90MB」重复算了一次——实际是整块移出），且装完即离线可用
+//      （转录 / 配音 / 字幕 / HTML 生成都不需要下载）；
+//   ② ffmpeg 与 hyperframes 各成一个包，各自独立升级、独立校验：改渲染引擎不必让转录功能重下 ffmpeg；
+//   ③ 是否下载由**用户决定**（用到相关功能时提示体积、可取消），下载进度可视化。
 //
-// 提供：register(ctx) 装配（runtime:status / runtime:prepare IPC + runtime:progress 回推）
-//       ensureRuntime()（幂等、并发安全）/ runtimeStatus() / prepareInBackground() / runtimeRoot()
-// 依赖：app / ipcMain / net / child_process(7za) / fs / crypto / hfEnv(刷新资源根) / settings(读 feedUrl)
+// 提供：register(ctx)（runtime:status / runtime:prepare / runtime:cancel + runtime:progress 回推）
+//       packsStatus()（纯探测，不下载）/ ensurePacks(packs)（下载+解包，可取消）/ packRoots() / runtimeDir()
+// 依赖：app / ipcMain / net / child_process(7za) / fs / crypto / hfEnv(刷新资源路径) / settings(读 feedUrl)
+// 详细方案与验收清单见 docs/runtime-pack-split.md。
 import { app, ipcMain, net } from 'electron'
+import type { ClientRequest } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { IPC } from '../shared/ipc'
-import type { RegisterCtx, RuntimeProgressPayload } from '../shared/types'
+import type {
+  IpcResult,
+  RegisterCtx,
+  RuntimePackName,
+  RuntimePackState,
+  RuntimeProgressPayload
+} from '../shared/types'
 import * as hfEnv from './hfEnv'
 import { getUpdaterSettings } from './settings'
 
+// ===== 包定义（scripts/pack-runtime.mjs 的 PACKS 必须与之对应）=====
+// hint：界面在用户确认下载前给出的体积提示。两个都已按 2026-10-14 的实测回填：
+//   ffmpeg 42.6 MB（build/runtime-pack/ffmpeg.json 的 bytes = 44,698,068）
+//   hyperframes 103.1 MB（bytes = 108,076,664，内含 chrome-headless-shell 268 MB 的未压缩体量）
+// 准备过程中会用清单里的真实字节覆盖这个提示值。
+// files：判定「解包完整」的关键文件（相对包目录），缺一即视为未就绪并触发重下。
+const PACK_DEFS: { name: RuntimePackName; title: string; hint: number; files: string[] }[] = [
+  { name: 'ffmpeg', title: '音视频处理（ffmpeg）', hint: 43 * 1024 * 1024, files: [path.join('ffmpeg', 'bin', 'ffmpeg.exe'), path.join('ffmpeg', 'bin', 'ffprobe.exe')] },
+  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 105 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] }
+]
+const PACK_NAMES: RuntimePackName[] = PACK_DEFS.map((d) => d.name)
+
 // ===== 清单（scripts/pack-runtime.mjs 产出，字段必须与脚本一致）=====
-interface RuntimeManifest {
+interface PackManifest {
+  name?: string
   id: string
   file: string
   sha512: string
@@ -35,26 +58,56 @@ interface RuntimeManifest {
   createdAt?: string
 }
 
-// ===== 运行时状态（stage 刻意放宽为 string：与 updater.ts 同因，跨回调写入后比较会被 TS 判成不可能分支）=====
+// ===== 持久状态（userData/runtime/packs.json）=====
+interface PacksState {
+  version: number
+  packs: Partial<Record<RuntimePackName, { id: string; files: number; unpackedBytes: number; at: string }>>
+  // 旧版整体运行环境包（安装包里带 runtime.7z 的那一版）解开的目录：里面三样资源俱全，
+  // 留着可让老用户升级后**不重下**；两个分包都就位后由 gc() 删除。
+  legacy?: { id: string; root: string; at: string }
+}
+interface PackStatusEntry {
+  state: RuntimePackState
+  id: string
+  root: string
+  files: number
+  unpackedBytes: number
+  bytes: number
+  legacy: boolean
+}
+export type PackStatus = Record<RuntimePackName, PackStatusEntry>
+
+// ===== 运行时状态 =====
 let getWindow: (() => any) | null = null
-let inFlight: Promise<{ ok: boolean; message?: string; detail?: string }> | null = null
+let inFlight: Promise<IpcResult> | null = null
+let cancelRequested = false
+let activeReq: ClientRequest | null = null
+let activeChild: ChildProcess | null = null
+
 const state = {
-  stage: 'idle' as string, // idle / checking / downloading / extracting / ready / failed
+  phase: 'idle' as string,
+  pack: null as RuntimePackName | null,
   percent: 0,
-  id: '',
+  packs: [] as RuntimePackName[],
+  missing: [] as RuntimePackName[],
+  status: {} as Record<RuntimePackName, RuntimePackState>,
   message: '尚未检查运行环境',
   detail: '' as string | undefined,
-  source: '' as string, // local（随安装包）/ download（更新源）/ dev / legacy
+  source: '',
   bytes: 0,
   unpackedBytes: 0,
   files: 0
 }
+for (const n of PACK_NAMES) state.status[n] = 'unknown'
 
 // ===== 路径 =====
 const runtimeDir = (): string => path.join(app.getPath('userData'), 'runtime')
 const downloadsDir = (): string => path.join(runtimeDir(), 'downloads')
-const currentFile = (): string => path.join(runtimeDir(), 'current.json')
-const okFile = (id: string): string => path.join(runtimeDir(), id, 'ok.json')
+const stateFile = (): string => path.join(runtimeDir(), 'packs.json')
+const packDir = (name: RuntimePackName): string => path.join(runtimeDir(), name)
+const packOkFile = (name: RuntimePackName): string => path.join(packDir(name), 'ok.json')
+// 旧版布局的指针（整体包时代）：仅用于「老用户沿用」，新代码不再写它
+const legacyPointer = (): string => path.join(runtimeDir(), 'current.json')
 
 // ===== 日志：userData/runtime.log（与 updater.log / startup.log 同一套排障口子，超过 64KB 清一次）=====
 function writeLog(line: string): void {
@@ -76,15 +129,19 @@ const bytesText = (n: number): string => {
 
 function payload(): RuntimeProgressPayload {
   return {
-    stage: state.stage as RuntimeProgressPayload['stage'],
+    phase: state.phase as RuntimeProgressPayload['phase'],
+    pack: state.pack,
     percent: Math.max(0, Math.min(100, Math.round(state.percent))),
-    id: state.id,
+    packs: state.packs.slice(),
+    missing: state.missing.slice(),
+    status: { ...state.status },
     message: state.message,
     detail: state.detail,
     source: state.source,
     bytes: state.bytes,
     unpackedBytes: state.unpackedBytes,
-    files: state.files
+    files: state.files,
+    cancellable: state.phase === 'downloading' || state.phase === 'extracting'
   }
 }
 
@@ -95,81 +152,149 @@ function push(): void {
   } catch (e) { /* 窗口已销毁则忽略 */ }
 }
 
-function setStage(stage: string, message: string, detail?: string): void {
-  state.stage = stage
+function setPhase(phase: string, message: string, detail?: string): void {
+  state.phase = phase
   state.message = message
   state.detail = detail
   push()
 }
 
-function fail(message: string, detail: string): { ok: false; message: string; detail: string } {
-  state.stage = 'failed'
-  state.message = message
-  state.detail = detail
-  push()
-  writeLog('failed: ' + message + ' | ' + detail)
+function fail(message: string, detail: string, packs: RuntimePackName[] = []): IpcResult {
+  state.pack = null
+  state.missing = packs.slice()
+  setPhase('error', message, detail)
+  writeLog('error: ' + message + ' | ' + detail)
   return { ok: false, message, detail }
 }
 
-// ===== 解包器（7za.exe）：随包发布在 <resources>/tools/，dev 下用 build/tools/ =====
-function resolveSevenZip(): string | null {
-  const name = process.platform === 'win32' ? '7za.exe' : '7za'
-  const candidates = [
-    path.join(process.resourcesPath || '', 'tools', name),
-    path.join(app.getAppPath(), 'build', 'tools', name)
-  ]
-  for (const c of candidates) {
-    try {
-      if (c && fs.statSync(c).isFile()) return c
-    } catch (e) { /* 继续找下一个 */ }
-  }
-  return null
+function cancelledResult(): IpcResult {
+  state.pack = null
+  state.phase = 'cancelled'
+  state.percent = 0
+  state.message = '已取消下载（运行环境未安装）'
+  state.detail = undefined
+  push()
+  writeLog('cancelled by user')
+  return { ok: false, message: '已取消下载' }
 }
 
-// 随安装包携带的清单目录：<resources>/runtime-pack/（dev 下为 build/runtime-pack/）
-function localPackDir(): string {
-  const env = process.env['SHADOWMILL_RUNTIME_PACK']
-  if (env) {
-    try {
-      const st = fs.statSync(env)
-      return st.isDirectory() ? env : path.dirname(env)
-    } catch (e) { /* 环境变量指向不存在的路径：忽略 */ }
-  }
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'runtime-pack')
-    : path.join(app.getAppPath(), 'build', 'runtime-pack')
-}
-
-function readManifest(dir: string): RuntimeManifest | null {
+// ===== 状态文件读写 =====
+function readState(): PacksState {
   try {
-    const m = JSON.parse(fs.readFileSync(path.join(dir, 'runtime.json'), 'utf8'))
-    if (!m || typeof m.id !== 'string' || !m.id) return null
-    if (typeof m.file !== 'string' || !m.file) return null
-    if (!fs.existsSync(path.join(dir, m.file))) return null
-    return m as RuntimeManifest
+    const s = JSON.parse(fs.readFileSync(stateFile(), 'utf8')) as PacksState
+    if (s && typeof s === 'object') {
+      if (!s.packs || typeof s.packs !== 'object') s.packs = {}
+      return s
+    }
+  } catch (e) { /* 首次运行 / 文件损坏：当作空状态 */ }
+  return { version: 1, packs: {} }
+}
+
+function writeState(s: PacksState): void {
+  try {
+    fs.mkdirSync(runtimeDir(), { recursive: true })
+    fs.writeFileSync(stateFile(), JSON.stringify(s, null, 2), 'utf8')
   } catch (e) {
-    return null
+    writeLog('写 packs.json 失败：' + (e && (e as Error).message ? (e as Error).message : String(e)))
   }
 }
 
-// 已解包完成的那一份（ok.json 是完整标记，current.json 只是指针）
-function installedRoot(): string {
+// ===== 就绪判定：必须「有记录 + 有 ok.json + 关键文件都在」三者齐备，缺一即视为未就绪 =====
+function packReadyAt(name: RuntimePackName, root: string): boolean {
+  const def = PACK_DEFS.find((d) => d.name === name)
+  if (!def) return false
   try {
-    const cur = JSON.parse(fs.readFileSync(currentFile(), 'utf8'))
+    if (!fs.existsSync(path.join(root, 'ok.json'))) return false
+    for (const rel of def.files) {
+      if (!fs.existsSync(path.join(root, rel))) return false
+    }
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+// 旧版整体包目录：packs.json 里记的，或旧 current.json + ok.json 推断出来的（升级第一次探测时补记）
+function legacyRoot(): string {
+  const s = readState()
+  if (s.legacy && s.legacy.root) {
+    const abs = path.join(runtimeDir(), s.legacy.root)
+    if (fs.existsSync(abs)) return abs
+  }
+  try {
+    const cur = JSON.parse(fs.readFileSync(legacyPointer(), 'utf8'))
     const id = cur && typeof cur.id === 'string' ? cur.id : ''
     if (!id) return ''
-    return fs.existsSync(okFile(id)) ? path.join(runtimeDir(), id) : ''
+    const abs = path.join(runtimeDir(), id)
+    if (!fs.existsSync(path.join(abs, 'ok.json'))) return ''
+    // 只认「同时含两包资源」的那一份，避免把某个分包目录误认成旧版整体包
+    const looksLegacy = PACK_DEFS.every((d) => d.files.every((rel) => {
+      const inside = rel.split(path.sep).slice(1).join(path.sep) // 去掉包名那一层
+      return fs.existsSync(path.join(abs, rel)) || fs.existsSync(path.join(abs, inside))
+    }))
+    if (!looksLegacy) return ''
+    const s2 = readState()
+    s2.legacy = { id, root: id, at: new Date().toISOString() }
+    writeState(s2)
+    writeLog('识别到旧版整体运行环境目录，沿用：' + abs)
+    return abs
   } catch (e) {
     return ''
   }
 }
 
-function hasInstalled(id: string): boolean {
-  try {
-    return fs.existsSync(okFile(id))
-  } catch (e) {
-    return false
+const installedEntry = (name: RuntimePackName) => {
+  const s = readState()
+  const e = s.packs[name]
+  if (!e || !e.id) return null
+  if (!packReadyAt(name, packDir(name))) return null
+  return e
+}
+
+// 纯探测：不下载、不阻塞
+function packsStatus(): PackStatus {
+  const out = {} as PackStatus
+  const legacy = legacyRoot()
+  for (const def of PACK_DEFS) {
+    const entry = installedEntry(def.name)
+    if (entry) {
+      out[def.name] = { state: 'ready', id: entry.id, root: packDir(def.name), files: entry.files, unpackedBytes: entry.unpackedBytes, bytes: 0, legacy: false }
+      continue
+    }
+    if (legacy && packReadyAt(def.name, legacy)) {
+      out[def.name] = { state: 'ready', id: '', root: legacy, files: 0, unpackedBytes: 0, bytes: 0, legacy: true }
+      continue
+    }
+    out[def.name] = { state: 'missing', id: '', root: '', files: 0, unpackedBytes: 0, bytes: 0, legacy: false }
   }
+  return out
+}
+
+// 把探测结果写进推送状态与 hfEnv 的解析
+function syncStatus(status: PackStatus): PackStatus {
+  for (const def of PACK_DEFS) {
+    const st = status[def.name]
+    state.status[def.name] = st.state
+    if (st.state === 'ready') hfEnv.refreshPack(def.name, st.root)
+  }
+  return status
+}
+
+// 缺哪些包（供消费点校验；缺的按 PACK_DEFS 顺序返回）
+function missingPacks(needs?: RuntimePackName[]): RuntimePackName[] {
+  const want = needs && needs.length ? needs : PACK_NAMES
+  const status = packsStatus()
+  syncStatus(status)
+  return want.filter((n) => status[n].state !== 'ready')
+}
+
+const packSizeText = (names: RuntimePackName[]): string => {
+  let sum = 0
+  for (const n of names) {
+    const def = PACK_DEFS.find((d) => d.name === n)
+    if (def) sum += def.hint
+  }
+  return bytesText(sum)
 }
 
 // ===== 更新源：与 updater.ts 同优先级（settings 的 feedUrl > 打包 app-update.yml）=====
@@ -187,7 +312,53 @@ function feedUrl(): string {
   return ''
 }
 
-// ===== HTTP：清单（小、当文本读）与包（大、流式落盘 + 进度）=====
+// 解包器：随安装包的 <resources>/tools/7za.exe（dev 为 build/tools/）
+function resolveSevenZip(): string | null {
+  const name = process.platform === 'win32' ? '7za.exe' : '7za'
+  const candidates = [
+    path.join(process.resourcesPath || '', 'tools', name),
+    path.join(app.getAppPath(), 'build', 'tools', name)
+  ]
+  for (const c of candidates) {
+    try {
+      if (c && fs.statSync(c).isFile()) return c
+    } catch (e) { /* 继续找下一个 */ }
+  }
+  return null
+}
+
+// 本地包目录（离线/内网用）：
+//   ① SHADOWMILL_RUNTIME_PACK 指向含 <pack>.json 与 <pack>.7z 的目录（dev 自测 / 内网分发）
+//   ② userData/runtime/local-import/（设置页「从本地文件安装…」把用户选的 7z 与清单放这里）
+function localPackDir(): string {
+  const env = process.env['SHADOWMILL_RUNTIME_PACK']
+  if (env) {
+    try {
+      const st = fs.statSync(env)
+      return st.isDirectory() ? env : path.dirname(env)
+    } catch (e) { /* 环境变量指向不存在：忽略 */ }
+  }
+  try {
+    const imported = path.join(runtimeDir(), 'local-import')
+    if (fs.existsSync(imported)) return imported
+  } catch (e) { /* ignore */ }
+  return ''
+}
+
+function readLocalManifest(dir: string, name: RuntimePackName): PackManifest | null {
+  if (!dir) return null
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(dir, name + '.json'), 'utf8')) as PackManifest
+    if (!m || typeof m.id !== 'string' || !m.id) return null
+    if (typeof m.file !== 'string' || !m.file) return null
+    if (!fs.existsSync(path.join(dir, m.file))) return null
+    return m
+  } catch (e) {
+    return null
+  }
+}
+
+// ===== HTTP：清单（小、当文本读）与包（大、可断点续传）=====
 // 注：Electron 的 IncomingMessage 类型只暴露 statusCode / headers / on，resume / pipe 在运行时存在
 // （它就是 Readable），故统一断言成 NodeJS.ReadableStream 再用。
 function httpText(url: string): Promise<string> {
@@ -210,31 +381,53 @@ function httpText(url: string): Promise<string> {
   })
 }
 
-function httpToFile(url: string, dest: string, onProgress: (got: number, total: number) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const req = net.request(url)
+// 断点续传下载：已经下过的部分留在 <dest>.part 里，用 Range 续；服务端不支持（回 200）则从头覆盖。
+// 只有「取消」才删残片；网络中断一律保留 .part，下次接着下（ffmpeg/hyperframes 包有 60-70MB，重下不可接受）。
+// 注意：**成功的字节落在 <dest>.part**，调用方校验通过后必须自己 rename 成 <dest>（见 installOne）。
+function downloadToFile(
+  url: string,
+  dest: string,
+  onProgress: (got: number, total: number) => void
+): Promise<{ bytes: number; resumedFrom: number; part: string }> {
+  const part = dest + '.part'
+  let start = 0
+  try {
+    if (fs.existsSync(part)) start = fs.statSync(part).size
+  } catch (e) { start = 0 }
+  return new Promise<{ bytes: number; resumedFrom: number; part: string }>((resolve, reject) => {
+    let settled = false
+    const finish = (fn: () => void) => { if (!settled) { settled = true; fn() } }
+    const req = net.request({ method: 'GET', url, headers: start > 0 ? { Range: 'bytes=' + start + '-' } : {} })
+    activeReq = req
     req.on('response', (res) => {
       const stream = res as unknown as NodeJS.ReadableStream
-      if (res.statusCode !== 200) {
+      const code = res.statusCode || 0
+      if (code !== 200 && code !== 206) {
         stream.resume()
-        reject(new Error('HTTP ' + res.statusCode + ' ' + url))
+        finish(() => reject(new Error('HTTP ' + code + ' ' + url)))
         return
       }
-      const len = res.headers['content-length']
-      const total = Number(Array.isArray(len) ? len[0] : len) || 0
-      let got = 0
-      const out = fs.createWriteStream(dest)
-      res.on('data', (c: Buffer) => {
+      // 服务端忽略了 Range（回 200）⇒ 从头写，不能把新内容追加到旧残片后面
+      const append = code === 206 && start > 0
+      if (!append) start = 0
+      const missing = Number(res.headers['content-length']) || 0
+      const total = append ? start + missing : missing
+      let got = start
+      onProgress(got, total)
+      const out = fs.createWriteStream(part, append ? { flags: 'a' } : {})
+      stream.on('data', (c: Buffer) => {
         got += c.length
         onProgress(got, total)
       })
-      res.on('error', reject)
-      out.on('error', reject)
-      out.on('finish', () => resolve())
+      stream.on('error', (e: any) => finish(() => reject(e)))
+      out.on('error', (e: any) => finish(() => reject(e)))
+      out.on('finish', () => finish(() => resolve({ bytes: got, resumedFrom: start, part })))
       stream.pipe(out)
     })
-    req.on('error', reject)
+    req.on('error', (e: any) => finish(() => reject(e)))
     req.end()
+  }).finally(() => {
+    activeReq = null
   })
 }
 
@@ -249,67 +442,32 @@ async function sha512Of(file: string): Promise<string> {
   })
 }
 
-// ===== 从更新源取包（本地包缺失时的回退路径）=====
-async function fetchRemotePack(): Promise<{ manifest: RuntimeManifest; packFile: string } | null> {
+// 从更新源取某包的清单（失败返回 null，由调用方给文案）
+async function fetchRemoteManifest(name: RuntimePackName): Promise<PackManifest | null> {
   const base = feedUrl()
   if (!base) return null
-  setStage('checking', '正在从更新源获取运行环境信息…')
-  let manifest: RuntimeManifest
   try {
-    manifest = JSON.parse(await httpText(base + 'runtime.json')) as RuntimeManifest
-  } catch (e) {
-    writeLog('远端清单不可用（' + base + 'runtime.json）：' + String(e))
-    return null
-  }
-  if (!manifest || typeof manifest.id !== 'string' || !manifest.id || typeof manifest.file !== 'string') {
-    writeLog('远端清单格式不对，忽略')
-    return null
-  }
-  const dest = path.join(downloadsDir(), manifest.file)
-  fs.mkdirSync(downloadsDir(), { recursive: true })
-  // 已有同一份（sha512 相符）就不重复下载
-  try {
-    if (fs.existsSync(dest) && (await sha512Of(dest)) === manifest.sha512) {
-      return { manifest, packFile: dest }
+    const m = JSON.parse(await httpText(base + name + '.json')) as PackManifest
+    if (!m || typeof m.id !== 'string' || !m.id || typeof m.file !== 'string' || !m.file) {
+      writeLog('[' + name + '] 远端清单格式不对，忽略')
+      return null
     }
-  } catch (e) { /* 校验失败就重下 */ }
-  try { fs.rmSync(dest, { force: true }) } catch (e) { /* ignore */ }
-
-  state.bytes = Number(manifest.bytes) || 0
-  state.unpackedBytes = Number(manifest.unpackedBytes) || 0
-  state.files = Number(manifest.files) || 0
-  state.id = manifest.id
-  state.source = 'download'
-  setStage('downloading', '正在下载运行环境（' + bytesText(state.bytes) + '）…')
-  try {
-    await httpToFile(base + manifest.file, dest, (got, total) => {
-      state.percent = total > 0 ? (got / total) * 100 : 0
-      state.message = '正在下载运行环境 ' + bytesText(got) + (total ? ' / ' + bytesText(total) : '') + '（' + Math.round(state.percent) + '%）'
-      push()
-    })
+    return m
   } catch (e) {
-    try { fs.rmSync(dest, { force: true }) } catch (e2) { /* ignore */ }
-    writeLog('下载运行环境失败：' + String(e))
+    writeLog('[' + name + '] 远端清单不可用（' + base + name + '.json）：' + String(e))
     return null
   }
-  const got = await sha512Of(dest).catch(() => '');
-  if (got !== manifest.sha512) {
-    try { fs.rmSync(dest, { force: true }) } catch (e) { /* ignore */ }
-    writeLog('下载的运行环境校验失败（sha512 不符），已删除')
-    return null
-  }
-  return { manifest, packFile: dest }
 }
 
-// ===== 解包：7za x <pack> -o<dest> -y -bsp1（-bsp1 把百分比进度打到 stdout）=====
-function extractPack(sevenZip: string, packFile: string, manifest: RuntimeManifest): Promise<void> {
-  const dest = path.join(runtimeDir(), manifest.id)
+// ===== 解包：7za x <pack> -o<dest> -y -bsp1（-bsp1 把百分比打到 stdout）=====
+function extractPack(sevenZip: string, packFile: string, dest: string, name: RuntimePackName): Promise<void> {
   fs.mkdirSync(dest, { recursive: true })
   return new Promise((resolve, reject) => {
     const child = spawn(sevenZip, ['x', packFile, '-o' + dest, '-y', '-bsp1'], { windowsHide: true })
+    activeChild = child
     let tail = ''
     let lastPercent = -1
-    child.stdout.on('data', (d: Buffer) => {
+    child.stdout?.on('data', (d: Buffer) => {
       tail = (tail + String(d)).slice(-400)
       const m = tail.match(/(\d{1,3})%/g)
       if (!m) return
@@ -317,166 +475,316 @@ function extractPack(sevenZip: string, packFile: string, manifest: RuntimeManife
       if (!isNaN(pct) && pct !== lastPercent) {
         lastPercent = pct
         state.percent = pct
-        state.message = '正在准备运行环境 ' + pct + '%（' + bytesText(state.unpackedBytes) + ' / ' + state.files + ' 个文件）'
+        state.message = '正在准备运行环境 ' + pct + '%（' + state.pack + '）'
         push()
       }
     })
-    child.stderr.on('data', (d: Buffer) => { tail = (tail + String(d)).slice(-400) })
-    child.on('error', (e) => reject(e))
+    child.stderr?.on('data', (d: Buffer) => { tail = (tail + String(d)).slice(-400) })
+    child.on('error', (e) => { if (activeChild === child) activeChild = null; reject(e) })
     child.on('close', (code) => {
+      if (activeChild === child) activeChild = null
+      if (cancelRequested) { reject(new Error('已取消')); return }
       if (code === 0) resolve()
       else reject(new Error('7za 退出码 ' + code + (tail ? '：' + tail.trim().split('\n').slice(-1)[0] : '')))
     })
   })
 }
 
-// ===== 主流程（幂等 + 并发安全）=====
-function done(ok: boolean, message?: string, detail?: string): { ok: boolean; message?: string; detail?: string } {
-  return ok ? { ok: true } : { ok: false, message, detail }
+// ===== 取消 =====
+const CANCEL_MSG = '已取消下载'
+
+function cancelPrepare(): IpcResult {
+  const busy = state.phase === 'downloading' || state.phase === 'extracting' || state.phase === 'checking'
+  if (!busy) return { ok: true, message: '当前没有正在进行的下载' }
+  cancelRequested = true
+  try { if (activeReq) activeReq.abort() } catch (e) { /* 请求可能已完成 */ }
+  try { if (activeChild) activeChild.kill() } catch (e) { /* 进程可能已退出 */ }
+  writeLog('cancel requested（phase=' + state.phase + '）')
+  return { ok: true, message: CANCEL_MSG }
 }
 
-async function run(): Promise<{ ok: boolean; message?: string; detail?: string }> {
-  // ① 已解包好：直接就绪（这是常态，更新后第二次启动起都是这条路径）
-  const root = installedRoot()
-  if (root) {
-    state.stage = 'ready'
-    state.percent = 100
-    state.source = 'cache'
-    state.message = '运行环境已就绪'
-    hfEnv.refreshBuiltinResources(root)
-    push()
-    return done(true)
-  }
+// 取消后清掉半成品：半解目录 + .part 残片（**只在取消时**删，网络失败要留着续传）
+function cleanupHalfDone(name: RuntimePackName, file: string, dest: string): void {
+  try { fs.rmSync(dest, { recursive: true, force: true }) } catch (e) { /* 占用中则下次再清 */ }
+  try { fs.rmSync(file + '.part', { force: true }) } catch (e) { /* ignore */ }
+  try { fs.rmSync(file, { force: true }) } catch (e) { /* ignore */ }
+}
 
-  // ② 安装目录里已经是展开形态（dev 项目资源 / 旧版布局的安装）：无需解包
-  const force = !!process.env['SHADOWMILL_RUNTIME_PACK']
-  const legacy = path.join(app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources'))
-  if (!force && fs.existsSync(path.join(legacy, 'ffmpeg', 'bin', 'ffmpeg.exe'))) {
-    state.stage = 'ready'
-    state.percent = 100
-    state.source = app.isPackaged ? 'legacy' : 'dev'
-    state.message = '运行环境已就绪（安装目录内置）'
-    hfEnv.refreshBuiltinResources(legacy)
-    writeLog('使用安装目录内置资源：' + legacy)
-    push()
-    return done(true)
-  }
+// ===== 主流程 =====
+function isCancelError(e: unknown): boolean {
+  const msg = String((e as Error)?.message || e)
+  return cancelRequested || msg.indexOf(CANCEL_MSG) >= 0 || /aborted|ERR_ABORTED/i.test(msg)
+}
 
-  setStage('checking', '正在检查运行环境…')
-  const sevenZip = resolveSevenZip()
-  if (!sevenZip) {
-    return fail('运行环境无法准备：缺少解包程序', '未找到 7za.exe（应为 <resources>/tools/7za.exe）。请用 npm run pack / npm run dist 重新打包。')
-  }
+async function installOne(sevenZip: string, name: RuntimePackName): Promise<void> {
+  const def = PACK_DEFS.find((d) => d.name === name) as typeof PACK_DEFS[number]
+  const dest = packDir(name)
+  state.pack = name
+  state.status[name] = 'missing'
+  const ldir = localPackDir()
 
-  // ③ 取包：随安装包的优先（离线可用），没有再走更新源下载
-  let manifest = readManifest(localPackDir())
-  let packFile = manifest ? path.join(localPackDir(), manifest.file) : ''
-  state.source = 'local'
+  // ① 清单：本地（SHADOWMILL_RUNTIME_PACK）优先，其次更新源
+  let manifest = readLocalManifest(ldir, name)
+  let packFile = manifest ? path.join(ldir, manifest.file) : ''
+  state.source = manifest ? 'local' : 'remote'
   if (!manifest) {
-    const remote = await fetchRemotePack()
-    if (!remote) {
-      return fail(
-        '运行环境尚未准备好，暂时无法使用本地转录 / 渲染功能',
-        '既没有找到随安装包携带的 runtime-pack（' + localPackDir() + '），也没能从更新源取到运行环境包。'
-      )
-    }
-    manifest = remote.manifest
-    packFile = remote.packFile
+    setPhase('checking', '正在获取运行环境信息（' + def.title + '）…')
+    manifest = await fetchRemoteManifest(name)
+    if (!manifest) throw new Error('NO_MANIFEST')
   }
+  if (cancelRequested) throw new Error(CANCEL_MSG)
 
-  state.id = manifest.id
   state.bytes = Number(manifest.bytes) || 0
   state.unpackedBytes = Number(manifest.unpackedBytes) || 0
   state.files = Number(manifest.files) || 0
 
-  // ④ 万一已经解过同一个 id（并发/上次被打断后指针没写）：直接认
-  if (hasInstalled(manifest.id)) {
-    hfEnv.refreshBuiltinResources(path.join(runtimeDir(), manifest.id))
-    state.stage = 'ready'
-    state.percent = 100
-    state.message = '运行环境已就绪'
-    push()
-    return done(true)
+  // ② 下载（本地包跳过；已有同 id 且校验相符的缓存也跳过）
+  if (!packFile) {
+    const base = feedUrl()
+    const cached = path.join(downloadsDir(), name + '-' + manifest.id + '.7z')
+    fs.mkdirSync(downloadsDir(), { recursive: true })
+    let ok = false
+    try {
+      if (fs.existsSync(cached) && (await sha512Of(cached)) === manifest.sha512) ok = true
+    } catch (e) { ok = false }
+    if (!ok) {
+      try { fs.rmSync(cached, { force: true }) } catch (e) { /* ignore */ }
+      state.percent = 0
+      setPhase('downloading', '正在下载运行环境（' + def.title + '，' + bytesText(state.bytes) + '）…')
+      const t0 = Date.now()
+      const r = await downloadToFile(base + manifest.file, cached, (got, total) => {
+        state.percent = total > 0 ? (got / total) * 100 : 0
+        state.message = '正在下载 ' + def.title + ' ' + bytesText(got) + (total ? ' / ' + bytesText(total) : '') +
+          '（' + Math.round(state.percent) + '%）'
+        push()
+      })
+      if (cancelRequested) throw new Error(CANCEL_MSG)
+      // 校验通过后才把 .part 变成正式名：内容不完整的一律不叫「已下载」
+      const got512 = await sha512Of(r.part).catch(() => '')
+      if (got512 !== manifest.sha512) {
+        try { fs.rmSync(r.part, { force: true }) } catch (e) { /* ignore */ }
+        try { fs.rmSync(cached, { force: true }) } catch (e) { /* ignore */ }
+        throw new Error('BADSHA')
+      }
+      try {
+        fs.rmSync(cached, { force: true })
+      } catch (e) { /* 不存在也无所谓 */ }
+      fs.renameSync(r.part, cached)
+      writeLog('[' + name + '] 下载完成 ' + bytesText(r.bytes) + '（续传起点 ' + r.resumedFrom + ' 字节，用时 ' +
+        ((Date.now() - t0) / 1000).toFixed(1) + ' 秒）')
+    }
+    packFile = cached
   }
 
-  setStage('extracting', '正在准备运行环境 0%（' + bytesText(state.unpackedBytes) + ' / ' + state.files + ' 个文件）')
+  // ③ 解包（先删掉半成品目录，避免上一次中断残留的文件被当成完整包）
+  if (cancelRequested) throw new Error(CANCEL_MSG)
+  try { fs.rmSync(dest, { recursive: true, force: true }) } catch (e) { /* ignore */ }
   state.percent = 0
-  const t0 = Date.now()
-  try {
-    await extractPack(sevenZip, packFile, manifest)
-  } catch (e) {
-    return fail('运行环境解压失败，转录 / 渲染暂不可用', '7za 解包失败：' + (e && (e as Error).message ? (e as Error).message : String(e)))
-  }
+  setPhase('extracting', '正在准备运行环境（' + def.title + '）0%')
+  const t1 = Date.now()
+  await extractPack(sevenZip, packFile, dest, name)
+  if (cancelRequested) throw new Error(CANCEL_MSG)
 
-  // ⑤ 成功：先落 ok.json（完整性标记），再写 current.json 指针，最后刷新资源根
-  const dest = path.join(runtimeDir(), manifest.id)
-  try {
-    fs.writeFileSync(okFile(manifest.id), JSON.stringify({
-      id: manifest.id,
-      files: state.files,
-      unpackedBytes: state.unpackedBytes,
-      at: new Date().toISOString()
-    }), 'utf8')
-    fs.writeFileSync(currentFile(), JSON.stringify({
-      id: manifest.id,
-      at: new Date().toISOString()
-    }), 'utf8')
-  } catch (e) {
-    return fail('运行环境写入失败（磁盘空间或权限问题）', '写 runtime/current.json 失败：' + (e && (e as Error).message ? (e as Error).message : String(e)))
-  }
-  hfEnv.refreshBuiltinResources(dest)
-  cleanOldPacks(manifest.id)
-  state.stage = 'ready'
-  state.percent = 100
-  state.message = '运行环境已就绪（' + bytesText(state.unpackedBytes) + '）'
-  push()
-  writeLog('解包完成 id=' + manifest.id + ' 用时 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒，来源 ' + state.source)
-  return done(true)
+  // ④ 完整性标记（先 ok.json，再 packs.json 记录；两者齐备才算就绪）
+  fs.writeFileSync(packOkFile(name), JSON.stringify({
+    name,
+    id: manifest.id,
+    files: state.files,
+    unpackedBytes: state.unpackedBytes,
+    at: new Date().toISOString()
+  }), 'utf8')
+  const s = readState()
+  s.packs[name] = { id: manifest.id, files: state.files, unpackedBytes: state.unpackedBytes, at: new Date().toISOString() }
+  writeState(s)
+  state.status[name] = 'ready'
+  hfEnv.refreshPack(name, dest)
+  writeLog('[' + name + '] 解包完成 id=' + manifest.id + ' 用时 ' + ((Date.now() - t1) / 1000).toFixed(1) + ' 秒，来源 ' + state.source)
 }
 
-// 旧的包目录留着没用（一个 632MB），解包成功后清掉；下载目录同理（包已解出来，留着只是占地方）
-function cleanOldPacks(keepId: string): void {
+// 两个分包都就位后，旧版整体包目录就没用了（632MB）
+function gc(): void {
   try {
-    for (const e of fs.readdirSync(runtimeDir(), { withFileTypes: true })) {
-      if (!e.isDirectory() || e.name === keepId) continue
-      try { fs.rmSync(path.join(runtimeDir(), e.name), { recursive: true, force: true }) } catch (e2) { /* 占用中则下次再清 */ }
+    const s = readState()
+    const legacy = s.legacy && s.legacy.root ? path.join(runtimeDir(), s.legacy.root) : ''
+    const allReady = PACK_NAMES.every((n) => installedEntry(n))
+    if (legacy && allReady) {
+      try { fs.rmSync(legacy, { recursive: true, force: true }) } catch (e) { /* 占用中则下次再清 */ }
+      try { if (fs.existsSync(legacyPointer())) fs.rmSync(legacyPointer(), { force: true }) } catch (e) { /* ignore */ }
+      delete s.legacy
+      writeState(s)
+      writeLog('旧版整体运行环境目录已清理：' + legacy)
     }
   } catch (e) { /* ignore */ }
+  // downloads/ 只保留当前各包 id 对应的那一份
+  try {
+    const s = readState()
+    const keep = new Set<string>()
+    for (const n of PACK_NAMES) {
+      const e = s.packs[n]
+      if (e && e.id) keep.add(n + '-' + e.id + '.7z')
+    }
+    for (const f of fs.readdirSync(downloadsDir())) {
+      if (keep.has(f)) continue
+      try { fs.rmSync(path.join(downloadsDir(), f), { recursive: true, force: true }) } catch (e) { /* 占用中则下次再清 */ }
+    }
+  } catch (e) { /* downloads 目录可能还不存在 */ }
 }
 
-function ensureRuntime(): Promise<{ ok: boolean; message?: string; detail?: string }> {
-  if (state.stage === 'ready') return Promise.resolve(done(true))
-  if (inFlight) return inFlight
-  inFlight = run().catch((e) => fail('运行环境准备失败', String(e))).then((r) => {
-    inFlight = null
-    return r
-  })
+async function runOnce(packs: RuntimePackName[]): Promise<IpcResult> {
+  state.packs = packs.slice()
+  if (cancelRequested) return cancelledResult()
+  setPhase('checking', '正在检查运行环境…')
+  const sevenZip = resolveSevenZip()
+  if (!sevenZip) {
+    return fail('运行环境无法准备：缺少解包程序',
+      '未找到 7za.exe（应为 <resources>/tools/7za.exe）。请用 npm run pack / npm run dist 重新打包。', packs)
+  }
+
+  // 当前缺的包（可能被 legacy 满足）
+  let status = syncStatus(packsStatus())
+  state.missing = packs.filter((n) => status[n].state !== 'ready')
+  push()
+  if (!state.missing.length) {
+    state.pack = null
+    state.percent = 100
+    state.phase = 'ready'
+    state.message = '运行环境已就绪'
+    state.detail = undefined
+    push()
+    return { ok: true }
+  }
+
+  const feed = feedUrl()
+  const ldir = localPackDir()
+  const canRemote = !!feed || !!ldir
+  if (!canRemote) {
+    return fail('运行环境尚未准备好，暂时无法使用渲染 / 转录转码功能',
+      '更新源未配置且本机没有运行环境包（可用环境变量 SHADOWMILL_RUNTIME_PACK 指向本地包目录）。', state.missing)
+  }
+
+  for (const name of state.missing.slice()) {
+    if (cancelRequested) return cancelledResult()
+    try {
+      await installOne(sevenZip, name)
+    } catch (e) {
+      if (isCancelError(e)) {
+        cleanupHalfDone(name, path.join(downloadsDir(), name + '.7z'), packDir(name))
+        cancelRequested = false
+        const st = syncStatus(packsStatus())
+        state.missing = packs.filter((n) => st[n].state !== 'ready')
+        return cancelledResult()
+      }
+      const msg = String((e as Error)?.message || e)
+      if (msg === 'NO_MANIFEST') {
+        return fail('运行环境需要联网下载，但更新源上没有找到对应清单',
+          '已尝试：' + (feed || '(未配置更新源)') + name + '.json；本地包目录：' + (ldir || '(未设置)'), state.missing)
+      }
+      if (msg === 'BADSHA') {
+        return fail('运行环境下载校验失败（sha512 不符），已丢弃',
+          '请重试；若反复失败请检查更新源上的 ' + name + '.7z 是否被改动。', state.missing)
+      }
+      return fail('运行环境下载 / 解包失败', name + '：' + msg, state.missing)
+    }
+  }
+
+  if (cancelRequested) { cancelRequested = false; return cancelledResult() }
+
+  const st = syncStatus(packsStatus())
+  state.missing = packs.filter((n) => st[n].state !== 'ready')
+  state.pack = null
+  state.percent = 100
+  state.source = 'cache'
+  state.phase = 'ready'
+  state.message = '运行环境已就绪'
+  state.detail = undefined
+  push()
+  gc()
+  return { ok: true }
+}
+
+// 幂等 + 并发安全：同一时刻只允许一次准备；忙碌期内的重复调用返回提示（界面按进度渲染）
+function ensurePacks(packs?: RuntimePackName[]): Promise<IpcResult> {
+  const want = packs && packs.length ? packs.filter((n) => PACK_NAMES.indexOf(n) >= 0) : PACK_NAMES.slice()
+  if (inFlight) {
+    return Promise.resolve({ ok: false, message: '正在准备另一个运行环境包，请稍候再试' })
+  }
+  if (!want.length) return Promise.resolve({ ok: true })
+  cancelRequested = false
+  inFlight = runOnce(want)
+    .catch((e) => fail('运行环境准备失败', String(e), want))
+    .then((r) => {
+      inFlight = null
+      return r
+    })
   return inFlight
 }
 
-const runtimeStatus = (): RuntimeProgressPayload => payload()
-const runtimeRoot = (): string => hfEnv.BUILTIN_RESOURCES.root
-
-// 启动即开始准备（不延迟）：曾经用 2 秒延迟换首屏，代价是全新安装白等这 2 秒才开始解包。
-// 现在直接触发——① 需要同步做的只有几个 existsSync / statSync 探测（微秒级），重活（7za 解包、
-// 远程包下载与 sha512 校验）本身都是异步的；② 早到的进度事件渲染层收不到也没关系，
-// 外壳与设置页挂载时都会用 runtime:status 补齐当前状态。
+// 启动时的后台准备：**只做探测**，不下载。
+// 理由：是否下载 60-70MB 必须由用户决定（用到相关功能时提示体积、可取消），静默下载会把「用户的选择」
+// 变成「已经在跑了」；这里探测一次是为了让横幅/设置页首屏就显示「需要下载」而不是空白。
 function prepareInBackground(): void {
-  void ensureRuntime()
+  try {
+    const status = syncStatus(packsStatus())
+    const miss = PACK_NAMES.filter((n) => status[n].state !== 'ready')
+    state.packs = PACK_NAMES.slice()
+    state.missing = miss
+    if (!miss.length) {
+      state.phase = 'ready'
+      state.percent = 100
+      state.message = '运行环境已就绪'
+      state.detail = undefined
+    } else {
+      state.phase = 'idle'
+      state.percent = 0
+      state.source = ''
+      state.message = '运行环境需要下载（' + packSizeText(miss) + '）'
+    }
+    push()
+  } catch (e) {
+    writeLog('启动探测失败：' + String(e))
+  }
+}
+
+// 供 hfEnv / 其它主进程模块用：各包解出来的根目录（未就绪为空串）
+function packRoots(): Partial<Record<RuntimePackName, string>> {
+  const status = packsStatus()
+  const out: Partial<Record<RuntimePackName, string>> = {}
+  for (const def of PACK_DEFS) {
+    if (status[def.name].state === 'ready') out[def.name] = status[def.name].root
+  }
+  return out
+}
+
+const runtimeStatus = (): RuntimeProgressPayload => {
+  const status = syncStatus(packsStatus())
+  state.missing = PACK_NAMES.filter((n) => status[n].state !== 'ready')
+  if (state.phase !== 'downloading' && state.phase !== 'extracting' && state.phase !== 'checking') {
+    state.phase = state.missing.length ? 'idle' : 'ready'
+    state.message = state.missing.length ? '运行环境需要下载（' + packSizeText(state.missing) + '）' : '运行环境已就绪'
+    state.percent = state.missing.length ? 0 : 100
+  }
+  return payload()
 }
 
 function register(ctx: RegisterCtx): void {
   getWindow = ctx && ctx.getWindow ? ctx.getWindow : null
-  ipcMain.handle(IPC.Runtime.Status, () => payload())
-  ipcMain.handle(IPC.Runtime.Prepare, () => ensureRuntime())
-  // 启动即准备（不延迟）；register 排在 index.ts 装配序列最后，只保证 handler 先挂上
+  ipcMain.handle(IPC.Runtime.Status, () => runtimeStatus())
+  ipcMain.handle(IPC.Runtime.Prepare, (_e, packs?: RuntimePackName[]) => ensurePacks(packs))
+  ipcMain.handle(IPC.Runtime.Cancel, () => cancelPrepare())
+  // 启动只探测、不下载；register 排在 index.ts 装配序列最后，只保证 handler 先挂上
   prepareInBackground()
 }
 
 export {
   register,
-  ensureRuntime,
+  ensurePacks,
   prepareInBackground,
+  cancelPrepare,
+  packsStatus,
+  missingPacks,
+  packSizeText,
+  packRoots,
   runtimeStatus,
-  runtimeRoot
+  runtimeDir
 }
+export type { PackManifest }

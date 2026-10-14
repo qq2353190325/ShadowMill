@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（IPC 注册 + 子进程编排）
-- **规模**：164 行
+- **规模**：176 行
 - **对外导出**：`register`
 
 ## 1. 作用与职责
@@ -54,10 +54,10 @@
 
 ### 3.2 `video:render`（HyperFrames 转视频）
 
-1. **入口校验**：`htmlPath` 缺失或文件不存在 → `{ ok: false, message: 'HTML 文件不存在' }`。
+1. **缺包校验（最先做）+ 入口校验**：先 `const lack = runtime.missingPacks(RENDER_PACKS)`（`const RENDER_PACKS: RuntimePackName[] = ['ffmpeg', 'hyperframes']`，第 27 行）——非空立刻返回 `{ ok: false, needPacks: lack, message: '转视频需要先下载运行环境（' + runtime.packSizeText(lack) + '）' }`：**不下载、不阻塞**，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），用户点「继续」才用原参数重发本操作（见 `docs/runtime-pack-split.md` §5.2）。随后才判 `htmlPath` 缺失或文件不存在 → `{ ok: false, message: 'HTML 文件不存在' }`。
 2. **合规校验**：读取 HTML 原文交给 `hfEnv.isHyperframesComposition(raw)`（要求同时含 `data-composition-id`、`__timelines`、`gsap`）；不合规则返回 `{ ok: false, compatible: false, message: ... }`，提示先用 HyperFrames 引导生成合规模板。
 3. **定位 CLI**：`hfEnv.findHyperframesCli()`（内置 `hyperframes.mjs` 优先，回退环境变量 `HYPERFRAMES_CLI`）；找不到返回「未找到 hyperframes CLI……」。
-4. **定位 Node**：`hfEnv.findNode()` —— 返回 `{ cmd, env }`（三级优先：① Electron 内嵌 Node，即 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`；② 随包 `resources/node/node.exe`；③ 系统 Node，要求主版本 >= 22）；返回 `null` 时给出「未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 随包 / 系统三种途径均不可用）」。
+4. **定位 Node**：`hfEnv.findNode()` —— 返回 `{ cmd, env }`（**两级优先**：① Electron 内嵌 Node，即 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`；② 系统 Node，要求主版本 >= 22。原先的「随包 `resources/node/node.exe`」已随该目录删除）；返回 `null` 时给出「未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 系统两种途径均不可用）」。
 5. **搭建临时项目目录**：`path.join(app.getPath('userData'), 'hf-projects', 'html-video-' + Date.now())` 并 `mkdirSync({ recursive: true })`。
 6. **复制素材**：读取 HTML 源目录，若存在 `index.html` / `output.mp4` 之外的兄弟文件（`hasAssets`）则 `fs.cpSync(srcDir, projDir, { recursive: true })` 整体复制（保证 `audio/`、`video/` 等资源随行）；否则只 `fs.copyFileSync` 目标 HTML 为 `projDir/index.html`。复制异常返回「复制 HTML 失败：…」。
 7. **渲染副本 GSAP 本地化**（在把 HTML 复制进渲染工作目录之后、启动渲染之前；**只改副本，不动用户原件**）：读取 `projDir/index.html`，交 `hfEnv.localizeGsapHtml()` 改写后写回；`hfEnv.referencesLocalGsap(localized)` 为真时 `hfEnv.copyGsapIntoProject(projDir)` 把随包 `gsap.min.js` 放进渲染目录。整段包在 `try/catch` 中，**本地化失败不阻断渲染**（在线时仍可由 CDN 加载）。
@@ -111,7 +111,7 @@
 - **渲染档位只透传白名单值**：`pickRenderOverride(payload)` 过滤掉缺省与非法字段，两个参数都只在**显式给出**时才拼进 CLI 命令，因此「不传档位」与「传默认档位」在 CLI 侧等价（都走 `standard` / `30`）；白名单取值（`draft/standard/high`、`24/30`）与 `shared/types.ts` 的 `RenderQuality` / `RenderFps` 及渲染层 `utils/render.ts` 必须保持一致。
 - **`dialog:open-html` 是保留能力、当前无调用方**：`hfTools.openHtml()` 仍暴露在 preload 上，但渲染层（原「选择 HTML 文件」按钮所在页面）已不再调用；不要据此以为存在「手动选 HTML 渲染」的界面入口。
 - **合规校验是硬门槛**：`data-composition-id`、`__timelines`、`gsap` 三者缺一不可，失败时额外回传 `compatible: false` 供界面区分「环境错误」与「HTML 不合规」。
-- **Node 的解析与「怎么跑」都交给 `hfEnv.findNode()`**：模块自身不拼 node 路径、不假定 `node` 可执行文件叫什么名字。`findNode()` 返回 `{ cmd, env }` 一对——`cmd` 在复用 Electron 内嵌 Node 时就是 `process.execPath`（绝对路径，天然规避 nvm shim / WindowsApps alias 下 `spawn('node')` 的 ENOENT），`env` 里带 `ELECTRON_RUN_AS_NODE=1` 并**必须**并用 `{ ...process.env, ...nodeRt.env }` 合并；其余两种途径 `env` 为空对象。`child.on('error')` 文案里也会带上 `nodeRt.cmd` 便于排查。
+- **Node 的解析与「怎么跑」都交给 `hfEnv.findNode()`**：模块自身不拼 node 路径、不假定 `node` 可执行文件叫什么名字。`findNode()` 返回 `{ cmd, env }` 一对——`cmd` 在复用 Electron 内嵌 Node 时就是 `process.execPath`（绝对路径，天然规避 nvm shim / WindowsApps alias 下 `spawn('node')` 的 ENOENT），`env` 里带 `ELECTRON_RUN_AS_NODE=1` 并**必须**并用 `{ ...process.env, ...nodeRt.env }` 合并；系统 Node 途径 `env` 为空对象。`child.on('error')` 文案里也会带上 `nodeRt.cmd` 便于排查。
 - **环境变量注入而非依赖系统 PATH**：`HYPERFRAMES_FFMPEG_PATH` / `HYPERFRAMES_FFPROBE_PATH` / `PRODUCER_HEADLESS_SHELL_PATH` 均为显式注入，`HYPERFRAMES_CLI` 是 CLI 缺失时的可选回退。这些变量名与 `hfEnv.ts` 的读取逻辑一一对应。
 - **资源整体复制策略**：目录里只要存在 `index.html` / `output.mp4` 之外的文件就整目录复制，代价是可能复制进大体积无用文件，换来音频等素材必然随行。
 - **音轨来源与混流分工**：本模块**不写 `<audio>`、也不做任何 ffmpeg 混音**。音轨是项目 `index.html` 里由主进程（`projects.ts` 的 `applyBgmToHtml`）注入的 `<audio id="myv-bgm" src="audio/…" autoplay loop>`；渲染时它随整目录复制进工作目录，**音轨提取与混入 MP4 全部发生在 HyperFrames CLI 内部**（trace 阶段 `audio_process`，渲染层只把该阶段翻成「处理音轨」）。因此「页面有音轨但成片没声音」应查注入标签是否存在，而不是查本模块。
@@ -121,3 +121,4 @@
 - **渲染副本本地化「尽力而为」**：老项目 HTML 仍引 GSAP CDN 时，离线渲染会因 `gsap` 未定义而失败，故在渲染工作目录里再本地化一次；整段包在 `try/catch` 中且注释明确「本地化失败不阻断渲染」（在线时仍可由 CDN 加载）。它只改 `userData/hf-projects/html-video-<ts>/index.html` 这个副本，**用户原件与项目目录里的 `index.html` 不受影响**。
 - **本地化依赖随包文件**：`vendor/gsap/gsap.min.js` 缺失时 `localizeGsapHtml` 原样返回（副本仍引 CDN），`copyGsapIntoProject` 返回 `false` **被忽略**（不会产生错误提示，也不会退回 CDN）；这与 `projects.ts` 作者态三处「复制失败即 `externalizeGsapHtml` 退回 CDN」的兜底不同——渲染路径以「不阻断渲染」优先，且副本本身只是临时工作目录。
 - **不生成预览外壳**：模块只注册 `dialog:open-html` / `video:show-in-folder` / `video:render` 三个 handler 与 `video:progress` 一路推送，工作目录里只产出渲染副本与 `output.mp4`，不写任何 HTML 外壳文件。
+- **本模块需要的两个包都不随安装包**：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）各是一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14），首次用到时下载并解到 `<userData>/runtime/<包名>/`（`src/main/runtime.ts`）。因此 `BUILTIN_RESOURCES.ffmpeg` / `ffprobe` / `chromeShell` 在这些包未就绪时分别是空串 / `null`，上面的环境变量注入会整段跳过；缺包时第 1 步就把 `needPacks` 交回界面，**不会**走到「CLI / Node 定位失败」那种报错。

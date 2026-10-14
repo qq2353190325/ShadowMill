@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/renderer/src/`
 - **类型**：根组件（单文件组件，`<script setup lang="ts">` + `<style scoped>`）
-- **规模**：232 行（模板 70 行 / 脚本 65 行 / 样式 95 行，另含 2 行空行分隔；行数口径为 `[IO.File]::ReadAllLines($f).Count`）
+- **规模**：301 行（模板 116 行 / 脚本 74 行 / 样式 109 行，另含 2 行空行分隔；行数口径为 `[IO.File]::ReadAllLines($f).Count`）
 - **对外导出**：默认导出组件对象（经 `env.d.ts` 的 `*.vue` 声明被 `main.ts` 导入）；**无 props、无 emits**，全部状态来自 composables 与 preload 桥
 
 ## 1. 作用与职责
@@ -12,7 +12,8 @@
 `App.vue` 是原 `src/index.html` 的 titlebar/sidebar 标记与 `entry.js` 中窗口控制、进度监听、启动逻辑的**合并移植体**。它承担七类职责：
 
 1. **自绘标题栏**：因主进程使用 `titleBarStyle: 'hidden'`，标题栏由本组件绘制，含 logo、标题（`{{ APP_NAME }}`，来自 `@shared/constants`）与最小化/最大化/关闭三个按钮。
-2. **运行环境横幅**：运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）首次解包期间显示的一条窄带，含文案、进度条与失败后的「重新准备」按钮。
+2. **运行环境横幅**：运行环境已**分包**——`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）各自一个 7z（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）、首次用到时由用户确认后下载并解到 `<userData>/runtime/<包名>/`，`whisper` 随安装包（详见 `docs/runtime-pack-split.md`）。横幅是三态窄带：**下载中**（`.runtime-banner-bar` 进度条 + 「取消」）、**缺包**（`runtimeState.message` / `runtimeMissingText` + 「下载运行环境」）、**失败**（危险色 + 「重试」）。
+3. **运行环境确认框**：模板里内联渲染 `useEnvGate()` 的单例确认框（`.hf-modal-mask` + `.hf-modal`，scoped 样式 `.env-gate-line` / `.env-gate-packs`），三态 `confirm | downloading | ready`——功能页缺包时由 `guard()` 置 `visible`，装好后按钮变「继续」调 `continueAction()`（**不自动续做**）。
 3. **左侧文字菜单**：8 个菜单项由 `menuItems` 数组 `v-for` 渲染，点击调用 `goPage(item.key)`。
 4. **右侧页面容器**：用 `<component :is="currentPage" :key="pageNavKey" />` 渲染 `pages` 注册表中的当前页面组件。
 5. **旧数据弹窗宿主**：挂载 `<LegacyDataDialog />`——品牌/目录改名后「发现旧版本数据」的**应用内**弹窗（迁移 / 删除 / 稍后）。弹窗自身按 `useLegacyData()` 的单例状态决定是否显示，本组件只负责把它放进外壳。
@@ -29,7 +30,8 @@
 | 标题文本 | `.titlebar-title` | 文案为 `{{ APP_NAME }}`（取自 `@shared/constants` 的 `APP_NAME`，当前值「影坊」），不再写字面量 |
 | 窗口按钮组 | `.titlebar-controls` | 三个 `button.win-btn`：最小化（`@click="winMinimize"`）、最大化/还原（`@click="winToggleMaximize"`，`title` 随 `isMaximized` 在「还原」/「最大化」间切换）、关闭（`button.win-btn.win-close`，`@click="winClose"`） |
 | 最大化图标切换 | `v-show="!isMaximized"` / `v-show="isMaximized"` | 两个互斥的 SVG 分支：还原态画单矩形，最大化态画双矩形叠放（后一个 `fill="#0B1220"` 挖空） |
-| 运行环境横幅 | `<div v-if="runtimeVisible" class="runtime-banner" :class="{ 'is-error': runtimeFailed }">` | 标题栏之下、内容区之上的一条窄带（flex 子项，不遮挡页面）：`.runtime-banner-text` 显示 `runtimeState.message`；`.runtime-banner-bar > i`（`v-if="runtimeBusy"`，宽度绑 `runtimeState.percent + '%'`）显示解包/下载进度；失败时 `.runtime-banner-btn`「重新准备」调 `retryRuntime()` |
+| 运行环境横幅 | `<div v-if="runtimeVisible" class="runtime-banner" :class="{ 'is-error': runtimeFailed }">` | 标题栏之下、内容区之上的一条窄带（flex 子项，不遮挡页面）：`.runtime-banner-text` 显示 `runtimeState.message \|\| runtimeMissingText`；`.runtime-banner-bar > i`（`v-if="runtimeBusy"`，宽度绑 `runtimeState.percent + '%'`）显示下载 / 解包进度；按钮三选一——`runtimeCancellable` 时「取消」（`cancelRuntime`）、`runtimeFailed` 时「重试」（`retryRuntime`）、`runtimeHasMissing` 时「下载运行环境」（`downloadRuntime`，与重试都调 `prepareRuntime()`） |
+| 运行环境确认框 | `.hf-modal-mask` + `.hf-modal`（`v-if="gate.visible.value"`） | 内联渲染的单例确认框：标题 `gate.title`、`gate.sizeText` 列出本次要下的包与体积、`gate.phase === 'downloading'` 时用 `.runtime-banner-bar` 显示 `gate.percent` 并提供「取消」（`gate.cancelDownload`）、确认态给「下载运行环境」（`gate.confirmDownload`）/「取消」（`gate.close`）、`ready` 态按钮变「继续」（`gate.continueAction`）；失败 / 取消的文案走 `gate.message` / `gate.detail` |
 | 布局容器 | `<div class="layout">` | 左右分栏骨架 |
 | 侧栏 | `<aside class="sidebar"><nav class="menu" id="menu">` | 保留 `id="menu"` 与原结构一致 |
 | 菜单项 | `div.menu-item` | `v-for="item in menuItems"`，`:key="item.key"`、`:class="{ active: activeMenu === item.key }"`、`:data-page="item.key"`、`:title="item.title"`、`@click="goPage(item.key)"` |
@@ -60,32 +62,33 @@
 | `toasts` | `const`（`useToasts()` 返回值） | Toast 队列 ref，模板中 `v-for` 数据源 |
 | `contentEl` | `ref<HTMLElement \| null>(null)` | `<main class="content">` 的模板引用 |
 | `isMaximized` | `ref(false)` | 窗口最大化状态，由主进程推送更新 |
-| `runtimeState` / `runtimeBusy` / `runtimeFailed` / `retryRuntime` | `useRuntime()` 解构出的 `runtime` / `busy` / `failed` / `retry` | 运行环境包状态、是否正在准备、是否失败、失败后的重试入口（`initRuntime()` 在 `onMounted` 里调用一次） |
-| `runtimeVisible` | `computed(() => runtimeBusy.value \|\| runtimeFailed.value)` | 横幅只在「正在准备」或「准备失败」时出现（已就绪时保持界面干净） |
+| `runtimeState` / `runtimeBusy` / `runtimeFailed` / `runtimeHasMissing` / `runtimeCancellable` / `runtimeMissingText` / `prepareRuntime` / `cancelRuntime` | `useRuntime()` 解构出的 `runtime` / `busy` / `failed` / `hasMissing` / `cancelable` / `missingText` / `prepare` / `cancel`（旧的 `retry` 已删，重试改调 `prepare`） | 运行环境（分包）状态、是否正在下载 / 解包、是否失败、是否缺包、是否可取消、缺包文案与两个动作（`initRuntime()` 在 `onMounted` 里调用一次） |
+| `gate` | `useEnvGate()` 返回值 | 「需要下载运行环境」确认框的单例状态与动作（`visible` / `packs` / `title` / `phase` / `percent` / `readyNow` / `message` / `detail` / `sizeText` / `confirmDownload` / `cancelDownload` / `continueAction` / `close`）；`initEnvGate()` 在 `onMounted` 里调用一次 |
+| `runtimeVisible` | `computed(() => runtimeBusy.value \|\| runtimeFailed.value \|\| runtimeHasMissing.value)` | 横幅在「正在下载 / 解包」「失败」「缺包」三种情况出现（已就绪时保持界面干净） |
 | `menuItems` | `{ key: PageKey; label: string; title: string }[]` | 菜单配置数组（见 2.2） |
 | `winMinimize()` | `function(): void` | 调 `window.windowControls.minimize()` |
 | `winToggleMaximize()` | `function(): void` | 调 `window.windowControls.toggleMaximize()` |
 | `winClose()` | `function(): void` | 调 `window.windowControls.close()` |
 | `initApp()` | `async function(): Promise<void>` | 恢复项目上下文 → `Promise.all([refreshProject(), loadRenderDefaults()])`（**不再调 `goPage('home')`**，见 3.1 第 5 点） |
 | `watch(currentPage, ...)` | 侦听器 | 页面切换后 `contentEl.value.scrollTop = 0` |
-| `onMounted(...)` | 生命周期钩子 | 订阅最大化状态 → `initRenderProgress()` → `initRuntime()` → `initLegacyData()` → `void initApp()` |
+| `onMounted(...)` | 生命周期钩子 | 订阅最大化状态 → `initRenderProgress()` → `initRuntime()` → `initEnvGate()` → `initLegacyData()` → `void initApp()` |
 
 ## 3. 关键流程
 
 ### 3.1 启动初始化（`onMounted`）
 
-`onMounted` 里的调用顺序是固定的：`windowControls.onMaximizedChange(...)` → `initRenderProgress()` → `initRuntime()` → `initLegacyData()` → `void initApp()`。
+`onMounted` 里的调用顺序是固定的：`windowControls.onMaximizedChange(...)` → `initRenderProgress()` → `initRuntime()` → `initEnvGate()` → `initLegacyData()` → `void initApp()`。
 
 1. **订阅窗口状态**：`window.windowControls.onMaximizedChange((v: boolean) => { isMaximized.value = v; })`——主进程在窗口 `maximize`/`unmaximize` 事件中推送布尔值，用于切换最大化按钮图标。
 2. **初始化渲染进度**：`initRenderProgress()` 注册 `window.hfTools.onProgress` 回调（HyperFrames 渲染进度解析，结果写入 `renderProgress.text`，供视频页展示）。预加载层为单订阅语义，重复注册只替换回调。
-3. **初始化运行环境状态**：`initRuntime()`（`composables/useRuntime.ts`）注册 `window.runtimeTools.onProgress` 并查一次 `runtimeTools.status`，结果写入模块级单例；横幅由上面的 `runtimeVisible` 驱动。它排在这里而不是 `initApp()` 里，是因为它与「项目数据」无关，且解包进度要尽早开始接收。
-4. **询问旧数据**：`initLegacyData()`（`composables/useLegacyData.ts`）调一次 `window.legacyTools.status()`，**有结果才**把单例的 `visible` 置真、由 `<LegacyDataDialog />` 弹应用内弹窗；函数自带幂等标志（`bound`），主进程未就绪时静默失败。它**不属于 `initApp()`**，且刻意排在 `initRuntime()` 之后：此时首屏已经渲染完，弹窗不会糊在空界面上，**主进程侧因此不需要任何「等首屏画完」的延迟**（早先用原生对话框时靠 `setTimeout(…, 1500)` 顶着，现已删除）。
+3. **初始化运行环境状态与确认框**：`initRuntime()`（`composables/useRuntime.ts`）注册 `window.runtimeTools.onProgress` 并查一次 `runtimeTools.status`，结果写入模块级单例；紧接着 `initEnvGate()`（`composables/useEnvGate.ts`）**不再注册第二个进度回调**（preload 是单订阅语义，后注册者会顶掉 `useRuntime` 的订阅），改为 `watch(() => useRuntime().runtime.value, applyProgress, { deep: true })` 消费同一份状态，并驱动模板里内联的确认框。两者排在这里而不是 `initApp()` 里，是因为它们与「项目数据」无关，且下载 / 解包进度要尽早开始接收。
+4. **询问旧数据**：`initLegacyData()`（`composables/useLegacyData.ts`）调一次 `window.legacyTools.status()`，**有结果才**把单例的 `visible` 置真、由 `<LegacyDataDialog />` 弹应用内弹窗；函数自带幂等标志（`bound`），主进程未就绪时静默失败。它**不属于 `initApp()`**，且刻意排在 `initEnvGate()` 之后：此时首屏已经渲染完，弹窗不会糊在空界面上，**主进程侧因此不需要任何「等首屏画完」的延迟**（早先用原生对话框时靠 `setTimeout(…, 1500)` 顶着，现已删除）。
 5. **恢复项目上下文**：`localStorage.getItem(STORAGE_KEY_PROJECT_CTX)`（常量定义在 `@renderer/constants`，值即 `'myapp.projectCtx'`），`JSON.parse` 后若存在且含 `name`，则只写回 `appState.currentName = saved.name`（历史值里可能残留的 `builtin` 字段被**忽略**）。整段包在 `try/catch` 中，解析失败（脏数据/非 JSON）静默忽略（`catch (e) { /* ignore */ }`）。
 6. **刷新项目 + 载入渲染默认档位**：`await Promise.all([refreshProject(), loadRenderDefaults()])`——前者拉取「我的项目」(`projectTools.list`) 并加载当前项目详情，后者读 `settingsTools.get()` 的 `render` 段写入 `composables/useRenderOptions.ts` 的 `renderDefaults`（源码注释：项目列表与渲染默认档位并行载入，档位读取失败不影响启动，落回内置默认 `standard` / `30`）。
 7. **不再进入首页**：`initApp()` **刻意不调 `goPage('home')`**。首页本就是初始页（`pages/index.ts` 里 `currentPage` 初值 = `pages.home`，`useAppStore` 里 `activeMenu` 初值 = `'home'`），再走一遍 `goPage` 只会：① 多跑一轮 `refreshProject()`（`project:list` + `project:load` 两次 IPC）；② 递增 `pageNavKey` 把已经挂好的首页整页重挂一次。首页内容由第 6 步的 `refreshProject()` 直接驱动渲染，因此这里删掉该调用后行为不变、启动更快。
 8. 调用处使用 `void initApp();`：显式丢弃 Promise，避免未捕获 rejection 警告，同时让 `onMounted` 保持同步返回。
 
-> **`initLegacyData()` / `initRuntime()` 都不是 `initApp()` 的一部分**：`initApp()` 只负责「项目上下文 + 项目数据 + 渲染档位」，副作用的登记（进度订阅、环境状态、旧数据询问）留在 `onMounted` 里，顺序即优先级。
+> **`initLegacyData()` / `initRuntime()` / `initEnvGate()` 都不是 `initApp()` 的一部分**：`initApp()` 只负责「项目上下文 + 项目数据 + 渲染档位」，副作用的登记（进度订阅、环境状态与确认框、旧数据询问）留在 `onMounted` 里，顺序即优先级。
 
 ### 3.2 菜单跳转与页面渲染
 
@@ -114,11 +117,12 @@
 | 依赖 | `./composables/useToast` | `useToasts()` 取 Toast 队列 |
 | 依赖 | `./composables/useRenderProgress` | `initRenderProgress()` |
 | 依赖 | `./composables/useRenderOptions` | `loadRenderDefaults()`（启动时与 `refreshProject()` 并行载入全局渲染默认档位） |
-| 依赖 | `./composables/useRuntime` | `initRuntime()` 与 `useRuntime()`（运行环境包状态 / 忙 / 失败 / 重试） |
+| 依赖 | `./composables/useRuntime` | `initRuntime()` 与 `useRuntime()`（运行环境状态 / 忙 / 失败 / 缺包 / 可取消 / 缺包文案 / `prepare(packs?)` / `cancel()`） |
+| 依赖 | `./composables/useEnvGate` | `initEnvGate()` 与 `useEnvGate()`（「需要下载运行环境」确认框单例；模板内联渲染） |
 | 依赖 | `./composables/useLegacyData` | `initLegacyData()`（外壳挂载时问一次「有没有旧数据」） |
 | 依赖 | `./components/LegacyDataDialog.vue` | 旧数据处置弹窗（应用内 `.hf-modal` 体系；自身消费 `useLegacyData()`） |
 | 依赖（preload 桥） | `window.windowControls` | `minimize` / `toggleMaximize` / `close` / `onMaximizedChange`；类型见 `src/preload/index.d.ts` |
-| 依赖（preload 桥，间接） | `window.hfTools.onProgress`、`window.runtimeTools`、`window.legacyTools` | 分别经 `initRenderProgress()`、`useRuntime()`、`useLegacyData()` 使用，本组件不直接调用 |
+| 依赖（preload 桥，间接） | `window.hfTools.onProgress`、`window.runtimeTools`、`window.legacyTools` | 分别经 `initRenderProgress()`、`useRuntime()` / `useEnvGate()`、`useLegacyData()` 使用，本组件不直接调用 |
 | 被使用 | `src/renderer/src/main.ts` | `createApp(App).mount('#app')` |
 | 被使用 | 全部页面组件 | 通过 `pages` 注册表被 `<component :is>` 渲染；各页面顶部放置 `<StepBar :page="..."/>` |
 

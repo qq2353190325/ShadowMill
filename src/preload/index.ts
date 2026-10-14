@@ -12,6 +12,7 @@ import type {
   HtmlProgressPayload,
   PreloadApi,
   RenderOverride,
+  RuntimePackName,
   RuntimeProgressPayload,
   UpdateProgressPayload,
   WhisperProgressPayload
@@ -64,7 +65,9 @@ const settingsTools: PreloadApi['settingsTools'] = {
   saveRender: (render) => ipcRenderer.invoke(IPC.Settings.SaveRender, { render }),
   // 更新源与自动检查开关：只更新 settings.json 的 updater 段
   saveUpdater: (updater) => ipcRenderer.invoke(IPC.Settings.SaveUpdater, { updater }),
-  test: (customModel) => ipcRenderer.invoke(IPC.Settings.Test, { customModel })
+  test: (customModel) => ipcRenderer.invoke(IPC.Settings.Test, { customModel }),
+  // 运行环境「从本地文件安装」（离线 / 内网兜底）：选一个 <pack>.7z 导入
+  pickRuntimePack: () => ipcRenderer.invoke(IPC.Settings.PickRuntimePack)
 };
 contextBridge.exposeInMainWorld('settingsTools', settingsTools);
 
@@ -188,11 +191,12 @@ const updateTools: PreloadApi['updateTools'] = {
 };
 contextBridge.exposeInMainWorld('updateTools', updateTools);
 
-// 运行环境包（ffmpeg / hyperframes / whisper 约 632MB）：安装包里只带一个 7z，
-// 首次启动解到 userData/runtime/<id>/；这里只暴露「查状态 / 主动准备 / 订阅进度」三件事
+// 运行环境（分包）：ffmpeg / hyperframes 各自一个 7z，首次用到时下载并解到 userData；
+// whisper 随安装包。这里暴露「查状态 / 主动准备 / 取消 / 订阅进度」四件事
 const runtimeTools: PreloadApi['runtimeTools'] = {
   status: () => ipcRenderer.invoke(IPC.Runtime.Status),
-  prepare: () => ipcRenderer.invoke(IPC.Runtime.Prepare),
+  prepare: (packs?: RuntimePackName[]) => ipcRenderer.invoke(IPC.Runtime.Prepare, packs),
+  cancel: () => ipcRenderer.invoke(IPC.Runtime.Cancel),
   // 单订阅：重复注册仅替换回调，避免页面切换叠加监听
   onProgress: (callback) => {
     _runtimeProgressCb = callback;

@@ -2,10 +2,10 @@
 
 > HTML 生成 / 修改 + 素材选配（字幕 / 视频）+ 背景音频选定（音轨由主进程注入 HTML）+ 实时预览 + AI 思考过程展示 + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染）**。
 
-- **覆盖文件**：`HtmlGenPage/index.vue`（本目录唯一文件，714 行）
+- **覆盖文件**：`HtmlGenPage/index.vue`（本目录唯一文件，741 行）
 - **所在目录**：`src/renderer/src/pages/HtmlGenPage/`
 - **类型**：页面组件（SFC，`<script setup lang="ts">`）
-- **规模**：714 行
+- **规模**：741 行
 - **对外导出**：默认导出组件（无 props；模板内渲染子组件 `StepBar`）
 
 ## 1. 作用与职责
@@ -367,3 +367,13 @@ iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报
 - **档位读取时机**：下拉初值取 `FALLBACK_RENDER`，真正生效值在 `onMounted` 的 `syncFromEffective()` 里写入（下拉虽然藏在弹窗里，也在挂载时就同步好，因此打开弹窗看到的即是最新生效档位）；只有挂载前就发起渲染（不可能，按钮 `:disabled`）才会用到内置默认。
 - **状态区文本与样式成对切换**：`statusDisplay` 与 `statusDisplayClass` 必须一起用；若只换文本不换样式，渲染中的 trace 文案会继承上一次的 `hf-ok` / `hf-error` 颜色。
 - **渲染中切页的语义**：`resetRenderProgress()` 只在页面挂载与渲染结束时调用；渲染进行中切走再回来，本页会先清空 trace，随后的新 trace 会重新写入（源码注释已说明此取舍）。
+
+## 7. 运行环境缺包守卫（`useEnvGate`）
+
+`转成视频` 与 `提取视频原声` 都要用到**不随安装包**的运行环境：`video:render` 需要 `ffmpeg` + `hyperframes`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14），`project:extract-video-audio` 需要 `ffmpeg`（42.6 MB）（分包方案见 `docs/runtime-pack-split.md`、主进程实现见 [main/video.ts.md](../../../main/video.ts.md) / [main/projects.ts.md](../../../main/projects.ts.md)）。
+
+- 两个入口函数都带守卫参数：`onRenderVideo(skipEnvGuard)` / `onExtractAudio(skipEnvGuard)`；
+- 动手前先 `const g = await envGate.guard(['ffmpeg','hyperframes'], '转成视频', () => { void onRenderVideo(true) })`（提取原声是 `guard(['ffmpeg'], '提取视频原声', …)`）；`!g.ok`（缺包已弹框或用户取消）就 `return`，**不发后续 IPC、不产生任何下载**；
+- 主进程返回 `res.needPacks`（并发 / 探测窗口造成的二次缺包）时再 `envGate.guard(res.needPacks, '转成视频', …)` 一次；
+- 用户在确认框里点「继续」时，`onContinue` 以 `skipEnvGuard = true` 重发同一次操作（**不自动续做**，见 [common.md](../common.md) §4.2）；
+- 确认框本身由 `App.vue` 内联渲染（`useEnvGate` 是模块级单例），本页只调 `guard()`；**取消下载 = 取消这次转视频 / 提取**，界面上横幅与设置页仍保留「需要下载」状态与重试入口。

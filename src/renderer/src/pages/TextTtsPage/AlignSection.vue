@@ -26,9 +26,9 @@
       <input v-model="gap" class="hgen-input" type="number" min="0" max="10" step="0.1" style="width:90px;flex:none" title="最小停顿：每句停顿优先按字幕原有时间间隔推算；仅当字幕间隔放不下本句音频、或字幕无时间线（估时）时，才用此值兜底" />
     </div>
     <div class="hgen-actions">
-      <button class="hf-btn hf-btn-primary" :disabled="alignBusy" @click="startAlign">开始对齐合成</button>
+      <button class="hf-btn hf-btn-primary" :disabled="alignBusy" @click="startAlign()">开始对齐合成</button>
       <button class="hf-btn" v-show="alignBusy" @click="onCancel">取消</button>
-      <button class="hf-btn" v-show="!alignBusy && !alignResult" @click="startAlign">重试</button>
+      <button class="hf-btn" v-show="!alignBusy && !alignResult" @click="startAlign()">重试</button>
     </div>
     <div class="whisper-bar-wrap" v-show="barVisible">
       <div class="whisper-bar" :class="{ indeterminate: barIndeterminate }"><div class="whisper-bar-fill" :class="barState" :style="{ width: barPercent + '%' }"></div></div>
@@ -68,9 +68,13 @@ import { toast } from '@renderer/composables/useToast'
 import { goPage } from '@renderer/pages'
 import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import { escTxt } from '@renderer/utils/escape'
+import { useEnvGate } from '@renderer/composables/useEnvGate'
 import { fmtTime, fmtTimeMs } from '@renderer/utils/time'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import { activeProviderLabel, activeTtsTab, firstVoiceId, loadVoices, refreshVoiceKeyState, requireCfg, voiceGroups, voiceKeyReady, voiceModelOf } from './helpers'
+
+// 运行环境缺包时的确认框（ffmpeg 不随安装包；见 docs/runtime-pack-split.md）
+const envGate = useEnvGate();
 
 interface AlignDetail {
   index: number
@@ -191,13 +195,18 @@ function resetAlignUi(): void {
   alignAudioSrc.value = '';
 }
 
-async function startAlign(): Promise<void> {
+async function startAlign(skipEnvGuard = false): Promise<void> {
   if (alignBusy.value) { toast('对齐合成进行中，请稍候'); return; }
   if (!(await requireCfg(setStatus))) return;
   const sub = await getAlignSubtitleText();
   if (!sub.ok) { setStatus(sub.message || '字幕为空', 'hf-error'); return; }
   const v = voiceId.value;
   if (!v) { setStatus('请先选择（或创建）音色', 'hf-error'); return; }
+  // 逐句对齐要 ffmpeg 包（不随安装包）：缺则先问用户；点「继续」回到这里时不再弹框
+  if (!skipEnvGuard) {
+    const g = await envGate.guard(['ffmpeg'], '逐句对齐配音', () => { void startAlign(true); });
+    if (!g.ok) return;
+  }
   const mode = alignMode.value;
   const gapSec = Number(gap.value);
   const voiceModel = voiceModelOf(v);
@@ -224,10 +233,16 @@ async function startAlign(): Promise<void> {
       setStatus((res.message) || '已取消', '');
       toast((res.message) || '已取消');
     } else {
-      const msg = (res && res.message) || '对齐合成失败';
+      const fail = res as { message?: string; needPacks?: ('ffmpeg' | 'hyperframes')[] } | null;
+      const msg = (fail && fail.message) || '对齐合成失败';
       showAlignBar({ text: msg, kind: 'error' }, false);
       setStatus(msg, 'hf-error');
-      toast(msg);
+      if (fail && fail.needPacks && fail.needPacks.length) {
+        // 缺 ffmpeg：弹确认框，用户点「继续」时重发这次对齐
+        void envGate.guard(fail.needPacks, '逐句对齐配音', () => { void startAlign(true); });
+      } else {
+        toast(msg);
+      }
     }
   } catch (e) {
     const msg = String((e as Error) && (e as Error).message || e);

@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
-- **规模**：225 行
+- **规模**：229 行
 - **对外导出**：本文件不产生模块导出；其作用是把 11 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、`updateTools`、`runtimeTools`、`legacyTools`
 - **类型契约**：11 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `settingsTools` | `saveRender` | `settings:save-render` | 传 `{ render }` 保存视频渲染默认档位（`RenderOverride`） |
 | `settingsTools` | `saveUpdater` | `settings:save-updater` | 传 `{ updater }` 保存更新设置（`Partial<UpdaterSettings>`：`feedUrl` / `autoCheck` / `skippedVersion`） |
 | `settingsTools` | `test` | `settings:test` | 传 `{ customModel }` 测试连通性 |
+| `settingsTools` | `pickRuntimePack` | `settings:pick-runtime-pack` | 运行环境「从本地文件安装…」：弹文件框选 `ffmpeg.7z` / `hyperframes.7z`（取消时 `{ ok:false, canceled:true }`；导入成功后调用方接着 `runtimeTools.prepare()`） |
 | `voiceTools` | `getConfig` | `voice:get-config` | 取语音配置（`{ active, providers, saveDir }`，**按厂家**） |
 | `voiceTools` | `getSaveDir` | `voice:get-save-dir` | 传 `{ saveDir?, defaultOut?, projectName? }` 解析保存目录 |
 | `voiceTools` | `saveConfig` | `voice:save-config` | **直接透传载荷** `VoiceSaveConfigPayload`（`{ provider?, config }`）到主进程——不再包 `{ voiceTTS }` |
@@ -126,9 +127,10 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `updateTools` | `status` | `update:status` | 取一次主进程当前更新状态（`invoke`）：返回 `UpdateProgressPayload`（`stage` 经 `toStage()` 白名单收敛）。主进程状态常驻、跨设置页挂载持续存在；设置页挂载时用它补齐「启动静默检查」那次失败——该事件发生在页面订阅 `update:progress` 之前 |
 | `updateTools` | `openLog` | `update:open-log` | 在文件管理器里定位 `userData/updater.log`（没有日志则打开 `userData` 目录），返回 `IpcResult<{ path }>`；**更新失败时的排障出口，不依赖 electron-updater 是否加载成功**（设置页只在更新出错时显示该入口） |
 | `updateTools` | `onProgress` | `update:progress` | 更新阶段 / 下载进度订阅（单订阅） |
-| `runtimeTools` | `status` | `runtime:status` | renderer → main，`invoke`；查询运行环境包状态 |
-| `runtimeTools` | `prepare` | `runtime:prepare` | renderer → main，`invoke`；主动准备运行环境包 |
-| `runtimeTools` | `onProgress` | `runtime:progress` | 运行环境包进度订阅（单订阅） |
+| `runtimeTools` | `status` | `runtime:status` | renderer → main，`invoke`；查询运行环境（分包 ffmpeg / hyperframes）状态 |
+| `runtimeTools` | `prepare` | `runtime:prepare` | renderer → main，`invoke`；主动准备指定包（载荷 `packs?: RuntimePackName[]`，省略 = 全部） |
+| `runtimeTools` | `cancel` | `runtime:cancel` | renderer → main，`invoke`；取消进行中的下载 / 解包（成功后 `message` 为「已取消下载」） |
+| `runtimeTools` | `onProgress` | `runtime:progress` | 运行环境进度订阅（单订阅，`_runtimeProgressCb` / `_runtimeProgressBound`） |
 | `legacyTools` | `status` | `legacy:status` | renderer → main，`invoke`，无载荷；返回 `LegacyDataInfo \| null`（有没有待处理的旧数据目录 / 里面有什么） |
 | `legacyTools` | `resolve` | `legacy:resolve` | renderer → main，`invoke`；**只把 `action` 字符串透传**（`resolve(action)` → `ipcRenderer.invoke(IPC.Legacy.Resolve, action)`），返回 `LegacyResolveResult` |
 
