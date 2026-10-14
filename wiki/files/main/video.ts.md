@@ -100,7 +100,7 @@
 
 | 使用方 | 用法 |
 |--------|------|
-| `src/main/index.ts` | `video.register(ctx)` 完成注册（依赖图注释：`hfEnv ← video`） |
+| `src/main/index.ts` | `video.register(ctx)` 完成注册（依赖图注释：`hfEnv ← projects, voice, whisper, ttsAlign, video, runtime`） |
 | `src/preload/index.ts` | 暴露 `openHtml` / `renderVideo` / `showInFolder` / `onProgress`，分别转发上述频道 |
 | `src/renderer/src/pages/HtmlGenPage/index.vue` | **发起渲染**（「转视频」按钮，带质量 / 帧率档位）、成功后回写产物并刷新项目 |
 | `src/renderer/src/pages/VideoPreviewPage/index.vue` | 纯预览：展示 / 定位成品视频、在文件夹中显示 |

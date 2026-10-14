@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（项目化流水线 + project:* IPC）
-- **规模**：817 行
+- **规模**：913 行
 - **对外导出**：
   - 函数/常量：`register`、`scanProjects`、`projectsRoot`（**函数**，见 §3）、`projectDir`、`projectFilePath`、`readProject`、`writeProject`、`ensureProject`、`parseSubtitle`、`normalizeContent`、`copyAudioIntoProject`、`copyVideoIntoProject`
   - 类型（**再导出**，定义在 `src/shared/types.ts`）：`Scene`、`ContentScript`、`Project`、`SubtitleLine` —— 本文件用 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'` 转发，因此 `projects.Project` / `from './projects'` 的既有引用面不变
@@ -22,7 +22,7 @@
 
 ## 2. 数据结构
 
-> 本节四个结构（`Scene` / `ContentScript` / `Project` / `SubtitleLine`）**已上移到 `src/shared/types.ts` ⑥ 节**（跨进程单一真源），本文件第 40 行再导出以保持既有引用面；各 IPC handler 的 `payload` 参数同样改用共享层的 `Project*Payload` 类型。字段语义如下（与源码逐字一致）。
+> 本节四个结构（`Scene` / `ContentScript` / `Project` / `SubtitleLine`）**已上移到 `src/shared/types.ts` ⑥ 节**（跨进程单一真源），本文件靠顶部的 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'` 再导出以保持既有引用面；各 IPC handler 的 `payload` 参数同样改用共享层的 `Project*Payload` 类型。字段语义如下（与源码逐字一致）。
 
 ### 2.1 `Scene`（内容脚本中的单个场景）
 
@@ -81,9 +81,9 @@
 >
 > | 位置 | 写法 |
 > | --- | --- |
-> | `projectDir(name)`（第 53 行） | `path.join(projectsRoot(), 净化后的项目名)` |
-> | `scanProjects()`（第 118 行） | 先 `const root = projectsRoot()`，后续只用 `root`（`existsSync` / `readdirSync`） |
-> | `IPC.Project.Delete`（第 604 行） | `dir.startsWith(projectsRoot())` 前缀校验 |
+> | `projectDir(name)`（函数体里的 `path.join(projectsRoot(), …)`；当前约在第 52 行，**行号随代码变动，仅供大致定位**） | `path.join(projectsRoot(), 净化后的项目名)` |
+> | `scanProjects()`（函数开头那行 `const root = projectsRoot()`；当前约在第 117 行） | 先 `const root = projectsRoot()`，后续只用 `root`（`existsSync` / `readdirSync`） |
+> | `IPC.Project.Delete`（`ipcMain.handle(IPC.Project.Delete, …)` 里的 `dir.startsWith(projectsRoot())`；当前约在第 698 行） | `dir.startsWith(projectsRoot())` 前缀校验 |
 
 | 名称 | 导出 | 说明 |
 | --- | --- | --- |
@@ -123,15 +123,17 @@
 ### 3.2 `HG_PREVIEW_CTRL`（预览播放控制脚本）细节
 
 - 以 `window.__hgPreviewCtrl` 标记防重复注入。
-- `timelines()` **三态枚举**（对应「新版对象形态 / 旧生成物数组形态 / 兜底」）：
-  1. `Object.prototype.toString.call(t) === "[object Array]"`（`t = window.__timelines`）→ `t.slice()`（旧版生成物的数组形态）；
-  2. `t` 是对象 → `for (var k in t)` 遍历取值，只收真值（HyperFrames 契约：以 composition id 为键的对象）；
-  3. 两者都没收到 → 回退 `[window.gsap.globalTimeline]`（兜底）；最终仍为空则返回 `[]`。
-- `setPaused(p)`：暂停/恢复 GSAP 时间轴 + 页面 `audio, video` 元素 + `document.getAnimations()`。
-- `clock()`：读 `audio/video` 的 `duration`/`currentTime`，与 `gsap.globalTimeline` 的 `duration()/time()` 取较大值。
-- 监听父窗口 `postMessage`：`d.__hg` 为真时，`type` 为 `pause` / `play` / `restart`（`restart` 执行 `location.reload()`）。
-- 每 300ms 向 `parent` 发送 `{ __hg: true, type: 'progress', time, dur }`。
-- 副本被单独打开时脚本无可见副作用。
+- `rawTimelines()`：**只取真实的 `window.__timelines`**，两种形态都收——`Object.prototype.toString.call(t) === "[object Array]"`（旧版生成物的数组形态）→ `t.slice()`；`t` 是对象 → `for (var k in t)` 遍历取值、只收真值（HyperFrames 契约：以 composition id 为键的对象）；取不到返回 `[]`。
+- `timelines()`：`rawTimelines()` 非空就返回它；否则兜底 `[window.gsap.globalTimeline]`（没有 `gsap` 时返回 `[]`）。**判定「有没有真实时间轴」一律用 `rawTimelines()`**（`watchEnd()` 同样只看它）。
+- `setPaused(p)`：暂停/恢复 GSAP 时间轴 + 页面 `audio, video` 元素 + `document.getAnimations()`。恢复侧**只对确实处于暂停的对象动手**：timeline 先判 `t.paused && t.paused()` 才 `resume()`、媒体先判 `ms[i].paused` 才 `play()`、WAAPI 先判 `a.playState === "paused"` 才 `play()`（源码注释：对正在跑或已播完的对象反复 resume/play，会把动画重头播一遍）。
+- `isPlaying()`：**「播完不算在播」**——timeline 先 `if (t.paused && t.paused()) return;`，再 `if (t.progress && t.progress() >= 1 && (!t.repeat || t.repeat() >= 0)) return;`（源码注释：GSAP 时间轴跑完后 `paused()` 仍是 `false`，只看 `paused` 会让按钮永远停在「暂停」）；媒体检查不变（任一 `!paused` 即算在播）。结果回给父页用于校准「暂停/播放」按钮。
+- `clock()`：**优先遍历 `rawTimelines()` 取 `t.duration()` / `t.time()` 的最大值**（进度条要反映「这条动画多长」，而不是页面里恰好嵌着的素材多长）；只有 `dur <= 0`（没有真实时间轴，如老生成物 / 纯 CSS 动画页）时才退回「`document.querySelector("audio, video")` 的 `duration`/`currentTime`」与「`gsap.globalTimeline` 的 `duration()/time()`」取大者。源码注释给出实例：3:45 的视频素材塞进 10 秒合成时，旧实现把总时长显示成 `03:45`、进度跟着素材跑，而素材是 `loop` 的 ⇒「自然播完」判定 `time >= dur - 0.25` 永远等不到。
+- `setTime(raw)`（父页发 `type: 'seek'` 时调用，载荷 `{ __hg: true, type: 'seek', seconds }`）：`Number(raw)` 非有限数或为负则直接 `return`；否则 `timelines().forEach((t) => t.time(s))`（GSAP 播放头定位，**播放中也安全**——从新位置继续跑）+ 逐个 `document.querySelectorAll("audio, video")`「时长有效且 `s <= duration` 时写 `currentTime = s`」（越界的素材跳过）+ `document.getAnimations()` 逐个 `a.currentTime = s * 1000`。**只挪播放头，不改播放/暂停状态**。
+- **载入后保持静止（已无 `kick` / `userPaused`）**：`userActed`（用户发来任何 `pause` / `play` / `seek` / `restart` 消息即置真）、`report(ack)`（把原 `setInterval` 里的上报抽成函数，载荷 `{ __hg: true, type: 'progress', time, dur, playing: isPlaying(), ack: !!ack }`）、`freeze()`（`if (userActed) return; setPaused(true); report(false);`）与 `freezeLoop`（`document.readyState === "complete"` 时 `setTimeout(freezeLoop, 0)`，否则挂 `load` 事件再 `setTimeout`；每 250ms 补一次、最多 5 次，`userActed` 后立即停手）。源码注释：合成是 `gsap.timeline({ paused: true })` 创建、开头又普遍 `gsap.set(..., { opacity: 0 })`，所以**「什么都不做」就是停在第 0 帧——首帧本来就是空的，不是加载失败**；播放交给用户（「播放」按钮 / 拖动进度条）；顺带把页面里带 `autoplay` 的 `<audio>/<video>` 一起冻住，并立刻上报一次，让父页按钮文案与总时长第一帧就对。
+- **播完就整体停住 `watchEnd()`**（300ms 的 `setInterval` 里先 `watchEnd()` 再 `report(false)`）：真实时间轴全部满足 `time() >= duration() - 0.05` 时 `setPaused(true)` + `report(false)`，用 `ended` 标志防重复；`repeat() < 0`（无限循环）的合成永远不算播完；没有真实时间轴（媒体页 / 老生成物）不干预。注释理由：合成的媒体元素普遍带 `loop`，时间轴跑完后媒体还在后台一直转（画面看着「结束了」、元素还耗 CPU、按钮一直显示「暂停」）。
+- 监听父窗口 `postMessage`：`d.__hg` 为真时**先置 `userActed = true`**（用户接管 ⇒ `freezeLoop` 立即停手），`type` 为 `pause`（`setPaused(true)`）/ `play`（`setPaused(false)`）/ `seek`（`{ setTime(d.seconds); report(true); }`——**带 ack**，父页据此把进度条钉在目标位置）/ `restart`（`location.reload()`）。
+- 每 300ms 向 `parent` 发送进度（`watchEnd(); report(false)`），载荷见上（含 `playing` 与 `ack` 两个给父页校准用的字段）。
+- 副本被单独打开时没有额外 UI，也**不再自动播放**：脚本只会把画面冻在第 0 帧（首帧本就是空的）。
 
 ### 3.3 `resolveMaterials` 选择项语义
 
@@ -384,10 +386,11 @@
 11. **合规检查只提示不阻断**：`compatible` 为 `false` 时仍返回 `ok: true` 并允许预览，仅在 `message` 中提示转视频前需调整（缺 `data-composition-id` / `__timelines` / `gsap`）。
 12. **预览副本专供应用内预览**：CSP 剥离与脚本注入只作用于 `index.preview.html`，原件始终保持模型产出的原貌；注入音轨则相反——它写进**原件** `index.html`（预览副本从原件派生，因此自动带上）。
 13. **ffmpeg 依赖内置资源、且先等运行环境包就绪**：`project:extract-video-audio` 先 `await runtime.ensureRuntime()`（未就绪返回其 `message` / `detail`），再判 `hfEnv.BUILTIN_RESOURCES.ffmpeg` 是否存在（缺失返回「未找到内置 ffmpeg（resources/ffmpeg/bin）」）；提取失败会删除半成品 `.m4a`。
-14. **结构类型只在 `shared/types.ts` 定义一处**：本文件已删掉本地的 `Scene` / `ContentScript` / `Project` / `SubtitleLine` interface，改为第 40 行的 `export type { … } from '../shared/types'`；因此 `from './projects'` 取到这些类型的既有代码（如 `ttsAlign.ts` 的 `type SubtitleLine`、`projects.Project` 形式的引用）字段完全同源。修改字段请改共享层，不要在本文件重建 interface（否则又会出现两份会漂移的定义）。
+14. **结构类型只在 `shared/types.ts` 定义一处**：本文件已删掉本地的 `Scene` / `ContentScript` / `Project` / `SubtitleLine` interface，改为顶部的 `export type { … } from '../shared/types'` 再导出；因此 `from './projects'` 取到这些类型的既有代码（如 `ttsAlign.ts` 的 `type SubtitleLine`、`projects.Project` 形式的引用）字段完全同源。修改字段请改共享层，不要在本文件重建 interface（否则又会出现两份会漂移的定义）。
 15. **handler 载荷全部有契约类型**：原先多处写作 `Record<string, unknown>` 或省略类型，现统一为 `Project*Payload`。注意 `ProjectNamePayload.name` 是**必填** `string`（用于 `clear-audio` / `clear-video`），而 `ProjectSaveSubtitlePayload` / `ProjectSetAudioPayload` / `ProjectSetVideoPayload` 等字段全部可选，运行时依旧保留 `payload && payload.name` 式的判空写法。
 16. **GSAP 本地化的兜底语义**：改写只在「随包 `vendor/gsap/gsap.min.js` 存在」时发生，否则 `localizeGsapHtml` 原样返回（继续走 CDN，在线可用），因此这是**能力增强而非硬依赖**。`copyGsapIntoProject` 的返回值在本文件**只剩 `project:preview-html` 一处被忽略**：generate / modify / save-html 三处现在都用它做兜底——复制失败即 `externalizeGsapHtml` 退回 CDN，保证落盘的 HTML 不会引用一个不存在的 `gsap.min.js`。`video.ts` 的渲染副本仍忽略返回值。
 17. **导出时换回 CDN、项目内保持本地引用**：`project:download-html` 是「读出 → `hfEnv.externalizeGsapHtml` → 文本写出」，导出物里的 GSAP 引用是指定版本的 CDN 地址（`https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js`），因此导出的单个 HTML 放到别处联网即可独立打开；项目目录内的 `index.html` 仍是 `./gsap.min.js` 本地引用（离线预览/渲染不受影响）。注意：导出物从此依赖网络（不再自带 GSAP），而导出的 `gsap.min.js` 副本本身不会被带上——原先「导出后缺 gsap.min.js 导致动画不跑」的问题已由这次改动修掉。
 18. **预览只在副本上改写**：`project:preview-html` 的 CSP 剥离与 GSAP 改写都作用于 `index.preview.html`，原件 `index.html` 保持原貌；但 `gsap.min.js` 是落在**项目目录**（原件与副本共用），所以原件的相对引用也成立。该处**不参与作者态的复制失败兜底**（返回值被忽略）：若出现「`gsap.min.js` 复制失败、但 HTML 本身写得进去」的偏门情形，作者态三处会把原件退回 CDN，而预览副本在 `localizeGsapHtml` 之后又会引 `./gsap.min.js`（复制同样失败），此时预览可能取不到该文件。
 19. **`./hfEnv` 已改为命名空间导入**：`import * as hfEnv from './hfEnv'`，全文以 `hfEnv.` 前缀引用（如 `hfEnv.BUILTIN_RESOURCES.ffmpeg`、`hfEnv.isHyperframesComposition(...)`、`hfEnv.localizeGsapHtml(...)`），原解构导入已取消。
 20. **音轨注入的三条不变量**：① 标签 id 固定为 `myv-bgm`，注入前先 `stripInjectedBgm`，重复设置不会叠出多条音轨；② 引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入）由 `stripAudioOfFile` 摘掉，避免双份播放；③ 没有 `index.html` 时 `applyBgmToHtml` 静默返回 `false`——因此「先生成音频、后生成 HTML」的顺序不会报错，音频会在下次生成 / 修改时随 HTML 一起补上。三个音频频道改写 HTML 后渲染层需重载预览才能听到（`HtmlGenPage` 已按 `htmlUpdated` 语义统一重载）。
+21. **预览默认静止、播放由用户驱动（本轮行为反转）**：合成的 timeline 是 `paused: true` 创建、开头又 `gsap.set(..., { opacity: 0 })`，所以载入后画面停在第 0 帧、**起始帧本来就是空的**——这不是加载失败，也不是白屏故障。`HG_PREVIEW_CTRL` 不再自动起播，只做三件事：`freeze()` 把画面（含带 `autoplay` 的 `<audio>/<video>`）冻住并立刻上报一次状态；一旦用户发来任何 `pause`/`play`/`seek`/`restart` 就置 `userActed` 停手、不再干预；`watchEnd()` 在真实时间轴全部跑完时统一 `setPaused(true)`（避免带 `loop` 的媒体在后台空转、按钮卡在「暂停」）。配套地 `isPlaying()` 把「已播完」排除在「在播」之外；`setTime()` 只挪播放头、不改播放/暂停状态，并在 seek 后回一条带 `ack` 的上报供父页定位。

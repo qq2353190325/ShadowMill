@@ -265,7 +265,7 @@
 | `.hf-sel-group-label` / `.hf-sel-empty` | 同上 | 都是 11px / 12px 的次要文字色（这两处本来就显式写了字号，不受下条影响） |
 | `.hf-sel-opt` | 同上 | `min-height: 32px`、独立成行、`:hover` 主色半透明底、`.on` 渐变高亮 + 主色字 + `font-weight: 600`、`.dis` 降透明度且不可点 |
 
-- **`.hf-sel-menu` 的字号必须显式声明，不能指望继承**（记一条坑）：弹层是 `<Teleport to="body">`，DOM 直接挂到 `body` 下，**继承不到** `.hf-sel` 上的 `font-size: 13px`；而 `assets/main.css` 的 `body` 也没设 `font-size`，于是弹层按浏览器默认的 **16px** 渲染——比触发器（13px）和 `.hgen-input`（13px）都大一圈。这是**既有 bug**（不是某轮新引入的），现象就是用户反馈「下拉的字太大」，且**影响全部 20 个调用点**（语音识别模型、音色模型、渲染档位、`StepBar` 项目切换器等）。修法只能在 `.hf-sel-menu` 上补 `font-size: 13px`。
+- **`.hf-sel-menu` 的字号必须显式声明，不能指望继承**（记一条坑）：弹层是 `<Teleport to="body">`，DOM 直接挂到 `body` 下，**继承不到** `.hf-sel` 上的 `font-size: 13px`。`assets/main.css` 的 `html, body` 现在给了全局基准 **14px**（见 [assets.md](./assets.md) §3「全局骨架」），因此漏写时弹层会按 14px 渲染（不再是浏览器默认的 16px），但仍比触发器（13px）和 `.hgen-input`（13px）大一档；按规范「Teleport 到 `body` 的弹层要在弹层根节点显式写字号」，这句 `font-size: 13px` 不能省（源码注释已按现行基准描述：继承不到 `.hf-sel` 上的 13px，只会拿到 `html, body` 的全局基准 14px）。
 - **一般规律**：**Teleport 出去的 DOM 不只是丢 scoped 属性，也丢祖先的继承样式**——字号、颜色、行高、字体族这类靠继承生效的属性，都必须在弹层自己的选择器上重新声明。任何「把排版属性写在 `.hf-sel` 上让弹层跟着继承」的想法都不成立。
 - `HfSelect` 是渲染层**唯一**使用 `Teleport` 的组件（全仓 `*.vue` 核对），因此暂无其它同类漏网点；将来新增第二个 Teleport 弹层时要照这条检查一遍。
 
@@ -383,7 +383,7 @@
 - **下拉值即项目名**：`selValue.get` 返回裸 `appState.currentName`，`projectGroups` 的选项 `:value="mp.name"` 也是裸项目名，`onSelect(name)` 收到的就是新选中值 —— 三处一致，不需要任何前缀或字符串偏移；空字符串只可能来自未来的占位选项，`onSelect` 保留了 `if (!name) return` 防御。
 - **HfSelect 的 `@change` 参数是字符串**：签名 `(value: string) => void`，不是 DOM Event；且**只在用户选中不同选项时**触发，程序化改值不触发。`pick()` 在 `o.value === modelValue` 时提前返回、连 `update:modelValue` 都不发。
 - **菜单必须 `Teleport` + `fixed`**：`.card` 与 `.hf-modal` 都有 `overflow: hidden`，菜单留在组件内会被裁掉；`z-index: 9500` 是为了盖住 `.hf-modal-mask`（9000）。改动这两点会同时破坏所有 20 个调用点在卡片/弹窗内的表现。
-- **弹层字号必须自己声明，不能指望继承**：`.hf-sel-menu` 上的 `font-size: 13px` 不能删。弹层是 `<Teleport to="body">`，DOM 直接挂到 `body` 下，**继承不到** `.hf-sel` 上的 `font-size: 13px`；而 `main.css` 的 `body` 也没有设 `font-size`，于是弹层按浏览器默认的 **16px** 渲染——比触发器（13px）和 `.hgen-input`（13px）都大一圈。这是**既有 bug**（不是某轮新引入的），表现为用户反馈「下拉的字太大」。**Teleport 出去的 DOM 不只是丢 scoped 属性，也丢祖先的继承样式**：字号、颜色、行高这类依赖继承的排版属性都必须在 `.hf-sel-menu` 或其子选择器上显式给出。改这一处字号即对**全部 20 个调用点**生效（语音识别模型、音色模型、渲染档位、`StepBar` 项目切换器等）。`HfSelect` 是渲染层**唯一**使用 `Teleport` 的组件（全仓 `*.vue` 核对），暂无其它同类漏网点。
+- **弹层字号必须自己声明，不能指望继承**：`.hf-sel-menu` 上的 `font-size: 13px` 不能删。弹层是 `<Teleport to="body">`，DOM 直接挂到 `body` 下，**继承不到** `.hf-sel` 上的 `font-size: 13px`；`main.css` 的 `html, body` 现设全局基准 **14px**，漏写时弹层即按 14px 渲染——仍比触发器（13px）和 `.hgen-input`（13px）大一档（源码注释同记此历史：基准落地前更差，是 Chromium 默认的 16px）。**Teleport 出去的 DOM 不只是丢 scoped 属性，也丢祖先的继承样式**：字号、颜色、行高这类依赖继承的排版属性都必须在 `.hf-sel-menu` 或其子选择器上显式给出。改这一处字号即对**全部 20 个调用点**生效（语音识别模型、音色模型、渲染档位、`StepBar` 项目切换器等）。`HfSelect` 是渲染层**唯一**使用 `Teleport` 的组件（全仓 `*.vue` 核对），暂无其它同类漏网点。
 - **全局监听成对注册**：`document` 的 `mousedown`（capture）与 `window` 的 `scroll`（capture）/ `resize` 在打开时挂、关闭时摘，`onBeforeUnmount` 再兜底摘一次；菜单上的 `@mousedown.prevent` 是为了让 listbox 保住焦点，键盘导航才不会中断。
 - **`activeIndex` 是扁平下标**：`watch(open)` 按「当前值 → 第一个可用项」播种，`move` 循环绕行跳过 `disabled`；分组只影响渲染，不影响键盘顺序。另注意分组 `:key="g.label"` 用的是 label，现有调用方至多一个 `label: ''` 的匿名组，不会撞 key。
 - **切换后重进当前页**：`onSelect` 与 `onCreated` 都以 `goPage(props.page)` 收尾，依赖 `pageNavKey` 的自增来强制页面重挂载，这是「切换 / 新建项目后页面数据不残留」的关键。
@@ -392,8 +392,8 @@
 - **ESC 监听只在弹窗可见时生效**：`onKeydown` 内部判 `props.visible`，所以常驻的全局监听不会吞掉其它页面的 Esc；注册/注销在 `onMounted` / `onBeforeUnmount` 成对完成（HfSelect 的 `Escape` 只作用于它自己的 listbox，不注册全局 keydown）。
 - **异步错误未捕获（与项目现状一致）**：`switchProject` / `goPage` / `projectTools.create` 均未包 `try/catch`（`create` 有 `!res || !res.ok` 判断，但 IPC 异常仍可能 reject）；`finally` 只负责复位 `busy`。
 - **模板作用域可使用 `window`**：三个组件的交互逻辑都写在 `script setup` 的函数体内，函数体内 `window.projectTools` 是模块作用域访问，不需要包装函数。
-- **跨目录导入统一走 `@renderer` 别名**：`@renderer/composables/useAppStore`、`@renderer/composables/useToast`、`@renderer/pages`、`@renderer/components/NewProjectDialog.vue`、`@renderer/components/HfSelect.vue`（遵循根目录 `agents.md` 规则 5）；同目录内部才用相对路径（`StepBar.vue` 导入同目录两个组件时仍写 `@renderer/components/...`）。
-- **依赖分界遵循 `agents.md` 规则 6**：依赖的 `useAppStore` / `useToast` 属于 `composables/`（有状态、含 localStorage 与 Vue 响应式），因此放在 composables 而非 utils；`HfSelect` 自身不引入任何 composable / 工具函数，只用 Vue 与浏览器 API。
+- **跨目录导入统一走 `@renderer` 别名**：`@renderer/composables/useAppStore`、`@renderer/composables/useToast`、`@renderer/pages`、`@renderer/components/NewProjectDialog.vue`、`@renderer/components/HfSelect.vue`（遵循根目录 `agents.md` 规则 7）；同目录内部才用相对路径（`StepBar.vue` 导入同目录两个组件时仍写 `@renderer/components/...`）。
+- **依赖分界遵循 `agents.md` 规则 8**：依赖的 `useAppStore` / `useToast` 属于 `composables/`（有状态、含 localStorage 与 Vue 响应式），因此放在 composables 而非 utils；`HfSelect` 自身不引入任何 composable / 工具函数，只用 Vue 与浏览器 API。
 - **HfSelect 的选项契约只认 `value`**：`current` / `displayText` / `pick` / `activeIndex` 播种全部按 `o.value === modelValue` 判定，选项对象里其它键一律不参与取值与回传。**调用方必须提供 `value`**：写成 `voiceId` 之类的别名会让所有选项 `value === undefined`（触发器恒显示 `placeholder`、无选中高亮，点选回传 `undefined`）。现有调用方都满足该契约——`TextTtsPage` 的 `VoiceOption` 就直接用 `value` 作音色键，所以 `:groups="voiceGroups"` 可以原样透传。
 - **HfSelect 未全局注册**：它只是 `components/` 下的普通共享组件，每个使用方都要显式 import（含 `HfSelectGroup` 类型）；新增下拉时照抄现有调用点的 `computed<HfSelectGroup[]>` 写法即可。
 - **旧数据弹窗刻意不走 props / emits**：`LegacyDataDialog.vue` 无 props、无 emits，`visible` / `busy` / `info` 都是 `useLegacyData.ts` 的模块级 ref——因为「要不要弹」由主进程的扫描结论决定、不来自任何父组件。想改显隐语义（例如加「本次不再提示」）要改 composable，而不是在 `App.vue` 里加 `v-if` 或给组件加 prop。

@@ -1,6 +1,6 @@
 # 03 · 目录架构：`src/preload/`（桥接层）
 
-> 预加载脚本是渲染层通往系统的**唯一门面**：它把 81 个 IPC 频道收敛成 11 个命名空间的方法，并用「单订阅」语义转发 6 路进度推送。渲染层永远不直接接触 `ipcRenderer`。
+> 预加载脚本是渲染层通往系统的**唯一门面**：它把 83 个 IPC 频道收敛成 11 个命名空间的方法，并用「单订阅」语义转发 6 路进度推送。渲染层永远不直接接触 `ipcRenderer`。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 文件 | 行数 | 角色 | 是否进运行时 |
 |---|---|---|---|
-| [index.ts](./files/preload/index.ts.md) | 220 | `contextBridge` 暴露 11 个命名空间 + 6 路进度通道的单订阅转发；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
+| [index.ts](./files/preload/index.ts.md) | 221 | `contextBridge` 暴露 11 个命名空间 + 6 路进度通道的单订阅转发；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
 | [index.d.ts](./files/preload/index.d.ts.md) | 11 | 只做 `interface Window extends PreloadApi {}`，把共享层契约挂到全局 `Window` | 否（仅类型，被 `tsconfig.web.json` include，为渲染层提供智能提示） |
 
 ---
@@ -30,10 +30,10 @@
 | `windowControls` | 4 | `window:*` | 最小化 / 最大化切换 / 关闭 / 最大化状态订阅 |
 | `hfTools` | 4 | `dialog:open-html`、`video:*` | HTML 选择（`openHtml`，**当前无渲染层调用方**）、转视频、在文件夹中显示、渲染进度订阅 |
 | `settingsTools` | 5 | `settings:*` | 读取 / 保存自定义模型 / 保存渲染档位 / 保存更新设置 / 连接测试 |
-| `voiceTools` | 18 | `voice:*` | 音色管理、文字生音频、字幕配音对齐（含 `synthAligned` / `cancelAlign` / `onAlignProgress`） |
+| `voiceTools` | 19 | `voice:*` | 音色管理、文字生音频、字幕配音对齐（含 `synthAligned` / `cancelAlign` / `onAlignProgress`）；**新增 `deleteCloudVoice`（删云端克隆音色）** |
 | `whisperTools` | 12 | `whisper:*` | 模型状态 / 下载 / 删除 / 设为当前 / 自定义模型增删改 / 打开目录 / 选音频 / 项目音频 / 转录 / 进度订阅 |
 | `projectTools` | 25 | `project:*` | 项目化流水线全量能力 + `onHtmlProgress` |
-| `updateTools` | 6 | `update:*` | 检查更新 / 下载 / 取消 / 重启安装 / **打开日志** / 版本号（同步）+ 进度订阅 |
+| `updateTools` | 7 | `update:*` | 检查更新 / 下载 / 取消 / 重启安装 / **状态查询（`status`，取一次主进程常驻的更新状态）** / **打开日志** / 版本号（同步）+ 进度订阅 |
 | `runtimeTools` | 3 | `runtime:*` | 运行环境包：状态查询 / 主动准备 / 进度订阅 |
 | `legacyTools` | 2 | `legacy:*` | 旧版本数据：状态查询 / 回传选择（`migrate` \| `delete` \| `later`）；**无进度订阅**——旧数据是否存在由渲染层主动问一次，主进程不推送、不弹界面 |
 

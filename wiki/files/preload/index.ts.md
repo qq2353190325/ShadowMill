@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
-- **规模**：220 行
+- **规模**：225 行
 - **对外导出**：本文件不产生模块导出；其作用是把 11 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、`updateTools`、`runtimeTools`、`legacyTools`
 - **类型契约**：11 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
@@ -62,9 +62,9 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `settingsTools` | `saveRender` | `settings:save-render` | 传 `{ render }` 保存视频渲染默认档位（`RenderOverride`） |
 | `settingsTools` | `saveUpdater` | `settings:save-updater` | 传 `{ updater }` 保存更新设置（`Partial<UpdaterSettings>`：`feedUrl` / `autoCheck` / `skippedVersion`） |
 | `settingsTools` | `test` | `settings:test` | 传 `{ customModel }` 测试连通性 |
-| `voiceTools` | `getConfig` | `voice:get-config` | 取语音配置（apiKey / targetModel / saveDir） |
+| `voiceTools` | `getConfig` | `voice:get-config` | 取语音配置（`{ active, providers, saveDir }`，**按厂家**） |
 | `voiceTools` | `getSaveDir` | `voice:get-save-dir` | 传 `{ saveDir?, defaultOut?, projectName? }` 解析保存目录 |
-| `voiceTools` | `saveConfig` | `voice:save-config` | 传 `{ voiceTTS }`（`Partial<VoiceTTSConfig>`） |
+| `voiceTools` | `saveConfig` | `voice:save-config` | **直接透传载荷** `VoiceSaveConfigPayload`（`{ provider?, config }`）到主进程——不再包 `{ voiceTTS }` |
 | `voiceTools` | `pickAudio` | `voice:pick-audio` | 选择音频文件 |
 | `voiceTools` | `pickDir` | `voice:pick-dir` | 选择目录 |
 | `voiceTools` | `listGenerated` | `voice:list-generated` | 列出已生成音频 |
@@ -72,10 +72,11 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `voiceTools` | `list` | `voice:list` | 列出云端音色 |
 | `voiceTools` | `listSystemVoices` | `voice:list-system-voices` | 列出 Qwen-TTS 系统音色 |
 | `voiceTools` | `listAll` | `voice:list-all` | 系统 + 自定义音色合并列表 |
-| `voiceTools` | `listModels` | `voice:list-models` | 列出可用语音模型 |
+| `voiceTools` | `listModels` | `voice:list-models` | 列出可用语音模型**与厂家目录**（`{ models, providers }`） |
 | `voiceTools` | `getProfiles` | `voice:get-profiles` | 读取本地音色映射 |
 | `voiceTools` | `saveProfile` | `voice:save-profile` | 传 `{ profile }`（`VoiceProfile`） |
-| `voiceTools` | `deleteProfile` | `voice:delete-profile` | 传 `{ key }` |
+| `voiceTools` | `deleteProfile` | `voice:delete-profile` | 传 `{ key }`（只清**本地映射**） |
+| `voiceTools` | `deleteCloudVoice` | `voice:delete-cloud` | 传 `{ voice }`（**删云端克隆音色**，不可撤销；`voiceTools` 方法数 18 → **19**） |
 | `voiceTools` | `synth` | `voice:synth` | 7 参数展开为 `{ text, voice, projectName, saveDir, targetModel, audioName, defaultOut }` |
 | `voiceTools` | `synthAligned` | `voice:synth-aligned` | 字幕配音逐句合成 + 对齐/重排，原样透传 payload |
 | `voiceTools` | `cancelAlign` | `voice:align-cancel` | `send` 单向，取消对齐任务 |
@@ -122,7 +123,8 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `updateTools` | `download` | `update:download` | 下载安装包（`autoDownload = false`，仅用户触发）；失败分支带 `message` + `detail` |
 | `updateTools` | `cancel` | `update:cancel` | 取消下载；异常时回 `取消下载失败，请重试` + `detail` |
 | `updateTools` | `install` | `update:install` | 退出并运行安装器（本机有转录 / 渲染 / 配音任务时拒绝） |
-| `updateTools` | `openLog` | `update:open-log` | 在文件管理器里定位 `userData/updater.log`（没有日志则打开 `userData` 目录），返回 `IpcResult<{ path }>`；**更新失败时的排障出口，不依赖 electron-updater 是否加载成功** |
+| `updateTools` | `status` | `update:status` | 取一次主进程当前更新状态（`invoke`）：返回 `UpdateProgressPayload`（`stage` 经 `toStage()` 白名单收敛）。主进程状态常驻、跨设置页挂载持续存在；设置页挂载时用它补齐「启动静默检查」那次失败——该事件发生在页面订阅 `update:progress` 之前 |
+| `updateTools` | `openLog` | `update:open-log` | 在文件管理器里定位 `userData/updater.log`（没有日志则打开 `userData` 目录），返回 `IpcResult<{ path }>`；**更新失败时的排障出口，不依赖 electron-updater 是否加载成功**（设置页只在更新出错时显示该入口） |
 | `updateTools` | `onProgress` | `update:progress` | 更新阶段 / 下载进度订阅（单订阅） |
 | `runtimeTools` | `status` | `runtime:status` | renderer → main，`invoke`；查询运行环境包状态 |
 | `runtimeTools` | `prepare` | `runtime:prepare` | renderer → main，`invoke`；主动准备运行环境包 |

@@ -48,10 +48,10 @@
 | `windowControls` | 4 | `minimize()`、`toggleMaximize()`、`close()`、`onMaximizedChange(cb)` |
 | `hfTools` | 4 | `openHtml`、`renderVideo`、`showInFolder`、`onProgress` |
 | `settingsTools` | 5 | `get`、`save`、`saveRender`、`saveUpdater`、`test` |
-| `voiceTools` | 18 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` |
+| `voiceTools` | 19 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`deleteCloudVoice`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` |
 | `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` |
-| `updateTools` | 7 | `version`、`check`、`download`、`cancel`、`install`、`openLog`、`onProgress` |
+| `updateTools` | 8 | `version`、`check`、`download`、`cancel`、`install`、`status`、`openLog`、`onProgress` |
 | `runtimeTools` | 3 | `status`、`prepare`、`onProgress` |
 | `legacyTools` | 2 | `status`、`resolve`（**无 `on*` 订阅**：旧数据是否存在由渲染层主动拉取，主进程不推送） |
 

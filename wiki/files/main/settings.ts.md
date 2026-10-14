@@ -4,8 +4,8 @@
 
 - **所在目录**：src/main/
 - **类型**：设置存储模块（settings.json）
-- **规模**：311 行
-- **对外导出**：`register`、`readSettings`、`writeSettings`、`loadOpenAI`、`isPristineSettings`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceConfig`、`getUpdaterSettings`、`saveUpdaterSettings`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`
+- **规模**：406 行
+- **对外导出**：`register`、`readSettings`、`writeSettings`、`loadOpenAI`、`isPristineSettings`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceSettings`、`getVoiceProviderConfig`、`saveVoiceProviderConfig`、**`saveVoiceSaveDir`**、`getUpdaterSettings`、`saveUpdaterSettings`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`（原 `getVoiceConfig` 已删除）
 
 ## 1. 作用与职责
 
@@ -40,7 +40,10 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `writeSettings` | `(s: AppSettings) => void` | 先 `mkdirSync(userData, { recursive: true })`，再以 `JSON.stringify(s, null, 2)` 写盘 |
 | `isPristineSettings` | `(file: string) => boolean` | 判定**指定**的 settings.json 是否还是「出厂状态」（用户在这个位置什么都没配过）：`true` = 可以安全被老配置覆盖。文件不存在 / JSON 损坏 / 顶层不是对象一律 `true`。判定字段与取舍见 §3.5 |
 | `getCustomModel` | `() => CustomModelConfig` | 返回 `settings.customModel`，缺失时退回默认值 |
-| `getVoiceConfig` | `() => VoiceTTSConfig` | 返回与默认 `voiceTTS` 合并后的配置 |
+| `getVoiceSettings` | `() => VoiceSettings` | 返回归一化后的 `voice` 段（`{ active, providers, saveDir }`） |
+| `getVoiceProviderConfig(key?)` | `(string?) => { key, config, def }` | 取某个厂家的配置：`config` 是该厂家已保存的 **`{ apiKey }`**（**已无 `defaultModel`**）、`def` 是 `voiceCatalog` 里的厂家定义；`key` 缺省 = active 厂家 |
+| `saveVoiceProviderConfig(provider, patch, saveDir?)` | `(string?, Partial<VoiceProviderConfig>, string?) => VoiceSettings` | **只更新传入字段**（只有 `apiKey` 可存）并把 `active` 切到该厂家，然后整文件回写；**可选的第三个参数 `saveDir` 给了就一并更新全局保存目录**，不给则保持原值 |
+| `saveVoiceSaveDir(dir)` | `(string) => VoiceSettings` | **只改全局 `voice.saveDir`**（不动任何厂家的 Key、也不切换 `active`）——「保存到 → 自定义目录 / 恢复默认」这条路径用它，是本轮修的静默 bug（以前走 `saveVoiceProviderConfig` 只认 `config`，`saveDir` 被忽略 ⇒ 选了目录但没持久化） |
 | `getUpdaterSettings` | `() => UpdaterSettings` | 返回规范化后的 `updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`） |
 | `saveUpdaterSettings` | `(patch?: Partial<UpdaterSettings>) => UpdaterSettings` | **按字段合并**写入（`{ skippedVersion: '1.0.2' }` 不会清掉 `feedUrl`），写盘并返回新值 |
 | `getWhisperModel` | `() => string` | 返回 `settings.whisper.modelId`，缺失返回 `''` |
@@ -64,8 +67,10 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | | `modelId` | `''` | 模型 ID |
 | | `apiKey` | `''` | 接口密钥（明文落盘） |
 | | `enabled` | `false` | 是否启用自定义模型 |
-| `voiceTTS` | `apiKey` | `''` | 千问语音 API Key |
-| | `targetModel` | `'qwen-audio-3.0-tts-flash'` | 默认语音合成模型 |
+| `voice` | `active` | `'qwen'`（`DEFAULT_PROVIDER_KEY`） | 当前厂家键 |
+| `voice` | `providers` | `{ qwen: { apiKey: '' } }` | **按厂家的配置**：每家只有一份 `{ apiKey }`；出厂值由 `defaultVoiceProviders()` 按 `VOICE_PROVIDERS` 生成（**已无 `defaultModel` 字段**——不再有「厂家默认模型」这种全局设置） |
+| `voice` | `saveDir` | `''` | 自定义 TTS 保存目录（仍**全局一份**，不按厂家分） |
+| `voiceTTS`（**旧结构，仅迁移来源**） | `apiKey` / `targetModel` | — | `normalizeVoiceSettings` 只把旧的 `voiceTTS.apiKey` 填进 `providers.qwen`（只填空缺）；**旧的 `targetModel` 是已废弃的「全局默认模型」，迁移时直接丢弃**；`writeSettings` 落盘前解构丢弃整个 `voiceTTS`，**不再写回** |
 | | `saveDir` | `''` | 默认音频保存目录 |
 | `voiceProfiles` | — | `{}` | 本地音色映射；key 形如 `system:Cherry` / `custom:<voice_id>`，值含 `{ key, name, voice, targetModel, type }` |
 | `whisper` | `modelId` | `''` | whisper.cpp 当前模型档位 |
@@ -80,7 +85,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 
 `readSettings()` 的合并策略是**逐分区浅合并（Object.assign）**：
 
-- `customModel`、`voiceTTS`、`whisper`：以默认值为底、以文件内容覆盖，因此新增字段能自动带上默认值。
+- `customModel`、`voice`、`whisper`：以默认值为底、以文件内容覆盖，因此新增字段能自动带上默认值；`voice` 还要先过 `normalizeVoiceSettings(raw.voice, raw.voiceTTS)`（**旧的 `voiceTTS.apiKey` 迁进 `providers.qwen`（只填空缺），旧的 `voiceTTS.targetModel` 直接丢弃**；`active` 指向未知厂家时回落默认厂家；`saveDir` 新旧都认）。
 - `voiceProfiles`：**不做默认值合并**，只取文件中的值，缺失即 `{}`。
 - `render`：**不在 `Object.assign` 之列**，而是走 `normalizeRenderOptions(raw && raw.render)`——旧 settings.json（无 `render` 字段）落回 `standard` / `30`，已写入的脏值经白名单规范化，保证返回值恒为合法的 `{ quality, fps }`。
 - `updater`：同样走专用规范化函数 `normalizeUpdaterSettings(raw && raw.updater)`——旧 settings.json（无 `updater` 字段）落回 `{ feedUrl: '', autoCheck: true, skippedVersion: '' }`；`feedUrl` 只接受空串或 `http(s)://` 开头的地址，非法值**回退到 `fallback` 而不是清空**（避免用户手填的地址被一次误读抹掉），`autoCheck` 非布尔则回退，`skippedVersion` 非字符串则回退。
@@ -133,13 +138,13 @@ function isPristineSettings(file: string): boolean
 | --- | --- |
 | `customModel.apiKey` / `customModel.baseUrl` / `customModel.modelId` | 任一非空 |
 | `customModel.enabled` | **严格 `=== true`**（`enabled` 为 `false`/缺失不算动过） |
-| `voiceTTS.apiKey` / `voiceTTS.saveDir` | 任一非空 |
+| `voice.providers[*].apiKey` / `voice.saveDir` | 任一非空；**同时仍认旧** `voiceTTS.apiKey` / `voiceTTS.saveDir` |
 | `whisper.modelId` | 非空 |
 | `whisper.customModels` | 是数组且 `length > 0` |
 | `updater.feedUrl` | 非空 |
 | `voiceProfiles` | `Object.keys(...).length > 0`（非空对象） |
 
-**刻意不参与判定的字段**：`updater.autoCheck` / `updater.skippedVersion`（含「跳过某个版本」）、`render.quality` / `render.fps`、`voiceTTS.targetModel`（出厂即非空，判它会让所有文件都「不干净」）。源码注释写明取舍理由：**丢一个开关是两次点击能补回来的，而丢 API Key 要用户去控制台重新翻出来**——所以宁可在迁移覆盖时丢掉开关，也不能因为一个开关而保留旧文件、丢用户凭据。
+**刻意不参与判定的字段**：`updater.autoCheck` / `updater.skippedVersion`（含「跳过某个版本」）、`render.quality` / `render.fps`、`voice.active`（当前厂家，只是「看哪个厂家的表单」）与 `voice.providers[*].apiKey` 之外的语音字段（`defaultModel` 字段**已整体删除**，不再参与判定）。源码注释写明取舍理由：**丢一个开关是两次点击能补回来的，而丢 API Key 要用户去控制台重新翻出来**——所以宁可在迁移覆盖时丢掉开关，也不能因为一个开关而保留旧文件、丢用户凭据。
 
 **副作用**：本函数是只读的，不写盘、不迁移；真正的备份发生在调用方（覆盖前先 `copyFileSync(dst, dst + '.before-migrate.bak')`），详见 [index.ts.md](./index.ts.md) §3.1⑤。
 
@@ -153,7 +158,7 @@ function isPristineSettings(file: string): boolean
 | --- | --- |
 | `src/main/index.ts` | `import * as settings`；`migrateFrom()` 用 `settings.isPristineSettings(dst)` 判定新 `settings.json` 是否还是出厂状态（决定能否被老配置覆盖），并在装配阶段最早调用 `settings.register(ctx)` |
 | `src/main/whisper.ts` | `getWhisperModel` / `saveWhisperModel` / `getWhisperCustomModels` / `saveWhisperCustomModels`（模型档位与自定义模型增删） |
-| `src/main/voice.ts` | `getVoiceConfig` / `readSettings` / `writeSettings` / `DEFAULT_SETTINGS` / `getVoiceProfiles` / `saveVoiceProfile` / `deleteVoiceProfile` |
+| `src/main/voice.ts` | `getVoiceSettings` / `getVoiceProviderConfig` / `saveVoiceProviderConfig` / `readSettings` / `writeSettings` / `DEFAULT_SETTINGS` / `getVoiceProfiles` / `saveVoiceProfile` / `deleteVoiceProfile` |
 | `src/main/htmlAgent.ts` | `getCustomModel`（取自定义模型配置发起对话）与 `loadOpenAI`（懒加载 SDK 构造函数） |
 | `src/main/projects.ts` | `pickRenderOverride`——`project:set-render` 写 / 清除项目级渲染档位覆盖时做白名单过滤 |
 | `src/main/video.ts` | `pickRenderOverride`——把 `video:render` 载荷里显式给出的档位拼成 `--quality` / `--fps` 参数 |
@@ -164,14 +169,14 @@ function isPristineSettings(file: string): boolean
 
 协作要点：
 
-- `voice.ts` 的 `voice:save-config` 复用本模块的 `readSettings` / `writeSettings`，自行做 `voiceTTS` 合并后整文件回写；因此 `voiceTTS` 与 `voiceProfiles` 的持久化入口在 `voice.ts`，而通用读写工具在本模块。
-- **`settings:save` 只碰 `customModel`、`settings:save-render` 只碰 `render`、`settings:save-updater` 只碰 `updater`、`voice:save-config` 只碰 `voiceTTS`，四者各管一个分区，互不覆盖。**
+- `voice.ts` 的 `voice:save-config` 复用本模块的 `saveVoiceProviderConfig`（存某厂家 Key，可带 `saveDir`）与 **`saveVoiceSaveDir`**（只存目录），内部再走 `readSettings` / `writeSettings` 做「只更新指定字段」的合并后整文件回写；因此 **`voice` 段与 `voiceProfiles` 的持久化入口在 `voice.ts`**，而通用读写工具与归一化在本模块。
+- **`settings:save` 只碰 `customModel`、`settings:save-render` 只碰 `render`、`settings:save-updater` 只碰 `updater`、`voice:save-config` 只碰 `voice`（该厂家的 `apiKey` + `active`），四者各管一个分区，互不覆盖。**
 - 渲染档位的白名单与合并策略**只在 `normalizeRenderOptions` / `pickRenderOverride` 里定义一次**：`projects.ts` 用它过滤项目覆盖、`video.ts` 用它过滤渲染参数、渲染层 `utils/render.ts` 有一份同语义的纯函数实现（取值必须同步）。
 - `isPristineSettings` 是**跨模块的唯一调用点**：`index.ts` 的 `migrateFrom()`（**用户点「迁移过来」之后**才执行，不在启动早期）。它依赖本模块的惰性路径约定——`settingsFile()` 是函数，因此 `index.ts` 顶部 `import * as settings` 的求值不会提前读写 userData。
 
 ## 5. 注意事项与实现要点
 
-- **API Key 明文落盘**：`customModel.apiKey` 与 `voiceTTS.apiKey` 以明文写入 `userData/settings.json`，未做加密；安全约定是「仅存本机、只在主进程读取、不落日志、不外发」，渲染层仅在设置页回显。
+- **API Key 明文落盘**：`customModel.apiKey` 与 `voice.providers[*].apiKey` 以明文写入 `userData/settings.json`，未做加密；安全约定是「仅存本机、只在主进程读取、不落日志、不外发」，渲染层仅在设置页回显。
 - **`DEFAULT_SETTINGS` 是函数**：每次调用返回新对象，避免默认对象被 `Object.assign` 目标或调用方就地修改而污染「默认值」。
 - **容错策略**：`readSettings` 吞掉所有异常并回退默认值，好处是文件损坏不会崩溃，代价是「设置看似被重置」而不报错；排查时应先检查 settings.json 是否为合法 JSON。
 - **写入无兜底**：`writeSettings` 没有 `try/catch`，`fs.mkdirSync` / `fs.writeFileSync` 失败会向上抛异常，由调用方决定如何处理。

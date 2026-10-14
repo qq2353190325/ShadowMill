@@ -5,14 +5,14 @@
 - **覆盖文件**：`assets/main.css`（本目录唯一文件，全局设计系统样式表）
 - **所在目录**：src/renderer/src/assets/
 - **类型**：全局样式表（设计系统）
-- **规模**：约 1541 行（单文件设计系统，随迭代持续增长，不写死行数）
+- **规模**：约 1674 行（单文件设计系统，随迭代持续增长，不写死行数）
 
 ## 1. 作用与职责
 
 | 职责 | 说明 |
 | --- | --- |
 | 主题变量源 | 在 `:root` 中集中定义背景、品牌色、文字色、辉光、圆角、间距刻度共 22 个 CSS 变量（清单见 §2），是全应用配色的唯一出口 |
-| 全局重置与骨架 | `*` 归零、`html/body` 字体与背景、`#app` 与 `.layout` 的 flex 列布局，决定「标题栏 + 侧栏 + 内容区」三段式结构 |
+| 全局重置与骨架 | `*` 归零、`html, body` 的字体族 + **全局字号基准 `font-size: 14px`** + 背景、`#app` 与 `.layout` 的 flex 列布局，决定「标题栏 + 侧栏 + 内容区」三段式结构 |
 | 通用组件样式 | 卡片、按钮（`.hf-btn`）、文本域、弹窗（`.hf-modal-*`）、进度条、空态提示等跨页面复用类（**下拉不在本文件**：自绘下拉 `HfSelect.vue` 自带 `.hf-sel*` 组件级样式，原 `.hf-select` / `.hgen-select` 已删除） |
 | 页面专有样式 | 首页 Hero 与流水线、HTML 生成工作台、字幕/配音、设置页模型卡片等按注释分节组织 |
 | 视觉特效库 | 毛玻璃（`backdrop-filter: blur(12px)`）、霓虹辉光（`text-shadow` / `box-shadow`）、渐变文字、扫描线动画 |
@@ -28,7 +28,7 @@
 | `pages/VideoPreviewPage/index.vue`（视频预览） | `.hf-toolbar`、`.hf-btn*`、`.hf-video*`、`.hf-status`、`.hf-tip`、`.card.hgen-panel` 外壳与 `.panel-title` |
 | `pages/SubtitlePage/index.vue` / `pages/SubtitlePage/TranscribeSection.vue` / `pages/HtmlGenPage/index.vue`（转视频弹窗外壳） | `.model-*`、`.whisper-*`、`.sub-list` / `.sub-row` 等字幕编辑器类、`.hf-modal-*` |
 | `pages/TextTtsPage/index.vue` / `pages/TextTtsPage/{SynthSection,AlignSection,VoiceSection}.vue` | `.hf-tabs` / `.hf-tab`、`.align-*`、`.sub-textarea`、`.hgen-tip`；四处下拉（音色 / 保存到 / 已生成音频 / 字幕来源 / 映射音色 / 模型）走 `components/HfSelect.vue` |
-| `pages/TextTtsPage/VoiceSection.vue`（音色管理，配音页第三个 Tab） | 无专有前缀，复用 `.panel-title`、`.hgen-tip`、`.hf-btn`、`.hgen-input`、`.empty-hint`、`.hf-status`；下拉走 `components/HfSelect.vue` |
+| `pages/TextTtsPage/VoiceSection.vue`（音色管理，配音页第三个 Tab） | 专有节「配音页：我的音色列表」：`.panel-head` / `.panel-head-actions`、`.voice-list` / `.voice-list-head` / `.voice-list-body` / `.voice-list-row`（含 `.on`）、`.voice-name` / `.voice-name-text`、`.voice-tag`（`.clone`）、`.voice-model` / `.voice-extra`、**行尾动作列 `.voice-actions`**（见 §3）；危险按钮用「预览 / HyperFrames 转视频」节的 `.hf-btn-danger`；「创建克隆音色」「删除云端音色确认」都是 `Teleport` 弹窗、复用通用弹窗类 `.hf-modal*`（**未新增弹窗 CSS**）；其余复用 `.card`、`.panel-title`、`.hgen-tip`、`.hf-btn`、`.hgen-input`、`.hf-status`；下拉走 `components/HfSelect.vue`（**`.voice-id` 已随「列表不再显示音色 ID」删除**） |
 | `pages/SettingsPage/index.vue` / `pages/SettingsPage/WhisperSection.vue` | `.model-card.current`、`.model-badge.current`、`.hgen-check`、`.panel-title`；「应用更新」卡片的排障详情块 `.hf-detail`（见 §3） |
 
 ## 2. CSS 变量清单
@@ -61,6 +61,8 @@
 | `--spacing-base` | `8px` | 间距基准，兼容旧写法，定义但未通过 `var()` 引用 |
 
 间距规范（源码注释原文）：区块/区块用 MD；控件行内用 SM；标题下用 XS；页面大分区用 LG/XL。
+
+**字号没有 CSS 变量**（与配色 / 间距不同）：`:root` 里不存在任何字号令牌，字号一律直接写 px；全局基准 14px 写在 §3「全局骨架」的 `html, body` 规则里，档位划分与「承载文字的元素必须显式落在某一档」的约定见 `src/renderer/agents.md` §3.1 / §3.2（本文件只兜底）。
 
 变量区块原文（节选，括号内为被注释分组的顺序）：
 
@@ -95,7 +97,7 @@
 | --- | --- | --- |
 | （无注释）基础重置 | `*` | `margin/padding` 归零，`box-sizing: border-box` 全局盒模型 |
 | 深空科技主题（Cyber UI） | `:root` | 全部设计令牌，含 4px 基准的间距刻度注释 |
-| （无注释）全局骨架 | `html, body`、`body`、`#app`、`.layout` | 字体族 `"Microsoft YaHei UI", "PingFang SC"`；`body` 叠两层径向渐变（右上电子蓝、左下量子紫）；`#app` 承接 flex 列布局，`.layout` 为 `flex:1; min-height:0` 的可滚动宿主 |
+| （无注释）全局骨架 | `html, body`、`body`、`#app`、`.layout` | 字体族 `"Microsoft YaHei UI", "PingFang SC"` + **全局字号基准 `font-size: 14px`**（规范 §3 的「正文」档；源码注释说明此前未设，凡未显式写 `font-size` 的文字都按 Chromium 默认 16px 渲染，比相邻的 12px 表头 / 13px 按钮大一档；此处只兜底，局部更小字号仍须显式声明）；`body` 叠两层径向渐变（右上电子蓝、左下量子紫）；`#app` 承接 flex 列布局，`.layout` 为 `flex:1; min-height:0` 的可滚动宿主 |
 | 自绘标题栏（深空科技风格） | `.titlebar`、`.titlebar-left`、`.titlebar-logo`、`.titlebar-title`、`.titlebar-controls`、`.win-btn`、`.win-btn svg`、`.win-close` | 40px 高；`-webkit-app-region: drag` 拖拽，控制区改回 `no-drag`；Logo 用 `drop-shadow` 发光；`.win-close:hover` 变警报红并加红色辉光 |
 | 左侧菜单（文字菜单） | `.sidebar`、`.logo`、`.menu`、`.menu-item`、`.menu-item:hover`、`.menu-item.active` | 220px 宽墨蓝渐变；选中态用 3px 电子蓝左边框 + 90° 渐隐高亮 + 文字辉光 |
 | 右侧内容区 | `.content`、`.content::-webkit-scrollbar`、`.content h1`、`.content p` | `padding:32px`；隐藏滚动条（`scrollbar-width:none`）；`h1` 24px 带 12px 半径辉光；`p` 行高 1.8 |
@@ -104,7 +106,7 @@
 | 流水线节点卡片 | `.flow-pipeline`、`.flow-node`、`.flow-node:hover`、`.flow-node-index`、`.flow-node h3`、`.flow-node p`、`.flow-arrow` | flex 等分节点；hover 上浮 4px 并叠加双层辉光；序号块用 JetBrains Mono + 内阴影 |
 | 数据指标卡 | `.metric-grid`、`.metric-card`、`.metric-value`、`.metric-label` | 4 列 grid；指标卡描边/辉光改用数据绿；数值 26px 等宽字体 |
 | 首页 · 我的项目卡片（只选择 / 打开，新建入口在顶部工作项目栏） | `.proj-grid`、`.proj-card`、`.proj-card:hover`、`.proj-card-name`、`.proj-card-meta`、`.proj-card-meta .on`、`.proj-card-time` | `repeat(auto-fill, minmax(220px, 1fr))` 卡片网格；卡片主色描边 + 蓝紫渐变底，hover 上移 2px 并加卡片辉光；项目名主色 + `word-break: break-all`，状态标记（HTML / 视频 / 字幕）命中时 `.on` 转数据绿，时间行为更淡的雾蓝 |
-| 预览 / HyperFrames 转视频 | `.hf-toolbar`、`.hf-btn`、`.hf-btn:hover:not(:disabled)`、`.hf-btn:disabled`、`.hf-btn-primary`、`.hf-file`、`.hf-status` / `.hf-ok` / `.hf-error`、`.hf-detail`、`.hf-video-wrap`、`.hf-video`、`.hf-video-actions`、`.hf-tip` | 全应用主按钮体系：`.hf-btn` 描边蓝，`.hf-btn-primary` 蓝紫渐变 + 深色文字（hover 换更亮的同色渐变 `#33ddff → #a078ff`，**必须重写 `background`**：基础 `.hf-btn:hover:not(:disabled)` 特异性 0,3,0 高于 `.hf-btn-primary` 的 0,1,0，不重写就会被它那层半透明青色填充顶掉、整块渐变变暗青绿；也不要改用 `filter: brightness()`）；`.hf-file` 单行省略号；状态文字按 `.hf-ok` / `.hf-error` 变色发光；**`.hf-detail` 紧跟在 `.hf-status.hf-error` 之后定义**，是排障详情的折叠块（等宽字体 + `pre-wrap` + 可选中复制，见 3.1）。（原置于本节的 `.hf-select` 已删除，下拉改由 `components/HfSelect.vue` 自带样式。）现由 `pages/VideoPreviewPage/index.vue`（工具栏 / 成品播放器 / 定位按钮 / 状态条）、`pages/HtmlGenPage/index.vue`（转视频按钮、「转视频」弹窗里的档位控件、「预览」卡片里的背景音频行、状态条）与 `pages/SettingsPage/index.vue`（「应用更新」卡片的状态行与 `.hf-detail` 详情块）共同使用 |
+| 预览 / HyperFrames 转视频 | `.hf-toolbar`、`.hf-btn`、`.hf-btn:hover:not(:disabled)`、`.hf-btn:disabled`、`.hf-btn-primary`、`.hf-btn-primary:hover:not(:disabled)`、**`.hf-btn-danger` / `.hf-btn-danger:hover:not(:disabled)`**、`.hf-file`、`.hf-status` / `.hf-ok` / `.hf-error`、`.hf-detail`、`.hf-video-wrap`、`.hf-video`、`.hf-video-actions`、`.hf-tip` | 全应用主按钮体系：`.hf-btn` 描边蓝，`.hf-btn-primary` 蓝紫渐变 + 深色文字（hover 换更亮的同色渐变 `#33ddff → #a078ff`，**必须重写 `background`**：基础 `.hf-btn:hover:not(:disabled)` 特异性 0,3,0 高于 `.hf-btn-primary` 的 0,1,0，不重写就会被它那层半透明青色填充顶掉、整块渐变变暗青绿；也不要改用 `filter: brightness()`）；**`.hf-btn-danger` 紧随 `.hf-btn-primary:hover:not(:disabled)` 之后**——红色描边 `rgba(255,77,109,.5)`，hover 为红色文字 + `rgba(255,77,109,.12)` 底 + 红色辉光（源码注释：基础 `.hf-btn:hover` 特异性同为 0,3,0，靠「写在后面」取胜）；`.hf-file` 单行省略号；状态文字按 `.hf-ok` / `.hf-error` 变色发光；**`.hf-detail` 紧跟在 `.hf-status.hf-error` 之后定义**，是排障详情的折叠块（等宽字体 + `pre-wrap` + 可选中复制，见 3.1）。（原置于本节的 `.hf-select` 已删除，下拉改由 `components/HfSelect.vue` 自带样式。）现由 `pages/VideoPreviewPage/index.vue`（工具栏 / 成品播放器 / 定位按钮 / 状态条）、`pages/HtmlGenPage/index.vue`（转视频按钮、「转视频」弹窗里的档位控件、「预览」卡片里的背景音频行、状态条）与 `pages/SettingsPage/index.vue`（「应用更新」卡片的状态行与 `.hf-detail` 详情块）共同使用 |
 | 项目链路状态条（贯通各页，两行：上流程链 / 下工作项目切换） | `.project-bar`、`.project-bar-row`、`.step-chain`、`.step-node`、`.step-node.clickable`、`.step-node .step-dot`、`.step-node.done`、`.step-node.active-now`、`@keyframes stepPulse`、`.step-arrow` | 胶囊节点 + 圆点状态机：灰点（未开始）/ 绿点（完成）/ 蓝点脉冲（进行中）；`.clickable` 才可点，hover 变主色 |
 | 配音页 Tab 切换 | `.hf-tabs`、`.hf-tab`、`.hf-tab:hover`、`.hf-tab.active` | 999px 胶囊 Tab；选中态蓝底 + `0 0 10px` 辉光 |
 | HTML 生成页（与紧随其后的「行内帮助」小节交错，无法用单一区间表示） | `.hgen-grid`、`.panel-title`、`.panel-title .dot`、`.hgen-subtitle`、`.hgen-input`、`.hgen-row`、`.hgen-actions`、`.hgen-tip`、`.hgen-tip code` | 左右两栏 grid；面板标题带发光小圆点——**`.panel-title` 与 `.panel-title .dot` 已全局化**（不再限定在 `.hgen-panel` 之内，任何 `div.card.hgen-panel` 里的标题都直接可用；`.dot` 另加 `flex: none`，避免圆点被 flex 压缩变形）；`.hgen-subtitle` 为 260px 高可纵向拉伸文本域，`#0A1120` 深底；`:focus` 变主色描边 + 辉光。**注意**：本节规则被下面的「行内帮助」小节（`.hg-help*`）从中间分开——`.hgen-actions` 之后插入 `.hg-help*` 组，`.hgen-tip` / `.hgen-tip code` 仍属本节但排在其后。（原 `.hgen-select` 已删除：所有下拉改用 `components/HfSelect.vue`，其触发器视觉即沿用本节的深底 + 主色描边风格。） |
@@ -112,7 +114,7 @@
 | HTML 工作台：分区小标题 + 源码编辑器 | `.panel-title-sm`、`.hgen-source`、`.hgen-source:focus`、`.hgen-source:disabled` | 通用小标题类（主色、13px、600）；源码编辑器 `min-height:320px`、`tab-size:2`、Consolas 等宽、`resize: vertical` |
 | 项目详情小卡 | `.proj-meta`、`.proj-stat`、`.proj-stat b`、`.proj-stat.on` | `auto-fit, minmax(130px, 1fr)` 自适应栅格；`.on` 状态切为数据绿 |
 | 预览画布 | `.hgen-frame-wrap`、`.hgen-frame` | 容器 `padding-bottom:56.25%` 撑 16:9；内部 iframe 恒为 1920×1080 原生视口，`transform-origin: 0 0` 由 JS 设 `transform: scale` 等比缩放 |
-| 预览播放控制条（进度条 + 暂停/播放 + 重新播放） | `.hg-prev-ctl`、`.hg-prev-bar`、`.hg-prev-bar-fill`、`.hg-prev-time`、`.empty-hint` | 进度条渐变填充 + 辉光，`transition: width .25s linear`；时间用 `font-variant-numeric: tabular-nums` 防抖动；`.empty-hint` 为虚线空态框 |
+| 预览播放控制条（进度条 + 暂停/播放 + 重新播放） | `.hg-prev-ctl`、`.hg-prev-bar`（`.seeking`）、`.hg-prev-track`、`.hg-prev-bar:hover .hg-prev-track`、`.hg-prev-bar-fill`、`.hg-prev-time`、`.hg-prev-hint`、`.empty-hint` | `.hg-prev-bar` 是**可点可拖的跳转热区**：`padding: 5px 0` 上下透明热区（8px 细条难点中，热区把可点高度撑到 18px，**视觉厚度仍是 8px**）+ `cursor:pointer` + `touch-action:none` + `user-select:none`；`.hg-prev-track` 是视觉条（8px 高、`border-radius:999px`、半透明白底），**用 `box-shadow: inset 0 0 0 1px rgba(0,212,255,.25)` 当描边**（源码注释：`border` 画在 padding box 上，热区一撑高边框就变成 18px 的大圆角框），`.hg-prev-bar:hover` 时描边变亮并加外发光；`.hg-prev-bar-fill` 渐变填充 + 辉光、`transition: width .25s linear`，`.hg-prev-bar.seeking .hg-prev-bar-fill { transition: none }`（拖动时宽度必须跟手，不能有 0.25s 补间）；时间用 `font-variant-numeric: tabular-nums` 防抖动；`.hg-prev-hint` 是「已暂停在第 0 帧…」的说明文字（`flex:none`、12px、`--text-secondary`、`opacity:.8`，源码注释：预览默认不自动播放、合成又以 `opacity:0` 开头 ⇒ 首帧本就是空的，这句说明免得被当成白屏故障）；`.empty-hint` 为虚线空态框 |
 | 首页流水线节点状态 | `.flow-node.flow-done`、`.flow-badge` | 完成节点绿描边；`.flow-badge` 绿色胶囊徽标 |
 | HTML 生成/修改：需求输入区块 + 设置页复选框 | `.hgen-block`、`.hgen-block .panel-title-sm`、`.hgen-check`、`.hgen-check input[type="checkbox"]` | 区块上边距统一由 `--space-4` 控制；复选框用 `accent-color: var(--color-primary)` 换成电子蓝 |
 | 字幕生成（whisper.cpp）：模型档位卡片 | `.model-grid`、`.model-card`、`.model-card:hover`、`.model-card.downloaded`、`.model-head`、`.model-name`、`.model-badge` / `.ok`、`.model-meta`、`.model-url`、`.model-desc`、`.model-actions` | `auto-fill, minmax(210px,1fr)` 栅格；已下载态整卡转绿；URL 文字 `user-select: text` 可复制 |
@@ -122,12 +124,13 @@
 | （注释）选中态：当前转录所用模型档位 | `.model-card.selected`、`.model-card.selected::after` | 双层描边 + 辉光；`::after` 用 `content:'转录使用'` 生成右上角标签（`border-radius: 0 10px 0 8px` 单向圆角） |
 | 设置页：语音识别模型 | `.model-card.current`、`.model-card.current .model-name`、`.model-badge.current` | 当前生效项：蓝描边；徽标反色为蓝底深字 |
 | 字幕编辑器：条目列表 | `.sub-list`(`::-webkit-scrollbar-thumb/track`)、`.sub-empty`、`.sub-row`、`.sub-row:hover`、`.sub-idx`、`.sub-time`、`.sub-arrow`、`.sub-text`、`.sub-del`、`.sub-count`、`.sub-note` | 列表 `max-height:420px` 区内滚动（避免整页滚动），并单独美化滚动条；每行 = 序号 + 起止时间输入 + 箭头 + 文本域 + 删除按钮；`.sub-del` 复用危险红 |
-| 通用弹窗（转录弹窗） | `.hf-modal-mask`、`.hf-modal`、`.hf-modal-head`、`.hf-modal-title`、`.hf-modal-close`、`.hf-modal-body`、`.hf-modal-foot`、`.tw-model`、`.tw-link` | 固定定位遮罩（`z-index: 9000`、`rgba(5,10,20,0.72)`）；弹窗 `width: min(640px, 92vw)`、`max-height: 86vh`、头部渐变；`.tw-link` 用 `margin-left:auto` 右推。**两个使用方**：`pages/SubtitlePage/TranscribeSection.vue`（从音频生成字幕）与 `pages/HtmlGenPage/index.vue`（转视频，仅用行内 `style` 把宽度收窄为 `min(520px, 92vw)`，未新增类）。（源码里本节注释头紧贴「设置页：左侧分类 + 右侧内容」的注释头，而 `.hf-modal-*` 规则体排在该设置页样式块之后。） |
+| 配音页：我的音色列表 | `.panel-head` / `.panel-head .panel-title` / `.panel-head-actions`、`.voice-list`、`.voice-list-head`、`.voice-list-body`（+ 三条 webkit 滚动条规则）、`.voice-list-row`（`.on` / `:hover` / `:last-child` / `> span`）、`.voice-name` / `.voice-name-text` / `.voice-tag`（`.clone`）、`.voice-model` / `.voice-extra`、**`.voice-actions`** | 排在本节的「字幕编辑器：条目列表」与紧随其后的「通用弹窗（转录弹窗）」之间。`.panel-head` 是通用「标题 + 右侧动作」头行（`flex` / `space-between` / `gap: var(--space-3)` / `margin-bottom:10px`，并把 `.panel-title` 自带的下边距归零）；`.voice-list` 为外框（1px `rgba(0,212,255,.18)` 描边 + 10px 圆角 + `overflow:hidden`）；`.voice-list-head` 与 `.voice-list-row` 共用 **4 列** grid `minmax(0,1.6fr) minmax(0,1.4fr) minmax(0,1fr) auto`（源码注释说明不能写成 `1fr`：`fr` 隐含下限是 `min-content`，超长文本会把列撑爆、省略号失效）、gap `12px`、padding `9px 12px`（第 4 列是动作列，宽度 `auto`）；表头 12px 雾蓝 + 字距 1px + 深底 `rgba(10,17,32,.96)` + 下描边，且**位于滚动区之外**（未用 `sticky`）；`.voice-list-body` 限高 360px 自行滚动；行 13px、下分隔线 `rgba(0,212,255,.08)`（`:last-child` 去掉）、hover `.07` 底、`cursor:pointer`，`.on` 选中态 = `inset 3px 0 0 var(--color-primary)` + 90° 主色渐变高亮；`.voice-tag` 为 11px 胶囊徽标（雾蓝描边，`.clone` 转数据绿）；两个次要列（`.voice-model` / `.voice-extra`）均 12px 雾蓝 + 省略号；`.voice-actions` = `display:flex; justify-content:flex-end; gap:6px`（行尾动作列）。**`.voice-id` 规则已删除**（列表不再显示音色 ID，公共截断规则随之只覆盖 `.voice-model` / `.voice-extra`） |
+| 通用弹窗（转录弹窗） | `.hf-modal-mask`、`.hf-modal`、`.hf-modal-head`、`.hf-modal-title`、`.hf-modal-close`、`.hf-modal-body`、`.hf-modal-foot`、`.tw-model`、`.tw-link` | 固定定位遮罩（`z-index: 9000`、`rgba(5,10,20,0.72)`）；弹窗 `width: min(640px, 92vw)`、`max-height: 86vh`、头部渐变；`.tw-link` 用 `margin-left:auto` 右推。**三个使用方**：`pages/SubtitlePage/TranscribeSection.vue`（从音频生成字幕）、`pages/HtmlGenPage/index.vue`（转视频，仅用行内 `style` 把宽度收窄为 `min(520px, 92vw)`，未新增类）与 `pages/TextTtsPage/VoiceSection.vue`（「创建克隆音色」，`Teleport` 到 `body` + 行内 `style="width:min(680px,94vw)"`，同样未新增类）。（源码里本节注释头紧贴「设置页：左侧分类 + 右侧内容」的注释头，而 `.hf-modal-*` 规则体排在该设置页样式块之后。） |
 | 设置页：左侧分类 + 右侧内容 | `.settings-layout`、`.settings-nav`、`.settings-nav-item`、`.settings-nav-item:hover`、`.settings-nav-item.active`、`.settings-nav-dot`、`.settings-content` | 页面内的局部导航：左侧 `150px` 分类列（`gap:2px`）+ 右侧内容区；刻意压低视觉重量（无卡片底色、无辉光），与全局侧栏菜单的渐变卡片感区分开，避免「两层导航」的观感；选中项 = 主色 2px 左边框 + 90° 渐隐高亮；`.settings-nav-dot` 是「应用更新」分类上的主色小点（有新版本时才点）；`.settings-content` 用 `flex:1; min-width:0` 占满剩余宽度，窄屏下卡片不被挤压 |
 | （注释）转录无百分比进度：不确定态条纹滑动 | `.whisper-bar.indeterminate .whisper-bar-fill` | 宽度锁定 38%（`!important`）+ 1.1s 往返平移动画 |
 | 字幕配音（逐句对齐）：结果明细 | `.align-row`、`.align-idx`、`.align-txt`、`.align-time`、`.align-dur`、`.align-badge` / `.ok` / `.warn`、`@keyframes whisper-slide` | 单行结果行：序号 / 文本（省略号截断）/ 时间 / 时长；徽标区分正常与告警（橙） |
 
-> 说明：**toast**（`.toast-host` / `.toast-item`）与 **音色管理**卡组并无本文件专有选择器。toast 样式定义在 `src/renderer/src/App.vue` 的 `<style scoped>` 中；音色管理（`pages/TextTtsPage/VoiceSection.vue`，配音页第三个 Tab，原 `pages/SoundCopyPage/index.vue`）直接复用本文件的 `.card`、`.panel-title`、`.hgen-tip`、`.hf-btn`、`.hgen-input` 等通用类，未新增前缀。预览 / 转视频相关样式即上表的 `hf-*` 节（`main.css` 注释标题为「预览 / HyperFrames 转视频」，排在「首页 · 我的项目卡片（只选择 / 打开，新建入口在顶部工作项目栏）」节之后），该节现由 `pages/VideoPreviewPage/index.vue`（工具栏 / 成品播放器 / 定位按钮）、`pages/HtmlGenPage/index.vue`（「转视频」按钮与弹窗里的档位控件）与 `pages/SettingsPage/index.vue`（状态行与 `.hf-detail`）共同使用。下拉控件（`.hf-sel*`）的样式在 `components/HfSelect.vue` 内（含一个**非 scoped** 的 `<style>` 块，因为弹层经 Teleport 挂到 `body`），本文件已无下拉选择器。
+> 说明：**toast**（`.toast-host` / `.toast-item`）没有本文件专有选择器，样式定义在 `src/renderer/src/App.vue` 的 `<style scoped>` 中。**音色管理**卡组（`pages/TextTtsPage/VoiceSection.vue`，配音页第三个 Tab，原 `pages/SoundCopyPage/index.vue`）现在有了自己的节：上表「配音页：我的音色列表」提供 `.panel-head*` / `.voice-list*` / `.voice-*`，「我的音色」列表已改为消费这些类（卡片外壳与其余控件仍复用 `.card`、`.panel-title`、`.hgen-tip`、`.hf-btn`、`.hgen-input`、`.hf-status`）。预览 / 转视频相关样式即上表的 `hf-*` 节（`main.css` 注释标题为「预览 / HyperFrames 转视频」，排在「首页 · 我的项目卡片（只选择 / 打开，新建入口在顶部工作项目栏）」节之后），该节现由 `pages/VideoPreviewPage/index.vue`（工具栏 / 成品播放器 / 定位按钮）、`pages/HtmlGenPage/index.vue`（「转视频」按钮与弹窗里的档位控件）与 `pages/SettingsPage/index.vue`（状态行与 `.hf-detail`）共同使用。下拉控件（`.hf-sel*`）的样式在 `components/HfSelect.vue` 内（含一个**非 scoped** 的 `<style>` 块，因为弹层经 Teleport 挂到 `body`），本文件已无下拉选择器。
 
 ### 3.1 关键实现片段
 
@@ -195,13 +198,14 @@ step-node 的三态状态机（节：**项目链路状态条（贯通各页，�
 | --- | --- | --- |
 | `hf-*` | 预览转视频、配音 Tab、弹窗 | 与 HyperFrames / 配音通用控件相关：`hf-btn`（通用按钮基类）、`hf-file`、`hf-status`、`hf-detail`（排障详情折叠块）、`hf-video`、`hf-tabs`/`hf-tab`、`hf-modal-*`（下拉的 `hf-sel*` 前缀不在本文件，属 `components/HfSelect.vue`） |
 | `hgen-*` | HTML 生成页与工作台 | HTML Generation：`hgen-grid`、`hgen-panel`、`hgen-subtitle`、`hgen-input`、`hgen-row`、`hgen-actions`、`hgen-tip`、`hgen-source`、`hgen-block`、`hgen-check`、`hgen-frame-wrap`、`hgen-frame`（`hgen-select` 已删除） |
-| `hg-prev-*` | 预览播放控制条 | HTML 预览专属：`hg-prev-ctl`、`hg-prev-bar`、`hg-prev-bar-fill`、`hg-prev-time` |
+| `hg-prev-*` | 预览播放控制条 | HTML 预览专属：`hg-prev-ctl`、`hg-prev-bar`（状态类 `.seeking`）、`hg-prev-track`、`hg-prev-bar-fill`、`hg-prev-time`、`hg-prev-hint`（首帧空白的说明文字） |
 | `hg-help*` | HTML 生成页两个动作按钮**内部** | 行内帮助（`?` 图标 + 悬浮说明，**每个动作按钮里各一个**）：`hg-help`（相对定位包裹，`margin-left:6px` / `vertical-align:middle`）、`hg-help-icon`（16px 圆形 `?`，`currentColor` 描边与文字，默认 `opacity:.75`）、`hg-help-pop`（320px 说明气泡，锚 `left:0` 向右展开）；显示 / 隐藏靠 `.hg-help:hover` 后代选择器，不使用修饰类；因位于 `<button>` 内，气泡另重置 `font-weight:400` / `text-align:left` / `white-space:normal` |
 | `step-*` / `project-bar*` | 项目链路状态条 | 流程链：`project-bar`、`project-bar-row`、`step-chain`、`step-node`、`step-dot`、`step-arrow`；状态用**修饰类**而非新前缀：`.done`、`.active-now`、`.clickable` |
 | `sub-*` | 字幕编辑器与字幕写入方式 | Subtitle：`sub-list`、`sub-row`、`sub-idx`、`sub-time`、`sub-arrow`、`sub-text`、`sub-del`、`sub-count`、`sub-note`、`sub-empty`、`sub-textarea`、`sub-mode-btn` |
 | `model-*` | whisper 模型档位卡片 | 模型卡片及其内部件：`model-grid`、`model-card`、`model-head`、`model-name`、`model-badge`、`model-meta`、`model-url`、`model-desc`、`model-actions`；状态类为 `.downloaded` / `.selected` / `.current` |
 | `whisper-*` | 下载进度与转录提示 | `whisper-bar-wrap`、`whisper-bar`、`whisper-bar-fill`、`whisper-bar-text`、`whisper-tip`；状态类 `.error` / `.done` / `.indeterminate` |
 | `align-*` | 逐句对齐结果 | `align-row`、`align-idx`、`align-txt`、`align-time`、`align-dur`、`align-badge`（`.ok` / `.warn`） |
+| `voice-*` / `panel-head*` | 配音页「我的音色列表」 | 列表面板：`panel-head`（标题 + 右侧动作的头行，通用类）、`panel-head-actions`；`voice-list` / `voice-list-head` / `voice-list-body` / `voice-list-row`（状态用修饰类 `.on`）、`voice-name` / `voice-name-text`、`voice-tag`（修饰类 `.clone`）、`voice-model` / `voice-extra`、`voice-actions`（行尾动作列；`.voice-id` 已删除） |
 | `flow-*` / `metric-*` | 首页 | 流水线节点：`flow-pipeline`、`flow-node`、`flow-node-index`、`flow-arrow`、`flow-badge`、`.flow-done`；指标：`metric-grid`、`metric-card`、`metric-value`、`metric-label` |
 | `titlebar-*` / `win-*` | 自绘标题栏 | 窗口框架：`titlebar-left`、`titlebar-logo`、`titlebar-title`、`titlebar-controls`；`win-btn`、`win-close` |
 | `proj-*` / `tw-*` | 项目详情卡 / 转录弹窗 | `proj-meta`、`proj-stat`；`tw-model`、`tw-link` |
@@ -231,8 +235,8 @@ step-node 的三态状态机（节：**项目链路状态条（贯通各页，�
 - **与 scoped 样式的配合**：Vue 的 scoped 只给组件自身模板元素加 `data-v-*` 属性，本文件作为全局样式**不受影响**，可继续为组件内元素提供基础样式；反过来，本文件的选择器无法命中 scoped 组件内部的深层结构，因此组件内的微调应写在组件自己的 scoped 块中。
 - **变量是组件行内样式的桥梁**：多个组件直接在模板 `style` 属性中引用本文件变量（如 `style="color:var(--text-secondary)"`），因此修改变量值即可全局换肤。
 - **类名复用是主要协作方式**：新页面优先复用 `.card`、`.panel-title`、`.hf-btn`、`.hf-btn-primary`、`.hgen-input`、`.hgen-tip`、`.empty-hint` 等既有类，而非新增样式块。
-- **JS 与 CSS 的契约**：`.hgen-frame` 的缩放依赖 JS 写 `transform: scale(...)`（容器已固定 `transform-origin: 0 0`）；`.hg-prev-bar-fill`、`.whisper-bar-fill` 的宽度依赖 JS 写 `style.width`；动画类 `.indeterminate` 依赖 JS 切换；`.hf-detail` 的显隐由 Vue 的 `v-if` 控制（`updateDetail && showUpdateDetail`），样式本身不含任何显隐逻辑。
-- **与 `AGENTS.md` 的主题规范一致**：变量名与取值同项目根目录科技主题设计规范逐条对应，本文件是那份规范的落地实现。
+- **JS 与 CSS 的契约**：`.hgen-frame` 的缩放依赖 JS 写 `transform: scale(...)`（容器已固定 `transform-origin: 0 0`）；`.hg-prev-bar-fill`、`.whisper-bar-fill` 的宽度依赖 JS 写 `style.width`（拖动进度条时 JS 给 `.hg-prev-bar` 加 `.seeking`，由它关掉填充的 `transition`）；动画类 `.indeterminate` 依赖 JS 切换；`.hf-detail` 的显隐由 Vue 的 `v-if` 控制（`updateDetail && showUpdateDetail`），样式本身不含任何显隐逻辑。
+- **与设计规范一致**：变量名与取值同 `src/renderer/agents.md`（科技主题设计规范正文；根目录 `agents.md` 只是指针）逐条对应，本文件是那份规范的落地实现；字号刻度与「不许依赖浏览器默认字号」的约定见该文件 §3.1 / §3.2，列表面板（`.panel-head*` / `.voice-list*`）的结构约定见该文件 §5.6。
 
 ## 6. 注意事项与实现要点
 
@@ -248,6 +252,7 @@ step-node 的三态状态机（节：**项目链路状态条（贯通各页，�
 - **深色专属假设**：所有颜色按深底亮字设计（如 `.hf-btn-primary` 文字为 `#03131a` 深色、`.model-card.selected::after` 文字为 `#06121F`）。若要做亮色模式，按项目 `AGENTS.md` 约定在 `:root[data-theme="light"]` 覆盖变量，但上述写死的深色字值需要一并调整。
 - **已定义但未使用的变量**：`--color-secondary`、`--color-warning`、`--space-1`、`--spacing-base`（`--radius-btn` 自「行内帮助」小节起被 `.hg-help-pop` 引用、现又用于 `.hf-detail`，已不在其中）。使用它们不会报错，但当前视觉结果与写死值一致；新增样式建议优先复用已有变量以保持一致性。
 - **`.hf-detail` 的取舍**（2026-10 新增）：内容是原始报错（HTTP 状态 / AccessDenied 原文 / 请求地址），故用比正文更弱一档的色阶（`--text-secondary` + `rgba(11,18,32,.6)` 底）避免抢状态行的视线；`white-space: pre-wrap` + `word-break: break-all` 让长 URL 不撑破卡片，`user-select: text` 让用户能直接复制原始报错交给发布者。它**只做样式**，显隐与内容全部由页面（`SettingsPage` 的 `v-if` + `{{ updateDetail }}`）控制。
+- **新增的「配音页：我的音色列表」节**：`.panel-head` 把标题与动作按钮放进同一头行（`.panel-head .panel-title { margin-bottom: 0 }` 是为了不让头行被标题的下边距撑高一倍）；`.voice-list-head` 与 `.voice-list-row` 共用同一套 **4 列** grid（`minmax(0,1.6fr) minmax(0,1.4fr) minmax(0,1fr) auto`：显示名称 / 合成模型 / 语种·创建时间 / 动作），列宽写 `minmax(0, …fr)` 而非 `1fr`（源码注释：`fr` 的隐含下限是 `min-content`，超长文本会把列撑爆、省略号失效）；**列表不再显示音色 ID**（`.voice-id` 规则已删除），行尾动作列 `.voice-actions` 里放危险按钮 `.hf-btn-danger`；表头在滚动区 `.voice-list-body`（`max-height:360px`）**之外**、未使用 `sticky`；行 13px / 次要列 12px / 徽标 11px，均落在规范 §3.1 的档位上（与规范 §5.6 的两条新约定一致）。
 - **类名缺口**：`.sel-label` 在多处页面模板中使用，但本文件未定义其样式（仅有 `.panel-title`、`.panel-title-sm` 等相近类），排查「标签样式不生效」时需注意。
 
 修改本文件的推荐步骤：

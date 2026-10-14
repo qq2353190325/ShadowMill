@@ -187,7 +187,9 @@ if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = h
 | `src/main/video.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`BUILTIN_RESOURCES.ffprobe`、`BUILTIN_RESOURCES.chromeShell`、`isHyperframesComposition`、`findHyperframesCli`、`findNode`（**返回值是 `{ cmd, env }`；`cmd` 交给 `spawn`，`env` 必须并入子进程环境**）、`findFfmpegBin`，以及 GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（作用于渲染工作目录里的 HTML 副本） |
 | `src/main/projects.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`isHyperframesComposition`（HTML 生成/修改/保存侧的合规判断），GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（生成 / 修改 / 保存 / 预览四个写盘环节；其中**前三个用 `copyGsapIntoProject` 的返回值做「复制失败即退回 CDN」兜底**），以及 `externalizeGsapHtml`（兜底改写 + `project:download-html` 的导出改写） |
 | `src/main/ttsAlign.ts` | `BUILTIN_RESOURCES`（取 `ffmpeg` / `ffprobe`） |
+| `src/main/voice.ts` | `import { BUILTIN_RESOURCES } from './hfEnv'`：`voice:create` 创建克隆音色时取 `BUILTIN_RESOURCES.ffmpeg` / `BUILTIN_RESOURCES.ffprobe`，把本地参考音频裁成前 15 秒 / 24 kHz / 单声道 `pcm_s16le` wav（见 [voice.ts.md](./voice.ts.md) §4.1.1） |
 | `src/main/whisper.ts` | `BUILTIN_RESOURCES`（取其内的 `ffmpeg`） |
+| `src/main/runtime.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `refreshBuiltinResources(...)`（四条就绪路径，把解包目录交给 `hfEnv` 重算内置资源缓存）与 `BUILTIN_RESOURCES.root`（`runtimeRoot()` 取资源根） |
 
 `findLocalGsap` 仅在本模块内部被 `localizeGsapHtml` / `copyGsapIntoProject` 使用；`hasGsapCdnRef` 现由 `localizeGsapHtml` 调用——**本模块已无「零调用点」的导出**。
 

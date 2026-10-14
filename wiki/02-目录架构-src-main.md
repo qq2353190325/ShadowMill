@@ -1,6 +1,6 @@
 # 02 · 目录架构：`src/main/`（主进程）
 
-> 主进程是整个应用的能力中心：窗口与生命周期、运行环境包（716MB 资源）的准备与解包、userData 历史数据目录的扫描与**用户确认式处置**（`legacy:*` 两个频道 + 渲染层应用内弹窗）、文件系统、外部程序调用（whisper / ffmpeg / HyperFrames）、全部网络请求（Qwen-TTS / 自定义模型 / 模型下载 / 运行环境包）以及 **81** 个 IPC 频道的实现，全部集中在这个目录。
+> 主进程是整个应用的能力中心：窗口与生命周期、运行环境包（716MB 资源）的准备与解包、userData 历史数据目录的扫描与**用户确认式处置**（`legacy:*` 两个频道 + 渲染层应用内弹窗）、文件系统、外部程序调用（whisper / ffmpeg / HyperFrames）、全部网络请求（Qwen-TTS / 自定义模型 / 模型下载 / 运行环境包）以及 **83** 个 IPC 频道的实现，全部集中在这个目录。
 
 ---
 
@@ -10,19 +10,20 @@
 |---|---|---|---|
 | [index.ts](./files/main/index.ts.md) | 464 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议、窗口控制与剪贴板 IPC、启动时序打点 `startup.log` | `window:*`、`app:copy-text`、`legacy:*` |
 | [hfEnv.ts](./files/main/hfEnv.ts.md) | 294 | 环境探测与内置依赖定位 + GSAP 本地化 / 导出外部化辅助（不注册 IPC） | — |
-| [settings.ts](./files/main/settings.ts.md) | 311 | 设置存储（`userData/settings.json`，含视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` + 「出厂状态」判定 `isPristineSettings`（供 index.ts 的 `migrateFrom()` 迁移老数据时决定能否覆盖 settings.json） | `settings:*`（5） |
-| [systemVoices.ts](./files/main/systemVoices.ts.md) | 63 | Qwen-TTS 内置系统音色静态表 | — |
+| [settings.ts](./files/main/settings.ts.md) | 406 | 设置存储（`userData/settings.json`，含 `voice` 按厂家配置（**只有 apiKey**）与视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` + 「出厂状态」判定 `isPristineSettings`（供 index.ts 的 `migrateFrom()` 迁移老数据时决定能否覆盖 settings.json） | `settings:*`（5） |
+| [systemVoices.ts](./files/main/systemVoices.ts.md) | 62 | Qwen-TTS 内置系统音色静态表（**只有 `SYSTEM_VOICES` 一个导出**，判定函数已删除） | — |
 | [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 248 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用；SDK 经 settings 懒加载） | — |
-| [projects.ts](./files/main/projects.ts.md) | 817 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、背景音轨注入（`<audio id="myv-bgm">`）、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、音视频产物（项目结构再导出 `shared/types`；项目根 `projectsRoot()` 为**函数**、惰性求值） | `project:*`（24 handle + 1 推送） |
-| [voice.ts](./files/main/voice.ts.md) | 533 | 千问语音：音色管理 + 文字生音频 | `voice:*`（15） |
+| [projects.ts](./files/main/projects.ts.md) | 913 | 项目化流水线：`project.json`、字幕、内容脚本、HTML、背景音轨注入（`<audio id="myv-bgm">`）、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、音视频产物（项目结构再导出 `shared/types`；项目根 `projectsRoot()` 为**函数**、惰性求值；预览副本注入脚本默认静止、支持 `seek` 播放头定位与播完自动停住） | `project:*`（24 handle + 1 推送） |
+| [voiceCatalog.ts](./files/main/voiceCatalog.ts.md) | 104 | **语音服务目录（按厂家组织）**：厂家定义 `VoiceProviderDef`（Key 提示 / apiBase / 克隆模型 `enrollModel` / 出厂默认模型 / 模型表 / 系统音色表）+ 查询函数（`providerByKey` / `providerOfModel` / `providerOfSystemVoice` / `seriesDefaultModel`）；千问模型表 **2 条**（`qwen3-tts-flash` 系统 / `qwen-audio-3.0-tts-flash` 复刻——本地文件 + 公网 URL）；**`enrollModelAudio` 字段与 vc 系列的两条 clone 模型已删除** | — |
+| [voice.ts](./files/main/voice.ts.md) | 745 | 语音服务（按厂家取端点与 Key）：音色管理 + 文字生音频；**跨厂家「音色 ↔ 模型」绑定会被显式拒绝**，映射绑着已下线模型时忽略并按固定绑定回落；**克隆只服务 Qwen-Audio-TTS**（非 `qwen-audio-*` 目标模型直接拒绝），参考音频用内置 ffmpeg 裁前 15 秒并转 data URI 提交（`input.url` 也收公网 URL，`prefix` 统一 10 位）；**合成一律「接口 → `output.audio.url` → 二次下载」**；**云端克隆音色列表单一接口 `list_voice`**；`voice:delete-cloud`（删云端克隆音色，**单一写法 `action:'delete_voice'`**）；`voice:save-config` 分「存某厂家 Key」与「只存全局保存目录」两条路径 | `voice:*`（16） |
 | [ttsAlign.ts](./files/main/ttsAlign.ts.md) | 336 | 字幕配音逐句合成与时间对齐（模式 A/B） | `voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | [video.ts](./files/main/video.ts.md) | 164 | HyperFrames 转视频（渲染副本 GSAP 本地化；音轨来自页面内的 `<audio id="myv-bgm">`） | `dialog:open-html`、`video:*`（3 handle + 1 推送） |
 | [whisper.ts](./files/main/whisper.ts.md) | 712 | whisper.cpp 转录 + 识别模型下载/管理 | `whisper:*`（11 handle + 1 推送） |
-| [updater.ts](./files/main/updater.ts.md) | 563 | 应用自更新（electron-updater generic provider，**懒加载**）：检查 / 下载 / 取消 / 退出安装 / **打开日志** + 启动静默检查 + 忙碌态判定；错误文案分 `message` / `detail` 两层 | `update:*`（5 handle + 1 `on`/`sendSync` + 1 推送） |
-| [runtime.ts](./files/main/runtime.ts.md) | 478 | 运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）：定位随包 `runtime-pack/` 或从更新源下载 → sha512 校验 → `7za` 解包到 `userData/runtime/<id>/`，维护 `current.json` 指针 + `<id>/ok.json` 完整性标记，并就绪后把资源根交给 `hfEnv.refreshBuiltinResources()`；`register()` 里带 2 秒延迟后台准备（不抢启动时间） | `runtime:*`（2 handle + 1 推送） |
+| [updater.ts](./files/main/updater.ts.md) | 600 | 应用自更新（electron-updater generic provider，**懒加载**）：检查 / 下载 / 取消 / 退出安装 / **状态补齐（`update:status`）** / **打开日志** + 启动静默检查 + 忙碌态判定；错误文案分 `message` / `detail` 两层 | `update:*`（6 handle + 1 `on`/`sendSync` + 1 推送） |
+| [runtime.ts](./files/main/runtime.ts.md) | 482 | 运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）：定位随包 `runtime-pack/` 或从更新源下载 → sha512 校验 → `7za` 解包到 `userData/runtime/<id>/`，维护 `current.json` 指针 + `<id>/ok.json` 完整性标记，并就绪后把资源根交给 `hfEnv.refreshBuiltinResources()`；`register()` 里启动即后台准备（不延迟，排最后只保证 handler 先挂上） | `runtime:*`（2 handle + 1 推送） |
 | [vad.ts](./files/main/vad.ts.md) | 122 | WAV 采样读取与静音裁剪（零依赖纯函数） | — |
 
-> 行数取自工作区源码实测（`[IO.File]::ReadAllLines` 与编辑器行号一致）。目录下共 **13** 个 `.ts` 文件，上表**已全部收录**（含 `runtime.ts`，其逐文件说明见 [files/main/runtime.ts.md](./files/main/runtime.ts.md)）。
+> 行数取自工作区源码实测（`[IO.File]::ReadAllLines` 与编辑器行号一致）。目录下共 **14** 个 `.ts` 文件，上表**已全部收录**（含 `runtime.ts`，其逐文件说明见 [files/main/runtime.ts.md](./files/main/runtime.ts.md)）。
 
 ---
 
@@ -43,7 +44,7 @@ updater.register(ctx)
 runtime.register(ctx)                          // 运行环境包，最后一步
 ```
 
-> `updater.register(ctx)` 除注册 `update:*` 频道，还会在 3 秒后做一次「启动静默检查」（受 `settings.json` 的 `updater.autoCheck` 控制；dev 环境未提供 `dev-app-update.yml` 时跳过）。`runtime.register(ctx)` 排在最后：它在 `register()` 里安排 **2 秒延迟**的后台准备（`prepareInBackground()`），不抢启动时间。
+> `updater.register(ctx)` 除注册 `update:*` 频道，还会在 3 秒后做一次「启动静默检查」（受 `settings.json` 的 `updater.autoCheck` 控制；dev 环境未提供 `dev-app-update.yml` 时跳过）；主进程更新状态 `state` 常驻，渲染层可随时用 `update:status` 取一次（设置页据此补出这次静默检查的失败）。`runtime.register(ctx)` 排在最后：它在 `register()` 里**启动即后台准备**（`prepareInBackground()`，已无延迟），排最后只保证自己的 handler 先挂上——需要同步做的只有几个 `existsSync` / `statSync` 探测（微秒级），重活本身都是异步的。
 >
 > `index.ts` 自身的 `legacy:*` 两个 handler 也在这个位置注册（`createWindow()` 之后、`ctx` 之前），但它们不属于 `register(ctx)` 模式——它们直接写在入口里，见 §4.1。
 
@@ -58,7 +59,7 @@ runtime.register(ctx)                          // 运行环境包，最后一步
 ```
 settings ──→ htmlAgent ──→ projects ──→ voice ──→ ttsAlign
                                      ↗
-hfEnv ──→ video / whisper / ttsAlign / projects
+hfEnv ──→ projects / voice / whisper / ttsAlign / video / runtime
 vad   ──→ whisper
 systemVoices ──→ voice
 settings ──→ updater（读 updater.feedUrl / autoCheck / skippedVersion）
@@ -73,7 +74,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 | `voice → projects` | 用 `projects.projectsRoot()`（**函数，惰性求值**）定位项目 `audio/` 与枚举项目（`scanProjects()`）；三处调用点见 [voice.ts.md](./files/main/voice.ts.md) §5 |
 | `ttsAlign → voice` | 复用 `synthOne()`（单句合成）、`resolveVoiceModel()`（音色→模型解析）、`voiceFriendlyError()`（错误友好化） |
 | `whisper → vad` | 转录前用 `vadTrimSegments()` 裁掉起止静音；用 `toVadSamples()`（走 `hfEnv` 的 ffmpeg）统一采样率 |
-| `whisper / ttsAlign / video / projects → hfEnv` | 定位 CLI、Node 运行方式（`findNode()` 返回 `{ cmd, env }`，首选 Electron 内嵌 Node）、FFmpeg bin、chrome-headless-shell，以及 `isHyperframesComposition()` 合规校验；`projects` / `video` 另用 GSAP 本地化的 `localizeGsapHtml()` / `referencesLocalGsap()` / `copyGsapIntoProject()` |
+| `whisper / ttsAlign / video / projects / voice → hfEnv` | 定位 CLI、Node 运行方式（`findNode()` 返回 `{ cmd, env }`，首选 Electron 内嵌 Node）、FFmpeg bin、chrome-headless-shell，以及 `isHyperframesComposition()` 合规校验；`projects` / `video` 另用 GSAP 本地化的 `localizeGsapHtml()` / `referencesLocalGsap()` / `copyGsapIntoProject()`；`voice.ts` 用 `BUILTIN_RESOURCES.ffmpeg` / `ffprobe` 裁剪克隆参考音频（见 [voice.ts.md](./files/main/voice.ts.md) §4.1.1） |
 | `projects → htmlAgent` | `project:generate-html` / `project:modify-html` 调用 `chatWithCustomModel()`，并把 `onProgress` 映射为阶段文案推送给渲染层 |
 | `voice / whisper / htmlAgent → settings` | 读取 API Key、目标模型、当前识别模型与自定义模型列表；写回配置 |
 | `index → settings` | 用户选「迁移过来」后，`migrateFrom()` 调 `settings.isPristineSettings(dst)` 判断新 `settings.json` 是否仍是「出厂状态」（是才允许被老配置覆盖，覆盖前先备份成 `.before-migrate.bak`） |
@@ -82,7 +83,7 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 | `runtime → settings` | `getUpdaterSettings().feedUrl` 作为运行环境包的下载源（与 `updater.ts` 同优先级，其次才回落 `app-update.yml`） |
 | `updater → settings` | 读 `updater.feedUrl`（非空即 `autoUpdater.setFeedURL` 覆盖打包内置地址）、`autoCheck`（启动静默检查开关）、`skippedVersion`（用户跳过的版本）；下载「跳过版本」的更新时清掉该标记 |
 
-`src/main/index.ts` 顶部的注释即为这份依赖图的权威描述（`settings ← htmlAgent ← projects ← voice ← ttsAlign`；`hfEnv ← video`；无环）。
+`src/main/index.ts` 顶部的注释即为这份依赖图的权威描述（`settings ← htmlAgent ← projects ← voice ← ttsAlign`；`hfEnv ← projects, voice, whisper, ttsAlign, video, runtime`；`updater ← settings`；无环）。
 
 ---
 
@@ -131,8 +132,8 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 ### 4.4 `systemVoices.ts` —— 系统音色表
 
 - `SYSTEM_VOICES` 共 48 条，字段 `{ voice, desc, langs, series }`；`series` 取值组合覆盖 `instruct-flash` / `flash` / `tts`（`flash` 为全量系列）。
-- `isSystemVoice()` 精确全等匹配（大小写敏感）。
-- 与 `voice.ts` 四处配合：默认模型推断（`instruct-flash > flash > tts`）、`voice:list-system-voices` 输出附带 `model`、`voice:list-all` 生成 `key = 'system:' + voice` 条目，以及渲染层音色管理的回退组装。
+- 「是不是内置音色」的判定**不在本模块**：原 `isSystemVoice()` 已删除，改由 `voiceCatalog.providerOfSystemVoice()` 精确全等匹配（大小写敏感，非内置音色返回 `null`）。
+- 与 `voice.ts` 四处配合：**默认模型由 `voiceCatalog.seriesDefaultModel` 按 series 推导**（替代原先写死的 `instruct-flash > flash > tts`）、`voice:list-system-voices` 输出附带 `model` 与 `provider`、`voice:list-all` 生成 `key = 'system:' + voice` 条目，以及渲染层音色管理的回退组装。
 
 ### 4.5 `htmlAgent.ts` —— 自定义模型 Agent
 
@@ -148,16 +149,17 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 - 项目实体：`userData/projects/<项目名>/`，元数据 `project.json`（`title` / `subtitle` / `subtitleCount` / `content` / `audioFile` / `videoMaterial` / `htmlPath` / `videoPath` / `createdAt` / `updatedAt`），旁挂 `subtitle.txt`、`index.html`、`index.preview.html`、`gsap.min.js`（按需从随包文件复制）、`audio/`、`video/`。
 - **项目根路径是函数**：`projectsRoot()` 返回 `path.join(app.getPath('userData'), 'projects')`，**每次调用重新求值**（不是模块级常量）。原因（源码注释）：当前 userData 位置只跟随 `package.json` 的 `name`，模块级快照本来也正确；但只要将来有任何「在模块体里改 userData 位置」的代码（例如重新引入 `app.setPath`），快照就会静默钉在**当时**的 userData 上，表现为「项目全没了」且极难查——函数化是**零代价的纯保险**。内部三个调用点：`projectDir()`、`scanProjects()`（先 `const root = projectsRoot()`）、`project:delete` 的 `dir.startsWith(projectsRoot())` 校验；导出名不变，导出的就是函数。
 - 对外能力（24 个 `handle` + 1 个推送）：项目 list / create / load / delete、字幕保存、内容脚本保存、HTML 生成 / 修改 / 读取 / 保存 / 预览 / 下载、SRT 导出、项目目录与指定路径所在目录打开、音频与视频素材的挑选 / 设置 / 清除、从视频提取音轨、视频产物回写、渲染档位覆盖。其中 `set-audio` / `clear-audio` / `extract-video-audio` 会同步改写 HTML 里的注入音轨并回带 `htmlUpdated`。
-- 关键内部设施：`projectDir()`（路径派生的唯一入口，也被 `hgpreview` 协议使用）、`parseSubtitle()`（解析 `[分:秒] 文本` 与纯文本行并统计条目数）、`normalizeContent()`（内容脚本字段兼容）、`scanProjects()`（列表与 `has*` 标记）、`buildContentBlock()` / `buildMaterialPrompt()`（拼装 Agent 提示词）、背景音轨注入一组（`BGM_TAG_ID` / `insertHtmlSnippet()` / `stripInjectedBgm()` / `stripAudioOfFile()` / `applyBgmToHtml()`，共 6 处调用点）、预览副本注入脚本 `HG_PREVIEW_CTRL`（`timelines()` 对 `__timelines` 的「数组 / 对象 / 缺失」三态兼容，落位复用 `insertHtmlSnippet()`）、`progressText()`（Agent 进度 → 中文阶段文案）。
+- 关键内部设施：`projectDir()`（路径派生的唯一入口，也被 `hgpreview` 协议使用）、`parseSubtitle()`（解析 `[分:秒] 文本` 与纯文本行并统计条目数）、`normalizeContent()`（内容脚本字段兼容）、`scanProjects()`（列表与 `has*` 标记）、`buildContentBlock()` / `buildMaterialPrompt()`（拼装 Agent 提示词）、背景音轨注入一组（`BGM_TAG_ID` / `insertHtmlSnippet()` / `stripInjectedBgm()` / `stripAudioOfFile()` / `applyBgmToHtml()`，共 6 处调用点）、预览副本注入脚本 `HG_PREVIEW_CTRL`（`rawTimelines()` / `timelines()` 对 `__timelines` 的「数组 / 对象 / 缺失」三态兼容；**默认静止**——用户没操作前用 `freeze()` / `freezeLoop` 把画面与带 `autoplay` 的媒体冻在第 0 帧，一旦收到 `pause`/`play`/`seek`/`restart` 就置 `userActed` 不再干预；`watchEnd()` 在真实时间轴跑完时统一 `setPaused(true)`，`isPlaying()` 把「已播完」排除在在播之外；`setTime()` 只挪播放头并在 seek 后回带 `ack` 的上报；进度上报带 `playing` / `ack` 字段；落位复用 `insertHtmlSnippet()`）、`progressText()`（Agent 进度 → 中文阶段文案）。
 - GSAP 本地化：生成 / 修改 / 保存（`project:save-html`）/ 预览副本四个写盘环节先 `hfEnv.localizeGsapHtml()` 改写 CDN 引用，再按需 `hfEnv.copyGsapIntoProject()` 把随包 `gsap.min.js` 复制进项目目录；其中**作者态三处（generate / modify / save-html）会用复制返回值做兜底**——复制失败就把引用换回 CDN（`hfEnv.externalizeGsapHtml()`），预览则忽略返回值、只在副本上改写，原件 `index.html` 保持原貌（渲染路径的第五处本地化见 4.9，同样忽略返回值）。反向地，`project:download-html` 用 `externalizeGsapHtml()` 把 `./gsap.min.js` 换回固定版本 CDN 后再文本写出——导出的是单文件，否则放到别处会缺 `gsap.min.js` 导致动画不跑。
 - `project:extract-video-audio` 会先 `await runtime.ensureRuntime()` 等运行环境包就绪（未就绪时原样返回其 `message` / `detail`），再判内置 ffmpeg 是否存在。
 - `project:open-folder` 在项目目录不存在时返回「项目目录不存在（项目尚未保存）」。
 - 写 HTML 成功后会把**失效的旧视频产物置空**，并做 HyperFrames 合规校验，返回 `compatible` 供 UI 提示。
 
-### 4.7 `voice.ts` —— 千问语音
+### 4.7 `voice.ts` —— 语音服务（按厂家）
 
 - 导出 `register()`，并向 `ttsAlign.ts` 暴露可复用的单句合成与解析能力。
-- 音色克隆按目标模型**自动切换输入方式**：`qwen-audio-*`（Qwen-Audio-TTS）走「粘贴音频 URL」，`qwen3-tts-vc-*` 走「上传本地文件」；请求分支覆盖 `action=create_voice` / `create`、`model=voice-enrollment` / `qwen-voice-enrollment`、`prefix` / `preferred_name`、`audio.url` / `audio.data`；直传音频失败时有专用回退（`fallback_mode` / `fallback_reason`）。
+- 音色克隆**只服务 Qwen-Audio-TTS 系列**（`qwen-audio-*`；vc 系列已彻底移除）：目标模型不匹配 `isAudioTtsModel` 时直接返回「模型「<id>」不支持音色复刻：请把「目标模型」选成 qwen-audio-* 系列…」。音频分三类来源：本地绝对路径、公网 URL / `oss://`、`data:audio/...;base64` URI（后两类原样透传）；本地文件先用内置 ffmpeg 裁成**前 15 秒 / 24 kHz / 单声道 `pcm_s16le` wav**（`makeCloneSample`，临时文件用完即删）再转成 data URI 放进 `input.url`——因此本地文件与公网 URL 都能用。请求固定 `action=create_voice` + `model=voice-enrollment` + `target_model` / `prefix` / `url` / `language_hints` / `max_prompt_audio_length`，`input.prefix` 上限统一 **10** 字符（原 vc 的 `action=create` / `preferred_name` / `audio.data` / 16 位上限已删除）；**成功回执严格按文档口径只读 `output.voice_id`**（`targetModel` 取本次请求发的模型；`fallback_mode` / `fallback_reason` / `output.target_model` 均不再解析，`VoiceCreateResult` 已收缩为 `{ voice, targetModel }`）。
+- **云端克隆音色列表只有一个接口**（`model=voice-enrollment` + `action:'list_voice'`），结果按 `voice` / `voice_id` 去重并归一化后返回；**删除云端音色同样只有一种写法**（`action:'delete_voice'`），`VoiceNotFound` 与非存在类错误都会顺带清掉本地映射。
 - 音色解析三级优先：本地映射 `voiceProfiles`（`system:X` / `custom:X`）→ 系统音色默认模型 → 内置默认模型。
 - **项目根走 `projects.projectsRoot()` 函数**：三处调用点（`resolveTtsDir()`、`voice:list-generated`、`voice:synth` 落盘回执）都是在函数 / handler 内取一次局部 `const projectsRoot = projects.projectsRoot()`，不是模块级常量。
 - 文字生音频 `voice:synth` 支持三种落盘位置（项目 `audio/`、自定义目录、音频输出目录），回执 `savedTo` 说明实际落点；`voice:list-generated` 按来源（音频输出目录 / 自定义目录 / 项目）分组列出历史音频。
@@ -191,20 +193,22 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 
 - **更新源三级优先**：`settings.json` 的 `updater.feedUrl`（非空即 `setFeedURL({ provider: 'generic', url })` 覆盖）→ 打包时写入 `resources/app-update.yml` 的 `publish` 地址（由 `package.json` 的 `build.publish` 在 `npm run dist` 时生成）。
 - **依赖加载是防御式的、并且是懒加载的**：`electron-updater` 用 `require()` 取 `autoUpdater`，整段包在 `try` 里并存下 `updaterLoadError`；缺依赖时所有 `update:*` 调用都返回 `{ ok: false, message, detail }`（`message` 是「更新模块不可用，请重新安装应用」，技术原因只留在 `detail`），**不会让主进程启动崩掉**（打包白名单漏项这类问题因此表现为「功能不可用」而不是「应用打不开」）。加载动作集中在 `ensureUpdater()`，**`register()` 不再触发它**——`electron-updater` 的模块图（实测 ~70ms，冷启动更久）因此不占用「建窗 → 首屏」这段时间；`autoCheck=false` 的用户整个会话都不会加载它。
-- **下载策略**：`autoDownload = false`（安装包近 300 MB，只由用户点「下载更新」触发）、`autoInstallOnAppQuit = true`（已下载的更新在用户直接关窗时也会装上）。
+- **下载 / 安装策略**：`autoDownload = false`（安装包近 300 MB，只由用户点「下载更新」触发）、`autoInstallOnAppQuit = false`（安装同样只由用户显式触发：NSIS 更新是「整体卸载旧版 → 解压复制新包」，实测一次约 97 秒，期间应用不存在、桌面快捷方式指向空路径，不能因为「用户只是关了个窗」就在背后静默开始）。
+- **检查 / 下载「有事件才算成功」**（设计约定 ⑦，2026-10 加入）：`checkForUpdates()` 在未打包且未置 `forceDevUpdateConfig` 时直接 `return Promise.resolve(null)`、已有检查在飞时复用旧 Promise——两种情形**一个字的事件都不发**；`checkNow()` 因此在报成功前判一次 `state.stage` 是否仍是 `checking`，是则落 `error`（未打包文案「开发环境不检查更新」，否则「检查更新失败，请稍后重试」）并写 `check declined trigger=… packaged=…` 日志。`downloadUpdate()` 同类：resolve 后仍停在 `downloading` 且 `!state.downloaded` ⇒ 「下载没有开始，请稍后重试」+ `download declined`（其正常路径必在 resolve 之前发 `update-downloaded`）。没有这两条守卫，主进程自己写下的「正在检查更新…」/「正在下载更新…」会被当作终态送到界面，卡片永远停在那一句。
 - **安装前拒绝长任务**：`installNow()` 在 `busy` 时返回「当前有任务正在进行（转录 / 渲染 / 配音）」并拒绝重启。`busy` 不改动任何业务模块——它由 `bindBusyTracking()` 监听 4 路进度通道（`whisper:progress` / `video:progress` / `voice:align-progress` / `project:html-progress`）的起止自动推导。
 - **与 `window-all-closed` 的配合**：`quitAndInstall()` 会触发窗口关闭，若入口的 `window-all-closed` 再 `app.quit()` 会与安装器抢退出流程，因此 `installNow()` 先置 `quitFlag`，入口据此直接 `return`（`updater.quitForUpdate()`）。
 - **`stage` 刻意放宽为 `string`**：阶段由 electron-updater 的事件回调跨函数写入，若标注成 `UpdateStage` 联合类型，TS 的控制流分析会把函数内最后一次赋值当成当前类型，导致后续全部比较被判成「不可能分支」（实测报 9 处 `TS2367`）；交出前由 `toStage()` 白名单收口成 `UpdateStage`。
 - **错误文案分两层（`message` / `detail`）**：`humanError()` 返回 `{ message, detail }` —— `message` 只说人话给终端用户（如「暂时没有可用的新版本信息，请稍后重试」），`detail` 存排障信息（原始报错**首行**截断 300 字符 + 从报错里抠出的请求地址，形如 `请求地址：<去掉查询串的 URL>；原始报错：<首行>`），由设置页的「查看详情」折叠展示；`setError()` 统一写 `state.stage='error'` / `error` / `detail` / `message`，取代原先三处各写一半的写法。抠 URL 是为了 403 / 404 能一眼看出「应用在请求哪个地址」。**判断顺序不可变**：403 的报错文本里必然含请求 URL，先判 `latest.yml` 会把权限问题误报成「文件没上传」。
-- **打开日志目录**：`update:open-log` 的 handler 用 `shell.showItemInFolder()` 定位 `userData/updater.log`（没有日志则 `shell.openPath(userData)` 打开目录），返回 `{ ok, path }`；它**刻意不进 `ensureUpdater()`**——electron-updater 加载失败恰恰是最需要看日志的场景。所有事件与动作写 `userData/updater.log`，与 `preview-protocol.log` 同思路。
-- **dev 环境**：未打包时需根目录提供 `dev-app-update.yml` 且置 `forceDevUpdateConfig = true` 才会检查；没有该文件则跳过启动静默检查（该文件名已进 `.gitignore`）。
+- **打开日志目录**：`update:open-log` 的 handler 用 `shell.showItemInFolder()` 定位 `userData/updater.log`（没有日志则 `shell.openPath(userData)` 打开目录），返回 `{ ok, path }`；它**刻意不进 `ensureUpdater()`**——electron-updater 加载失败恰恰是最需要看日志的场景。所有事件与动作写 `userData/updater.log`，与 `preview-protocol.log` 同思路。设置页只在更新确实出错时才显示这个入口（`updateLogVisible`），启动静默检查的失败由页面挂载时的 `update:status` 补齐带出来。
+- **状态补齐（`update:status`）**：`ipcMain.handle(IPC.Update.Status, () => payload())`，紧跟 `update:version` 的 `ipcMain.on` 之后注册；`payload()` 把常驻的 `state` 收成 `UpdateProgressPayload`（`stage` 经 `toStage()` 白名单收敛）。存在的理由：启动静默检查发生在设置页订阅 `update:progress` 之前，没有这条通道渲染层永远只看到 `idle`——那次失败就传不到界面上。它与 `update:open-log` 一样不进 `ensureUpdater()`（只读常驻状态）。
+- **dev 环境**：未打包时需根目录提供 `dev-app-update.yml` 才会检查——`forceDevUpdateConfig` 由 `ensureUpdater()` 统一代为打开（`!app.isPackaged && fs.existsSync(process.cwd()/dev-app-update.yml)` 成立即置真，`try/catch` 包住）；原先只有 `register()` 的启动分支会打开它，于是出现「dev 下手动点『检查更新』没反应、3 秒后的静默检查反而能通」，那段重复赋值**已删除**；没有该文件则跳过启动静默检查（写日志 `startup check skipped: dev 环境未提供 dev-app-update.yml`），手动检查由约定 ⑦ 的守卫给出「开发环境不检查更新」（该文件名已进 `.gitignore`）。
 
 ### 4.12 `runtime.ts` —— 运行环境包
 
 - **动机**：NSIS 更新是「整体卸载旧版 → 解压复制新包」，716MB / 4900+ 文件的运行资源每次更新都要重解压复制一遍（源码注释记的实测值：一次更新 97 秒，期间应用不存在）。拆包后安装目录里只剩 1 个 `runtime.7z`，解包由应用自己做（可显示进度），包内容没变时下次更新完全不碰这 716MB。包与清单由 `scripts/pack-runtime.mjs` 产出（`build/runtime-pack/`），随 `extraResources` 进安装目录，也可上传到更新源目录。
 - **频道**：`runtime:status`（快照 `RuntimeProgressPayload`）、`runtime:prepare`（触发一次准备，返回 `{ ok, message?, detail? }`）、推送 `runtime:progress`（唯一出口 `push()`，发送前判 `win && !win.isDestroyed()`）。
 - **主流程 `run()`**：① 已就绪（`current.json` 指针 + `<id>/ok.json` 标记同时在）⇒ `source='cache'` 直接成功（**常态**）→ ② 安装目录已是展开形态（非强制且 `<resources>/ffmpeg/bin/ffmpeg.exe` 存在）⇒ `source = legacy`（打包）/ `dev`（开发）→ ③ 定位 `7za`（`<resources>/tools/7za.exe`，dev 为 `build/tools/`，缺失即失败并提示重新打包）→ ④ 取包：随包 `runtime-pack/runtime.json` 优先（`source='local'`），缺失才从更新源下载（`source='download'`，边下边报进度、下完复核 sha512、不符即删残片）→ ⑤ 解包（`7za x <pack> -o<dest> -y -bsp1`，从 stdout 解析百分比）→ ⑥ **先写 `ok.json` 再写 `current.json`**，然后 `hfEnv.refreshBuiltinResources(dest)`（把资源根交给 `hfEnv`）+ `cleanOldPacks(id)`（旧包目录 716MB，留着无用）。
-- **幂等与并发**：`ensureRuntime()` 在 `stage === 'ready'` 时直接成功、已有 `inFlight` 时复用同一个 Promise，因此「启动后台准备」与渲染层点「重新准备」共享同一次执行；`register()` 里 `prepareInBackground()` **默认延迟 2 秒**触发（与 `updater` 的 3 秒静默检查同思路，不抢启动时间）。
+- **幂等与并发**：`ensureRuntime()` 在 `stage === 'ready'` 时直接成功、已有 `inFlight` 时复用同一个 Promise，因此「启动后台准备」与渲染层点「重新准备」共享同一次执行；`register()` 里 `prepareInBackground()` 现在**无参、启动即触发**（旧 `(delayMs = 2000)` + `setTimeout` 已删除）——需要同步做的只有几个 `existsSync` / `statSync` 探测（微秒级），解包与远程下载本身异步；早到的进度事件渲染层收不到也没关系，外壳与设置页挂载时都会用 `runtime:status` 补齐。
 - **失败不阻断应用**：任何一步失败都走 `fail()`——只更新状态（`stage='failed'` + 人话 `message` + 排障 `detail`）、推一次进度、写 `userData/runtime.log`，并返回 `{ ok: false, … }`；`projects.ts` 的 `project:extract-video-audio` 会先 `await runtime.ensureRuntime()` 并把失败文案原样返回。详见 [files/main/runtime.ts.md](./files/main/runtime.ts.md)。
 
 ### 4.13 `vad.ts` —— 纯函数 VAD

@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（IPC 注册 + 子进程编排 + 网络下载）
-- **规模**：478 行
+- **规模**：482 行
 - **对外导出**：`register`、`ensureRuntime`、`prepareInBackground`、`runtimeStatus`、`runtimeRoot`
 
 ## 1. 作用与职责
@@ -27,9 +27,9 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这�
 
 | 名称 | 类型 | 说明 |
 |------|------|------|
-| `register` | `(ctx: RegisterCtx) => void` | 存下 `ctx.getWindow`（缺失则为 `null`）→ 注册 `runtime:status` / `runtime:prepare` 两个 handler → 调 `prepareInBackground()`（默认 2 秒后后台准备） |
+| `register` | `(ctx: RegisterCtx) => void` | 存下 `ctx.getWindow`（缺失则为 `null`）→ 注册 `runtime:status` / `runtime:prepare` 两个 handler → 调 `prepareInBackground()`（**启动即后台准备，不延迟**；`register` 排在 `index.ts` 装配序列最后只为保证 handler 先挂上） |
 | `ensureRuntime` | `() => Promise<{ ok: boolean; message?: string; detail?: string }>` | **幂等 + 并发安全**：`stage === 'ready'` 直接成功返回；已有 `inFlight` 则复用同一个 Promise；否则执行 `run()` 并把 Promise 存进 `inFlight`，settle 后清空 |
-| `prepareInBackground` | `(delayMs = 2000) => void` | `setTimeout(() => { void ensureRuntime() }, delayMs)`——先让窗口首屏出来（与 updater 的启动静默检查同思路，不抢启动时间） |
+| `prepareInBackground` | `() => void` | `void ensureRuntime()`——**已无参数、无延迟**（旧 `(delayMs = 2000)` + `setTimeout` 已删除）。理由：需要同步做的只有几个 `existsSync` / `statSync` 探测（微秒级），重活（7za 解包、远程包下载与 sha512 校验）本身都是异步的；早到的进度事件渲染层收不到也没关系，外壳与设置页挂载时都会用 `runtime:status` 补齐 |
 | `runtimeStatus` | `() => RuntimeProgressPayload` | 当前状态快照（`payload()`）；本文件内其它地方都直接用 `payload()` |
 | `runtimeRoot` | `() => string` | `hfEnv.BUILTIN_RESOURCES.root`——就绪后（经 `refreshBuiltinResources`）指向真实的资源根 |
 
@@ -80,13 +80,15 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这�
 5. **⑤ 幂等认领 / 解包**：把 `manifest` 的 `id` / `bytes` / `unpackedBytes` / `files` 写入 `state`；若 `hasInstalled(manifest.id)`（并发或上次被打断后指针没写）⇒ 直接 `refreshBuiltinResources` + `ready` 成功；否则 `setStage('extracting', '正在准备运行环境 0%（<体积> / <文件数> 个文件）')` 并 `extractPack()`（失败 ⇒ `fail('运行环境解压失败，转录 / 渲染暂不可用', '7za 解包失败：…')`）。
 6. **⑥ 落标记与指针**：先写 `<id>/ok.json`（`{ id, files, unpackedBytes, at }`），再写 `current.json`（`{ id, at }`）——写盘异常 ⇒ `fail('运行环境写入失败（磁盘空间或权限问题）', ...)`。随后 `refreshBuiltinResources(dest)` → `cleanOldPacks(id)` → `stage='ready'`、`percent=100`、文案「运行环境已就绪（<体积>）」→ 推送 → `writeLog('解包完成 id=… 用时 N 秒，来源 <source>')` → 成功。
 
+> **「已就绪」文案只留在主进程**：① / ② / ⑥ 三条就绪路径仍会把 `state.message` 写成「运行环境已就绪」/「运行环境已就绪（安装目录内置）」/「运行环境已就绪（<体积>）」（`stage='ready'`、`percent=100` 照旧下发），但**渲染层不再展示就绪态**：外壳横幅只在 `busy || failed` 时出现（`src/renderer/src/App.vue` 的 `runtimeVisible`），设置页状态行 `v-if="runtimeBusy || runtimeFailed"` 且 `runtimeStatusText` 只有「准备中 / 失败」两个分支（`src/renderer/src/pages/SettingsPage/index.vue`）。因此这些文案现在只出现在主进程状态与 `runtime.log` 里。
+
 ### 3.2 幂等与并发（`ensureRuntime`）
 
 `stage === 'ready'` 时**不发任何 IPC、不碰文件系统**，直接 `Promise.resolve(done(true))`；否则若 `inFlight` 已存在就返回同一个 Promise；否则 `inFlight = run().catch(e => fail('运行环境准备失败', String(e))).then(r => { inFlight = null; return r })`。因此「启动后台准备」与渲染层点「重新准备」天然共享同一次执行，重复点击不会并发解包。
 
 ### 3.3 启动时序
 
-`register(ctx)` 里注册完两个 handler 后立即调 `prepareInBackground()`：**延迟 2 秒**（`delayMs` 参数默认 2000）触发 `void ensureRuntime()`，让「建窗 → 首屏」先完成。这与 `updater.register()` 里 3 秒后的启动静默检查是同一思路——入口把 `runtime.register(ctx)` 排在最后也是为此（不抢启动时间）。
+`register(ctx)` 里注册完两个 handler 后**立即**调 `prepareInBackground()`：它已无参数、立刻 `void ensureRuntime()`，**不再有任何延迟**。之所以敢在启动路径上直接触发：① 需要同步做的只有几个 `existsSync` / `statSync` 探测（微秒级），重活（7za 解包、远程包下载与 sha512 校验）本身都是异步的；② 早到的进度事件渲染层收不到也没关系，外壳与设置页挂载时都会用 `runtime:status` 补齐当前状态。入口把 `runtime.register(ctx)` 排在最后，现在只是保证它的 handler 先挂上（与 `updater.register()` 里 3 秒后的启动静默检查不再是同一思路）。
 
 ### 3.4 与 `hfEnv` 的资源根交接
 
@@ -114,12 +116,12 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这�
 
 | 使用方 | 用法 |
 |--------|------|
-| `src/main/index.ts` | `runtime.register(ctx)`——装配顺序里**最后一个**（注释：自己带 2s 延迟在后台解包，不抢启动时间） |
+| `src/main/index.ts` | `runtime.register(ctx)`——装配顺序里**最后一个**（注释：启动即准备，不延迟；排最后只保证 handler 先挂上） |
 | `src/main/projects.ts` | `project:extract-video-audio` 先 `await runtime.ensureRuntime()` 等运行环境就绪（未就绪时把其 `message` / `detail` 原样返回给渲染层） |
 | `src/main/hfEnv.ts` | 资源根交接对端：本模块调 `refreshBuiltinResources(resolvedRoot)`，`hfEnv` 据此重算内置资源路径 |
 | `src/preload/index.ts` | `runtimeTools` 命名空间：`status` / `prepare` / `onProgress`（单订阅）分别转发上述三个频道 |
-| `src/renderer/src/composables/useRuntime.ts` | 模块级状态单例：`initRuntime()` 订阅 `runtime:progress` + 查一次 `runtime:status`，派生 `busy` / `failed` / `ready` / `sizeText` 与 `retry()` |
-| `src/renderer/src/App.vue`、`src/renderer/src/pages/SettingsPage/index.vue` | 外壳横幅（准备中 / 失败重试）与设置页的运行环境状态行 |
+| `src/renderer/src/composables/useRuntime.ts` | 模块级状态单例：`initRuntime()` 订阅 `runtime:progress` + 查一次 `runtime:status`，派生 `busy` / `failed` 与 `retry()`（`ready` / `sizeText` 已随「已就绪」不再展示而删除） |
+| `src/renderer/src/App.vue`、`src/renderer/src/pages/SettingsPage/index.vue` | 外壳横幅与设置页的运行环境状态行——两处都**只在「准备中 / 失败」时出现**（`runtimeVisible = busy \|\| failed`；设置页状态行 `v-if="runtimeBusy \|\| runtimeFailed"`），已就绪时界面保持干净 |
 
 ## 5. 注意事项与实现要点
 

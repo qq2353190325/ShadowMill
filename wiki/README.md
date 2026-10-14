@@ -11,13 +11,13 @@
 | # | 文档 | 内容 | 适合谁 |
 |---|---|---|---|
 | 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构、`src/` 完整目录树、构建与打包、运行时数据目录、全局约定 | 第一次接触项目的人 |
-| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（81 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
-| 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程 13 个模块的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
+| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（83 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
+| 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程 14 个模块的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
 | 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：11 个命名空间、6 路进度通道的「单订阅」语义、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
 | 4 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) | Vue 渲染层：启动链路、无 router 的注册表导航、状态与通信约定、组件分层、页面↔主进程域对照、样式策略 | 改界面 / 加页面 |
-| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（10 组 81 个）、跨进程载荷类型、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
+| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（10 组 83 个）、跨进程载荷类型、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
 | 6 | [06-目录架构-src-agent](./06-目录架构-src-agent.md) | 独立实验脚本：为什么不进构建图、5 个工具、工作区防护、运行方式 | 想跑 Agent 样例 |
-| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，`files/` 下共 **40** 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue` 与 `LegacyDataDialog.vue` 四个组件） | 需要具体实现细节时查阅 |
+| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，`files/` 下共 **42** 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue` 与 `LegacyDataDialog.vue` 四个组件） | 需要具体实现细节时查阅 |
 
 ---
 
@@ -29,9 +29,9 @@
 
 ## 三、说明文档索引
 
-> **粒度约定**（与根目录 `AGENTS.md` 的规则 5 一致）：渲染层按「**每页一篇**（该页面自己的子组件与助手并入同一篇；代码侧对应 `src/renderer/src/pages/<PageName>/` 一页一目录、入口 `index.vue`）、**`assets.md` / `components.md` 目录级各一篇**、**`common.md` 公共方法与工具一篇**」组织；主进程、preload、shared、agent 与工程根配置按源文件逐篇。
+> **粒度约定**（与根目录 `AGENTS.md` 的规则 6 一致）：渲染层按「**每页一篇**（该页面自己的子组件与助手并入同一篇；代码侧对应 `src/renderer/src/pages/<PageName>/` 一页一目录、入口 `index.vue`）、**`assets.md` / `components.md` 目录级各一篇**、**`common.md` 公共方法与工具一篇**」组织；主进程、preload、shared、agent 与工程根配置按源文件逐篇。
 
-### 3.1 `src/main/`（主进程，13 篇）
+### 3.1 `src/main/`（主进程，14 篇）
 
 | 源文件 | 说明文档 |
 |---|---|
@@ -41,6 +41,7 @@
 | `src/main/systemVoices.ts` | [main/systemVoices.ts.md](./files/main/systemVoices.ts.md) |
 | `src/main/htmlAgent.ts` | [main/htmlAgent.ts.md](./files/main/htmlAgent.ts.md) |
 | `src/main/projects.ts` | [main/projects.ts.md](./files/main/projects.ts.md) |
+| `src/main/voiceCatalog.ts` | [main/voiceCatalog.ts.md](./files/main/voiceCatalog.ts.md) |
 | `src/main/voice.ts` | [main/voice.ts.md](./files/main/voice.ts.md) |
 | `src/main/ttsAlign.ts` | [main/ttsAlign.ts.md](./files/main/ttsAlign.ts.md) |
 | `src/main/video.ts` | [main/video.ts.md](./files/main/video.ts.md) |
@@ -59,7 +60,7 @@
 | `src/shared/types.ts` | [shared/types.ts.md](./files/shared/types.ts.md) |
 | `src/shared/constants.ts`（应用级公共常量：品牌文案与请求标识） | [shared/constants.ts.md](./files/shared/constants.ts.md) |
 
-### 3.3 `src/renderer/`（渲染层，17 篇）
+### 3.3 `src/renderer/`（渲染层，16 篇）
 
 | 覆盖的文件 | 说明文档 |
 |---|---|
@@ -91,16 +92,17 @@
 | `src/agent/index.ts` | [agent/index.ts.md](./files/agent/index.ts.md) |
 | `src/agent/package.json` | [agent/package.json.md](./files/agent/package.json.md) |
 
-### 3.5 工程根配置（4 篇）
+### 3.5 工程根配置（5 篇）
 
 | 文件 | 说明文档 |
 |---|---|
 | `package.json` | [root/package.json.md](./files/root/package.json.md) |
+| `CHANGELOG.md` | [root/changelog.md](./files/root/changelog.md) |
 | `electron.vite.config.ts` | [root/electron.vite.config.ts.md](./files/root/electron.vite.config.ts.md) |
 | `tsconfig.json` / `tsconfig.node.json` / `tsconfig.web.json` / `tsconfig.agent.json` | [root/tsconfig.md](./files/root/tsconfig.md) |
 | `.gitignore` | [root/gitignore.md](./files/root/gitignore.md) |
 
-> `README.md`、`REFACTOR_PLAN.md` 属于项目级说明文档，其内容不再二次转述，直接阅读原文件即可；项目入口（项目简介 + wiki 地址）与设计规范指针见根目录 [`agents.md`](../agents.md)，界面设计规范正文在 [`src/renderer/agents.md`](../src/renderer/agents.md)。
+> `CHANGELOG.md` 是**唯一**的变更记录（更新日志 = 修改日志 = 版本记录，同一份文件），写入规则见根目录 [`agents.md`](../agents.md) 第三节与关键约定的第 3、4 条；`README.md`、`REFACTOR_PLAN.md` 属于项目级说明文档，其内容不再二次转述，直接阅读原文件即可；项目入口（项目简介 + wiki 地址）与设计规范指针见根目录 [`agents.md`](../agents.md)，界面设计规范正文在 [`src/renderer/agents.md`](../src/renderer/agents.md)。
 
 ---
 
@@ -111,6 +113,7 @@
 - **行数口径**：一律用 `[IO.File]::ReadAllLines($f).Count`（等价于阅读工具显示的 total 行数）。**不要**用 `(Get-Content $f).Count`（PowerShell 5.1 读 LF 行尾文件会少算），也不要用 `([regex]::Matches($text,"`n")).Count + 1`（以换行结尾的文件会多算 1）。
 - **代码与文档同构**：渲染层一个页面一个目录（`pages/<PageName>/`，入口 `index.vue`），wiki 对应一篇 `pages/<PageName>.md`；改目录结构时两处一起改。
 - **精确性**：文档中的频道名、导出名、字段名与源码**逐字一致**；代码变更后请同步更新对应文档（改代码前先查本索引）。
+- **更新日志必走一遍**：改任何代码前先看根目录 [`CHANGELOG.md`](../CHANGELOG.md) 的**当前版本区块**（这一版已经改了什么），改完必须在该区块**追加或更新一条**记录（影响范围 + 验证方式）；同一功能在本版内改到第 2 次的，在**最新那一条**标 `[完整版]`。细则见根目录 [`agents.md`](../agents.md) 第三节与关键约定 3、4。
 - **两类字符串不要混层**：要显示的品牌文案（应用名 / 英文名 / 口号）取 `src/shared/constants.ts`；渲染层 `localStorage` 键名取 `src/renderer/src/constants.ts`，且**故意不跟随品牌改名**（改了会丢老用户记忆，必须补迁移）。
 - **注意事项是观察记录**：文档里标注的「注意事项」包含撰写时发现的实现细节（未使用的导入、不会触发的分支、命名不一致的历史遗留等），不代表需要立即修改。
 - 本知识库不替代 `README.md`（面向使用者）与 `REFACTOR_PLAN.md`（重构历史），三者互补。
@@ -125,6 +128,7 @@
 | 加一个新的跨进程接口 | [05-目录架构-src-shared §6](./05-目录架构-src-shared.md)（三处齐改清单） |
 | 改应用名 / 英文名 / 口号 | [shared/constants.ts.md](./files/shared/constants.ts.md)（唯一来源 + 改品牌名完整清单） |
 | 发新版本 / 排查「检查更新失败」 | [main/updater.ts.md](./files/main/updater.ts.md)（发版三件套与更新源） |
+| 某个版本改了什么 / 记一次修改 | [root/changelog.md](./files/root/changelog.md) + 根目录 [`../CHANGELOG.md`](../CHANGELOG.md) |
 | 搞清楚「项目」在磁盘上长什么样 | [00-项目结构 §7](./00-项目结构.md) + [main/projects.ts.md](./files/main/projects.ts.md) |
 | 明白 HTML 是怎么被 Agent 生成的 | [01-架构总览 §5.1](./01-架构总览.md) + [main/htmlAgent.ts.md](./files/main/htmlAgent.ts.md) |
 | 查 whisper 模型档位与转录流程 | [main/whisper.ts.md](./files/main/whisper.ts.md) |

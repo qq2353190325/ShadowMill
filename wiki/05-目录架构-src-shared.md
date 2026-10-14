@@ -8,8 +8,8 @@
 
 | 文件 | 行数 | 角色 |
 |---|---|---|
-| [ipc.ts](./files/shared/ipc.ts.md) | 122 | IPC 频道名常量（10 个分组、81 个频道）+ `IpcChannel` 类型 |
-| [types.ts](./files/shared/types.ts.md) | 772 | 跨进程载荷类型（12 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情）、`RegisterCtx`、设置（含渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境包（`RuntimeStage` / `RuntimeProgressPayload`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音、语音识别、项目与字幕、预览/转视频、进度推送，以及 `PreloadApi`（`window.*` 契约唯一真源）；其中 `ProjectHtmlMaterials` 已删 `audioPath`（背景音轨由主进程注入 HTML），`ProjectSetAudioResult` 增加可选 `htmlUpdated` |
+| [ipc.ts](./files/shared/ipc.ts.md) | 127 | IPC 频道名常量（10 个分组、83 个频道）+ `IpcChannel` 类型 |
+| [types.ts](./files/shared/types.ts.md) | 821 | 跨进程载荷类型（12 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情）、`RegisterCtx`、设置（含**按厂家的 `VoiceSettings` / `VoiceProviderConfig`（只有 `apiKey`）**、渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境包（`RuntimeStage` / `RuntimeProgressPayload`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音（含 `VoiceProviderView`；`VoiceCreatePayload.audioPath` 可为本地路径 / 公网 URL / `data:audio/...` URI，本地文件裁 15 秒后走复刻接口的 `input.url`；`VoiceCreateResult` 已收缩为 `{ voice, targetModel }`）、语音识别、项目与字幕、预览/转视频、进度推送，以及 `PreloadApi`（`window.*` 契约唯一真源）；其中 `ProjectHtmlMaterials` 已删 `audioPath`（背景音轨由主进程注入 HTML），`ProjectSetAudioResult` 增加可选 `htmlUpdated` |
 | [constants.ts](./files/shared/constants.ts.md) | 30 | 应用级公共常量：品牌文案 `APP_NAME`（`'影坊'`）/ `APP_NAME_EN`（`'ShadowMill'`）/ `APP_SLOGAN` / `APP_SLOGAN_SHORT` 与出网请求标识 `APP_USER_AGENT`（`APP_NAME_EN + '/1.0'`） |
 
 > 前两个文件是**契约**（频道名与载荷格式禁止改动）；`constants.ts` 是**文案与请求标识**，改它不影响任何频道名或载荷格式。
@@ -24,16 +24,16 @@
 |---|---|---|
 | `Window` | 4 | `window:minimize`、`window:toggle-maximize`、`window:close`、`window:maximized-change` |
 | `App` | 1 | `app:copy-text` |
-| `Update` | 7 | `update:check`、`update:download`、`update:cancel`、`update:install`、`update:version`、`update:open-log`、`update:progress` |
+| `Update` | 8 | `update:check`、`update:download`、`update:cancel`、`update:install`、`update:version`、**`update:status`**、`update:open-log`、`update:progress` |
 | `Settings` | 5 | `settings:get`、`settings:save`、`settings:save-render`、`settings:save-updater`、`settings:test` |
-| `Voice` | 18 | `voice:get-config`、`voice:get-save-dir`、`voice:save-config`、`voice:pick-audio`、`voice:create`、`voice:list-system-voices`、`voice:list-models`、`voice:get-profiles`、`voice:save-profile`、`voice:delete-profile`、`voice:list`、`voice:list-all`、`voice:pick-dir`、`voice:list-generated`、`voice:synth`、`voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
+| `Voice` | 19 | `voice:get-config`、`voice:get-save-dir`、`voice:save-config`、`voice:pick-audio`、`voice:create`、`voice:list-system-voices`、`voice:list-models`、`voice:get-profiles`、`voice:save-profile`、`voice:delete-profile`、**`voice:delete-cloud`**、`voice:list`、`voice:list-all`、`voice:pick-dir`、`voice:list-generated`、`voice:synth`、`voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | `Whisper` | 12 | `whisper:status`、`whisper:download`、`whisper:delete`、`whisper:set-current`、`whisper:add-model`、`whisper:update-model`、`whisper:remove-model`、`whisper:open-dir`、`whisper:project-audio`、`whisper:pick-audio`、`whisper:transcribe`、`whisper:progress` |
 | `Project` | 25 | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-video`、`project:set-video`、`project:clear-video`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、`project:html-progress` |
 | `Video` | 4 | `dialog:open-html`、`video:show-in-folder`、`video:render`、`video:progress` |
 | `Runtime` | 3 | `runtime:status`、`runtime:prepare`、`runtime:progress` |
 | `Legacy` | 2 | `legacy:status`、`legacy:resolve`（历史数据目录：问一次「有没有 / 是什么」+ 回传处置选择；**没有推送频道**，界面在渲染层） |
 
-合计 **81** 个频道（Window 4 + App 1 + Update 7 + Settings 5 + Voice 18 + Whisper 12 + Project 25 + Video 4 + Runtime 3 + Legacy 2）。
+合计 **83** 个频道（Window 4 + App 1 + Update 8 + Settings 5 + Voice 19 + Whisper 12 + Project 25 + Video 4 + Runtime 3 + Legacy 2）。
 
 三个容易踩的点：
 
@@ -53,7 +53,7 @@
 |---|---|---|
 | ① 通用 IPC 结果 | 全部 `{ ok, ... }` 结果的形状 | `IpcFail`（`ok:false` + 可选 `message` / `detail` / `canceled`）、`IpcResult<T> = ({ ok: true } & T) \| IpcFail`（**取代**旧版只存在于 `preload/index.d.ts` 内部的 `OkResult` / `FailResult`） |
 | ② 主进程装配上下文 | `register(ctx)` 的能力面 | `RegisterCtx`（`getWindow: () => BrowserWindow \| null`） |
-| ③ 设置 | `userData/settings.json` 的完整 schema 与 `settings:*` 载荷 | `CustomModelConfig`、`VoiceTTSConfig`、`VoiceProfile`、`VoiceProfileType`、`VoiceProfileInput`、`WhisperCustomModel`、`WhisperSettings`、`UpdaterSettings`、`AppSettings`、`SettingsSaveResult` |
+| ③ 设置 | `userData/settings.json` 的完整 schema 与 `settings:*` 载荷 | `CustomModelConfig`、**`VoiceSettings` + `VoiceProviderConfig`**、`VoiceTTSConfig`（旧结构，仅迁移来源）、`VoiceProfile`、`VoiceProfileType`、`VoiceProfileInput`、`WhisperCustomModel`、`WhisperSettings`、`UpdaterSettings`、`AppSettings`、`SettingsSaveResult` |
 | ③.5 应用自更新 | `update:*` 的检查结果与进度载荷 | `UpdateCheckState`、`UpdateCheckResult`（**`message` 必填** + 可选 `detail`）、`UpdateStage`、`UpdateProgressPayload`（含可选 `detail`） |
 | ③.6 运行环境包 | 运行环境包的阶段与进度载荷 | `RuntimeStage`、`RuntimeProgressPayload`（`stage` / `percent` / `id` / `message` / `detail?` / `source` / `bytes` / `unpackedBytes` / `files`） |
 | ⑧b 历史数据目录 | 旧数据扫描结论与处置契约 | `LegacyDataInfo`（`dir` / `entries` / `projects`）、`LegacyResolveAction`（`'migrate' \| 'delete' \| 'later'`）、`LegacyResolveResult`（`ok` / `action` / `moved?` / `skipped?` / `failed?` / `message?`） |
@@ -62,7 +62,7 @@
 | ⑥ 项目与字幕 | `project.json`、字幕行、HTML 生成载荷 | `Scene`、`ContentScript`、`Project`、`SubtitleLine`、`ProjectMeta`、`ProjectAgentPayload`、`ProjectHtmlResult` |
 | ⑦ 预览 / 转视频 | 渲染载荷与结果、进度 | `VideoRenderPayload`、`VideoRenderResult`、`VideoProgressPayload` |
 | ⑧ 进度推送 | 6 路 main → renderer 推送载荷 | `HtmlProgressPayload`、`WhisperProgressPayload`、`AlignProgressPayload`、`VideoProgressPayload`、`UpdateProgressPayload`、`RuntimeProgressPayload` |
-| ⑨ `window.*` 契约 | 11 个命名空间的完整方法签名 | `PreloadApi`（preload 实现与渲染层消费的唯一真源；`updateTools` 含 `openLog`，`runtimeTools` / `legacyTools` 分别对应运行环境包与旧数据处置） |
+| ⑨ `window.*` 契约 | 11 个命名空间的完整方法签名 | `PreloadApi`（preload 实现与渲染层消费的唯一真源；`updateTools` 含 `status`（取一次常驻更新状态）与 `openLog`，`runtimeTools` / `legacyTools` 分别对应运行环境包与旧数据处置） |
 
 四条关键约定：
 

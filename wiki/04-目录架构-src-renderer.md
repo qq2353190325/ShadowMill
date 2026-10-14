@@ -1,6 +1,6 @@
 # 04 · 目录架构：`src/renderer/`（渲染层）
 
-> Vue 3 + TypeScript 的界面层，共 37 个文件（`index.html` 1 + 设计规范 `agents.md` 1 + `src/` 下 35：外壳 `App.vue` 1 + 入口 `main.ts` / `env.d.ts` 2 + **渲染层常量 1** + 样式 1 + 通用组件 4（`StepBar.vue` / `NewProjectDialog.vue` / `HfSelect.vue` / `LegacyDataDialog.vue`） + composables 6 + utils 4 + 页面 16（一页一目录，入口统一 `index.vue`，含注册表 `pages/index.ts`））。刻意**不引入** vue-router 与 pinia：导航是一个注册表 + `goPage()` 函数，全局状态是模块级 `reactive` 单例。所有系统能力都经 `window.*`（preload 桥）访问。
+> Vue 3 + TypeScript 的界面层，共 38 个文件（`index.html` 1 + 设计规范 `agents.md` 1 + `src/` 下 36：外壳 `App.vue` 1 + 入口 `main.ts` / `env.d.ts` 2 + **渲染层常量 1** + 样式 1 + 通用组件 4（`StepBar.vue` / `NewProjectDialog.vue` / `HfSelect.vue` / `LegacyDataDialog.vue`） + composables 7 + utils 4 + 页面 16（一页一目录，入口统一 `index.vue`，含注册表 `pages/index.ts`））。刻意**不引入** vue-router 与 pinia：导航是一个注册表 + `goPage()` 函数，全局状态是模块级 `reactive` 单例。所有系统能力都经 `window.*`（preload 桥）访问。
 
 ---
 
@@ -9,25 +9,26 @@
 ```
 src/renderer/
 ├─ index.html                    # 103 行  HTML 宿主：#app + 启动画面（内联样式，不等 JS）+ CSP meta + 模块入口；品牌文案用 %APP_*% 占位、构建期注入
-├─ agents.md                     # 139 行   科技主题（Cyber UI / 深空科技）设计规范正文（自 pages/ 上提到 renderer/ 层）
+├─ agents.md                     # 174 行   科技主题（Cyber UI / 深空科技）设计规范正文（自 pages/ 上提到 renderer/ 层）
 └─ src/
    ├─ main.ts                    #  15 行   createApp + 挂载 + 导入全局 CSS + 启动画面淡出移除
    ├─ App.vue                    # 232 行   外壳：标题栏（文案取 @shared/constants 的 APP_NAME）+ 运行环境横幅 + 侧栏菜单 + 页面容器 + 旧数据弹窗宿主 + Toast + 启动流程（initRenderProgress → initRuntime → initLegacyData → initApp）
    ├─ env.d.ts                   #   8 行   .vue 等模块类型补丁
-   ├─ constants.ts               #  14 行   渲染层公共常量：localStorage 键名前缀 + 两个持久化键（不跟随品牌名，改前缀必须补迁移）
+   ├─ constants.ts               #  59 行   渲染层公共常量：localStorage 键名前缀 + 两个持久化键（不跟随品牌名，改前缀必须补迁移）
    ├─ assets/
    │  └─ main.css                # 全局设计系统（深空科技主题，行数随迭代增长）
    ├─ components/
    │  ├─ StepBar.vue             #  90 行   五节点链路状态条 + 工作项目切换器（新建入口改为弹窗）
    │  ├─ NewProjectDialog.vue    #  83 行   新建项目弹窗（创建 + 刷新 + 切换，成功后 emit created）
-   │  ├─ HfSelect.vue            # 378 行   全局自绘下拉（Teleport 弹层 + 分组 + 键盘导航），替代原生 select
+   │  ├─ HfSelect.vue            # 382 行   全局自绘下拉（Teleport 弹层 + 分组 + 键盘导航），替代原生 select
    │  └─ LegacyDataDialog.vue    # 102 行   「发现旧版本数据」应用内弹窗（迁移 / 删除 / 稍后；无 props / emits，状态取自 useLegacyData）
    ├─ composables/
    │  ├─ useAppStore.ts          # 107 行   全局项目状态单例（appState / has* / refreshProject；含项目级渲染档位覆盖）；上下文键取 @renderer/constants
    │  ├─ useToast.ts             #  22 行   轻提示
    │  ├─ useRenderProgress.ts    #  92 行   HyperFrames 渲染进度解析（长阶段中文名 + 内部微阶段不上屏）
-   │  ├─ useRuntime.ts           #  48 行   运行环境包状态单例（runtime:progress 订阅 + runtime:status 首帧补齐；busy / failed / ready / sizeText / retry）
+   │  ├─ useRuntime.ts           #  43 行   运行环境包状态单例（runtime:progress 订阅 + runtime:status 首帧补齐；busy / failed / retry）
    │  ├─ useLegacyData.ts        #  60 行   旧数据提示单例（legacy:status 问一次 → 弹窗；resolve(action) 回传 legacy:resolve，条目名转中文）
+   │  ├─ useNavIntent.ts         #  30 行   跨页「导航意图」信号单例（requestSettingsSection / consumeSettingsSection；设置页 5 个分类枚举的唯一来源 SETTINGS_SECTIONS）
    │  └─ useRenderOptions.ts     #  41 行   渲染档位：全局默认载入 / 生效档位 / 项目级覆盖写入
    ├─ utils/
    │  ├─ escape.ts               #   4 行   escTxt 文本转义
@@ -35,7 +36,7 @@ src/renderer/
    │  ├─ time.ts                 #  15 行   fmtTime / fmtTimeMs
    │  └─ render.ts               #  55 行   渲染档位选项表与纯函数（pickRenderOverride / resolveRenderOptions …）
    └─ pages/                     # 一个页面一个文件夹，入口统一 index.vue
-      ├─ index.ts                #  40 行   页面注册表 + goPage 路由（归属「公共方法与工具」一篇）
+      ├─ index.ts                #  51 行   页面注册表 + goPage 路由（刷新失败照切页 + toast；归属「公共方法与工具」一篇）
       ├─ HomePage/
       │  └─ index.vue            #  86 行   首页（hero 角标与主标题均取 @shared/constants + 参数行 + 流水线 + 我的项目卡片）
       ├─ AboutPage/
@@ -43,27 +44,27 @@ src/renderer/
       ├─ ContentPage/
       │  └─ index.vue            # 106 行   内容脚本
       ├─ TextTtsPage/
-      │  ├─ index.vue            #  43 行   配音页外壳（三个 Tab：文字生音频 / 字幕配音 / 音色管理）
-      │  ├─ SynthSection.vue     # 360 行   文字生音频卡
-      │  ├─ AlignSection.vue     # 293 行   字幕配音（逐句对齐）卡
-      │  ├─ VoiceSection.vue     # 320 行   音色管理卡组（创建克隆音色 / 我的音色 / 音色映射；原独立页 SoundCopyPage 并入本 Tab）
-      │  └─ helpers.ts           # 129 行   配音助手（音色载入/分组/校验、「管理音色」Tab 信号）
+      │  ├─ index.vue            #  37 行   配音页外壳（三个 Tab：文字生音频 / 字幕配音 / 音色管理；**Tab 值用 helpers 的 `activeTtsTab`**，切 Tab 只有本页按钮一个入口）
+      │  ├─ SynthSection.vue     # 373 行   文字生音频卡（音色/模型下拉受「Key 已配置」门控；**切回本 Tab 自动重拉音色**）
+      │  ├─ AlignSection.vue     # 313 行   字幕配音（逐句对齐）卡（音色同样门控 + 未就绪时的「API Key 设置」按钮；切回本 Tab 自动重拉音色）
+      │  ├─ VoiceSection.vue     # 520 行   音色管理卡组（创建克隆音色弹窗——Qwen-Audio-TTS 系列的本地文件 / 公网 URL **二选一、填了 URL 以 URL 为准**，提交名**统一 10 位**（模块级 `CLONE_PREFIX_MAX`，原 10 / 16 分流已删）；弹窗说明只剩 `qwen-audio-3.0-tts-flash` 一条并提醒审核期间合成会失败；我的音色列表（**4 列、不显示音色 ID、行尾「删云端」动作**，**审核状态非 OK 时在第 3 列追加「（审核中 / 审核未通过）」**）/ 音色映射（**系统音色的合成模型固定不可改**）；**模型下拉按厂家分组**；创建弹窗的模型受 Key 门控；卡内 `requireCfg` 走 helpers 的 `readActiveCfg`；**切回本 Tab 自动重拉列表**；原独立页 SoundCopyPage 并入本 Tab）
+      │  └─ helpers.ts           # 177 行   配音助手（**三卡共用的 `activeTtsTab`**、**配置形状的唯一读取入口 `readActiveCfg`**、**Key 就绪状态** `voiceKeyReady` / `activeProviderLabel` / `refreshVoiceKeyState`、音色载入/分组；切 Tab 信号已删除）
       ├─ SubtitlePage/
       │  ├─ index.vue            # 253 行   字幕条目编辑
       │  ├─ TranscribeSection.vue# 350 行   转录弹窗
       │  └─ helpers.ts           # 165 行   字幕助手（估时、条目类型等）
       ├─ HtmlGenPage/
-      │  └─ index.vue            # 644 行   HTML 生成 / 修改（「生成 HTML」与「按需求修改」两个并列按钮，**每个动作按钮内部各带一个 `?`**（悬浮只显示该动作自己的说明；动作行末尾不再有独立 `?`）；生成点一次即执行、无二次确认，按需求修改在无 HTML 时禁用；字幕 / 视频素材选配：视频只有一个入口，可选项目现有素材或当场导入）+ 背景音频选定 + 预览 + 转视频（含渲染档位）
+      │  └─ index.vue            # 714 行   HTML 生成 / 修改（「生成 HTML」与「按需求修改」两个并列按钮，**每个动作按钮内部各带一个 `?`**（悬浮只显示该动作自己的说明；动作行末尾不再有独立 `?`）；生成点一次即执行、无二次确认，按需求修改在无 HTML 时禁用；字幕 / 视频素材选配：视频只有一个入口，可选项目现有素材或当场导入）+ 背景音频选定 + 预览 + 转视频（含渲染档位）
       ├─ VideoPreviewPage/
       │  └─ index.vue            #  88 行   视频预览（纯预览：成品播放 / 定位；「转视频」与渲染档位在 HTML生成页）
       └─ SettingsPage/
-         ├─ index.vue            # 551 行   设置（左侧分类导航：自定义模型 / 千问语音 / 渲染默认档位 / 应用更新 / 语音识别模型；分类记忆键取 @renderer/constants）
+         ├─ index.vue            # 714 行   设置（左侧分类导航：自定义模型 / **语音服务（按厂家，只有 API Key）** / 渲染默认档位 / 应用更新 / 语音识别模型；分类记忆键取 @renderer/constants，分类枚举取 @renderer/composables/useNavIntent）
          └─ WhisperSection.vue   # 274 行   语音识别模型管理区块
 ```
 
 > **行数口径**：与 [README](./README.md) §4 一致，用 `[IO.File]::ReadAllLines($f).Count`（等价于阅读工具显示的 total 行数）；**不要**用 `(Get-Content $f).Count`（PS 5.1 读 LF 行尾会少算）或 `([regex]::Matches($text,"`n")).Count + 1`（以换行结尾会多算 1）。
 >
-> **文件计数**：`index.html`(1) + `agents.md`(1) + `src/` 下 35 个（`main.ts` / `App.vue` / `env.d.ts` / `constants.ts` / `assets/main.css` / `components` 4 / `composables` 6 / `utils` 4 / `pages` 16）= **37**。
+> **文件计数**：`index.html`(1) + `agents.md`(1) + `src/` 下 36 个（`main.ts` / `App.vue` / `env.d.ts` / `constants.ts` / `assets/main.css` / `components` 4 / `composables` 7 / `utils` 4 / `pages` 16）= **38**。
 
 ---
 
@@ -103,15 +104,19 @@ export const pageNavKey = ref(0)
 
 export async function goPage(key: PageKey) {
   activeMenu.value = key
-  await refreshProject()      // 先刷新项目状态，再换页
-  currentPage.value = pages[key]
-  pageNavKey.value++          // 递增 key 强制重挂载
+  try {
+    await refreshProject()          // 刷新项目上下文（两次 IPC）
+  } catch (e) {                     // 刷新失败不能拖住导航
+    toast('项目信息刷新失败：' + msg)
+  }
+  currentPage.value = pages[key]    // 无论刷新成败都换页
+  pageNavKey.value++                // 递增 key 强制重挂载
 }
 ```
 
 三个设计要点：
 
-1. **`goPage` 有「先刷新项目再渲染」的副作用**，因此保留函数式导航而不是声明式路由。
+1. **`goPage` 有「先刷新项目再渲染」的副作用**：刷新失败**也照切页**，只把原因 `toast` + `console.error` 说出来（旧写法是把 `refreshProject()` 的异常抛给调用方，界面会停在「菜单亮了、页面没换」的半截状态），因此保留函数式导航而不是声明式路由。
 2. **`pageNavKey` 作为 `<component :is>` 的 `key`**：Vue 复用同组件实例时不会重跑 `onMounted`，会导致「同页切换项目后页面数据/预览残留旧项目状态」。递增 key 强制重挂载，恢复「每次进入页面重新加载当前项目」的旧语义。
 3. **组件对象用 `shallowRef`**：避免 Vue 深度代理组件定义。
 
@@ -148,8 +153,9 @@ export async function goPage(key: PageKey) {
 | 时间格式 | `fmtTime`（`[分:秒]`）/ `fmtTimeMs`（`[分:秒.毫秒]`），字幕与配音对齐共用 | `utils/time.ts` |
 | 播放语速 | `applyRate` / `stepRate`，仅改 `playbackRate`，不动磁盘音频 | `utils/rate.ts` |
 | 渲染档位 | 项目覆盖（`project.json` 的 `render`）> 全局默认（`settings.json` 的 `render`）> 内置默认（`standard` / `30`）；缺省字段逐级继承 | `composables/useRenderOptions.ts` + `utils/render.ts` |
-| 运行环境包状态 | 模块级 `ref` 单例 `runtime`（`RuntimeProgressPayload`）：`initRuntime()` 先订阅 `runtime:progress` 再查一次 `runtime:status` 补齐首帧；派生 `busy` / `failed` / `ready` / `sizeText` 与 `retry()` | `composables/useRuntime.ts`（`App.vue` 的横幅、设置页的状态行） |
+| 运行环境包状态 | 模块级 `ref` 单例 `runtime`（`RuntimeProgressPayload`）：`initRuntime()` 先订阅 `runtime:progress` 再查一次 `runtime:status` 补齐首帧；派生 `busy` / `failed` 与 `retry()`（`ready` / `sizeText` 已随「已就绪」不再展示而删除） | `composables/useRuntime.ts`（`App.vue` 的横幅、设置页的状态行——两处都只在「准备中 / 失败」时出现） |
 | 旧数据提示 | 模块级单例 `info` / `visible` / `busy`：`initLegacyData()` 问一次 `legacy:status`，有结果就弹应用内弹窗；`resolve(action)` 回传 `legacy:resolve`（**无论成败都先收起弹窗**，结果由调用方 toast） | `composables/useLegacyData.ts` + `components/LegacyDataDialog.vue` |
+| 跨页导航意图 | 模块级 `ref` 单例 `settingsSectionRequest`：源页 `requestSettingsSection(section)` 置位 → 目标页 `consumeSettingsSection()` 读取并复位（`onMounted` 主路径 + `watch` 兜底），用于「带着分类跳进设置页」（配音页「API Key 设置」→ 设置页「语音服务」）；设置页 5 个分类枚举的唯一来源 | `composables/useNavIntent.ts` |
 
 ---
 
@@ -174,14 +180,14 @@ export async function goPage(key: PageKey) {
 | AboutPage | 纯静态 | — |
 | ContentPage | 编辑并保存内容脚本（style + scenes） | `projectTools` |
 | TextTtsPage | 壳：Tab 切换三个子卡（文字生音频 / 字幕配音 / 音色管理） | — |
-| ├ SynthSection | 音色/模型选择、文字合成、试听、设为背景音频、已生成音频列表 | `voiceTools`、`projectTools` |
+| ├ SynthSection | 音色/模型选择（**模型按厂家分组**）、文字合成、试听、设为背景音频、已生成音频列表 | `voiceTools`、`projectTools` |
 | ├ AlignSection | 逐句对齐（模式 A/B）、进度与取消、结果写回字幕与音频 | `voiceTools`、`projectTools` |
-| └ VoiceSection | 创建克隆音色、云端/系统音色列表、本地显示名与绑定模型（原独立页 `SoundCopyPage`） | `voiceTools` |
+| └ VoiceSection | 创建克隆音色（`Teleport` 弹窗）、云端/系统音色列表（**按厂家**）、本地显示名与绑定模型（原独立页 `SoundCopyPage`） | `voiceTools` |
 | SubtitlePage | 字幕条目编辑、SRT 写入方式、复制、导出、由脚本旁白生成、保存 | `projectTools` |
 | └ TranscribeSection | 选音频与语言、转录、进度、结果替换/追加 | `whisperTools` |
 | HtmlGenPage | 提示词生成/修改 HTML（**两个并列按钮**：「生成 HTML」/「按需求修改」，区别由**每个动作按钮内部各自的 `?`** 悬浮说明承载（一个动作一个，只讲自己那个动作；动作行末尾不再有独立 `?`）；「按需求修改」在无 HTML 时禁用，「生成 HTML」点一次即执行、无二次确认；主进程两个频道各自独立未合并）、素材选配（字幕 / 视频素材）、**背景音频选定**（音轨由主进程注入 HTML，不经 Agent）、预览、下载、AI 思考过程、**转视频（点按钮先开「渲染档位」弹窗，确认后渲染）** | `projectTools`（`onHtmlProgress`、`setAudio` / `clearAudio`、`extractVideoAudio`、`saveVideo`、`setRender`）、`hfTools`（`renderVideo`）、`voiceTools`（`listGenerated`，仅填充音频下拉）、全局 `renderProgress` / `renderDefaults` |
 | VideoPreviewPage | 纯预览：播放 / 定位当前项目成品 MP4（`<video class="hf-video" controls>`），无成品时给引导文案；**不再发起渲染** | `projectTools`（经 `refreshProject`）、`hfTools`（`showInFolder`）、全局 `renderProgress` |
-| SettingsPage | 自定义模型（含测试连接）、千问语音配置、渲染默认档位、**应用更新**（版本显示 / 检查 / 下载 / 取消 / 重启安装 / 更新源与启动检查开关 / 跳过版本 / 「查看详情 · 收起详情」折叠排障详情 / 常驻的「打开日志目录」） | `settingsTools`、`voiceTools`、`updateTools` |
+| SettingsPage | 自定义模型（含测试连接）、**语音服务配置（按厂家：厂家下拉 + API Key；模型与音色由厂家目录固定）**、渲染默认档位、**应用更新**（版本显示 / 检查 / 下载 / 取消 / 重启安装 / 更新源与启动检查开关 / 跳过版本（**按钮标签与写入 `skippedVersion` 都用目标版本 `updateNewVersion`**，与只作「当前版本」显示的 `updateVersion` 分开）/ 「查看详情 · 收起详情」折叠排障详情 / **仅更新出错时才出现的「打开日志目录」**（`updateLogVisible = updateStage === 'error' \|\| updateStatusClass === 'hf-error'`）/ 挂载时用 `updateTools.status()` 补齐主进程状态）、运行环境状态行（只在「准备中 / 失败」时显示） | `settingsTools`、`voiceTools`（`listModels` 取厂家目录 / `saveConfig` 按厂家保存 apiKey）、`updateTools` |
 | └ WhisperSection | 识别模型下载/删除/设为当前、自定义模型管理、占用统计 | `whisperTools` |
 
 > 具体方法名与参数见 [files/renderer/](./files/renderer/) 下的页面 / 组件 / 公共方法 / 文件级文档（每页一篇，页面自己的子组件与助手并入该篇）；频道 ↔ 命名空间总表见 [01-架构总览 §3.3](./01-架构总览.md)。
@@ -190,7 +196,7 @@ export async function goPage(key: PageKey) {
 
 ## 6. 样式策略
 
-- **全局设计系统**：`assets/main.css`（1541 行）承载根变量、标题栏、布局、菜单、卡片、按钮、表单、表格、`step-bar` 以及各页面专有样式（按源码注释可划分为约 33 个样式节，含新增的首页项目卡片 `.proj-*`、首页 hero 参数行 `.hero-sub`、设置页左侧导航 `.settings-*` 与排障详情块 `.hf-detail`）；由 `main.ts` 全局导入。视觉规范（配色、辉光、字号、间距、圆角）写在 `src/renderer/agents.md`（科技主题设计规范，已随渲染层代码上提到 `renderer/` 层；根目录 `agents.md` 只是指向它的指针）。
+- **全局设计系统**：`assets/main.css`（1674 行）承载根变量、标题栏、布局、菜单、卡片、按钮、表单、表格、`step-bar` 以及各页面专有样式（按源码注释可划分为约 34 个样式节，含首页项目卡片 `.proj-*`、首页 hero 参数行 `.hero-sub`、设置页左侧导航 `.settings-*`、排障详情块 `.hf-detail`、配音页「我的音色」列表 `.panel-head*` / `.voice-list*` / `.voice-*`（含危险按钮 `.hf-btn-danger` 与行尾动作列 `.voice-actions`）与可拖动跳转的预览进度条 `.hg-prev-*`）；由 `main.ts` 全局导入。其中 `html, body` 另设**全局基准字号 `font-size: 14px`**（设计规范「正文」档，改动前未设、未显式声明字号的文字会落到 Chromium 默认 16px）。视觉规范（配色、辉光、字号、间距、圆角）写在 `src/renderer/agents.md`（科技主题设计规范，已随渲染层代码上提到 `renderer/` 层；根目录 `agents.md` 只是指向它的指针；列表面板的结构约定见该文件 §5.6）。
 - **组件补充**：经核查，全部 `.vue` 中**只有 `App.vue` 带 `<style scoped>`**（Toast 宿主 `.toast-host` / `.toast-item`），其余页面/组件不含样式块，完全依赖 `main.css` 的类名。新增样式时优先在 `main.css` 内按节追加，保持设计系统集中。**唯一例外是启动画面**（`index.html` 的内联 `<style>`）：`main.css` 要等 Vue 挂载才由 JS 注入，启动画面必须自包含，因此它不引用任何 CSS 变量。
 - 主题通过 CSS 变量（`--bg-primary`、`--color-primary`、`--text-secondary`、`--glow-*`、`--radius-*` 等）切换，若要加亮色模式只需在 `:root[data-theme="light"]` 覆盖变量。
 
@@ -205,6 +211,7 @@ export async function goPage(key: PageKey) {
 5. **CSP 禁止运行时模板编译**：SFC 全部预编译，不要使用 `Vue.compile` / 字符串模板。
 6. **唯一的同步 IPC 在设置页**：`updateTools.version()` 是 `sendSync`（首屏立刻显示当前版本号），调用点只在 `SettingsPage` 的 `onMounted` 里、且包在 `try` 中；新增页面不要模仿这个做法，异步接口足够。
 7. **两类字符串归属不同，别放错层**：要显示的**品牌文案**（应用名 / 英文名 / 口号）取 `@shared/constants`（三端共用，可随品牌改）；**`localStorage` 键名**取 `@renderer/constants`（**故意不跟随品牌改名**，改了会让老用户丢「上次项目 / 设置页分类」记忆，必须补「读旧键 → 写新键」迁移）。页面里不要写裸字面量。
+8. **改代码前先看更新日志、改完必记一条**：动渲染层任何源码前，先看根目录 `CHANGELOG.md` 的**当前版本区块**（这一版已经改了什么，避免重复实现、避免与已写下的决定打架），改完必须在该区块**追加或更新一条**记录（`[标签]` + 影响范围 + 验证方式）；同一功能在本版内改到第 2 次的，在最新那一条标 `[完整版]`。与根 `agents.md` 关键约定 3、4 一致。
 
 ---
 

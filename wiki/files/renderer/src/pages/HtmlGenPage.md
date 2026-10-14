@@ -2,10 +2,10 @@
 
 > HTML 生成 / 修改 + 素材选配（字幕 / 视频）+ 背景音频选定（音轨由主进程注入 HTML）+ 实时预览 + AI 思考过程展示 + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染）**。
 
-- **覆盖文件**：`HtmlGenPage/index.vue`（本目录唯一文件，644 行）
+- **覆盖文件**：`HtmlGenPage/index.vue`（本目录唯一文件，714 行）
 - **所在目录**：`src/renderer/src/pages/HtmlGenPage/`
 - **类型**：页面组件（SFC，`<script setup lang="ts">`）
-- **规模**：644 行
+- **规模**：714 行
 - **对外导出**：默认导出组件（无 props；模板内渲染子组件 `StepBar`）
 
 ## 1. 作用与职责
@@ -32,7 +32,7 @@
 | 状态合并显示（渲染中优先显示全局 trace） | `statusDisplay` / `statusDisplayClass` computed |
 | 进度阶段文案 + AI 思考原文实时展示 | `onHtmlProgress` 订阅 + `status` / `thinkText` + `thinkPreEl` |
 | 预览画布（1920×1080 等比缩放） | `loadFrame` + `fitFrame` + `iframe.hgen-frame` |
-| 预览播放控制（暂停/播放/重新播放/进度条） | `onPrevToggle` `onPrevReplay` `onPrevMessage` |
+| 预览播放控制（默认静止；暂停/播放/重新播放/进度条**可点可拖跳转**） | `onPrevToggle` `onPrevReplay` `onPrevMessage` + `seeking` / `seekPending` / `onSeekStart` / `onSeekMove` / `onSeekEnd`（seek，带 ack 与 800ms 兜底） |
 | 下载 HTML 到本地 | `onDownload` |
 | 顶部流程条 | `<StepBar :page="'html-gen'" />` |
 
@@ -64,7 +64,7 @@
 | `.empty-hint` `v-show="emptyVisible"` | 空态 / 失败态提示，文本 `emptyText` |
 | `.hgen-frame-wrap` `v-show="frameVisible"` | 预览画布容器（`ref="frameWrapEl"`，CSS `padding-bottom:56.25%` 维持 16:9） |
 | `iframe.hgen-frame` | `:src="frameSrc"`、`sandbox="allow-scripts allow-same-origin"`、`@load="onFrameLoad"` |
-| `.hg-prev-ctl` `v-show="ctlVisible"` | `暂停`/`播放`（`prevToggleText`，`onPrevToggle`）、`重新播放`（`onPrevReplay`）、`.hg-prev-bar-fill`（宽度 `prevFillPct`）、`.hg-prev-time`（`prevTimeText`） |
+| `.hg-prev-ctl` `v-show="ctlVisible"` | `暂停`/`播放`（`prevToggleText`，`onPrevToggle`）、`重新播放`（`onPrevReplay`）、进度条 `.hg-prev-bar`（`:class="{ seeking }"`、`title="点击或按住拖动进度条，可跳转到任意播放位置"`、`@pointerdown="onSeekStart"` / `@pointermove="onSeekMove"` / `@pointerup="onSeekEnd"` / `@pointercancel="onSeekEnd"`；内层 `.hg-prev-track` 再包 `.hg-prev-bar-fill`，宽度 `prevFillPct`——热区与视觉条分离）、`.hg-prev-time`（`prevTimeText`）、`.hg-prev-hint`（`v-if="!prevPlaying && prevDur > 0 && prevTimeCur < 0.05"`，文案「已暂停在第 0 帧 · 起始帧本就是空的，点「播放」或拖动进度条」） |
 
 ## 3. 脚本逻辑
 
@@ -93,7 +93,10 @@
 | `emptyVisible` | `ref(true)` | 是否显示空态提示 |
 | `emptyText` | `ref('尚未生成 HTML。')` | 空态 / 失败态文案 |
 | `ctlVisible` | `computed<boolean>` | 等同 `frameVisible.value` |
-| `prevPlaying` | `ref(true)` | 预览是否处于播放态，决定 `prevToggleText` |
+| `prevPlaying` | `ref(true)` | 预览是否处于播放态，决定 `prevToggleText`；载入完成时置 `false`（预览**不自动播放**），之后由画面回报的 `playing` 校准 |
+| `seeking` | `ref(false)` | 是否正在拖动进度条：拖动期间本地跟手、**忽略画面回报**（见 4.5），并给 `.hg-prev-bar` 加 `.seeking`（关掉填充的 0.25s 过渡） |
+| `seekPending` | `ref(false)` | 松手后等待画面 `ack` 期间：只更新总时长、位置与播放状态一律不采信（避免被「拖动前发出的旧回报」拽回原位） |
+| `seekAckTimer` | `let seekAckTimer = 0` | **模块级普通变量**（非 ref）：`onSeekEnd` 起的 800ms 兜底定时器，收到 `ack` 或卸载时清掉 |
 | `prevDur` | `ref(0)` | 预览总时长（秒，来自 iframe 上报） |
 | `prevTimeCur` | `ref(0)` | 预览当前时间（秒，来自 iframe 上报） |
 | `prevFillPct` | `computed<string>` | 进度条宽度百分比，`prevDur > 0` 时上限 100，保留 2 位小数 |
@@ -123,10 +126,15 @@
 |------|------|
 | `watch(thinkText, …)` | 思考文本变化后把 `thinkPreEl.scrollTop` 设为 `scrollHeight`，实现自动滚到底部 |
 | `fmtPrev(sec)` | 秒 → `mm:ss`（`Math.floor`、`padStart(2,'0')`） |
-| `prevPost(type)` | 向 iframe 的 `contentWindow` 发送 `{ __hg: true, type }`，目标源 `'*'` |
-| `onPrevMessage(ev)` | 过滤 `d.__hg && d.type === 'progress'`，写入 `prevTimeCur` / `prevDur`；播放中且到达 `prevDur - 0.25` 时置 `prevPlaying = false`（视为自然播完） |
+| `prevPost(type, seconds?)` | 向 iframe 的 `contentWindow` 发送 `{ __hg: true, type, seconds }`，目标源 `'*'`；`seconds` 只在 `'seek'` 时给值（其余类型为 `undefined`，画面侧忽略） |
+| `onPrevMessage(ev)` | 过滤 `d.__hg && d.type === 'progress'`；先看 `d.ack === true`（画面收到 seek 后的应答）：命中则清 `seekPending` 与 `seekAckTimer`；随后**拖动中、或 `seekPending` 且本条不是 ack** 时只更新 `prevDur` 并 `return`（不采信 `time` / `playing`）；否则写 `prevTimeCur` / `prevDur` 并按 `d.playing` 校准 `prevPlaying`；最后播放中且到达 `prevDur - 0.25` 时置 `prevPlaying = false`（视为自然播完） |
+| `seekRatio(ev)` | 指针事件的 `clientX` 相对 `.hg-prev-bar` 的 `getBoundingClientRect()` 求比例，钳制到 `0 ~ 1`（宽度为 0 时返回 0） |
+| `seekTo(ev)` | `prevDur <= 0` 直接返回（总时长还没上报、无从换算）；否则 `sec = seekRatio(ev) * prevDur`，**本地立即**写 `prevTimeCur = sec` 并 `prevPost('seek', sec)` |
+| `onSeekStart(ev)` | 无 `frameSrc` 或 `prevDur <= 0` 时忽略；置 `seeking = true`、`setPointerCapture(ev.pointerId)`（拖出进度条甚至拖到按钮上仍继续收 move），随即 `seekTo(ev)` |
+| `onSeekMove(ev)` | 仅当 `seeking` 时 `seekTo(ev)` |
+| `onSeekEnd(ev)` | 非拖动中直接返回；置 `seeking = false`、`releasePointerCapture`；随后置 `seekPending = true` 并起 800ms 兜底定时器（`seekAckTimer`）——在收到画面的 `ack` 之前不采信回报，超时则强制恢复采信（画面里若是旧脚本也不会让进度条永远不更新） |
 | `fitFrame()` | `frame.style.transform = 'scale(' + (wrap.clientWidth / 1920) + ')'` |
-| `onFrameLoad()` | 每次 iframe 载入（含 `restart` 引发的 reload）复位 `prevPlaying = true`、`prevDur = 0`、`prevTimeCur = 0`，并调用 `fitFrame()` |
+| `onFrameLoad()` | 每次 iframe 载入（含 `restart` 引发的 reload）复位 `prevPlaying = false`（**刻意不主动起播**：预览默认静止在第 0 帧，播放交给用户，按钮由画面回报的 `playing` 校准）、`prevDur = 0`、`prevTimeCur = 0`，并调用 `fitFrame()`；源码注释：合成是 `paused: true` 创建 + 开头 `opacity: 0`，首帧本来就是空的，不是加载失败 |
 | `onPrevToggle()` | 无 `frameSrc` → `toast('暂无预览')`；已自然播完（`!prevPlaying && time >= dur - 0.25`）→ 发 `'restart'` 并重置进度；否则切换 `prevPlaying` 并发 `'play'` / `'pause'` |
 | `onPrevReplay()` | 无 `frameSrc` → `toast('暂无预览')`；否则发 `'restart'` 并置 `prevPlaying = true` |
 | `loadFrame()` | 调 `window.projectTools.previewHtml(appState.currentName)`；失败则关画布、显示 `emptyText`（`res.message` 或 `'预览副本生成失败'`）；成功则拼 `hgpreview://` URL 并显示画布 |
@@ -158,7 +166,7 @@
 | `onModalKeydown(e)` | `document` 级 `keydown`：`e.key === 'Escape' && renderModalVisible.value` 时 `closeRenderModal()`（与「从音频生成字幕」弹窗一致） |
 | `onRenderVideo()` | 转视频主流程（见 4.10）：进行中守卫 → **Agent 忙守卫** → `htmlPath` / `htmlExists` 校验 → `hfTools.renderVideo(htmlPath, { quality, fps })` → 成功后 `saveVideo` + `refreshProject()` + toast；IPC 异常在 `catch` 中转为失败状态（这些守卫与 `openRenderModal` 重复，用于兜住「弹窗打开后状态被改」的窗口期） |
 | `onMounted(cb)` | 清空 `status` / `statusClass` / `thinkText`；`resetRenderProgress()`；`syncFromEffective()`；`syncVideoSelFromProject()`（视频素材下拉按项目状态初始化）；注册 `onHtmlProgress`；注册 `message`、`resize`、`keydown`（`onModalKeydown`，供弹窗 ESC 关闭）监听；`syncPreview()`；`genLoad()` |
-| `onBeforeUnmount(cb)` | `removeEventListener('message', onPrevMessage)`、`removeEventListener('resize', fitFrame)`、`document.removeEventListener('keydown', onModalKeydown)` |
+| `onBeforeUnmount(cb)` | `removeEventListener('message', onPrevMessage)`、`removeEventListener('resize', fitFrame)`、`document.removeEventListener('keydown', onModalKeydown)`，并清掉 seek 的兜底定时器（`if (seekAckTimer) { window.clearTimeout(seekAckTimer); seekAckTimer = 0 }`） |
 
 ## 4. 关键流程
 
@@ -211,11 +219,11 @@
 
 ### 4.5 预览 postMessage 协议
 
-父页 → iframe：`prevPost(type)` 发送 `{ __hg: true, type }`，`type` 取 `'pause'` / `'play'` / `'restart'`；副本注入脚本收到 `'restart'` 时执行 `location.reload()`。
+父页 → iframe：`prevPost(type, seconds?)` 发送 `{ __hg: true, type, seconds }`，`type` 取 `'pause'` / `'play'` / `'seek'` / `'restart'`；副本注入脚本收到 `'restart'` 时执行 `location.reload()`、收到 `'seek'` 时调 `setTime(d.seconds)`（只挪播放头、不改播放/暂停状态，并立刻回一条带 `ack` 的进度），见 [main/projects.ts.md](../../../main/projects.ts.md) §3.2。**父页在载入完成后不再发 `'play'`**：预览默认静止（画面侧也只 `freeze()` 冻住），播放完全由用户点「播放」或拖动进度条触发。
 
-iframe → 父页：副本每 300ms 上报 `{ __hg: true, type: 'progress', time, dur }`（时长/时间取 `<audio>/<video>` 与 `gsap.globalTimeline` 的较大值；暂停/恢复另由副本的 `timelines()` 枚举 `window.__timelines` 的「对象 / 数组」两种形态并回退 `gsap.globalTimeline`，详见 [main/projects.ts.md](../../../main/projects.ts.md) §3.2）。
+iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报 `{ __hg: true, type: 'progress', time, dur, playing, ack }`（`playing` 是副本 `isPlaying()` 上报的真实播放状态——**已播完不算在播**，父页用它校准按钮；`ack` 只在收到 seek 后的那条上报里为 `true`，父页据此结束 `seekPending`；`time`/`dur` **优先取 composition 时间轴 `rawTimelines()` 的 `duration()`/`time()` 最大值**，没有时间轴时才退回 `<audio>/<video>` 与 `gsap.globalTimeline` 取大者——否则素材比合成长时总时长会显示成素材长度；暂停/恢复另由副本的 `timelines()` 枚举 `window.__timelines` 的「对象 / 数组」两种形态并回退 `gsap.globalTimeline`，详见 [main/projects.ts.md](../../../main/projects.ts.md) §3.2）。
 
-父页处理：`onPrevMessage` 只接受 `d.__hg && d.type === 'progress'`，写 `prevTimeCur = Number(d.time) || 0`、`prevDur = Number(d.dur) || 0`；当处于播放态且 `prevTimeCur >= prevDur - 0.25` 时把 `prevPlaying` 置回 false（进度停满、按钮回到「播放」，再点即从头重播）。
+父页处理：`onPrevMessage` 只接受 `d.__hg && d.type === 'progress'`；先看 `d.ack === true`（seek 的应答）——命中就清 `seekPending` 与兜底定时器；随后**拖动中、或「松手后还没等到 ack」时只更新 `prevDur`**，位置与播放状态一律不采信（否则松手后可能先收到一条「拖动前发出」的旧回报，看起来像进度条被拽回原位）；正常回报则写 `prevTimeCur = Number(d.time) || 0`、`prevDur = Number(d.dur) || 0`，`typeof d.playing === 'boolean'` 时用画面里的真实状态写 `prevPlaying`（校准「暂停/播放」按钮），最后当处于播放态且 `prevTimeCur >= prevDur - 0.25` 时把 `prevPlaying` 置回 false（进度停满、按钮回到「播放」，再点即从头重播）。**拖动本身不改变播放/暂停状态**：`seekTo` 只发 `'seek'` + 本地跟手，画面侧 `setTime()` 也只挪播放头。
 
 监听在 `onMounted` 注册、`onBeforeUnmount` 移除，成对管理。
 
@@ -347,7 +355,8 @@ iframe → 父页：副本每 300ms 上报 `{ __hg: true, type: 'progress', time
 - **生成侧是两个并列按钮，各自对应一个明确动作**：「生成 HTML」走 `project:generate-html`（提示词不含现有页面），「按需求修改」走 `project:modify-html`（提示词含当前 `index.html` 全文）；没有 HTML 时「按需求修改」禁用。两者的区别由**每个动作按钮内部各带一个的 `?`**（`.hg-help`，悬浮只显示该动作自己的说明）承载，而不是靠按钮文案随状态变化；上一版那条「按 `hasHtml` 分流到同一个按钮」的自适应路径已随该方案一并删除；**「生成 HTML」在已有 HTML 时也没有二次确认**——点一次即覆盖 `index.html`（曾经的 `regenArmed` + 5 秒自动解除那套武装态已整体删除），要留底稿得自己先点「下载 HTML」。
 - **进度订阅的单订阅语义**：`onHtmlProgress` 在 preload 中只绑定一次 `ipcRenderer.on`，后续注册仅替换回调；本页因此只需在 `onMounted` 注册、无需（也无法）取消订阅。
 - **事件监听成对**：`message`、`resize` 两个 window 监听与 `keydown`（document，弹窗 ESC）都在 `onBeforeUnmount` 移除，避免切页后仍响应 iframe 上报、resize 或按键。
-- **播放控制边界**：`ctlVisible` 跟随 `frameVisible`；无 `frameSrc` 时点「暂停/播放」「重新播放」只 toast「暂无预览」。自然播完判定带 `0.25s` 容差，避免因上报精度抖动而卡在「暂停」。
+- **播放控制边界**：`ctlVisible` 跟随 `frameVisible`；无 `frameSrc` 时点「暂停/播放」「重新播放」只 toast「暂无预览」。自然播完判定带 `0.25s` 容差，避免因上报精度抖动而卡在「暂停」。**预览默认静止**：载入完成后父页不再主动发 `'play'`（画面侧也只 `freeze()` 冻住），`prevPlaying` 初值置 `false`，按钮文案由画面回报的 `playing` 校准——合成是 `paused: true` 创建 + 开头 `opacity: 0`，**首帧本来就是空的**，所以「停在第 0 帧」不是故障；`.hg-prev-hint`（`!prevPlaying && prevDur > 0 && prevTimeCur < 0.05`）就是把这句说明写在进度条旁边。
+- **进度条拖动跳转（seek）的四条约定**：① **拖动期间不采信画面回报**（`seeking` 为真时 `onPrevMessage` 只更新 `prevDur`）；② **松手后等 `ack`**：`onSeekEnd` 置 `seekPending = true` 并起 800ms 兜底定时器，收到画面 `ack: true` 的回报才恢复采信（避免被「拖动前发出的旧回报」拽回原位；画面里若是旧脚本，800ms 后也会强制恢复）；③ **本地立即跟手**：`seekTo()` 先按比例写 `prevTimeCur` 再 `prevPost('seek', sec)`，画面侧 `setTime()` 只挪播放头（`t.time(s)` + 媒体 `currentTime` + WAAPI `currentTime`）、**不改播放/暂停状态**；④ **总时长未上报时忽略拖动**（`prevDur <= 0` 直接返回，`onSeekStart` 也直接忽略），并用 `setPointerCapture` 保证拖出控件甚至拖到按钮上仍继续收 `pointermove`。
 - **预览副本与原件分离**：预览用 `index.preview.html`（剥离 CSP、注入控制脚本），下载与转视频始终使用原件 `index.html`。
 - **视频素材只有一个入口**：选择 / 当场导入 / 移除 / 提取原声都在「项目素材」块的那一行下拉里（见 4.12）。新增素材后**导入即选中**（`videoSel = '__current__'`，不必再去别处选一次），移除后 `videoSel = currentVideoSel()` 回到「不使用」；两次操作都先 `await refreshProject()`，让下拉的 `__current__` 选项与两个按钮的禁用态跟着项目实际状态刷新。**背景音频没有 `*Sel`**——它不进提示词，选定即由主进程写进 HTML（见 4.8），本页只做「刷新项目 + 更新试听源 + 重载预览」。
 - **音轨注入的三条不变量**：① 标签 id 固定为 `myv-bgm`，重复设置不会叠出多条音轨（注入前先 `stripInjectedBgm`）；② 引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入）会被 `stripAudioOfFile` 摘掉，避免双份播放；③ 没有 `index.html` 时静默返回 `false`，因此「先生成音频、后生成 HTML」的顺序不会报错。

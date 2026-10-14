@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：772 行
+- **规模**：821 行
 - **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 2 个（`IpcFail`、`IpcResult`）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境包 2 个（`RuntimeStage`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个
 
 ## 1. 作用与职责
@@ -13,7 +13,7 @@
 
 1. **统一载荷格式**：IPC 两端对同一份数据（设置文件、音色条目、模型条目、项目结构）使用完全相同的字段名与类型，避免「主进程叫 `voiceId`、渲染层叫 `voice_id`」这类漂移。
 2. **统一 IPC 结果形状**：`IpcFail` / `IpcResult<T>` 是全部 `{ ok, ... }` 结果类型的唯一来源 —— 它们原先只在 `src/preload/index.d.ts` 内部以 `OkResult` / `FailResult` / `IpcResult` 三个未导出类型存在，现在上移到共享层并被主进程、preload、渲染层共同引用。
-3. **描述持久化结构**：`CustomModelConfig` / `VoiceTTSConfig` / `VoiceProfile` / `WhisperCustomModel` / `WhisperSettings` / `AppSettings` 共同构成 `userData/settings.json` 的完整 schema。
+3. **描述持久化结构**：`CustomModelConfig` / `VoiceSettings`（含按厂家的 `VoiceProviderConfig`）/ `VoiceProfile` / `WhisperCustomModel` / `WhisperSettings` / `AppSettings` 共同构成 `userData/settings.json` 的完整 schema；旧的 `VoiceTTSConfig` 保留但**只作迁移来源**。
 4. **定义 `window.*` 契约**：⑨ 节的 `PreloadApi` 用 11 个命名空间的完整方法签名描述「preload 实现 ↔ 渲染层消费」的唯一真源 —— `src/preload/index.ts` 用它标注各 `contextBridge` 对象，`src/preload/index.d.ts` 用它给 `Window` 补类型，因此两端不会再各自漂移。
 5. **收敛主进程的本地类型**：`whisper.ts` / `ttsAlign.ts` / `video.ts` / `htmlAgent.ts` / `voice.ts` / `projects.ts` 原先各自声明过 `WhisperProgressPayload`、`AlignProgressInfo`、`RenderPayload` / `RenderResult`、`AgentProgress`、`VoiceModel`、`Scene` / `ContentScript` / `Project` / `SubtitleLine`，现在全部改为从本文件导入（`htmlAgent.ts` 保留 `AgentProgress` 这一导出名，但它已是 `HtmlAgentProgress` 的类型别名；`projects.ts` 用 `export type { … } from '../shared/types'` 再导出，保持 `projects.Project` / `from './projects'` 的既有引用面）。**`src/main/` 下已不存在任何本地声明的 payload / result / progress 接口**，各 IPC handler 的 `payload` 参数也一律用本文件的 `*Payload` 类型标注（此前多为 `Record<string, unknown>` 或内联字面量）。
 6. **约束主进程装配模式**：`RegisterCtx` 把 `src/main/*.ts` 各模块 `register(ctx)` 所依赖的能力（拿主窗口）显式化。
@@ -64,13 +64,15 @@
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `CustomModelConfig` | `interface` | OpenAI 兼容自定义模型配置：`baseUrl` / `modelId` / `apiKey` / `enabled` |
-| `VoiceTTSConfig` | `interface` | 千问语音配置：`apiKey` / `targetModel` / `saveDir` |
+| `VoiceProviderConfig` | `interface` | **单个厂家**的语音配置：**只有 `apiKey`**（源码注释：不再有「厂家默认模型」这种全局设置——系统音色与模型是固定对应关系（写在 `voiceCatalog` 目录里），克隆音色按其映射 / 云端 `target_model` 走，都没有时才落到目录里的出厂默认模型） |
+| `VoiceSettings` | `interface` | `voice` 段（按厂家组织）：`active`（当前厂家键）/ `providers: Record<string, VoiceProviderConfig>` / `saveDir` |
+| `VoiceTTSConfig` | `interface` | **旧结构（单厂家、无厂家字段）**：`apiKey` / `targetModel` / `saveDir`；注释标明**仅作为迁移来源读取**，新写入一律走 `VoiceSettings` |
 | `VoiceProfileType` | `type` | `'system' \| 'custom'`（音色类型字面量联合） |
 | `VoiceProfile` | `interface` | 本地音色映射条目：`key` / `name` / `voice` / `targetModel` / `type` |
 | `VoiceProfileInput` | `interface` | 保存映射的入参：`key` / `voice` / `targetModel` + 可选 `name` / `type`（主进程按 `voice` 回填 `name`，按 `'system'` 之外一律归 `'custom'`） |
 | `WhisperCustomModel` | `interface` | whisper 自定义模型条目：`id` / `name` / `file` / `url` / `sizeMB` / `desc`（`id` 由文件名派生） |
 | `WhisperSettings` | `interface` | whisper 分区：`modelId` / `customModels: WhisperCustomModel[]` |
-| `AppSettings` | `interface` | 设置文件根结构：`customModel` / `voiceTTS` / `voiceProfiles` / `whisper` / `render` |
+| `AppSettings` | `interface` | 设置文件根结构：`customModel` / **`voice`** / `voiceProfiles` / `whisper` / `render`，另有**可选的旧字段 `voiceTTS`**（只读兼容） |
 | `SettingsSavePayload` | `interface` | `settings:save` 线上载荷：`{ customModel: CustomModelConfig }` |
 | `SettingsTestPayload` | `interface` | `settings:test` 线上载荷：形状与 `SettingsSavePayload` 相同 |
 | `SettingsSaveResult` | `interface` | `settings:save` 成功分支：`{ settings: AppSettings }`（`voice:save-config` 复用同一结果形状） |
@@ -86,9 +88,11 @@
 | `CustomModelConfig` | `modelId` | `string` | 模型标识（如 `gpt-4o-mini`） |
 | `CustomModelConfig` | `apiKey` | `string` | 接口密钥 |
 | `CustomModelConfig` | `enabled` | `boolean` | 是否启用自定义模型（关闭则走内置/默认通道） |
-| `VoiceTTSConfig` | `apiKey` | `string` | 千问 DashScope 类接口密钥 |
-| `VoiceTTSConfig` | `targetModel` | `string` | 目标 TTS 模型 |
-| `VoiceTTSConfig` | `saveDir` | `string` | 生成音频保存目录（空串表示使用默认/项目目录） |
+| `VoiceProviderConfig` | `apiKey` | `string` | 该厂家的 API Key（明文存本机）；**这是该结构唯一的字段** |
+| `VoiceSettings` | `active` | `string` | 当前厂家键（对应 `voiceCatalog` 的 `VoiceProviderDef.key`） |
+| `VoiceSettings` | `providers` | `Record<string, VoiceProviderConfig>` | 按厂家的配置表 |
+| `VoiceSettings` | `saveDir` | `string` | 生成音频保存目录（**全局一份**，不按厂家分；空串表示使用默认/项目目录） |
+| `VoiceTTSConfig`（旧） | `apiKey` / `targetModel` / `saveDir` | `string` | **迁移来源**：`normalizeVoiceSettings` 把 `apiKey` / `targetModel` 搬进 `providers.qwen`（只填空缺），`saveDir` 新旧都认 |
 | `VoiceProfile` | `key` | `string` | 映射键，形如 `"system:Cherry"` 或 `"custom:<voice_id>"` |
 | `VoiceProfile` | `name` | `string` | 显示名 |
 | `VoiceProfile` | `voice` | `string` | 音色标识（系统音色名或克隆得到的 voice_id） |
@@ -101,7 +105,8 @@
 | `WhisperSettings` | `modelId` | `string` | 当前使用的模型档位 id |
 | `WhisperSettings` | `customModels` | `WhisperCustomModel[]` | 用户自定义模型条目数组 |
 | `AppSettings` | `customModel` | `CustomModelConfig` | 自定义模型配置 |
-| `AppSettings` | `voiceTTS` | `VoiceTTSConfig` | 语音 TTS 配置 |
+| `AppSettings` | `voice` | `VoiceSettings`（**必填**） | 语音服务配置（按厂家：`active` + `providers` + `saveDir`） |
+| `AppSettings` | `voiceTTS` | `VoiceTTSConfig?`（**可选，旧结构**） | 只读兼容：读取时迁进 `voice.providers.qwen`，写盘前被解构丢弃 |
 | `AppSettings` | `voiceProfiles` | `Record<string, VoiceProfile>` | 音色映射表，键即 `VoiceProfile.key` |
 | `AppSettings` | `whisper` | `WhisperSettings` | whisper 分区 |
 | `AppSettings` | `render` | `RenderOptions` | 视频渲染**全局默认档位**（项目未覆盖时生效；读取时经 `normalizeRenderOptions` 规范化） |
@@ -167,21 +172,22 @@
 | `SystemVoice` | `interface` | Qwen-TTS 系统音色条目（`systemVoices.ts` 的内置表结构）：`voice` / `desc` / `langs` / `series` |
 | `SystemVoiceItem` | `interface` | `extends SystemVoice`，额外带 `model: string`（该音色绑定/默认的合成模型）；`voice:list-system-voices` 的结果元素 |
 | `VoiceModelRole` | `type` | `'clone' \| 'system'`（候选合成模型的角色） |
-| `VoiceModelInput` | `type` | `'url' \| 'file'`（音色克隆的音频输入方式） |
+| `VoiceModelInput` | `type` | `'url' \| 'file'`（音色克隆的音频输入方式）——**`url` = 除本地文件外还接受公网音频 URL（`qwen-audio-*`），`file` = 只接受本地音频文件**；源码注释另注明「vc 系列移除后千问只剩 url 一档；`file` 留给将来『只收本地文件』的厂家」 |
 | `VoiceModel` | `interface` | 候选合成模型：`id` / `label` / `role` + 可选 `input` / `group` / `isDefault` / `series` |
 | `ClonedVoice` | `interface` | 云端克隆音色项：`voice?`（Qwen-TTS 系列）/ `voice_id?`（Qwen-Audio-TTS 系列）/ `target_model?` / `targetModel?` |
 | `VoiceListItem` | `interface` | `voice:list-all` 结果项（系统 + 克隆合并，统一「音色即模型」形态）：`key` / `type` / `name` / `voiceId` / `model` |
 | `GeneratedAudioItem` | `interface` | `voice:list-generated` 结果项：`path` / `name` / `group` / `size` / `mtime` |
-| `VoiceConfigResult` | `interface` | `voice:get-config` 结果：`apiKey` / `targetModel` / `saveDir` |
+| `VoiceConfigResult` | `interface` | `voice:get-config` 结果：`{ active, providers, saveDir }`——`active` 为当前厂家键、`providers` 为各家 `VoiceProviderConfig` |
 | `VoiceSaveDirPayload` | `interface` | `voice:get-save-dir` 载荷：`saveDir?` / `defaultOut?` / `projectName?` |
 | `VoiceSaveDirMode` | `type` | `'custom' \| 'output' \| 'project' \| 'default'`（保存目录解析模式） |
 | `VoiceSaveDirResult` | `interface` | `{ mode: VoiceSaveDirMode; saveDir: string }` |
-| `VoiceSaveConfigPayload` | `interface` | `voice:save-config` 线上载荷：`{ voiceTTS: Partial<VoiceTTSConfig> }` |
+| `VoiceSaveConfigPayload` | `interface` | `voice:save-config` 线上载荷：`{ provider?: string, config?: Partial<VoiceProviderConfig>, saveDir?: string }`——`config` 是**可选**的（只改保存目录时不给），且只可能是 `{ apiKey? }`；`saveDir` 是**全局「自定义保存目录」**（给了就一并更新：**不动 Key、不切厂家**），`provider` 缺省 = active 厂家 |
+| `VoiceProviderView` | `interface` | `voice:list-models` / `voice:get-config` 回带的**厂家目录**（`VoiceProviderDef` 的渲染层视图）：`key` / `label` / `apiKeyHint` / `defaultModel` / `models` / `voices`。**`defaultModel` 保留**——它是目录里的**出厂默认**，仅供界面说明展示（不再对应任何可保存的设置项） |
 | `VoiceProfilesResult` | `interface` | `{ profiles: Record<string, VoiceProfile> }`（`getProfiles` / `saveProfile` / `deleteProfile` 共用） |
 | `VoiceProfilePayload` | `interface` | `voice:save-profile` 线上载荷：`{ profile: Partial<VoiceProfile> & { type?: string } }` |
 | `VoiceProfileKeyPayload` | `interface` | `voice:delete-profile` 线上载荷：`{ key }` |
-| `VoiceCreatePayload` | `interface` | `voice:create` 载荷：`audioPath?` / `targetModel?` / `preferredName?`（`audioPath` 在 `file` 模式为本地绝对路径，在 `url` 模式为可公开访问的音频 URL） |
-| `VoiceCreateResult` | `interface` | `{ voice, targetModel, fallbackMode, fallbackReason }` |
+| `VoiceCreatePayload` | `interface` | `voice:create` 载荷：`audioPath?` / `targetModel?` / `preferredName?`。源码注释：**`audioPath` 为本地音频绝对路径、公网 URL / `oss://` 地址，或 `data:audio/...;base64` URI**；本地文件由主进程用 ffmpeg 裁成前 15 秒 24k 单声道 wav 再转 data URI，**放进复刻接口的 `input.url`**（Qwen-Audio-TTS 系列；该系列也接受公网 URL，两者都由主进程按字符串形态分流） |
+| `VoiceCreateResult` | `interface` | **`{ voice: string; targetModel: string }`**（本轮由 4 字段收缩为 2 字段）。源码注释：`voice` 取自返回体的 `output.voice_id`；`targetModel` 是**本次请求发的目标模型**（创建返回体不带 `target_model`，所以不再从响应里猜）；**`fallbackMode` / `fallbackReason` 已删除**——文档没有这两个字段，实测也从未返回过 |
 | `VoiceSynthPayload` | `interface` | `voice:synth` 载荷（由 preload 按位置参数组装）：`text?` / `voice?` / `targetModel?` / `projectName?` / `saveDir?` / `defaultOut?` / `audioName?` |
 | `VoiceSynthResult` | `interface` | `{ savePath, projectName, savedTo, size }` |
 | `VoiceSavedTo` | `type` | `'custom' \| 'output' \| 'project' \| 'default'`（`voice:synth` 的落盘位置） |
@@ -191,7 +197,7 @@
 | `VoiceAlignDetail` | `interface` | 逐句明细：`index` / `text` / `subtitleStart` / `audioStart` / `audioDur` / `status` / `rate` / `delta` / `segPath` |
 | `VoiceAlignResult` | `interface` | `voice:synth-aligned` 成功分支：`mode` / `subtitleText` / `audioPath` / `totalDur` / `details` |
 
-`VoiceModel` 的字段语义：`role` 决定用途（`clone` 用于克隆音色、`system` 用于系统音色）；`input` 仅在 `role: 'clone'` 时有意义（`url` = 粘贴可公开访问的音频 URL，`file` = 上传本地音频文件）；`group` 用于界面分组，`isDefault` 标记默认项，`series` 用于系统音色按系列取默认模型。
+`VoiceModel` 的字段语义：`role` 决定用途（`clone` 用于克隆音色、`system` 用于系统音色）；`input` 仅在 `role: 'clone'` 时有意义（`url` = 除本地文件外**还**接受公网音频 URL，`file` = 只接受本地音频文件）；`group` 用于界面分组，`isDefault` 标记默认项，`series` 用于系统音色按系列取默认模型。
 
 `VoiceAlignMode` 的两种语义（源码注释）：
 
@@ -325,10 +331,10 @@
 | `windowControls` | 4 | `minimize`、`toggleMaximize`、`close`、`onMaximizedChange` | 前三者 `void`（`send` 单向）；`onMaximizedChange(cb: (isMaximized: boolean) => void)` |
 | `hfTools` | 4 | `openHtml`、`renderVideo`、`showInFolder`、`onProgress` | `openHtml` → `Promise<string \| null>`（**保留但渲染层当前无调用方**）；`renderVideo` → `Promise<VideoRenderResult>`；`showInFolder` → `Promise<void>`；`onProgress(cb: (data: VideoProgressPayload) => void)` |
 | `settingsTools` | 5 | `get`、`save`、`saveRender`、`saveUpdater`、`test` | `get` → `Promise<AppSettings>`（**不经 `ok` 包裹**）；`save(customModel)` / `saveRender(render)` / `saveUpdater(updater)` → `Promise<IpcResult<SettingsSaveResult>>`（preload 分别包装为 `{ customModel }` / `{ render }` / `{ updater }`）；`test(customModel)` → `Promise<IpcResult>` |
-| `voiceTools` | 18 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` | 见下 |
+| `voiceTools` | 19 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、**`deleteCloudVoice`**、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` | 见下 |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` | 见下 |
 | `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下 |
-| `updateTools` | 7 | `version`、`check`、`download`、`cancel`、`install`、`openLog`、`onProgress` | 见下 |
+| `updateTools` | 8 | `version`、`check`、`download`、`cancel`、`install`、**`status`**、`openLog`、`onProgress` | 见下 |
 | `runtimeTools` | 3 | `status`、`prepare`、`onProgress` | `status()` → `Promise<RuntimeProgressPayload>`；`prepare()` → `Promise<IpcResult>`（幂等，进度仍由 `runtime:progress` 回推）；`onProgress(cb: (data: RuntimeProgressPayload) => void)`（单订阅） |
 | `legacyTools` | 2 | `status`、`resolve` | `status()` → `Promise<LegacyDataInfo \| null>`；`resolve(action: LegacyResolveAction)` → `Promise<LegacyResolveResult>`（preload 只把 `action` 字符串透传，见 §2.3.3） |
 
@@ -338,7 +344,7 @@
 | --- | --- |
 | `getConfig()` | `Promise<IpcResult<VoiceConfigResult>>` |
 | `getSaveDir(payload: VoiceSaveDirPayload)` | `Promise<IpcResult<VoiceSaveDirResult>>` |
-| `saveConfig(voiceTTS: Partial<VoiceTTSConfig>)` | `Promise<IpcResult<SettingsSaveResult>>` |
+| `saveConfig(payload: VoiceSaveConfigPayload)` | `Promise<IpcResult<SettingsSaveResult>>`（**按厂家**保存：`{ provider?, config }`） |
 | `pickAudio()` | `Promise<string \| null>` |
 | `pickDir()` | `Promise<IpcResult<{ dir: string }>>`（取消时为 `{ ok: false, canceled: true }`） |
 | `listGenerated()` | `Promise<IpcResult<{ items: GeneratedAudioItem[]; total: number }>>` |
@@ -346,10 +352,11 @@
 | `list()` | `Promise<IpcResult<{ voices: ClonedVoice[]; total: number }>>` |
 | `listSystemVoices()` | `Promise<IpcResult<{ voices: SystemVoiceItem[]; total: number }>>` |
 | `listAll()` | `Promise<IpcResult<{ voices: VoiceListItem[]; total: number; cloudMessage: string }>>` |
-| `listModels()` | `Promise<IpcResult<{ models: VoiceModel[] }>>` |
+| `listModels()` | `Promise<IpcResult<{ models: VoiceModel[]; providers: VoiceProviderView[] }>>` |
 | `getProfiles()` | `Promise<IpcResult<VoiceProfilesResult>>` |
 | `saveProfile(profile: VoiceProfileInput)` | `Promise<IpcResult<VoiceProfilesResult>>`（线上载荷为 `{ profile }`） |
 | `deleteProfile(key: string)` | `Promise<IpcResult<VoiceProfilesResult>>`（线上载荷为 `{ key }`） |
+| `deleteCloudVoice(voice: string)` | `Promise<IpcResult<VoiceProfilesResult & { voice: string }>>`（线上载荷 `{ voice }`）——**删除云端克隆音色，不可撤销**；成功后主进程会一并清掉该音色的本地映射并回带最新映射表 |
 | `synth(text, voice, projectName, saveDir, targetModel, audioName, defaultOut)` | 7 个位置参数 → `Promise<IpcResult<VoiceSynthResult>>` |
 | `synthAligned(payload: VoiceAlignPayload)` | `Promise<IpcResult<VoiceAlignResult>>`（payload 原样透传） |
 | `cancelAlign()` | `void`（`send` 单向） |
@@ -364,6 +371,7 @@
 | `download()` | `Promise<IpcResult<{ version: string }>>`（未处于 `available` / `skipped` 时失败分支带 `message`） |
 | `cancel()` | `Promise<IpcResult>`（异常分支带 `message` + `detail`） |
 | `install()` | `Promise<IpcResult>`（未下载完成或本机有长任务时失败分支带 `message`） |
+| `status()` | `Promise<UpdateProgressPayload>`（取一次主进程当前更新状态；主进程 `state` 常驻、跨设置页挂载持续存在，用于补齐「启动静默检查」那次失败——它发生在页面订阅 `update:progress` 之前） |
 | `openLog()` | `Promise<IpcResult<{ path: string }>>`（在文件管理器里定位 `userData/updater.log`，没有日志则打开 `userData` 目录；**不依赖 electron-updater 是否加载成功**） |
 | `onProgress(cb: (data: UpdateProgressPayload) => void)` | `void`（单订阅） |
 
@@ -408,7 +416,7 @@
 ### 3.2 设置数据的读写闭环
 
 1. `AppSettings` 是 `userData/settings.json` 的完整镜像；主进程 `settings.ts` 负责读写与合并，`whisper` 分区由 `WhisperSettings` 描述。
-2. 渲染层通过 `window.settingsTools.get()` 取到 `AppSettings`，通过 `window.settingsTools.save(customModel)` 提交 `CustomModelConfig`，通过 `window.voiceTools.saveConfig(Partial<VoiceTTSConfig>)` 提交部分语音配置；两者的成功分支都是 `IpcResult<SettingsSaveResult>`，由 `voice:save-config` / `settings:save` 回带 `settings`。
+2. 渲染层通过 `window.settingsTools.get()` 取到 `AppSettings`，通过 `window.settingsTools.save(customModel)` 提交 `CustomModelConfig`，通过 `window.voiceTools.saveConfig({ provider, config })` 提交**某个厂家**的部分语音配置（`VoiceSaveConfigPayload`）；两者的成功分支都是 `IpcResult<SettingsSaveResult>`，由 `voice:save-config` / `settings:save` 回带 `settings`。
 3. 音色映射以 `Record<string, VoiceProfile>` 存储，`voiceTools.saveProfile(profile)` / `deleteProfile(key)` 按 key 增删，入参用 `VoiceProfileInput`（`name` / `type` 可缺省），线上载荷分别是 `VoiceProfilePayload` / `VoiceProfileKeyPayload`。
 4. whisper 分区即以 `WhisperSettings` 落盘，`whisperTools.addModel/updateModel/removeModel` 对应 `customModels` 数组的增删改，载荷为 `WhisperAddModelPayload` / `WhisperUpdateModelPayload` / `WhisperIdPayload`。
 
@@ -438,11 +446,11 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | 方向 | 对象 | 说明 |
 | --- | --- | --- |
 | 依赖（仅类型） | `electron` | 仅引入 `BrowserWindow` 类型 |
-| 被 import | `src/main/settings.ts` | `AppSettings`、`CustomModelConfig`、`RegisterCtx`、`VoiceProfile`、`VoiceTTSConfig`、`WhisperCustomModel` |
+| 被 import | `src/main/settings.ts` | `AppSettings`、`CustomModelConfig`、`RegisterCtx`、`VoiceProfile`、`VoiceProviderConfig`、`VoiceSettings`、`VoiceTTSConfig`（旧结构，迁移来源）、`WhisperCustomModel` |
 | 被 import（+ 再导出） | `src/main/projects.ts` | `RegisterCtx`、`ProjectAgentPayload`、`ProjectExportSrtPayload`、`ProjectNamePayload`、`ProjectSaveContentPayload`、`ProjectSaveHtmlPayload`、`ProjectSaveSubtitlePayload`、`ProjectSetAudioPayload`、`ProjectSetVideoPayload`；并 `export type { ContentScript, Project, Scene, SubtitleLine }` 再导出四个项目结构 |
 | 被 import | `src/main/index.ts` | `RegisterCtx`、`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`（后三者服务于 `legacy:status` / `legacy:resolve`） |
 | 被 import | `src/main/whisper.ts` | `RegisterCtx`、`WhisperCustomModel` 与全部 `Whisper*Payload`（含 `WhisperProgressPayload`） |
-| 被 import | `src/main/voice.ts` | `RegisterCtx`、`SystemVoice`、`VoiceModel`、`VoiceProfile`、`VoiceTTSConfig`、`VoiceCreatePayload`、`VoiceProfileKeyPayload`、`VoiceProfilePayload`、`VoiceSaveConfigPayload`、`VoiceSaveDirPayload`、`VoiceSynthPayload` |
+| 被 import | `src/main/voice.ts` | `RegisterCtx`、`SystemVoice`、`VoiceModel`、`VoiceProviderView`、`VoiceSettings`、`VoiceProfile`、`VoiceCreatePayload`、`VoiceProfileKeyPayload`、`VoiceProfilePayload`、`VoiceSaveConfigPayload`、`VoiceSaveDirPayload`、`VoiceSynthPayload` |
 | 被 import | `src/main/ttsAlign.ts` | `RegisterCtx`、`AlignProgressPayload`（取代原本地 `AlignProgressInfo`）、`VoiceAlignPayload` |
 | 被 import | `src/main/video.ts` | `RegisterCtx`、`VideoRenderPayload`、`VideoRenderResult`（取代原本地声明的 `RenderPayload` / `RenderResult`） |
 | 被 import | `src/main/runtime.ts` | `RegisterCtx`、`RuntimeProgressPayload`（③.6 节；`RuntimeStage` 由该接口的 `stage` 字段内联引用） |
@@ -467,6 +475,6 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 - **少数 API 不走 `ok` 包裹**：`settingsTools.get()` → `AppSettings`、`projectTools.list()` → 数组、`projectTools.load()` → `Project | null`、`hfTools.openHtml` / `pickAudio` / `pickVideo` → `string | null`、`appTools.copyText` → `boolean`、`updateTools.version()` → `string`（同步）。其中 `projectTools.load()` 在项目名为空时**确实返回 `null`**，调用方必须做空值守卫（`useAppStore.refreshProject` 已据此加守卫）。
 - **`RegisterCtx.getWindow` 可为 `null`**：所有 `webContents.send` 前必须判空，否则窗口关闭或重载期间会抛异常。
 - **结构类型靠「再导出」保引用面**：`src/main/projects.ts` 的 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'`、`src/renderer/src/composables/useAppStore.ts` 的 `export type { ProjectMeta }` 都只是转发 —— `projects.Project`、`from './projects'`、`import { ProjectMeta } from '@renderer/composables/useAppStore'` 这类既有引用不需要改动，但结构本身只在本文档定义一处。新增字段时改这里即可，不要在被再导出的文件里重建 interface。
-- **主进程 handler 的 `payload` 参数一律标注契约类型**：如 `ProjectSaveSubtitlePayload`、`ProjectAgentPayload`、`Partial<WhisperIdPayload>`、`VoiceSaveConfigPayload | Partial<VoiceTTSConfig>`、`VoiceAlignPayload`；因此字段名改动会在主进程侧直接编译报错，而不是等运行时才发现。
+- **主进程 handler 的 `payload` 参数一律标注契约类型**：如 `ProjectSaveSubtitlePayload`、`ProjectAgentPayload`、`Partial<WhisperIdPayload>`、`VoiceSaveConfigPayload`（`voice:save-config` 的形参另**联合**了历史形态 `{ voiceTTS?: { apiKey?; targetModel? }; apiKey?; targetModel? }`）、`VoiceAlignPayload`；因此字段名改动会在主进程侧直接编译报错，而不是等运行时才发现。
 - **并非所有导出名都会出现在 import 语句里**：文件内类型相互引用（如 `IpcResult` 被 `PreloadApi` 的多个成员使用、`SystemVoiceItem extends SystemVoice`），另有一批 `*Result` / `*Payload` 类型只用于描述 handler 的返回结构与线上载荷形状（其中一部分被 `PreloadApi` 的返回类型内联引用）；这不代表它们是死代码，删除前需确认契约文档的完整性。
 - **纯类型文件**：编译后不产出 JS；不要在此文件写常量或函数（常量请放 `src/shared/ipc.ts`）。
