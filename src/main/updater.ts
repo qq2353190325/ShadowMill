@@ -17,6 +17,11 @@
 // ⑤ 错误文案分两层：message 说人话给终端用户，detail 存原始报错给排障（见 humanError）。
 // ⑥ 安装成功后清一次下载缓存：pending/ 那份与 cacheDir/installer.exe 重复（各约 275 MB），
 //    是否装上只能等下次启动用版本号验证，故退出前落 update-installing.json 标记（见 finalizePendingUpdate）。
+// ⑦ **检查必须「有事件才算成功」**：electron-updater 的 checkForUpdates() 有两种「一个字的事件都不发」的
+//    静默放弃——① 未打包且未 forceDevUpdateConfig 时 isUpdaterActive() 为假，直接 `return null`；
+//    ② 已有一次检查在飞时复用同一个 Promise，也不再发事件。这两种情况若照样按成功回带，主进程自己
+//    写下的临时文案「正在检查更新…」就会被当成终态送到界面——卡片永远停在那句话上，看起来像卡死。
+//    所以 checkNow() 在报成功之前必判一次「state.stage 是否还停在 checking」（见该函数注释）。
 import { app, dialog, ipcMain, shell } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
@@ -272,6 +277,12 @@ function ensureUpdater(): UpdaterLike | null {
       autoUpdater.autoDownload = false       // 安装包近百 MB：下载只能由用户显式触发
       // 关窗即装会带来「应用自己消失约 100 秒、快捷方式失效」的无提示体验，改成只能显式点「立即重启安装」
       autoUpdater.autoInstallOnAppQuit = false
+      // dev：electron-updater 只在「已打包」或 forceDevUpdateConfig 时才真的检查（见 isUpdaterActive，
+      // 否则 checkForUpdates() 直接返回 null 且不发任何事件）。项目根放了 dev-app-update.yml 就替它打开
+      // 这个开关，让手动检查与启动静默检查走同一条路，不再出现「点了没反应」。
+      if (!app.isPackaged && fs.existsSync(path.join(process.cwd(), 'dev-app-update.yml'))) {
+        try { (autoUpdater as any).forceDevUpdateConfig = true } catch (e) { /* 老版本无此属性则忽略 */ }
+      }
       bindEvents(autoUpdater)
     } else {
       updaterLoadError = 'electron-updater 未导出 autoUpdater（依赖未正确打包？）'
@@ -316,6 +327,20 @@ async function checkNow(trigger: 'manual' | 'startup'): Promise<any> {
     }
     return { ok: false, message: state.error || humanError(msg(e)).message, detail: state.detail, currentVersion: appVersion() }
   }
+  // 【不许把「检查中」当成结果】还停在 checking ⇒ 全程没有任何事件 ⇒ electron-updater 静默放弃了
+  // （未打包且未强制 dev 配置时 return null；或已有检查在飞时复用旧 Promise）。
+  // 这时报成功会把上面刚写下的「正在检查更新…」当成终态送到界面，卡片就永远停在那一句。
+  if (state.stage === 'checking') {
+    const dev = !app.isPackaged
+    state.stage = 'error'
+    state.error = dev ? '开发环境不检查更新' : '检查更新失败，请稍后重试'
+    state.message = state.error
+    state.detail = (dev
+      ? '当前是未打包的开发环境：electron-updater 在 app.isPackaged 为假时不会发起检查（需在项目根放 dev-app-update.yml 强制开启）。'
+      : '更新模块没有返回任何结果。') + '原始信息：checkForUpdates() 未发出任何事件（返回 null 或复用了进行中的检查）。'
+    send('check declined trigger=' + trigger + ' packaged=' + app.isPackaged)
+    return { ok: false, message: state.error, detail: state.detail, currentVersion: appVersion() }
+  }
   // 状态文案由主进程单点产出（见 bindEvents），这里把当前态原样回带，渲染层不再拼串
   if (state.stage === 'available') {
     return { ok: true, state: 'available', version: state.version, currentVersion: appVersion(), message: state.message, detail: state.detail } as UpdateCheckResult & { ok: true }
@@ -354,6 +379,17 @@ async function downloadUpdate(): Promise<any> {
       send('download failed ' + msg(e))
     }
     return { ok: false, message: state.error || humanError(msg(e)).message, detail: state.detail }
+  }
+  // 与 checkNow 同一条纪律：downloadUpdate() 正常时会在 resolve 之前发 update-downloaded
+  // （见其 executeDownload 里 `await taskOptions.done(...)`），所以「resolve 了却还停在 downloading、
+  // 也没有 downloaded 标记」= 全程无事件，不能报成功——否则卡片永远停在「正在下载更新…」
+  if (state.stage === 'downloading' && !state.downloaded) {
+    state.stage = 'error'
+    state.error = '下载没有开始，请稍后重试'
+    state.message = state.error
+    state.detail = '原始信息：downloadUpdate() 未发出任何事件（既无下载进度，也没有 update-downloaded）。'
+    send('download declined')
+    return { ok: false, message: state.error, detail: state.detail }
   }
   return { ok: true, version: state.version }
 }
@@ -514,6 +550,9 @@ function register(ctx: RegisterCtx): void {
   ipcMain.handle(IPC.Update.Install, () => installNow())
   // 同步版本号：设置页首屏要立刻显示，避免走 async 再等一轮渲染
   ipcMain.on(IPC.Update.Version, (event) => { event.returnValue = appVersion() })
+  // 取当前状态：状态活在主进程（跨页面挂载持续存在），设置页挂载时用它补齐一次。
+  // 这是「启动静默检查失败」唯一能被渲染层看见的路径——那次失败发生在设置页订阅进度之前。
+  ipcMain.handle(IPC.Update.Status, () => payload())
   // 打开日志：更新失败时用户 / 维护者拿到原始报错的唯一出口。
   // 刻意不进 ensureUpdater——electron-updater 加载失败恰恰是最需要看日志的场景。
   ipcMain.handle(IPC.Update.OpenLog, () => {
@@ -540,9 +579,7 @@ function register(ctx: RegisterCtx): void {
     }
     const u = ensureUpdater()
     if (!u) return
-    if (!app.isPackaged) {
-      try { (u as any).forceDevUpdateConfig = true } catch (e) { /* 老版本无此属性则忽略 */ }
-    }
+    // dev 下的 forceDevUpdateConfig 由 ensureUpdater() 统一设置（上面的提前 return 已保证 dev 必有该文件）
     void checkNow('startup')
   }, 3000)
 

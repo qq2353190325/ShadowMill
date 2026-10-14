@@ -730,12 +730,15 @@ export interface PreloadApi {
     cancel(): Promise<IpcResult>
     // 退出应用并运行安装程序（主进程先置 quitForUpdate 标志，避免与 window-all-closed 抢流程）
     install(): Promise<IpcResult>
+    // 取一次当前更新状态（主进程状态跨页面挂载持续存在）：
+    // 设置页挂载时补齐一次，好让「启动静默检查」的那次失败也能显示出来
+    status(): Promise<UpdateProgressPayload>
     // 在文件管理器里定位 userData/updater.log（没有日志则打开 userData 目录）：
     // 更新失败时用户 / 维护者唯一的原始报错出口，不依赖 electron-updater 是否加载成功
     openLog(): Promise<IpcResult<{ path: string }>>
     onProgress(callback: (data: UpdateProgressPayload) => void): void
   }
-  // 运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）：安装包里只带一个 7z，
+  // 运行环境包（ffmpeg / hyperframes / whisper 约 632MB）：安装包里只带一个 7z，
   // 首次启动解到 userData/runtime/<id>/；页面据此显示「正在准备运行环境 x%」
   runtimeTools: {
     status(): Promise<RuntimeProgressPayload>

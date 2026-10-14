@@ -173,6 +173,8 @@ const updateTools: PreloadApi['updateTools'] = {
   download: () => ipcRenderer.invoke(IPC.Update.Download),
   cancel: () => ipcRenderer.invoke(IPC.Update.Cancel),
   install: () => ipcRenderer.invoke(IPC.Update.Install),
+  // 取一次当前状态（设置页挂载时补齐：启动静默检查早于页面订阅）
+  status: () => ipcRenderer.invoke(IPC.Update.Status),
   // 在文件管理器里定位 updater.log（更新失败时的排障出口）
   openLog: () => ipcRenderer.invoke(IPC.Update.OpenLog),
   // 单订阅：重复注册仅替换回调，避免页面切换叠加监听

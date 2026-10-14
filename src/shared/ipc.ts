@@ -21,6 +21,9 @@ export const IPC = {
     Install: 'update:install',
     // 同步取当前版本号（sendSync）：设置页首屏要立刻显示「当前版本 x.y.z」，不等异步检查
     Version: 'update:version',
+    // 取一次当前更新状态（invoke）：启动静默检查发生在设置页订阅之前，
+    // 没有这个通道渲染层永远只看到 idle——那次失败（以及它的「打开日志目录」入口）就丢了
+    Status: 'update:status',
     // 定位 userData/updater.log（排障出口，不依赖 electron-updater 加载成功）
     OpenLog: 'update:open-log',
     Progress: 'update:progress'

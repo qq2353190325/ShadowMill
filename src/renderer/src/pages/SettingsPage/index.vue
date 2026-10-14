@@ -109,26 +109,29 @@
       </div>
       <div class="hf-status" :class="updateStatusClass">{{ updateMessage }}</div>
       <!-- 排障出口：latest.yml / 存储桶 / HTTP 状态这类信息只在「详情」里展开，用户文案本身保持人话。
-           「打开日志目录」**常驻**——启动静默检查失败时本页是刚挂载的（stage 还是 idle），
-           只有日志里才有那次失败的原始报错，不留这个入口就没法取证 -->
-      <div class="hgen-actions" style="margin-top:0">
+           入口**平时不出现**——没出错时把用户送进日志目录，他看到的是自己读不懂的文件，
+           只会以为哪里坏了；只在更新出错（检查 / 下载 / 安装失败）时才露出来。
+           启动静默检查的失败同样能显示：那次失败发生在设置页订阅进度之前，
+           本页挂载时用 updateTools.status() 找主进程要一次当前状态（见 onMounted） -->
+      <div v-if="updateDetail || updateLogVisible" class="hgen-actions" style="margin-top:0">
         <button v-if="updateDetail" class="hf-btn" @click="showUpdateDetail = !showUpdateDetail">{{ showUpdateDetail ? '收起详情' : '查看详情' }}</button>
-        <button class="hf-btn" @click="onOpenUpdateLog">打开日志目录</button>
+        <button v-if="updateLogVisible" class="hf-btn" @click="onOpenUpdateLog">打开日志目录</button>
       </div>
       <div v-if="updateDetail && showUpdateDetail" class="hf-detail">{{ updateDetail }}</div>
-      <!-- 运行环境包（ffmpeg / node / hyperframes / whisper 约 716MB）：安装包里只带一个 7z，
-           首次启动由主进程解到 userData；失败时这里给重试入口（转录 / 转视频依赖它）-->
-      <div class="hf-status" :class="runtimeStatusClass">{{ runtimeStatusText }}</div>
+      <!-- 运行环境包（ffmpeg / hyperframes / whisper 约 632MB）：安装包里只带一个 7z，
+           首次启动由主进程解到 userData。只在「准备中 / 失败」时占一行：
+           就绪是常态，常驻一句「已就绪」对用户没有信息量（外壳顶部横幅同此口径） -->
+      <div v-if="runtimeBusy || runtimeFailed" class="hf-status" :class="runtimeStatusClass">{{ runtimeStatusText }}</div>
       <div v-if="runtimeFailed" class="hgen-actions" style="margin-top:0">
         <button class="hf-btn hf-btn-primary" :disabled="runtimeBusy" @click="onPrepareRuntime">重新准备运行环境</button>
       </div>
       <!-- 保存 / 重置的反馈独立成行：与检查更新共行会被随后的进度文案盖掉，看起来像「没保存」-->
       <div v-if="updaterStatus" class="hf-status" :class="updaterStatusClass">{{ updaterStatus }}</div>
       <div v-if="updateStage === 'available'" class="hgen-actions" style="margin-top:8px">
-        <button class="hf-btn" @click="onSkipVersion(true)">跳过版本 {{ updateVersion }}</button>
+        <button class="hf-btn" @click="onSkipVersion(true)">跳过版本 {{ updateNewVersion }}</button>
       </div>
       <div v-else-if="updateStage === 'skipped'" class="hgen-actions" style="margin-top:8px">
-        <button class="hf-btn" @click="onSkipVersion(false)">恢复提示版本 {{ updateVersion }}</button>
+        <button class="hf-btn" @click="onSkipVersion(false)">恢复提示版本 {{ updateNewVersion }}</button>
       </div>
     </div>
 
@@ -163,10 +166,16 @@
 
 <script setup lang="ts">
 // pages/SettingsPage/index.vue —— 设置页（原 JS 版 settings 模块 {template,index}.js 移植）
-// 自定义模型 + 千问语音配置 + 视频渲染默认档位；语音识别模型区块为子组件 WhisperSection（原 window.__settings.initWhisper）。
+// 自定义模型 + 语音服务（按厂家）+ 视频渲染默认档位；语音识别模型区块为子组件 WhisperSection（原 window.__settings.initWhisper）。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { RenderFps, RenderQuality, UpdateProgressPayload, UpdateStage } from '@shared/types'
 import { MODEL_PROVIDERS, STORAGE_KEY_SETTINGS_SECTION } from '@renderer/constants'
+import {
+  consumeSettingsSection,
+  useSettingsSectionRequest,
+  SETTINGS_SECTIONS,
+  type SettingsSectionKey
+} from '@renderer/composables/useNavIntent'
 import {
   FALLBACK_RENDER,
   RENDER_FPS_OPTIONS,
@@ -242,10 +251,11 @@ function onModelPick(v: string): void {
 
 // ===== 设置分类（左侧导航 → 右侧内容）=====
 // 5 类平级：模型配置 / 语音服务 / 渲染档位 / 应用更新 / 语音识别模型。
+// 枚举与「跨页导航意图」共用同一份（composables/useNavIntent.ts），避免两处漂移。
 // 选择记忆在 localStorage（键名见 @renderer/constants 的 STORAGE_KEY_SETTINGS_SECTION），下次进设置页回到上次的分类。
-type SettingsSection = 'model' | 'voice' | 'render' | 'update' | 'whisper';
+type SettingsSection = SettingsSectionKey;
 const SETTINGS_SECTION_KEY = STORAGE_KEY_SETTINGS_SECTION;
-const SECTIONS: SettingsSection[] = ['model', 'voice', 'render', 'update', 'whisper'];
+const SECTIONS = SETTINGS_SECTIONS;
 function readSection(): SettingsSection {
   try {
     const v = localStorage.getItem(SETTINGS_SECTION_KEY) as SettingsSection | null;
@@ -394,12 +404,18 @@ interface UpdateCheckReply {
 }
 
 const updateVersion = ref('');
+// 待安装的目标版本（payload/回执里的 version）：只给「跳过版本 / 恢复提示版本」用，
+// 与「当前版本」（updateVersion）严格分开——见 applyUpdateProgress 的注释
+const updateNewVersion = ref('');
 const updateStage = ref<UpdateStage>('idle');
 const updateMessage = ref('');
 const updateStatusClass = ref('');
 // 排障详情（HTTP 状态 / AccessDenied 原文等）+ 其折叠开关；仅在出错时出现
 const updateDetail = ref('');
 const showUpdateDetail = ref(false);
+// 「打开日志目录」只在更新确实出错时才出现：平时把用户送进日志目录没有意义（他也看不懂），
+// 出错时它是拿到原始报错的唯一出口（人话文案在 message，原始报错在 detail / updater.log）
+const updateLogVisible = computed(() => updateStage.value === 'error' || updateStatusClass.value === 'hf-error');
 // 有网络动作在跑时禁用重复点击（检查中的重复点击是最常见的误操作）
 const updateBusy = computed(() => updateStage.value === 'checking' || updateStage.value === 'downloading');
 // 已保存的更新设置（回填自 settings.json，也是卡片文案的来源）
@@ -446,6 +462,10 @@ function applyUpdateProgress(d: UpdateProgressPayload): void {
   if (!d) return;
   updateStage.value = d.stage;
   if (d.currentVersion) updateVersion.value = d.currentVersion;
+  // 目标版本（payload.version = 待安装的那个版本）：与「当前版本」必须分开存——
+  // 「跳过版本 x / 恢复提示版本 x」用的是它，以前误用 updateVersion（当前版本）会把当前版本写进
+  // settings.json 的 skippedVersion，而主进程比的是目标版本，于是「跳过」永远不生效
+  updateNewVersion.value = d.version || '';
   updateMessage.value = d.message || '';
   updateDetail.value = d.detail || '';
   // 离开 error 态就收起详情面板，避免旧报错一直挂在卡片上
@@ -536,6 +556,8 @@ async function onCheckUpdate(): Promise<void> {
   }
   updateStage.value = res.state || 'none';
   if (res.currentVersion) updateVersion.value = res.currentVersion;
+  // 目标版本同样以 IPC 回执为准（事件可能早于本次 invoke 返回，这里保证「跳过版本」标签不为空）
+  updateNewVersion.value = res.version || updateNewVersion.value;
   // 文案由主进程产出（含 available / skipped / none 三种），这里只做极端兜底
   updateMessage.value = res.message || '检查完成';
   updateDetail.value = res.detail || '';
@@ -601,12 +623,14 @@ async function onInstallUpdate(): Promise<void> {
 }
 
 // 撤销「跳过该版本」：清掉 settings.json 里的 skippedVersion，让新版本重新提示
+// 写进去的必须是**目标版本**（updateNewVersion）：主进程是拿 available 的那个版本号与 skippedVersion
+// 比较的（见 updater.ts 的 update-available 分支），写当前版本永远不会命中
 async function onSkipVersion(skip: boolean): Promise<void> {
   try {
-    const res = await window.settingsTools.saveUpdater({ skippedVersion: skip ? updateVersion.value : '' });
+    const res = await window.settingsTools.saveUpdater({ skippedVersion: skip ? updateNewVersion.value : '' });
     if (res && res.ok) {
       updateDetail.value = '';
-      updateMessage.value = skip ? ('已跳过版本 ' + updateVersion.value) : ('已恢复提示版本 ' + updateVersion.value);
+      updateMessage.value = skip ? ('已跳过版本 ' + updateNewVersion.value) : ('已恢复提示版本 ' + updateNewVersion.value);
       updateStatusClass.value = '';
     } else {
       updateMessage.value = (res as { message?: string })?.message || '操作失败';
@@ -661,6 +685,12 @@ onMounted(async () => {
     setStatus('读取版本号失败', 'hf-error');
   }
   window.updateTools.onProgress(applyUpdateProgress);
+  // 订阅之后再补齐一次主进程状态：启动静默检查（3s）早于本页订阅，不补这一次，
+  // 那次失败就只剩「尚未检查更新」——连带它的「查看详情 / 打开日志目录」一起看不到
+  try {
+    const st = await window.updateTools.status();
+    if (st && st.stage && st.stage !== 'idle') applyUpdateProgress(st);
+  } catch (e) { /* 主进程未就绪：保持 idle，不打扰用户 */ }
   if (!updateMessage.value) {
     updateMessage.value = updateStage.value === 'idle'
       ? '尚未检查更新'
