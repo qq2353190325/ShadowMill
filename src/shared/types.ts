@@ -13,10 +13,11 @@ import type { BrowserWindow } from 'electron'
 export type RuntimePackName = 'ffmpeg' | 'hyperframes'
 
 // 「配置类」错误的目标设置分类：这类错误用户去设置页改一下配置就能解决，
-// 界面据此把它从内嵌状态行升级成弹窗（[去设置] / [取消]，余额类是 [去充值] / [取消]）。
-// 取值与 SettingsPage 的分类、useNavIntent.SettingsSectionKey 对齐（model / voice / update）。
+// 界面据此把它从内嵌状态行升级成弹窗（[去设置] / [取消]）。
+// 取值与 SettingsPage 的分类、useNavIntent.SettingsSectionKey 对齐（model / voice）。
 // 判定由主进程的 friendlyError() 单点产出（见 src/shared/errors.ts 与 docs/error-mapping.md §11.1）。
-export type ConfigTarget = 'model' | 'voice' | 'billing'
+// **没有 'billing'**：余额 / 欠费类去设置也修不好，走内嵌状态行（文案说明去厂家充值），不弹窗。
+export type ConfigTarget = 'model' | 'voice'
 
 export interface IpcFail {
   ok: false
@@ -29,12 +30,10 @@ export interface IpcFail {
   // 用户确认后调 runtimeTools.prepare(needPacks) 下载，下完由用户在同一个框里点「继续」重发本操作。
   // 详见 docs/runtime-pack-split.md §5.2
   needPacks?: RuntimePackName[]
-  // 这次失败属于「配置类」（缺 Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用 / 余额不足）：
+  // 这次失败属于「配置类」（缺 Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用）：
   // 界面据此弹「去设置 / 取消」弹窗而不是只显示一行红字。**它不驱动流程**（不像 needPacks 要续做），
-  // 只是一个分类标记；不显示原始报文（排障详情仍落日志）。
+  // 只是一个分类标记；不显示原始报文（排障详情仍落日志）。余额 / 欠费不属于此处。
   needConfig?: ConfigTarget
-  // 配置类的补充动作：充值页地址（余额 / 欠费类才有）。界面把主按钮换成「去充值」。
-  configUrl?: string
   // 配置类弹窗的标题（主进程用 errors.configTitle() 单点产出，界面只显示不判断）
   title?: string
 }
@@ -737,9 +736,6 @@ export interface PreloadApi {
   }
   appTools: {
     copyText(text: string): Promise<boolean>
-    // 用系统默认浏览器打开外链（只放行 http/https）：余额不足弹窗的「去充值」用。
-    // 渲染层不能直接 target="_blank"——应用没设 setWindowOpenHandler，那会开出一个新的 Electron 窗口。
-    openExternal(url: string): Promise<boolean>
   }
   windowControls: {
     minimize(): void

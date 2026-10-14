@@ -13,7 +13,7 @@
 //   runtime.ts   运行环境包（ffmpeg/hyperframes/whisper 解包到 userData）+ runtime:* IPC
 // 依赖图：settings ← htmlAgent ← projects ← voice ← ttsAlign；hfEnv ← projects, voice, whisper, ttsAlign, video, runtime；updater ← settings；无环。
 // 打包输出 out/main/index.js；preload 输出 out/preload/index.js；渲染层输出 out/renderer/。
-import { app, BrowserWindow, Menu, ipcMain, clipboard, protocol, shell } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, clipboard, protocol } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { Readable } from 'node:stream'
@@ -380,20 +380,6 @@ ipcMain.on(IPC.Window.Close, () => {
 ipcMain.handle(IPC.App.CopyText, (_event, text: unknown) => {
   clipboard.writeText(String(text == null ? '' : text))
   return true
-})
-
-// ===== 用系统默认浏览器打开外链（充值页 / 帮助文档） =====
-// 为什么不直接在渲染层用 <a target="_blank">：应用没有 setWindowOpenHandler，那会开出一个新的 Electron
-// 窗口而不是浏览器；走 shell.openExternal 才是「交给系统处理」。只放行 http/https，避免 file: / 自定义协议。
-ipcMain.handle(IPC.App.OpenExternal, async (_event, url: unknown) => {
-  const u = String(url == null ? '' : url)
-  if (!/^https?:\/\//i.test(u)) return false
-  try {
-    await shell.openExternal(u)
-    return true
-  } catch (e) {
-    return false
-  }
 })
 
 function createWindow(): void {

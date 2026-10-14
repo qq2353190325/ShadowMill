@@ -11,9 +11,7 @@ export const IPC = {
   },
   // 应用级小工具（renderer → main，invoke）
   App: {
-    CopyText: 'app:copy-text',
-    // 用系统默认浏览器打开外链（余额不足弹窗的「去充值」）：只放行 http/https
-    OpenExternal: 'app:open-external'
+    CopyText: 'app:copy-text'
   },
   // 应用自更新（updater.js，electron-updater generic provider）
   Update: {

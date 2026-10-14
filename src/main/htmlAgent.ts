@@ -95,7 +95,7 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
     let usage: unknown = null;
     let attemptErr: string | null = null;
     // 本次尝试的失败分类（needConfig 非空 = 配置类，界面弹「去设置」）
-    let attemptCfg: { needConfig: ConfigTarget; configUrl?: string } | null = null;
+    let attemptCfg: { needConfig: ConfigTarget } | null = null;
     // 失败时的排障详情（原始报文首行 + 请求地址），只进日志与对话记录，不进用户文案
     let attemptDetail = '';
     // 非 2xx 时的响应体（排障详情），只进详情不进用户文案
@@ -206,7 +206,7 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
         extras: [apiUrl ? '请求地址：' + apiUrl : '', httpDetail]
       });
       attemptErr = f.message;
-      attemptCfg = f.needConfig ? { needConfig: f.needConfig, configUrl: f.configUrl } : null;
+      attemptCfg = f.needConfig ? { needConfig: f.needConfig } : null;
       attemptDetail = f.detail || '';
     }
     attempts.push({

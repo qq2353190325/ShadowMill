@@ -234,7 +234,7 @@ async function onSynth(): Promise<void> {
       }
       fillGenAudios(true);
     } else {
-      // 配置类（Key 无效 / 余额不足 / 未配置…）：弹「去设置 / 去充值」；状态行照旧留着，不叠 toast
+      // 配置类（Key 无效 / 未配置…）：弹「去设置」；状态行照旧留着，不叠 toast
       configPrompt.fromResult(res);
       setStatus((res as { message?: string })?.message || '合成失败', 'hf-error');
     }

@@ -85,14 +85,14 @@ export async function requireCfg(onError: (text: string, kind: string) => void):
   if (!c) {
     voiceKeyReady.value = false;
     onError('读取语音配置失败，请到「设置」-「语音服务」检查', 'hf-error');
-    configPrompt.open('读取语音配置失败，请到「设置 → 语音服务」检查', 'voice', undefined, true);
+    configPrompt.open('读取语音配置失败，请到「设置 → 语音服务」检查', 'voice', true);
     return null;
   }
   if (!c.apiKey) {
     voiceKeyReady.value = false;
     if (!activeProviderLabel.value) activeProviderLabel.value = c.provider;
     onError('尚未配置「' + (activeProviderLabel.value || c.provider) + '」的语音 API Key，请先到「设置」-「语音服务」填写并保存', 'hf-error');
-    configPrompt.open('尚未配置「' + (activeProviderLabel.value || c.provider) + '」的语音 API Key，请先到「设置 → 语音服务」填写并保存', 'voice', undefined, true);
+    configPrompt.open('尚未配置「' + (activeProviderLabel.value || c.provider) + '」的语音 API Key，请先到「设置 → 语音服务」填写并保存', 'voice', true);
     return null;
   }
   voiceKeyReady.value = true;

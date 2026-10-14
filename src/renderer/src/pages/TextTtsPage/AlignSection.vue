@@ -241,7 +241,7 @@ async function startAlign(skipEnvGuard = false): Promise<void> {
       showAlignBar({ text: msg, kind: 'error' }, false);
       setStatus(msg, 'hf-error');
       if (configPrompt.fromResult(fail)) {
-        // 配置类（Key 无效 / 余额不足 / 未配置…）：已弹「去设置 / 去充值」，不再叠 toast
+        // 配置类（Key 无效 / 未配置…）：已弹「去设置」，不再叠 toast
       } else if (fail && fail.needPacks && fail.needPacks.length) {
         // 缺 ffmpeg：弹确认框，用户点「继续」时重发这次对齐
         void envGate.guard(fail.needPacks, '逐句对齐配音', () => { void startAlign(true); });

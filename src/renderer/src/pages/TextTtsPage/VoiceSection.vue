@@ -288,7 +288,7 @@ async function onCreate(): Promise<void> {
       loadAll(true);
       closeCreate(); // 建完收起弹窗：新音色已经出现在下面的列表里
     } else {
-      // 配置类（Key 无效 / 余额不足 / 未配置…）：弹「去设置 / 去充值」，状态行照旧显示原因
+      // 配置类（Key 无效 / 未配置…）：弹「去设置」，状态行照旧显示原因
       configPrompt.fromResult(res);
       status.value = (res as { message?: string })?.message || '创建失败';
       statusClass.value = 'hf-error';

@@ -383,9 +383,10 @@ function register(ctx?: RegisterCtx): void {
       }
       return { ok: true, message: '连接成功：模型已响应（' + String(text).slice(0, 40) + '）' };
     } catch (e) {
-      // 测试连接是同步返回的，这里把配置类（Key 无效 / 余额不足 / 地址填错）一起带回界面弹「去设置 / 去充值」
+      // 测试连接是同步返回的，这里把配置类（Key 无效 / 地址填错）一起带回界面；
+      // 但**设置页刻意不弹窗**（按钮与状态行都在本页上，弹「去设置」等于原地跳）
       const f = friendlyError(e, { label: '连接失败', baseUrl: m.baseUrl });
-      return { ok: false, message: f.message, detail: f.detail, needConfig: f.needConfig, configUrl: f.configUrl };
+      return { ok: false, message: f.message, detail: f.detail, needConfig: f.needConfig };
     }
   });
 }

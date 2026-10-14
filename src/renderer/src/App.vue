@@ -109,9 +109,10 @@
     </div>
   </div>
 
-  <!-- 配置类错误的统一弹窗（缺 Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用 / 余额不足）。
-       与上面的运行环境框同一范式：全局单例、两个按钮；余额类主按钮是「去充值」。
-       刻意**不显示「查看详情」**——配置类错误的原始报文对用户没有可操作性，详情仍落日志。 -->
+  <!-- 配置类错误的统一弹窗（缺 Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用）。
+       与上面的运行环境框同一范式：全局单例、两个按钮（[去设置] / [取消]）。
+       刻意**不显示「查看详情」**——配置类错误的原始报文对用户没有可操作性，详情仍落日志。
+       余额 / 欠费类**不进这里**：去设置修不了余额，它走内嵌状态行（文案说明去厂家控制台充值）。 -->
   <div v-if="configPrompt.visible.value" class="hf-modal-mask" @click.self="configPrompt.close()">
     <div class="hf-modal" style="width:min(520px,92vw)">
       <div class="hf-modal-head">
@@ -121,12 +122,10 @@
       <div class="hf-modal-body">
         <div class="hf-status hf-error" style="margin:0">{{ configPrompt.message.value }}</div>
         <div class="hgen-tip" style="margin:10px 0 0">
-          点「{{ configPrompt.target.value === 'billing' ? '去充值' : '去设置' }}」前往处理；点「取消」放弃本次操作，可以稍后再来。
+          点「去设置」前往修改配置；点「取消」放弃本次操作，可以稍后再来。
         </div>
         <div class="hgen-actions" style="margin-top:12px">
-          <button class="hf-btn hf-btn-primary" @click="configPrompt.go()">
-            {{ configPrompt.target.value === 'billing' ? '去充值' : '去设置' }}
-          </button>
+          <button class="hf-btn hf-btn-primary" @click="configPrompt.go()">去设置</button>
           <button class="hf-btn" @click="configPrompt.close()">取消</button>
         </div>
       </div>

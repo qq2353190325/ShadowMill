@@ -20,18 +20,19 @@ export interface FriendlyError {
   message: string
   /** 排障详情：原始报文首行（截断 500 字符）；没有可留的东西时为 undefined */
   detail?: string
-  /** 命中「配置类」时给出目标设置分类，界面据此弹「去设置」；不命中则无此字段 */
+  /**
+   * 命中「需要用户去设置页改配置」时给出目标设置分类，界面据此弹「去设置 / 取消」。
+   * **余额 / 欠费类刻意不在此列**：去设置改不了余额，它走内嵌状态行（文案已说明去厂家充值）。
+   */
   needConfig?: ConfigTarget
-  /** 配置类的补充动作：充值页地址（余额 / 欠费类才有），界面把按钮换成「去充值」 */
-  configUrl?: string
 }
 
 // 调用上下文：label 是动作名（拼在 message 最前面，用户得知道是哪件事失败了）
 export interface ErrorContext {
   label: string
-  /** 已解析出的厂家 key（如 qwen），用于文案里带上厂家名与充值页 */
+  /** 已解析出的厂家 key（如 qwen） */
   provider?: string
-  /** 本次请求的 Base URL：余额类错误据此给出「去充值」目标（见 topupUrlOf） */
+  /** 本次请求的 Base URL（排障详情用；也曾用于给余额类找充值页，该按钮已按用户要求摘除） */
   baseUrl?: string
   /** 附加到详情里的字段（原始 code / HTTP 状态 / 请求地址），比从文案里正则抠更可靠 */
   extras?: string[]
@@ -44,22 +45,8 @@ export interface ErrorContext {
   hint?: string
 }
 
-// 模型厂家充值页（余额 / 欠费类错误的「去充值」目标）。
-// 只列本项目 MODEL_PROVIDERS（src/renderer/src/constants.ts）里出现的四家；按 Base URL 关键字识别。
-const TOPUP_PAGES: { match: RegExp; url: string }[] = [
-  { match: /api\.deepseek\.com/i, url: 'https://platform.deepseek.com/top_up' },
-  { match: /dashscope|aliyuncs/i, url: 'https://billing.console.aliyun.com/expense/overview' },
-  { match: /bigmodel\.cn/i, url: 'https://open.bigmodel.cn/finance/pay' },
-  { match: /minimax/i, url: 'https://platform.minimaxi.com/user-center/basic-information/recharge' }
-]
-
-/** 由 Base URL 猜出充值页；猜不出返回空串（界面就不显示「去充值」，只留「去设置」） */
-export function topupUrlOf(baseUrl?: string): string {
-  const s = String(baseUrl || '')
-  if (!s) return ''
-  const hit = TOPUP_PAGES.find((p) => p.match.test(s))
-  return hit ? hit.url : ''
-}
+// 模型厂家充值页（余额 / 欠费类的「去充值」目标）已按用户要求整条摘除：
+// 配置类弹窗只保留「去设置 / 取消」两个按钮，余额类不再弹窗（改设置修不了余额，走内嵌状态行）。
 
 // ===== 从异常对象里取字段（兼容 OpenAI SDK 的 APIError 与自造的 Error）=====
 // OpenAI SDK 的 APIError 带 status / code；自造的 Error 则把这些写进了 message（如 'HTTP 402：…'）。
@@ -114,13 +101,14 @@ export function friendlyError(err: unknown, ctx: ErrorContext): FriendlyError {
 function coreMessage(err: unknown, ctx: ErrorContext): FriendlyError {
   const text = matchText(err, ctx && ctx.hint)
   const detail = detailOf(text, ctx && ctx.extras)
-  const hit = (message: string, needConfig?: ConfigTarget, configUrl?: string): FriendlyError =>
-    ({ message, detail, needConfig, configUrl })
+  const hit = (message: string, needConfig?: ConfigTarget): FriendlyError =>
+    ({ message, detail, needConfig })
 
-  // ---------- ① 配置类：余额 / 欠费（先于一切，因为它最容易与「参数错误」混淆）----------
+  // ---------- ① 余额 / 欠费（**不弹窗**：去设置改不了余额，文案直接说清要充值）----------
   // DeepSeek：402 Insufficient Balance；百炼：400 + Arrearage / isv.OUT_OF_SERVICE。
+  // 必须排在参数类之前：两家的状态码不一致（402 vs 400），先按状态码判会把欠费误报成「参数错误」。
   if (statusOf(err) === 402 || /insufficient[\s_-]*balance|arrearage|out_of_service|out of credits|欠费|余额不足|in good standing/i.test(text)) {
-    return hit('账户余额不足或已欠费，请充值后再试', 'billing', topupUrlOf(ctx && ctx.baseUrl))
+    return hit('账户余额不足或已欠费，请到厂家控制台充值后重试')
   }
   // ---------- ② 配置类：未启用 / 未配置 / 缺字段 / Key 无效 ----------
   // 「未启用」必须独立成档（它提到要用「设置」里的开关，与「字段没填」是两种修法）。
@@ -203,7 +191,7 @@ function coreMessage(err: unknown, ctx: ErrorContext): FriendlyError {
   if (/enoent|not exist|no such file/i.test(text)) return hit('文件不存在或已被移动')
   if (/aborted|err_aborted|cancell?ed|已取消/i.test(text)) return hit('已取消')
   // ---------- ⑨ 兜底 ----------
-  return { message: '失败，请重试', detail }
+  return hit('失败，请重试')
 }
 
 // 语音类错误（label 含「语音 / 音色」）指向「语音服务」分类，模型类指向「自定义模型」
@@ -214,27 +202,23 @@ function cfgTargetOf(ctx: ErrorContext): ConfigTarget {
 // 配置类弹窗的标题（由主进程随 IPC 一起给，渲染层只显示不判断）
 const CONFIG_TITLE: Record<ConfigTarget, string> = {
   model: '需要设置自定义模型',
-  voice: '需要设置语音服务',
-  billing: '账户余额不足'
+  voice: '需要设置语音服务'
 }
 export function configTitle(target?: ConfigTarget): string {
-  return CONFIG_TITLE[target as ConfigTarget] || '需要先完成设置'
+  return (target && CONFIG_TITLE[target]) || '需要先完成设置'
 }
 
 // 给「已经翻译过、只剩 message 文本」的上游用（典型：projects.ts 捕获 chatWithCustomModel 抛出的错，
 // 到那里只剩一句中文 message）。复用同一张码表跑分类，不重复拼 label，故不返回 message。
-// 判定文本是**中文文案**，特征词（余额不足 / API Key / 未配置…）本来就在码表里，直接复用即可。
-export function configTargetOf(message: string): { needConfig?: ConfigTarget; configUrl?: string; title?: string } {
+// 判定文本是**中文文案**（没有数字状态码可判），所以按本文件产出的句式逐条认。
+// **余额 / 欠费不在其中**：那类不弹窗，界面保持内嵌状态行。
+export function configTargetOf(message: string): { needConfig?: ConfigTarget; title?: string } {
   const text = String(message || '')
-  // 这里拿到的是**已经翻译过的中文文案**，没有数字状态码可判，所以按本文件产出的句式逐条认。
-  // 判定顺序与 coreMessage 一致：余额 → 未启用/未配置 → Key 无效/权限 → 模型不存在/地址 → 参数。
   let target: ConfigTarget | undefined
   const voiceLike = /语音|音色|合成|voice|tts/i.test(text)
-  if (/余额不足|已欠费|请充值|去充值/.test(text)) target = 'billing'
-  else if (/未启用|未配置|配置不完整|均需填写|三项都要填/.test(text)) target = voiceLike ? 'voice' : 'model'
+  if (/未启用|未配置|配置不完整|均需填写|三项都要填/.test(text)) target = voiceLike ? 'voice' : 'model'
   else if (/API Key 无效|重新填写并保存|API Key.*权限/.test(text)) target = voiceLike ? 'voice' : 'model'
   else if (/Base URL|接口地址|模型不存在|核对模型 ID/.test(text)) target = 'model'
   if (!target) return {}
-  const core = coreMessage(text, { label: 'x' })
-  return { needConfig: target, configUrl: core.configUrl, title: configTitle(target) }
+  return { needConfig: target, title: configTitle(target) }
 }

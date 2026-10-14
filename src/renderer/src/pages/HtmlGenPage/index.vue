@@ -407,10 +407,11 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
       const msg = (res && res.message) || '提交失败';
       status.value = msg;
       statusClass.value = 'hf-error';
-      // 配置类（Key 无效 / 余额不足 / 未启用 / Base URL 填错…）：主进程判好的分类 → 弹「去设置 / 去充值」
+      // 配置类（Key 无效 / 未启用 / 配置不完整 / Base URL 填错…）：主进程判好的分类 → 弹「去设置」
       // 状态行照样留着（框关掉后还能看见原因），但不叠 toast——弹窗已经把信息讲全了
+      // 余额 / 欠费不在其中（主进程不会给它 needConfig）：改设置修不好余额，走内嵌状态行
       if (res && res.needConfig) {
-        configPrompt.open(msg, res.needConfig, res.configUrl, false, res.title);
+        configPrompt.open(msg, res.needConfig, false, res.title);
       } else {
         toast(msg);
       }

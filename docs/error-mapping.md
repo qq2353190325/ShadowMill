@@ -59,7 +59,7 @@
 |---|---|---|---|---|---|
 | H-400 | 400 | `invalid_request_error` / `InvalidParameter` / `DataInspectionFailed` | 请求格式或内容不合规，本次生成已中止 | 服务端拒绝该请求：参数或内容不合法 | 改需求描述后重试；若反复出现按「查看详情」提交报文 |
 | H-401 | 401 | `invalid_api_key` / `AuthenticationError` / `InvalidApiKey` | API Key 无效，请到「设置」重新填写并保存 | 鉴权失败：Key 错误、已删除或不属于该厂家 | 打开设置页对应厂家的 API Key 输入框 |
-| H-402 | 402 | `Insufficient Balance` | **账户余额不足，无法调用模型；请充值或改用其它模型** | 服务端判定余额不足（预付费平台充值余额与赠送额度分列，赠金过期同样报此错） | 主按钮「去充值」（打开厂家充值页）+ 次按钮「打开设置」 |
+| H-402 | 402 | `Insufficient Balance` | **账户余额不足，无法调用模型；请到厂家控制台充值，或改用其它模型** | 服务端判定余额不足（预付费平台充值余额与赠送额度分列，赠金过期同样报此错） | 内嵌状态行，**不弹窗**（去设置修不好余额） |
 | H-403 | 403 | `permission_denied` / `AccessDenied` / `Forbidden` | 该 API Key 没有调用此模型的权限 | 权限被拒：Key 未开通该模型、或额度被冻结 | 换模型或到厂家控制台开通 |
 | H-404 | 404 | `model_not_found` / `Model not exist` | 模型不存在：请核对「设置」里的模型 ID | 模型 ID 在当前账号/该 Base URL 上不存在 | 设置页「测试连接」；音色类另见 V-900 |
 | H-413 | 413 | `RequestEntityTooLarge` | 输入内容过长，服务端拒收 | 请求体超过服务端上限（字幕 / 素材过多） | 精简字幕或素材后重试 |
@@ -97,7 +97,7 @@
 |---|---|---|---|
 | V-000 | 未配置 Key（`getVoiceApiError`） | 未配置「〈厂家〉」的 API Key，请先到「设置 → 语音服务」填写并保存 | 打开设置页 |
 | V-401 | `InvalidApiKey` / `Unauthorized` / `401` / `403` | 语音服务的 API Key 无效或无权限，请检查后重试 | 换 Key |
-| V-402 | **`Arrearage`**（HTTP 400）/ `isv.OUT_OF_SERVICE` / `Insufficient` / `Insufficient Balance` | **语音服务账户余额不足或已欠费，服务已暂停，请充值后再试** | 去充值（阿里云费用中心） |
+| V-402 | **`Arrearage`**（HTTP 400）/ `isv.OUT_OF_SERVICE` / `Insufficient` / `Insufficient Balance` | **语音服务账户余额不足或已欠费，请到阿里云费用中心充值后再试** | 内嵌状态行，**不弹窗** |
 | V-429 | `Throttling.RateQuota` / `Throttling.AllocationQuota` / `Throttling.BurstRate`（HTTP 429，OpenAI 兼容侧别名 `limit_requests` / `insufficient_quota` / `limit_burst_rate`） | **语音合成请求过于频繁或用量超限，请稍后再试** | 重试；突发限流可加 `X-DashScope-Wait-Timeout` 头（3~120 秒）让服务端排队 |
 | V-403 | `DataInspectionFailed` / `data_inspection_failed` | **内容未通过服务端合规检查**（字幕或参考音频被判为敏感），请修改后重试 | 改文本 / 换素材 |
 | V-406 | `InvalidParameter.DataInspection` + `Unable to download the media resource` | 参考音频/素材下载超时（跨区域或第三方的安全策略拦截）：建议改用本地上传或同区域存储 | 改传本地文件 |
@@ -172,7 +172,7 @@
 
 1. **新增 `src/shared/errors.ts`**：`friendlyError()` + `type FriendlyError = { message: string; detail: string; needConfig?: ConfigTarget }`（`ConfigTarget = 'model' | 'voice' | 'billing'`）+ 纯函数便于单测；主进程各模块 import，渲染层只渲染不做二次翻译（与 `UpdateCheckResult` 同一分层）。
 2. **`IpcFail` 已支持 `detail`**（`src/shared/types.ts`，2026-10 加入）。**本轮新增的可选字段实测只需两处**：`src/shared/types.ts`（`needConfig` / `configUrl` / `title`）+ `src/main/**` 生产它。**preload 不需要改**——它是纯转发（`ipcRenderer.invoke(...)` 把主进程返回的对象原样交给渲染层，既不解构也不重建），`detail` 与 `needPacks` 当年就是这样过去的（`needConfig` 同理）。
-3. **UI 挂载点**：`HtmlGenPage`（生成 HTML 失败的 `.hf-status.hf-error` 行）+ `SettingsPage`（测试连接、应用更新）已有 `.hf-detail` 折叠块与「查看详情」按钮范式，直接复用；余额类（DeepSeek 402 / 百炼 `Arrearage`）的弹窗按钮改为「去充值」+「取消」（`shell.openExternal` 打开厂家充值页）。
+3. **UI 挂载点**：`HtmlGenPage`（生成 HTML 失败的 `.hf-status.hf-error` 行）+ `SettingsPage`（测试连接、应用更新）已有 `.hf-detail` 折叠块与「查看详情」按钮范式，直接复用。**不做外链 / 充值按钮**：配置类弹窗只有 `[去设置]` / `[取消]`；余额类走内嵌状态行（文案指向厂家控制台）。
 4. **日志**：`detail` 与原始终端报文一并落 `userData/*.log`（复用 `updater.log` / `runtime.log` 的追加写范式）。
 5. **默认不加重试**：402 / 401 / 400 / 422 重试无意义（余额与配置问题），429 / 5xx / 网络类可自动退避重试 1 次——与 `htmlAgent` 现有「升档重试」区分开（那是针对 `max_tokens` 截断，不是针对错误码）。
 
@@ -194,22 +194,22 @@
 | M-002 / M-006 | 模型配置不完整（Base URL / Model ID / API Key 缺失） | 「模型配置不完整」 |
 | M-007 | Base URL 填错（补 `/v1`） | 「Base URL 可能填错了」 |
 | V-000 | 未配置语音 API Key | 「未配置语音 API Key」 |
-| H-402 / V-402 | 余额不足 / 欠费（DeepSeek 402 / 百炼 `Arrearage`、`isv.OUT_OF_SERVICE`） | 「账户余额不足」→ 按钮改「去充值」+「取消」 |
 
-`needConfig` 只标**需要用户去设置页改配置**的档位；**其余档位一律保持内嵌 `.hf-status.hf-error` + `.hf-detail`，不弹窗**：429 限流、5xx、网络 / 证书、`DataInspectionFailed` 合规拦截、404 模型不存在、参数类 4xx、渲染 / 转录 / 文件的 exit≠0 与 errno。
+**不进弹窗的（走内嵌状态行）**：H-402 / V-402 余额不足与欠费（**去设置修不了余额**，文案直接指向厂家控制台）、429 限流、5xx、网络 / 证书、`DataInspectionFailed` 合规拦截、404 模型不存在、参数类 4xx、渲染 / 转录 / 文件的 exit≠0 与 errno。
 
 **弹窗内不显示「查看详情」**（2026-10-14 决定）：配置类弹窗只有 `[去设置]` / `[取消]` 两个按钮，正文只说「发生了什么 + 去哪修」；`detail` 仍照常写日志。理由：配置类错误的原始报文对用户没有可操作性，而弹窗多一个折叠区会让「点哪个按钮」这个唯一决策变模糊。
 
 **判定方式（已按方案 A 落地：只用主进程字段，不做渲染层正则）**：
 
-`friendlyError()` 判定命中「配置类」档位时，在 `IpcFail` 上带 `needConfig: 'model' | 'voice' | 'billing'`（+ `configUrl` 充值页 / `title` 弹窗标题）；渲染层 `if (res.needConfig) configPrompt.fromResult(res)` 即可，**不认识任何文案**。
+`friendlyError()` 判定命中「需要去设置页改配置」的档位时，在 `IpcFail` 上带 `needConfig: 'model' | 'voice'`（+ `title` 弹窗标题）；渲染层 `if (res.needConfig) configPrompt.fromResult(res)` 即可，**不认识任何文案**。
 唯一例外：`projects.ts` 捕获 `chatWithCustomModel` 抛出的错时只剩一句中文 message，用 `configTargetOf(message)` 复用同一张码表**复分类**（该函数按本文件产出的句式逐条认，因为此时没有数字状态码可判）。
 
-> 曾经的备选「渲染层正则兜底」已废弃，不再实现。原因：正则按文案措辞判定，改文案、加厂家都会漏；且 `api.?key` 这类松写法会把 `Insufficient Balance` 里的 `B**ala**nce` 误判成「Key 错了」，余额类就会给出错误的主按钮（该给「去充值」）。
+> 曾经的备选「渲染层正则兜底」已废弃，不再实现。原因：正则按文案措辞判定，改文案、加厂家都会漏；且 `api.?key` 这类松写法会把 `Insufficient Balance` 里的 `B**ala**nce` 误判成「Key 错了」，给出错误的分类。
 
-**复用现成范式**：App.vue 已有运行环境确认框（`env-gate`）就是「全局单例 + 两个按钮 + 取消即作废」——弹窗照它做：新增 `composables/useConfigPrompt.ts`（模块级单例：`visible` / `title` / `message` / `detail` / `section`），在 App.vue 的 `env-gate` 之后渲染一个 `.hf-modal`，标题与正文字号沿用 §3.1 刻度（标题 14px、说明 12px）。
+**复用现成范式**：App.vue 已有运行环境确认框（`env-gate`）就是「全局单例 + 两个按钮 + 取消即作废」——弹窗照它做：新增 `composables/useConfigPrompt.ts`（模块级单例：`visible` / `title` / `message` / `target`、方法 `open` / `fromResult` / `go` / `close`），在 App.vue 的 `env-gate` 之后渲染一个 `.hf-modal`，标题与正文字号沿用 §3.1 刻度（标题 14px、说明 12px）。
 
-**按钮行为**：`[去设置]` = `requestSettingsSection(section)`（复用 `composables/useNavIntent.ts`，**不要新造跳页信号**）+ `goPage('settings')` + 关框；`[取消]` = 关框、本次操作作废。分类映射：`model` → `model` 分类、`voice` → `voice` 分类、`billing`/更新源 → 各自分类。
+**按钮行为**：`[去设置]` = `requestSettingsSection(section)`（复用 `composables/useNavIntent.ts`，**不要新造跳页信号**）+ `goPage('settings')` + 关框；`[取消]` = 关框、本次操作作废。分类映射：`model` → 「自定义模型」分类、`voice` → 「语音服务」分类。
+**不做外链、不做「去充值」**（2026-10-14 用户决定）：余额 / 欠费类不进这个弹窗——去设置改不了余额，弹一个只能点「取消」的框没有意义，改为内嵌状态行 + 文案说明去厂家控制台充值。
 
 **顺带收口**：`pages/TextTtsPage/helpers.ts` 的 `requireCfg()` 目前**直接 `goPage('settings')` 把用户从当前页拽走**（`useNavIntent` 里那句注释就是描述这个行为）——改为弹同一个框，由用户决定去不去。
 
@@ -223,5 +223,5 @@
 | DashScope 限流码 | **已确认（[限流最佳实践](https://www.alibabacloud.com/help/en/model-studio/rate-limiting-best-practices)）**：`Throttling.RateQuota`（RPM/RPS）、`Throttling.AllocationQuota`（TPM/TPS）、`Throttling.BurstRate`（流量突增）；OpenAI 兼容侧别名为 `limit_requests` / `insufficient_quota` / `limit_burst_rate`；触发后一般 1 分钟内恢复 |
 | 429 的可优化项 | 官方提供 `X-DashScope-Wait-Timeout`（3~120 秒）让服务端排队，仅对 `Throttling.BurstRate` 有效——若要实现「自动重试 1 次」，比客户端睡眠更省事（**待决策**，属功能增强，不在本次错误映射范围内） |
 | DeepSeek 官方错误码全集 | **已确认（[官方文档](https://api-docs.deepseek.com/quick_start/error_codes)）**：仅 400 / 401 / 402 / 422 / 429 / 500 / 503 七种，**没有 403 与 404** ⇒ 表 1 的 403、404 档对 DeepSeek 不会命中（保留给百炼 / 智谱 / MiniMax）；「模型 ID 不存在」在 DeepSeek 侧按 400 `Invalid Format` 或 422 `Invalid Parameters` 返回，故 H-404 的文案需允许由报文字符串（含 `model`）二次判定 |
-| DeepSeek 402 与充值入口 | **已确认（官方文档）**：`402 - Insufficient Balance` = 余额用尽，处置为到 `https://platform.deepseek.com/top_up` 充值；与本次实测报文 `402 Insufficient Balance (request_id: …)` 一致 |
+| DeepSeek 402 | **已确认（[官方文档](https://api-docs.deepseek.com/quick_start/error_codes)）**：`402 - Insufficient Balance` = 余额用尽，官方处置为到 `https://platform.deepseek.com/top_up` 充值；与本次实测报文 `402 Insufficient Balance (request_id: …)` 一致。**这个充值页地址只写在这里供人查阅，应用里不做按钮**（见 §11.1：用户决定摘除「去充值」） |
 | 智谱 / MiniMax 码表 | 未核对官方文档（本项目 `MODEL_PROVIDERS` 里的另外两家）。它们同为 OpenAI 兼容协议，表 1 的状态码档可覆盖大部分；若用户实际用这两家报错，再按同一格式补行 |
