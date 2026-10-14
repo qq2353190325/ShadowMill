@@ -8,7 +8,7 @@
 
 | 文件 | 行数 | 角色 | 注册的 IPC 域 |
 |---|---|---|---|
-| [index.ts](./files/main/index.ts.md) | 464 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议、窗口控制与剪贴板 IPC、启动时序打点 `startup.log` | `window:*`、`app:copy-text`、`legacy:*` |
+| [index.ts](./files/main/index.ts.md) | 494 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议（`rangeResponse()` 支持 `Range` 字节范围取 → `206` / `416`，响应体走文件流）、窗口控制与剪贴板 IPC、启动时序打点 `startup.log` | `window:*`、`app:copy-text`、`legacy:*` |
 | [hfEnv.ts](./files/main/hfEnv.ts.md) | 294 | 环境探测与内置依赖定位 + GSAP 本地化 / 导出外部化辅助（不注册 IPC） | — |
 | [settings.ts](./files/main/settings.ts.md) | 406 | 设置存储（`userData/settings.json`，含 `voice` 按厂家配置（**只有 apiKey**）与视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` + 「出厂状态」判定 `isPristineSettings`（供 index.ts 的 `migrateFrom()` 迁移老数据时决定能否覆盖 settings.json） | `settings:*`（5） |
 | [systemVoices.ts](./files/main/systemVoices.ts.md) | 62 | Qwen-TTS 内置系统音色静态表（**只有 `SYSTEM_VOICES` 一个导出**，判定函数已删除） | — |
@@ -104,7 +104,10 @@ shared/{ipc,types} ──→ 全部模块（仅常量与类型）
 - **启动时序打点**：`bootLog(stage)` 往 `userData/startup.log` 追加 `ISO 时间 + '+<距进程启动毫秒>ms ' + 阶段`；打点覆盖「模块加载 → app ready → 建窗 → page load start → dom ready → page load finished → first paint」。路径在模块顶层解析一次并缓存（`USER_DATA_DIR` 只跟随 `name`，运行期不变，缓存是安全的）。文件超 64KB 自动清空，写失败静默。排查「首屏只有背景很久」时先看它，可直接判断耗时落在主进程启动、建窗还是页面加载。
 - **协议特权**：`app` ready **之前**调用 `protocol.registerSchemesAsPrivileged([{ scheme: 'hgpreview', privileges: { standard, secure, supportFetchAPI, stream } }])`；ready 之后 `protocol.handle('hgpreview', …)` 把 `hgpreview://p/<encodeURIComponent(项目名)>/<相对路径>` 映射回 `userData/projects/<项目名>/` 内的文件。
   - 目录穿越防护：`path.resolve` 后必须等于项目目录或以 `项目目录 + path.sep` 开头，否则 403。
-  - 直接读字节构造 `Response`（`net.fetch(file://)` 在协议处理器内有兼容问题，会导致预览空白），MIME 由 `previewMime()` 的扩展名表显式给出，`Cache-Control: no-store`。
+  - 响应统一由 `rangeResponse(full, request)` 构造（`net.fetch(file://)` 在协议处理器内有兼容问题、会导致预览空白，故自行构造 `Response`）；MIME 由 `previewMime()` 的扩展名表显式给出，基础响应头为 `Content-Type` + `Accept-Ranges: bytes` + `Cache-Control: no-store`。
+    - **支持 `Range` 字节范围**：正则 `^bytes=(\d*)-(\d*)$` 解析——`bytes=N-` / `bytes=N-M` / 后缀 `bytes=-N`（取最后 N 字节），越界把 `end` 夹到 `size-1`；命中 ⇒ `206` + `Content-Range: bytes start-end/size`；非法或不可满足（`start > end` / `start >= size`）⇒ `416` + `Content-Range: bytes */size`；无 `Range` ⇒ `200`（行为与改动前一致）；`HEAD` 只回响应头。
+    - **为什么**：Chromium 只在响应支持字节范围时才把 `<audio>` / `<video>` 判成可跳转，否则预览页媒体 `seekable` 恒为 `[0, 0]`——拖预览进度条时画面时间轴走到了目标秒、声音还停在原处（`media.currentTime = s` 被静默夹回缓冲起点）。
+    - **响应体是流**：`fs.createReadStream(full, { start, end })`（范围）或 `fs.createReadStream(full)`（整文件），经 `Readable.toWeb()` 转成 `BodyInit`；素材最大 214MB，不再整文件读进内存。
   - 失败路径写入 `userData/preview-protocol.log` 便于排查。
 - **窗口**：单窗口 `1200×800`（最小 `800×600`）、`titleBarStyle: 'hidden'`、**`backgroundColor: '#0B1220'`**（与设计系统 `--bg-primary` / 渲染层启动画面同色，窗口首帧前不闪白）、`Menu.setApplicationMenu(null)`、`contextIsolation: true` / `nodeIntegration: false`、preload 指向 `../preload/index.js`；dev 走 `process.env.ELECTRON_RENDERER_URL`，prod 走 `loadFile('../renderer/index.html')`。
 - **IPC**：`window:minimize` / `window:toggle-maximize` / `window:close`（`on`），`app:copy-text`（`handle`，渲染层 sandbox 无 clipboard 模块），最大化状态经 `window:maximized-change` 回推；旧数据处置为 `legacy:status` / `legacy:resolve`（都是 `handle`，**没有主 → 渲染的推送**——结论完全由渲染层主动拉取）。

@@ -1,11 +1,11 @@
 # src/main/index.ts
 
-> ShadowMill（影坊）主进程入口：历史数据目录的归属证明与旧数据处置契约（`legacy:*`）、装配窗口、预览协议与各业务域 IPC
+> ShadowMill（影坊）主进程入口：历史数据目录的归属证明与旧数据处置契约（`legacy:*`）、装配窗口、预览协议（含字节范围请求）与各业务域 IPC
 
 - **所在目录**：src/main/
 - **类型**：主进程入口（装配器，副作用型模块）
-- **规模**：465 行（2026-10 品牌改名事故修复后由 265 行增长；本轮把「原生三按钮对话框 + 1.5s 延迟」改为「主进程只提供 `legacy:*` 两个 handler、界面交给渲染层」后由 481 行缩短，行数以工作区源码为准）
-- **对外导出**：无 `export`（模块加载即执行归属标记写入、协议特权声明与 IPC 监听；`app.whenReady()` 后完成装配并注册 `legacy:*` 两个 handler）；内部包含 `LEGACY_DIR_NAMES` / `OWN_DATA_ENTRIES` / `USER_DATA_DIR` / `DATA_MARKER` / `APP_ID` / `STARTUP_LOG` / `BOOT_AT` 等模块级常量、`type MergeStat`、模块级可变状态 `legacyScanned` / `legacyFound`，函数 `hasOurIdentity()` / `isOurs()` / `writeIdentity()` / `mergeTree()` / `pruneEmptyDirs()` / `migrateFrom()` / `findLegacyData()` / `legacyInfo()` / `resolveLegacy(action)` / `previewMime(p)` / `createWindow()` / `getWindow()` / `bootLog(stage)`，以及模块级 `let mainWindow`
+- **规模**：494 行（2026-10 品牌改名事故修复后由 265 行增长；本轮把「原生三按钮对话框 + 1.5s 延迟」改为「主进程只提供 `legacy:*` 两个 handler、界面交给渲染层」后由 481 行缩短；**本轮又为 `hgpreview://` 加上 `rangeResponse()`（支持 `Range` 字节范围请求、响应体改流式）后由 465 行增至 494 行**，行数以工作区源码为准）
+- **对外导出**：无 `export`（模块加载即执行归属标记写入、协议特权声明与 IPC 监听；`app.whenReady()` 后完成装配并注册 `legacy:*` 两个 handler）；内部包含 `LEGACY_DIR_NAMES` / `OWN_DATA_ENTRIES` / `USER_DATA_DIR` / `DATA_MARKER` / `APP_ID` / `STARTUP_LOG` / `BOOT_AT` 等模块级常量、`type MergeStat`、模块级可变状态 `legacyScanned` / `legacyFound`，函数 `hasOurIdentity()` / `isOurs()` / `writeIdentity()` / `mergeTree()` / `pruneEmptyDirs()` / `migrateFrom()` / `findLegacyData()` / `legacyInfo()` / `resolveLegacy(action)` / `previewMime(p)` / `rangeResponse(full, request)` / `createWindow()` / `getWindow()` / `bootLog(stage)`，以及模块级 `let mainWindow`
 
 ## 1. 作用与职责
 
@@ -15,7 +15,7 @@
 - **历史数据目录：主进程只回答「有没有 / 是什么」并执行选择，不做任何界面展示**：品牌改名（`my-app` → `shadowmill`）会让 userData 目录名随之改变，老用户打开应用会看到「项目全没了」（数据其实还在 `%APPDATA%\my-app` 里）。本文件扫 `LEGACY_DIR_NAMES`，通过归属证明且**确有应用数据**时把结论缓存起来，经 `legacy:status` 交给渲染层；界面由渲染层的应用内弹窗 `LegacyDataDialog.vue`（沿用 `.hf-modal` 体系）负责，用户选完再把 `migrate` / `delete` / `later` 经 `legacy:resolve` 回传，由 `resolveLegacy()` 执行。**不做静默自动迁移**：静默挪动上 GB 的数据出问题极难追查，而弹窗本身就把「数据在哪、有多少、要怎么办」讲清楚了。见 §3.1。
 - **窗口与生命周期**：创建 `BrowserWindow`（1200×800，最小 800×600，`titleBarStyle: 'hidden'`，`backgroundColor: '#0B1220'`），处理 `activate` / `window-all-closed`。
 - **首屏时序打点**：`bootLog()` 把「模块加载 → app ready → 建窗 → 页面开始加载 → DOM ready → 加载完成 → 首帧」写进 `userData/startup.log`，用于排查首屏慢（每次启动几行，超 64KB 自动清空）；迁移/删除/「稍后再说」的结果也写同一文件。
-- **预览协议宿主**：声明并实现自定义协议 `hgpreview`，让渲染层的预览 iframe 能读取 `userData\projects` 下的项目文件；dev 阶段渲染层来自 `http://localhost`，Chromium 会拦截 `file://` iframe（`Not allowed to load local resource`），因此必须走该协议。
+- **预览协议宿主**：声明并实现自定义协议 `hgpreview`，让渲染层的预览 iframe 能读取 `userData\projects` 下的项目文件；dev 阶段渲染层来自 `http://localhost`，Chromium 会拦截 `file://` iframe（`Not allowed to load local resource`），因此必须走该协议。响应统一由 `rangeResponse()` 构造：**支持 `Range` 字节范围（206 / 416）**，响应体用 `fs.createReadStream` 流式返回，供预览页的媒体跳转（见 §3.3）。
 - **基础 IPC**：窗口控制（最小化 / 最大化切换 / 关闭）与剪贴板写入。
 - **业务域装配**：按固定顺序调用各业务模块的 `register(ctx)`，把窗口引用注入各域（供打开对话框时作为父窗口）。
 - 具体业务逻辑不在本文件实现，按域拆到 `src/main/` 下的 `hfEnv.ts`、`settings.ts`、`htmlAgent.ts`、`projects.ts`、`voice.ts`、`ttsAlign.ts`、`video.ts`、`whisper.ts`、`updater.ts`、`runtime.ts`。
@@ -44,7 +44,8 @@
 | `legacyInfo()` | 函数 `() => LegacyDataInfo \| null` | 主进程对「有没有旧数据 / 是什么」的**唯一回答**；缓存语义与 `MIGRATE_USER_DATA=0` 关闸见 §3.1④ |
 | `resolveLegacy(action?)` | 函数 `(LegacyResolveAction?) => LegacyResolveResult` | 执行用户在弹窗里的选择（`migrate` / `delete` / `later`），非法或缺省的 action 归一为 `'later'`；返回 `{ ok, action, moved?, skipped?, failed?, message? }`；见 §3.1⑤ |
 | `STARTUP_LOG` | `string`（模块级常量） | `path.join(USER_DATA_DIR, 'startup.log')`，启动打点日志路径；**在这里解析一次并缓存**（注释说明：userData 位置只跟随 `name`，运行期不会变，缓存是安全的） |
-| `previewMime(p)` | 函数 `(string) => string` | 预览协议 MIME 表；按 `path.extname(p).toLowerCase()` 查表，未命中返回 `application/octet-stream` |
+| `previewMime(p)` | 函数 `(string) => string` | 预览协议 MIME 表；按 `path.extname(p).toLowerCase()` 查表，未命中返回 `application/octet-stream`；`rangeResponse()` 用它算每个响应的 `Content-Type` |
+| `rangeResponse(full, request)` | 函数 `(string, Request) => Response` | 预览协议的**统一响应构造器**：算 MIME / 体积 / 基础响应头（`Accept-Ranges: bytes` + `Cache-Control: no-store`），解析 `Range` 头并按范围返回 `206` / `416`，`HEAD` 只回头；响应体是 `fs.createReadStream` → `Readable.toWeb()` 的流。见 §3.3 的「Range 支持」 |
 | `mainWindow` | `BrowserWindow \| null` | 主窗口引用；`closed` 事件中置回 `null` |
 | `getWindow()` | 箭头函数 `() => BrowserWindow \| null` | 装配上下文 `RegisterCtx.getWindow` 的实现；各业务域的对话框用它取父窗口 |
 | `BOOT_AT` | `number`（模块级常量） | 进程启动时刻（`Date.now() - process.uptime()*1000`，含 Electron 引导耗时），`bootLog` 的相对时间基准 |
@@ -58,12 +59,13 @@
 | `IPC.Legacy.Status` | `ipcMain.handle`（在 `app.whenReady()` 内、`createWindow()` 之后注册） | 频道 `'legacy:status'`，`() => legacyInfo()`——渲染层挂载时问一次「有没有待处理的旧数据」 |
 | `IPC.Legacy.Resolve` | `ipcMain.handle`（同上） | 频道 `'legacy:resolve'`，`(_event, action?) => resolveLegacy(action)`——回传用户在弹窗里的选择并同步拿到执行结果 |
 | `protocol.registerSchemesAsPrivileged([...])` | 模块顶层调用 | 为 `hgpreview` 声明 `{ standard: true, secure: true, supportFetchAPI: true, stream: true }` |
-| `protocol.handle('hgpreview', handler)` | `app.whenReady()` 内调用 | 把 URL 路径映射到项目目录内文件并返回 `Response` |
+| `protocol.handle('hgpreview', handler)` | `app.whenReady()` 内调用 | 把 URL 路径映射到项目目录内文件（含目录穿越校验），命中后交给 `rangeResponse(full, request)` 构造响应 |
 | `ctx: RegisterCtx` | 对象 `{ getWindow }` | 由 `src/shared/types.ts` 定义，仅含 `getWindow` 一个字段 |
 
 > **已作废的历史方案（文档与代码里都不再存在，勿再引用）**：`USER_DATA_DIR_NAME`、`app.setPath('userData', …)`、目录位置钉死、启动时「身份标记自动认领」（`readMarkerAppId()` / `adoptExistingData()`）、`README_NAME` / `README_TEXT`（`README-请勿删除.txt`），以及备份名 `.before-adopt.bak`。
 > 注意区分：`DATA_MARKER` / `APP_ID` / `writeIdentity()` **在**（本轮重新引入，用途变了，见 §3.1②）；被删掉的是旧方案里那套「按标记自动把老目录并过来」的启动逻辑。
 > **本轮又删掉的一层**：`promptLegacyData()`（原生 `dialog.showMessageBox` 三按钮对话框整段）、它的调用 `setTimeout(() => promptLegacyData(), 1500)`，以及 `electron` 的 `dialog` 导入与 `import type { MessageBoxOptions }`。因此**启动路径上已经没有任何与旧数据相关的延迟或原生对话框**；取而代之的是 §3.1④/⑤ 的 `legacyInfo()` / `resolveLegacy()` 与两个 `legacy:*` handler。
+> **同一轮里被替换掉的响应构造方式**：协议处理器原先的 `fs.readFileSync(full)` + 手写 `new Response(data, { headers: { Content-Type, Cache-Control } })`（整文件读进内存、不带 `Accept-Ranges`）已被 `rangeResponse(full, request)` 取代；协议路径解析、403 / 404 / 异常落盘逻辑未变。
 
 ## 3. 关键流程 / 算法
 
@@ -208,8 +210,68 @@ URL 形态：`hgpreview://p/<encodeURIComponent(项目名)>/<相对路径>`。�
 4. `dir = projects.projectDir(name)`（项目目录绝对路径），`full = path.resolve(dir, rel)`。
 5. 目录穿越防护：若 `full !== dir` 且 `!full.startsWith(dir + path.sep)`，记 `403 <url>` 并返回 `403 Forbidden`。
 6. 存在性校验：`fs.existsSync(full)` 且 `fs.statSync(full).isFile()` 不满足则记 `404 <url> -> <full>` 并返回 `404 Not Found`。
-7. `fs.readFileSync(full)` 直接读字节，构造 `Response`，头为 `Content-Type: previewMime(full)` 与 `Cache-Control: no-store`。
+7. `return rangeResponse(full, request)`——响应构造统一交给它：MIME 由 `previewMime(full)` 算、按 `Range` 头返回 `200` / `206` / `416`、响应体是文件流（见下方「Range 支持」）。
 8. 任意异常落入 `catch`：记 `500 <url> <message>`，但**响应状态码为 400 `Bad Request`**（日志前缀与响应码不一致，属现有实现）。
+
+> 处理器自己的注释（第 434-437 行）写明三点：只允许读目标项目目录内的文件（防目录穿越）；`net.fetch(file://)` 在协议处理器内存在兼容性问题、易致预览空白，故自行构造 `Response`；**媒体文件（音轨 / 视频素材）走 `rangeResponse` 支持按字节范围取，预览跳转依赖它**；失败/异常落盘 `userData/preview-protocol.log`。
+
+#### Range 支持（`rangeResponse(full, request)`）
+
+**为什么必须支持 Range**：Chromium 只有在响应支持字节范围时才把 `<audio>` / `<video>` 判成**可跳转**。原先对任何请求都回 `200` 且不带 `Accept-Ranges`，预览页里媒体的 `seekable` 恒为 `[0, 0]`——预览控制脚本执行 `media.currentTime = s` 会被静默夹回缓冲起点，表现为「拖动预览进度条时画面时间轴走到了目标秒、声音还停在原处、再点播放继续从原处播」。
+
+真实 Electron 复现（临时探针复刻该协议处理器 + 载入真实项目生成的 `index.preview.html`，读 iframe DOM 采样）：
+
+| | `seekable` | seek 到 8 / 2 / 6 秒后的 `currentTime` |
+| --- | --- | --- |
+| 修复前 | `[0, 0]` | `0.54 / 0 / 0.55`（未生效） |
+| 修复后 | `[0, 225.419002]` | `8.55 / 2.00 / 6.54`（与 composition 时间轴同步） |
+
+实现（**代码与源码逐行一致**）：
+
+```ts
+// 支持 Range 的响应：媒体（背景音轨 / 视频素材）必须能按字节范围取，否则 Chromium 会把
+// <audio>/<video> 判成不可跳转（seekable 只有 [0,0]），预览里拖进度条时画面时间轴动了、
+// 声音却跳不动（表现为「拖动后音频不跟着走、再播放还从原处继续」）。
+// 这里按请求范围返回 206 + Content-Range，响应体用流（214MB 的素材不能整个读进内存）。
+function rangeResponse(full: string, request: Request): Response {
+  const type = previewMime(full)
+  const size = fs.statSync(full).size
+  const head = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' }
+  const noBody = request.method === 'HEAD'
+  const raw = request.headers.get('range')
+  const m = raw ? /^bytes=(\d*)-(\d*)$/.exec(raw.trim()) : null
+  let start = 0;
+  let end = size - 1;
+  if (m) {
+    if (m[1]) { start = Number(m[1]); if (m[2]) end = Number(m[2]); }
+    else if (m[2]) { start = Math.max(0, size - Number(m[2])); }   // 后缀范围 bytes=-N：最后 N 字节
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+      return new Response(null, { status: 416, headers: { ...head, 'Content-Range': 'bytes */' + size } });
+    }
+    if (end > size - 1) end = size - 1;
+  }
+  const len = end - start + 1;
+  const partial = !!m;
+  const headers: Record<string, string> = { ...head, 'Content-Length': String(len) };
+  if (partial) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + size;
+  if (noBody) return new Response(null, { status: partial ? 206 : 200, headers });
+  const body = partial ? fs.createReadStream(full, { start, end }) : fs.createReadStream(full);
+  return new Response(Readable.toWeb(body) as unknown as BodyInit, { status: partial ? 206 : 200, headers });
+}
+```
+
+行为要点：
+
+| 环节 | 行为 |
+| --- | --- |
+| 基础响应头 | `Content-Type`（复用 `previewMime()`）+ `Accept-Ranges: bytes` + `Cache-Control: no-store`；`Content-Length` 是本次响应的实际字节数（整文件时即文件体积） |
+| `HEAD` | `request.method === 'HEAD'` 时**只回响应头、不带响应体**（仍按是否命中范围给 `206` / `200`） |
+| `Range` 解析 | 正则 `^bytes=(\d*)-(\d*)$`（先 `trim()`）；支持 `bytes=N-`、`bytes=N-M`、后缀式 `bytes=-N`（`start = Math.max(0, size - N)`，取最后 N 字节） |
+| 越界夹取 | 命中范围时 `end > size - 1 ⇒ end = size - 1` |
+| 命中范围 | `206 Partial Content` + `Content-Range: bytes start-end/size` + `Content-Length` |
+| 非法 / 不可满足 | `start > end`、`start >= size` 或非有限数 ⇒ `416` + `Content-Range: bytes */size`（无响应体） |
+| 无 `Range` | `200`，行为与改动前一致（但响应体已是流） |
+| 响应体 | **流**：范围请求 `fs.createReadStream(full, { start, end })`，整文件 `fs.createReadStream(full)`，两者都经 `Readable.toWeb(...)` 转成 `BodyInit` 交给 `Response`——**不再整文件读进内存**（素材最大 214MB） |
 
 ### 3.4 createWindow 装配流程
 
@@ -233,10 +295,12 @@ URL 形态：`hgpreview://p/<encodeURIComponent(项目名)>/<相对路径>`。�
   ├─ legacyInfo / resolveLegacy 定义
   ├─ STARTUP_LOG = path.join(USER_DATA_DIR, 'startup.log')   // 位置只跟随 name，缓存安全
   ├─ bootLog('main module loaded')
-  └─ protocol.registerSchemesAsPrivileged([...])   // 协议特权必须在 app ready 之前
+  ├─ protocol.registerSchemesAsPrivileged([...])   // 协议特权必须在 app ready 之前
+  ├─ previewMime / rangeResponse 定义               // 协议响应构造器（MIME 表 + Range 支持）
+  └─ mainWindow = null / getWindow 定义
 whenReady
   ├─ bootLog('app ready')
-  ├─ protocol.handle('hgpreview', ...)   // 协议处理器先就绪，预览才可用
+  ├─ protocol.handle('hgpreview', ...)   // 协议处理器先就绪，预览才可用；命中后交给 rangeResponse()
   ├─ createWindow()                       // 窗口先建好，ctx.getWindow / 各域对话框父窗口才有值
   │    └─ bootLog('window created') → loadFile/loadURL
   │         （异步阶段另打点：page load start → dom ready → page load finished → first paint）
@@ -265,7 +329,8 @@ whenReady
 | --- | --- |
 | `electron` | `app`、`BrowserWindow`、`Menu`、`ipcMain`、`clipboard`、`protocol`（**本轮起不再有 `dialog`**） |
 | `node:path` | `path`（`join` / `resolve` / `dirname` / `basename` / `extname` / `sep`） |
-| `node:fs` | `fs`（`existsSync` / `statSync` / `readdirSync` / `readFileSync` / `writeFileSync` / `appendFileSync` / `mkdirSync` / `renameSync` / `copyFileSync` / `rmSync` / `rmdirSync`） |
+| `node:fs` | `fs`（`existsSync` / `statSync` / `readdirSync` / `readFileSync` / `writeFileSync` / `appendFileSync` / `mkdirSync` / `renameSync` / `copyFileSync` / `rmSync` / `rmdirSync` / **`createReadStream`（`rangeResponse` 的响应体）**） |
+| `node:stream` | `Readable`——新增导入（第 19 行），`rangeResponse()` 用 `Readable.toWeb(fs.createReadStream(...))` 把 Node 流转成 `Response` 的 `BodyInit` |
 | `../shared/ipc` | `IPC` 频道常量表（本轮用到新增的 `IPC.Legacy.Status` / `IPC.Legacy.Resolve`） |
 | `../shared/types` | 类型 `LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`、`RegisterCtx`（均为 `import type`；**本轮起不再有 `MessageBoxOptions`**） |
 | `./settings` | `import * as settings`——`migrateFrom()` 用 `settings.isPristineSettings(dst)` 判定「新 settings.json 是否仍是出厂状态」（见 §3.1⑥） |
@@ -294,10 +359,12 @@ whenReady
 - **「空壳」判定避免打扰**：老目录里若只剩 Chromium 缓存（白名单条目全空或不存在），`findLegacyData()` 返回 `null`，`legacy:status` 返回 `null`，渲染层**不会**弹出任何弹窗。
 - **userData 位置本身仍是 Electron 默认语义**：`USER_DATA_DIR = app.getPath('userData')` = `%APPDATA%\<package.json 的 name>`（现 `shadowmill`）；本文件不调用 `app.setPath`。因此**迁移只发生在用户点击之后**，不存在任何隐式的目录改写。
 - **业务模块仍保持惰性求值（纯保险）**：`projects.projectsRoot()` 等一律写成函数 / getter，源码注释（含 `STARTUP_LOG` 的缓存说明）已把理由写作「**将来**若有人重新引入 `setPath` 之类的改动，模块级快照会静默钉在当时的位置」——当前 userData 只跟随 `name`，快照本来也正确，函数化属于零代价的保险。**不要**把它写成「禁止模块级快照的硬约束源于现行的 setPath」。
-- **必须显式给 MIME**：直接读字节构造 `Response` 时若缺 `Content-Type`（缺省 `application/octet-stream`）会被 Chromium 的严格 MIME 检查拦下脚本，因此 `previewMime` 是功能必需而非优化；常用映射为 `.html/.htm`→`text/html; charset=utf-8`、`.js/.mjs`→`text/javascript; charset=utf-8`、`.css`→`text/css; charset=utf-8`、`.json`→`application/json`、`.svg`→`image/svg+xml`、`.mp3`→`audio/mpeg`、`.wav`→`audio/wav`、`.mp4/.m4v`→`video/mp4`、`.woff2`→`font/woff2`、`.txt`→`text/plain; charset=utf-8`。
-- **不要用 `net.fetch('file://...')`**：源码注释明确该方式在协议处理器内存在兼容性问题，易致预览空白，故改为 `fs.readFileSync` 手工构造响应。
-- **禁用缓存**：`Cache-Control: no-store`，配合渲染层的 `?v=` 时间戳实现预览强制刷新。
-- **安全边界**：`path.resolve` + `startsWith(dir + path.sep)` 组合是防目录穿越的唯一防线；`full === dir` 放行但随后会被 `isFile()` 判否返回 404。每段单独 `decodeURIComponent`，注意编码后的斜杠在分段解码后才会显现。
+- **必须显式给 MIME**：构造 `Response` 时若缺 `Content-Type`（缺省 `application/octet-stream`）会被 Chromium 的严格 MIME 检查拦下脚本，因此 `previewMime` 是功能必需而非优化；`rangeResponse()` 的每个分支（含 `206` / `416`）都用它算 `Content-Type`。常用映射为 `.html/.htm`→`text/html; charset=utf-8`、`.js/.mjs`→`text/javascript; charset=utf-8`、`.css`→`text/css; charset=utf-8`、`.json`→`application/json`、`.svg`→`image/svg+xml`、`.mp3`→`audio/mpeg`、`.wav`→`audio/wav`、`.mp4/.m4v`→`video/mp4`、`.woff2`→`font/woff2`、`.txt`→`text/plain; charset=utf-8`。
+- **不要用 `net.fetch('file://...')`**：源码注释明确该方式在协议处理器内存在兼容性问题，易致预览空白，故改为在协议处理器里直接构造 `Response`（现由 `rangeResponse()` 统一负责，见 §3.3 的「Range 支持」）。
+- **媒体预览必须支持 Range（本轮修复）**：Chromium 只在响应支持字节范围时才把 `<audio>` / `<video>` 判成可跳转；没有 `Accept-Ranges` / `206` 时 `seekable` 恒为 `[0, 0]`，`media.currentTime = s` 被静默夹回缓冲起点，用户看到的是「拖进度条后画面时间轴走了、声音停在原处、再点播放从原处继续」。`rangeResponse()` 给出 `Accept-Ranges: bytes` 与 `206` + `Content-Range` 之后，同一串 seek（8 / 2 / 6 秒）实测 `currentTime = 8.55 / 2.00 / 6.54`，与 composition 时间轴同步。
+- **响应体是流、不是整文件读进内存**：`fs.createReadStream` + `Readable.toWeb()`；项目素材最大 214MB，整文件 `readFileSync` 既占内存也推迟首字节。范围请求只读 `{ start, end }` 这一段。
+- **禁用缓存**：`Cache-Control: no-store`，配合渲染层的 `?v=` 时间戳实现预览强制刷新；每份响应固定带 `Accept-Ranges: bytes`。
+- **安全边界**：`path.resolve` + `startsWith(dir + path.sep)` 组合是防目录穿越的唯一防线；`full === dir` 放行但随后会被 `isFile()` 判否返回 404。每段单独 `decodeURIComponent`，注意编码后的斜杠在分段解码后才会显现。`Range` 只影响读取的字节区间，**不改变路径校验结果**（校验在 `rangeResponse` 之前完成）。
 - **排障入口**：预览异常时看 `userData/preview-protocol.log`；**首屏慢 / 启动卡顿看 `userData/startup.log`**（每行带「距进程启动毫秒数」，可直接判断时间花在模块加载、建窗还是页面加载），历史数据迁移/删除/「稍后」那几行也在同一文件里（见 §3.1⑤）。
 - **两种 IPC 语义不能混用**：窗口控制是 `ipcMain.on`（渲染层 `send`，单向、无返回值），剪贴板与 `legacy:*` 都是 `ipcMain.handle`（渲染层 `invoke`，返回 Promise）。`IPC.Window.MaximizedChange` 是主进程 → 渲染层的推送频道；`legacy:*` 没有主 → 渲染的推送，**完全由渲染层拉取**。
 - **`register(ctx)` 顺序有约束**：必须在 `createWindow()` 之后、且按 settings → projects → voice → ttsAlign → video → whisper → updater → runtime 注册，避免跨域依赖缺位（`runtime` 放最后只是保证它的 handler 先挂上：它现在**启动即开始后台准备、不再有延迟**，同步部分只有几个 `existsSync` / `statSync` 探测）；`legacy:*` 两个 handler 也在这个位置注册，顺序上写在 `ctx` 之前。
