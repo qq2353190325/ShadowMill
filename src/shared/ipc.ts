@@ -45,6 +45,8 @@ export const IPC = {
     GetProfiles: 'voice:get-profiles',
     SaveProfile: 'voice:save-profile',
     DeleteProfile: 'voice:delete-profile',
+    // 删除**云端**克隆音色（DashScope customization: action=delete）；与 DeleteProfile（只清本地映射）不同
+    DeleteCloud: 'voice:delete-cloud',
     List: 'voice:list',
     ListAll: 'voice:list-all',
     PickDir: 'voice:pick-dir',

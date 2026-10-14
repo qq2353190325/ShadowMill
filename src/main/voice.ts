@@ -2,63 +2,151 @@
 // 千问语音：音色管理 + 文字生音频（Qwen-TTS / Qwen-Audio-TTS 双系列 HTTP 方案）
 // 提供：isAudioTtsModel / getVoiceApiError / parseJsonLike / voiceFriendlyError /
 //       nowStamp / guessAudioExt / resolveTtsDir + 全部 voice:* IPC
-// 依赖：settings(getVoiceConfig / readSettings / writeSettings / DEFAULT_SETTINGS) /
-//       projects(projectsRoot / scanProjects) / dialog
+// 依赖：settings(getVoiceSettings / getVoiceProviderConfig / saveVoiceProviderConfig / readSettings / writeSettings) /
+//       voiceCatalog（**按厂家组织**的模型表与音色表：apiBase / API Key / 克隆模型都从厂家取） /
+//       projects(projectsRoot / scanProjects) / hfEnv(BUILTIN_RESOURCES.ffmpeg / ffprobe，裁参考音频用) / dialog
 import { app, ipcMain, dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { spawn } from 'node:child_process'
 import * as settings from './settings'
 import * as projects from './projects'
-import { SYSTEM_VOICES, isSystemVoice } from './systemVoices'
+import { BUILTIN_RESOURCES } from './hfEnv'
+import {
+  VOICE_MODELS,
+  VOICE_PROVIDERS,
+  providerByKey,
+  providerOfModel,
+  providerOfSystemVoice,
+  seriesDefaultModel,
+  type VoiceProviderDef
+} from './voiceCatalog'
 import { IPC } from '../shared/ipc'
 import type {
   RegisterCtx,
   SystemVoice,
   VoiceCreatePayload,
-  VoiceModel,
   VoiceProfileKeyPayload,
   VoiceProfilePayload,
   VoiceProfile,
+  VoiceProviderView,
   VoiceSaveConfigPayload,
   VoiceSaveDirPayload,
-  VoiceSynthPayload,
-  VoiceTTSConfig
+  VoiceSynthPayload
 } from '../shared/types'
 
-const VOICE_API_BASE = 'https://dashscope.aliyuncs.com/api/v1';
-const VOICE_ENROLL_MODEL = 'qwen-voice-enrollment'; // Qwen-TTS 系列克隆模型，请勿修改
-const VOICE_ENROLL_MODEL_AUDIO = 'voice-enrollment'; // Qwen-Audio-TTS 系列克隆模型
-// 候选模型表（角色：clone=语音复刻/克隆音色合成，system=内置系统音色合成）；结构见 shared/types.ts 的 VoiceModel
-const VOICE_MODELS: VoiceModel[] = [
-  { id: 'qwen-audio-3.0-tts-flash', label: 'qwen-audio-3.0-tts-flash', role: 'clone', input: 'url', group: '语音复刻（克隆音色合成）', isDefault: true },
-  { id: 'qwen3-tts-vc-2026-01-22', label: 'qwen3-tts-vc-2026-01-22（非实时）', role: 'clone', input: 'file' },
-  { id: 'qwen3-tts-vc-realtime-2026-01-15', label: 'qwen3-tts-vc-realtime-2026-01-15（实时）', role: 'clone', input: 'file' },
-  { id: 'qwen3-tts-vc-realtime-2025-11-27', label: 'qwen3-tts-vc-realtime-2025-11-27（实时）', role: 'clone', input: 'file' },
-  { id: 'qwen3-tts-instruct-flash', label: '千问3-TTS-Instruct-Flash', role: 'system', series: 'instruct-flash', group: '系统音色合成' },
-  { id: 'qwen3-tts-flash', label: '千问3-TTS-Flash', role: 'system', series: 'flash' },
-  { id: 'qwen-tts', label: '千问-TTS', role: 'system', series: 'tts' }
-];
-// 各系列系统音色默认合成模型
-const SYSTEM_SERIES_MODEL: Record<string, string> = { 'instruct-flash': 'qwen3-tts-instruct-flash', 'flash': 'qwen3-tts-flash', 'tts': 'qwen-tts' };
-const VOICE_TTS_MODELS = VOICE_MODELS.map((m) => m.id);
-const VOICE_MIME: Record<string, string> = { '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'audio/mp4' };
-// Qwen-Audio-TTS 系列模型名特征（如 qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus）
+// 模型表 / 端点 / 克隆模型名全部来自 voiceCatalog（按厂家组织）
+// Qwen-Audio-TTS 系列模型名特征（如 qwen-audio-3.0-tts-flash / qwen-audio-3.0-tts-plus）；
+// 也是「能不能作复刻目标模型」的唯一判据（vc 系列已移除）
 function isAudioTtsModel(model: string): boolean {
   return /^qwen-audio-.*-tts/i.test(String(model || ''));
 }
 
-function getVoiceConfig(): VoiceTTSConfig {
-  return settings.getVoiceConfig();
+// ===== 克隆参考音频的准备（本地文件 → 前 15 秒 / 24kHz / 单声道 wav）=====
+// 为什么要先在本地裁：create_voice 只用参考音频的前 max_prompt_audio_length 秒（3~30，默认 10），
+// 整段上传毫无意义，还会把 base64 请求体撑大（15 秒 24k 单声道 wav ≈ 700KB，比原文件直传小一个量级）。
+// 端点：POST /services/audio/tts/customization，input.url —— **既收公网 URL，也收 data: 音频 URI**
+// （官方文档只写了「要求公网可访问的 URL」；2026-10-14 实测 data URI 同样返回 200 并成功合成，
+//  所以本地文件不必再先传到公网）。
+const CLONE_SR = 24000;   // 与 Qwen-Audio-TTS 原生采样率一致
+const CLONE_SECONDS = 15; // 截取的参考音频时长（官方推荐 10~20 秒清晰人声）
+const CLONE_PREFIX_MAX = 10; // input.prefix 仅允许数字/英文字母且不超过 10 字符
+
+// ffmpeg / ffprobe 调用样板（同 whisper.ts / ttsAlign.ts：windowsHide + Promise，不引第三方依赖）
+function runProc(exe: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, args, { windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', (err) => reject(new Error('无法启动 ' + path.basename(exe) + '：' + err.message)));
+    child.on('close', (code) => {
+      if (code === 0) resolve(stdout);
+      else reject(new Error(path.basename(exe) + ' 退出码 ' + code + (stderr.trim() ? '：' + stderr.trim().slice(-300) : '')));
+    });
+  });
 }
-function getVoiceApiError(cfg: VoiceTTSConfig): string | null {
-  return cfg.apiKey ? null : '未配置千问语音 API Key，请先到「设置」-「千问语音」填写';
+
+// ffprobe 量音频时长（秒，float）；失败 reject
+async function probeDuration(file: string): Promise<number> {
+  const out = await runProc(BUILTIN_RESOURCES.ffprobe, [
+    '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file
+  ]);
+  const d = parseFloat(String(out).trim());
+  if (!isFinite(d) || d < 0) throw new Error('无法读取音频时长：' + file);
+  return d;
+}
+
+// 本地音频 → 参考样本 wav（截前 CLONE_SECONDS 秒、单声道、24kHz、pcm_s16le）。
+// 返回的临时文件由调用方在 finally 里删除；时长不足 3 秒直接报错（服务端要求 3~30 秒）。
+async function makeCloneSample(src: string): Promise<string> {
+  const ffmpeg = BUILTIN_RESOURCES.ffmpeg;
+  if (!fs.existsSync(ffmpeg) || !fs.existsSync(BUILTIN_RESOURCES.ffprobe)) {
+    throw new Error('未找到内置 ffmpeg/ffprobe（运行环境包可能还没解包完成），无法裁取参考音频');
+  }
+  const dur = await probeDuration(src);
+  if (dur < 3) {
+    throw new Error('参考音频太短（' + dur.toFixed(1) + ' 秒）：声音复刻要求 3~30 秒的清晰人声');
+  }
+  const out = path.join(app.getPath('temp'), 'shadowmill-clone-' + Date.now() + '.wav');
+  await runProc(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
+    '-vn', '-t', String(CLONE_SECONDS), '-ac', '1', '-ar', String(CLONE_SR), '-c:a', 'pcm_s16le', out
+  ]);
+  return out;
+}
+
+// 错误对象 → 消息串（多处 catch 共用）
+function errMsg(e: unknown): string {
+  return (e as Error) && (e as Error).message ? (e as Error).message : String(e);
+}
+
+// ===== 厂家解析（谁家的话走谁家的端点与 Key）=====
+// 当前选中的厂家（settings.voice.active）——「克隆音色列表」这类没有模型信息的调用用它
+function activeProviderDef(): VoiceProviderDef {
+  return providerByKey(settings.getVoiceSettings().active);
+}
+// 模型 → 厂家（最准）；系统音色按它所属厂家；都没有则退回当前 active 厂家。
+// defaultModel 一律取**厂家目录里的出厂默认**（不再有用户可改的「厂家默认模型」）。
+function providerFor(voice?: string, model?: string): { def: VoiceProviderDef; apiKey: string; defaultModel: string } {
+  const def = (model ? providerOfModel(model) : null) || providerOfSystemVoice(voice) || activeProviderDef();
+  const { config } = settings.getVoiceProviderConfig(def.key);
+  return { def, apiKey: config.apiKey, defaultModel: def.defaultModel };
+}
+/** 该模型是否在这个厂家的模型表里（用来识别「映射里绑的是已下线/不存在的模型」） */
+function modelKnownFor(provider: VoiceProviderDef, model?: string): boolean {
+  const m = String(model || '').trim();
+  return !!m && provider.models.some((x) => x.id === m);
+}
+// 音色与模型必须同厂家：音色名是厂家私有的（千问是 Cherry/Serena… 这类 voice 参数，别家是另一套 id），
+// 把千问的音色发给别家端点只会得到「音色不存在」这种看不出原因的报错。这里统一给出**明确提示**，
+// 不做静默改名、也不静默换厂家。返回 null = 没问题。
+// 克隆音色（custom:xxx）拿不到厂家信息（在云端），按模型所属厂家处理，不在此拦。
+function vendorMismatch(voice?: string, model?: string): string | null {
+  const v = String(voice || '').trim();
+  const m = String(model || '').trim();
+  if (!v || !m) return null;
+  const vProvider = providerOfSystemVoice(v);
+  if (!vProvider) return null;
+  const mProvider = providerOfModel(m);
+  if (!mProvider || mProvider.key === vProvider.key) return null;
+  return '音色「' + v + '」属于「' + vProvider.label + '」，而模型「' + m + '」属于「' + mProvider.label
+    + '」：两者必须同属一个厂家，请改选模型，或到「音色管理 → 音色映射管理」改绑该音色的模型。';
+}
+function getVoiceApiError(provider: VoiceProviderDef, apiKey: string): string | null {
+  return apiKey ? null : '未配置「' + provider.label + '」的 API Key，请先到「设置」-「语音服务」填写并保存';
 }
 function parseJsonLike(text: string): Record<string, any> | null {
   try { return JSON.parse(text); } catch (e) { return null; }
 }
 function voiceFriendlyError(err: unknown, label: string): string {
   let msg = (err && (err as Error).message) ? (err as Error).message : String(err);
-  if (/InvalidApiKey|unauthorized|Unauthorized|401|403/i.test(msg)) msg = 'API Key 无效或无权限，请检查后重试';
+  if (/Model not exist/i.test(msg)) {
+    msg = '这个模型在当前账号里不存在（' + msg + '）：请到「设置 → 语音服务」核对厂家，或到「音色管理 → 音色映射管理」把该音色改绑到可用的模型';
+  } else if (/does not exist or is not licensed/i.test(msg)) {
+    msg = '音色未获授权或不存在（' + msg + '）：克隆音色只能用创建时对应的复刻模型合成，该模型在当前账号不可用时请改用系统音色';
+  } else if (/InvalidApiKey|unauthorized|Unauthorized|401|403/i.test(msg)) msg = 'API Key 无效或无权限，请检查后重试';
   else if (/quota|ExceededQuota|Insufficient/i.test(msg)) msg = '额度不足或已被限流：' + msg;
   return label + '：' + msg;
 }
@@ -91,71 +179,88 @@ function resolveTtsDir(projectName: string, saveDir: string): string {
   return path.join(app.getPath('userData'), 'tts-output');
 }
 
-// 系统音色默认合成模型：按 series 优先级取（instruct-flash > flash > tts）
-function systemVoiceDefaultModel(v: SystemVoice | Record<string, never>): string {
-  const s = (v as SystemVoice).series;
-  if (Array.isArray(s)) {
-    if (s.indexOf('instruct-flash') >= 0) return SYSTEM_SERIES_MODEL['instruct-flash'];
-    if (s.indexOf('flash') >= 0) return SYSTEM_SERIES_MODEL['flash'];
-    if (s.indexOf('tts') >= 0) return SYSTEM_SERIES_MODEL['tts'];
-  }
-  return 'qwen3-tts-flash';
+// 系统音色默认合成模型：交给 voiceCatalog 按「该厂家的模型表 + 音色的 series」推导（替代原先写死的映射表）
+function systemVoiceDefaultModel(provider: VoiceProviderDef, v: SystemVoice | Record<string, never>): string {
+  return seriesDefaultModel(provider, (v as SystemVoice).series);
 }
 
 // 统一「音色→模型」解析（voice:list-all 等共用单一入口）
-// 三级：① 本地映射 voiceProfiles[voiceKey].targetModel；② 系统音色按其 series 默认模型；③ 兜底全局默认 targetModel
+// 三级：① 本地映射 voiceProfiles[voiceKey].targetModel（**必须是该厂家模型表里现存的模型**，
+//          绑着已下线/不存在的模型时忽略它，否则合成必然 404「Model not exist」）；
+//       ② 系统音色按它的 series 取该厂家的系统合成模型（系统音色与模型是固定绑定）；
+//       ③ 兜底「当前厂家的出厂默认模型」。
 function resolveVoiceModel(voiceKey: string, _ctx?: RegisterCtx): string {
   const key = String(voiceKey || '').trim();
   const bare = key.replace(/^(system|custom):/i, ''); // 兼容带前缀 key（system:Cherry / custom:<voice_id>）
+  const sysProvider = providerOfSystemVoice(bare);
+  const provider = sysProvider || activeProviderDef();
   const profiles = settings.getVoiceProfiles();
   const prof = profiles[key] || profiles[bare];
-  if (prof && prof.targetModel) return prof.targetModel; // ① 本地映射命中
-  if (isSystemVoice(bare)) { // ② 系统音色：按系列取默认合成模型
-    const sys = SYSTEM_VOICES.find((v) => v.voice === bare);
-    return systemVoiceDefaultModel(sys || {});
+  if (prof && prof.targetModel && modelKnownFor(provider, prof.targetModel)) return prof.targetModel; // ① 本地映射命中
+  if (sysProvider) { // ② 系统音色：按系列取该厂家的系统合成模型
+    const sys = sysProvider.voices.find((v) => v.voice === bare);
+    return systemVoiceDefaultModel(sysProvider, sys || {});
   }
-  // ③ 兜底：全局默认 targetModel
-  return getVoiceConfig().targetModel;
+  // ③ 兜底：当前厂家的出厂默认模型
+  return provider.defaultModel;
 }
 
-// 查询克隆音色列表（action=list，供 voice:list / voice:list-all 复用）
-async function fetchClonedVoices(): Promise<{ ok: boolean; voices?: any[]; total?: number; message?: string }> {
-  const cfg = getVoiceConfig();
-  const noKey = getVoiceApiError(cfg);
+// 查询克隆音色列表，供 voice:list / voice:list-all 复用。
+// 接口：model=voice-enrollment（厂家的克隆模型）+ action=list_voice。
+// 历史坑（2026-10-14 实测）：这里曾只查 qwen-voice-enrollment 的 action=list（Qwen-TTS/vc 系列），
+// 而创建走的是 voice-enrollment 的 create_voice —— 于是新建的音色云端 status=OK、本地映射也有中文名，
+// 「我的音色」里却看不见。vc 那条线已彻底移除，现在只有一套接口，不再存在两边错配的问题。
+// 返回字段兼容：接口给 `voice_id`，历史数据给 `voice`，这里统一成两者都填同一个 id，
+// 并把 `target_model` / `targetModel` 补齐，渲染层不必再按系列分支。
+// 克隆音色属于某个账号 ⇒ 必须用「该厂家」的 Key 与该厂家的端点；providerKey 缺省 = 当前 active 厂家
+async function fetchClonedVoices(providerKey?: string): Promise<{ ok: boolean; voices?: any[]; total?: number; message?: string }> {
+  const provider = providerKey ? providerByKey(providerKey) : activeProviderDef();
+  const key = settings.getVoiceProviderConfig(provider.key).config.apiKey;
+  const noKey = getVoiceApiError(provider, key);
   if (noKey) return { ok: false, message: noKey };
   try {
-    const resp = await fetch(VOICE_API_BASE + '/services/audio/tts/customization', {
+    const resp = await fetch(provider.apiBase + '/services/audio/tts/customization', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
-      body: JSON.stringify({
-        model: VOICE_ENROLL_MODEL,
-        input: { action: 'list', page_size: 100, page_index: 0 }
-      })
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify({ model: provider.enrollModel, input: { action: 'list_voice', page_size: 100, page_index: 0 } })
     });
     const raw = await resp.text();
     const json = parseJsonLike(raw);
-    if (!resp.ok) {
-      throw new Error('HTTP ' + resp.status + ((json && json.message) ? '：' + json.message : ''));
-    }
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ((json && json.message) ? '：' + json.message : ''));
     const out = (json && json.output) || {};
     const list = Array.isArray(out.voice_list) ? out.voice_list : [];
-    return { ok: true, voices: list, total: out.total || list.length };
+    const voices: any[] = [];
+    const seen: Record<string, boolean> = {};
+    list.forEach((v: any) => {
+      const id = String((v && (v.voice || v.voice_id)) || '').trim();
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      const model = String((v && (v.target_model || v.targetModel)) || '').trim();
+      voices.push(Object.assign({}, v, { voice: id, voice_id: id, target_model: model, targetModel: model }));
+    });
+    return { ok: true, voices: voices, total: voices.length };
   } catch (e) {
     return { ok: false, message: voiceFriendlyError(e, '查询音色失败') };
   }
 }
 
-// 单次文字合成（不落盘）：Qwen-Audio-TTS 直写音频流 / Qwen-TTS 取 output.audio.url 下载
+// 单次文字合成（不落盘）：两个系列都是「接口 → output.audio.url → 二次下载」
+// （Qwen-Audio-TTS 走 SpeechSynthesizer、Qwen-TTS 走 multimodal-generation，响应体都是 JSON）
 // 返回 { buf, ext }；失败抛错（由调用方 voiceFriendlyError 包装）。供 voice:synth 与 ttsAlign 逐句合成共用
+// 用哪个厂家的 Key 由「合成模型」决定（模型属于哪家就走哪家）；模型为空时按音色所属厂家。
 async function synthOne(text: string, voice: string, useModel: string): Promise<{ buf: Buffer; ext: string }> {
-  const cfg = getVoiceConfig();
-  const noKey = getVoiceApiError(cfg);
+  const mismatch = vendorMismatch(voice, useModel);
+  if (mismatch) throw new Error(mismatch);
+  const prov = providerFor(voice, useModel);
+  const noKey = getVoiceApiError(prov.def, prov.apiKey);
   if (noKey) throw new Error(noKey);
   const isAudio = isAudioTtsModel(useModel);
-  const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey };
+  const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + prov.apiKey };
   if (isAudio) {
-    // Qwen-Audio-TTS 系列：POST /services/audio/tts/SpeechSynthesizer，响应体直接为音频流
-    const resp = await fetch(VOICE_API_BASE + '/services/audio/tts/SpeechSynthesizer', {
+    // Qwen-Audio-TTS 系列：POST /services/audio/tts/SpeechSynthesizer
+    // **这个端点不回音频流**，回的是 JSON { output.audio.url }，必须再下载一次。
+    // （2026-10-14 实测：漏掉这一步会把 467 字节的 JSON 当成 mp3 存下来，音频必然打不开。）
+    const resp = await fetch(prov.def.apiBase + '/services/audio/tts/SpeechSynthesizer', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({
@@ -163,15 +268,21 @@ async function synthOne(text: string, voice: string, useModel: string): Promise<
         input: { text: text, voice: voice, format: 'mp3', sample_rate: 24000 }
       })
     });
+    const raw = await resp.text();
+    const json = parseJsonLike(raw);
     if (!resp.ok) {
-      const json = parseJsonLike(await resp.text());
       const extra = (json && json.code ? '[' + json.code + '] ' : '') + ((json && json.message) ? json.message : '');
       throw new Error('HTTP ' + resp.status + (extra ? '：' + extra : ''));
     }
-    return { buf: Buffer.from(await resp.arrayBuffer()), ext: 'mp3' };
+    const audioUrl = (json && json.output && json.output.audio && json.output.audio.url) || '';
+    if (!audioUrl) throw new Error('接口未返回音频地址（output.audio.url）');
+    // 回带的是 http:// 的 OSS 地址，统一升到 https 再取（明文 http 在部分网络环境会被拦）
+    const dlResp = await fetch(String(audioUrl).replace(/^http:\/\//i, 'https://'));
+    if (!dlResp.ok) throw new Error('下载音频失败：HTTP ' + dlResp.status);
+    return { buf: Buffer.from(await dlResp.arrayBuffer()), ext: guessAudioExt(String(audioUrl)) };
   }
   // Qwen-TTS 系列：generation 接口取 output.audio.url 再下载
-  const resp = await fetch(VOICE_API_BASE + '/services/aigc/multimodal-generation/generation', {
+  const resp = await fetch(prov.def.apiBase + '/services/aigc/multimodal-generation/generation', {
     method: 'POST',
     headers: headers,
     body: JSON.stringify({ model: useModel, input: { text: text, voice: voice } })
@@ -192,9 +303,11 @@ async function synthOne(text: string, voice: string, useModel: string): Promise<
 function register(ctx?: RegisterCtx): void {
   const getWindow = (ctx && ctx.getWindow) || (() => null);
 
+  // 语音服务配置：按厂家回带（active + 各厂家已保存的 apiKey + 全局保存目录）；没有全局模型设置
+  // 渲染层另有 voice:list-models 回带厂家目录（label / Key 提示 / 模型 / 音色），两者配合渲染「语音服务」页
   ipcMain.handle(IPC.Voice.GetConfig, () => {
-    const c = getVoiceConfig();
-    return { ok: true, apiKey: c.apiKey, targetModel: c.targetModel, saveDir: String(c.saveDir || '') };
+    const vs = settings.getVoiceSettings();
+    return { ok: true, active: vs.active, providers: vs.providers, saveDir: String(vs.saveDir || '') };
   });
 
   // 返回当前选择的 TTS 保存目录绝对路径（配音页「打开目录」按钮用，无需合成）
@@ -211,129 +324,172 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, mode: mode, saveDir: dir };
   });
 
-  // 兼容两种线上形态：{ voiceTTS } 与裸 Partial<VoiceTTSConfig>（历史调用）
-  ipcMain.handle(IPC.Voice.SaveConfig, (_event, payload?: VoiceSaveConfigPayload | Partial<VoiceTTSConfig>) => {
-    const raw = settings.readSettings();
-    const incoming = (payload && (payload as any).voiceTTS) || payload || {};
-    // 与既有配置合并：未传入的字段保留原值（避免「只存 saveDir」时误清空 API Key，也避免设置页保存时覆盖 saveDir）
-    const prev = raw.voiceTTS || {};
-    const t = typeof incoming.targetModel === 'string' ? incoming.targetModel : String(prev.targetModel || '');
-    raw.voiceTTS = {
-      apiKey: typeof incoming.apiKey === 'string' ? incoming.apiKey.trim() : String(prev.apiKey || ''),
-      targetModel: VOICE_TTS_MODELS.includes(t) ? t : 'qwen-audio-3.0-tts-flash',
-      saveDir: typeof incoming.saveDir === 'string' ? incoming.saveDir.trim() : String(prev.saveDir || '')
+  // 保存语音配置。两种用途：
+  //   ① 保存「某个厂家」的 API Key：{ provider?: string, config: { apiKey } }（provider 缺省 = 当前 active；保存即切到该厂家）
+  //   ② 只改全局「自定义保存目录」：{ saveDir }（「保存到：自定义目录 / 恢复默认」，不动 Key、不切厂家）
+  // 兼容历史形态：{ voiceTTS: { apiKey, targetModel } } 与裸 { apiKey, targetModel }（旧渲染层会这么发；
+  // 其中的 targetModel 一律忽略——「厂家默认模型」这个设置已废除，模型表在 voiceCatalog 里）。
+  ipcMain.handle(IPC.Voice.SaveConfig, (_event, payload?: VoiceSaveConfigPayload | { voiceTTS?: { apiKey?: string; targetModel?: string }; apiKey?: string; targetModel?: string; saveDir?: string }) => {
+    const p = (payload || {}) as {
+      provider?: string;
+      config?: { apiKey?: string };
+      saveDir?: string;
+      voiceTTS?: { apiKey?: string; targetModel?: string };
+      apiKey?: string;
+      targetModel?: string;
     };
-    settings.writeSettings(raw);
-    return { ok: true, settings: raw };
+    const legacy = p.voiceTTS || p;
+    const patch = (p.config && typeof p.config === 'object') ? p.config : {};
+    const dir = typeof p.saveDir === 'string' ? p.saveDir : undefined;
+    const apiKey = typeof patch.apiKey === 'string' ? patch.apiKey
+      : (typeof p.config !== 'object' && typeof legacy.apiKey === 'string' ? legacy.apiKey : undefined);
+    // 只有真的给了 Key 或明确点了厂家时才去动厂家配置，否则光改目录会把 active 悄悄切走；
+    // 两者都没给（空载荷）时什么也不写，避免把已有目录清空
+    const merged = (apiKey === undefined && p.provider === undefined)
+      ? (dir === undefined ? settings.getVoiceSettings() : settings.saveVoiceSaveDir(dir))
+      : settings.saveVoiceProviderConfig(p.provider, { apiKey: apiKey }, dir);
+    return { ok: true, settings: settings.readSettings(), voice: merged };
   });
 
   ipcMain.handle(IPC.Voice.PickAudio, async () => {
     const win = getWindow();
     if (!win) return null;
     const r = await dialog.showOpenDialog(win, {
-      title: '选择用于克隆音色的音频（推荐 10~20 秒清晰人声）',
-      filters: [{ name: '音频文件', extensions: ['mp3', 'wav', 'm4a', 'mp4'] }],
+      title: '选择用于克隆音色的音频（推荐 10~20 秒清晰人声，主进程会自动截取前 15 秒）',
+      // 任何 ffmpeg 能解码的格式都行（本地文件会先转成 24k 单声道 wav 再提交）
+      filters: [{ name: '音频 / 视频文件', extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'wma', 'mp4', 'mov', 'mkv'] }],
       properties: ['openFile']
     });
     if (r.canceled || !r.filePaths.length) return null;
     return r.filePaths[0];
   });
 
-  // 创建克隆音色（Qwen-TTS：action=create / Qwen-Audio-TTS：action=create_voice）
+  // 创建克隆音色：model=<厂家的克隆模型>（千问为 voice-enrollment）+ action=create_voice
+  // 音频位置（payload.audioPath）支持三种形态：本地绝对路径、http(s)/oss 远程地址、data:audio/... URI。
+  //   · 远程地址与 data URI 直接放进 input.url 透传；
+  //   · 本地文件先经 ffmpeg 裁成前 15 秒 24k 单声道 wav，再转 base64 data URI 放进 input.url
+  //     （实测 data URI 被接受；文档写的是「公网可访问的 URL」，但并非硬校验，所以不必先传到公网）。
   ipcMain.handle(IPC.Voice.Create, async (_event, payload?: VoiceCreatePayload) => {
-    const cfg = getVoiceConfig();
-    const noKey = getVoiceApiError(cfg);
+    const audioPath = String((payload && payload.audioPath) || '').trim();
+    // 目标模型决定这次克隆走哪个厂家（模型属于哪家就用哪家的 Key 与端点）；
+    // 没给模型时用当前厂家的默认合成模型。
+    const active = providerFor();
+    const useModel = String((payload && payload.targetModel) || '').trim() || active.defaultModel;
+    const prov = providerFor(undefined, useModel);
+    const noKey = getVoiceApiError(prov.def, prov.apiKey);
     if (noKey) return { ok: false, message: noKey };
-    const audioPath = payload && payload.audioPath;
-    // 音色复制时可选目标模型（创建后合成须沿用该模型）
-    const useModel = String((payload && payload.targetModel) || '').trim() || cfg.targetModel;
-    const isAudio = isAudioTtsModel(useModel);
-    // Qwen-Audio-TTS（如 qwen-audio-3.0-tts-flash）克隆仅接受可公开访问的音频 URL
-    const isAudioUrl = isAudio && /^https?:\/\//i.test(String(audioPath || ''));
-    if (!isAudioUrl && (!audioPath || !fs.existsSync(audioPath))) return { ok: false, message: '音频文件不存在：' + (audioPath || '') };
-    let preferredName = String((payload && payload.preferredName) || '').trim().replace(/[^a-zA-Z0-9_]/g, '');
-    if (!preferredName || preferredName.length > 16) {
-      return { ok: false, message: '音色名称需 1~16 个字符，仅限数字、字母、下划线' };
+    // 只有 Qwen-Audio-TTS 系列能作复刻目标模型（vc 那条线已彻底移除，见 voiceCatalog 注释）。
+    // 系统音色模型（如 qwen3-tts-flash）走不到这里：界面只列 role=clone 的模型，这里再兜一道。
+    if (!isAudioTtsModel(useModel)) {
+      return { ok: false, message: '模型「' + useModel + '」不支持音色复刻：请把「目标模型」选成 qwen-audio-* 系列（如 qwen-audio-3.0-tts-flash）' };
     }
-    let dataUri = '';
-    if (!isAudioUrl) {
-      const mime = VOICE_MIME[path.extname(audioPath as string).toLowerCase()];
-      if (!mime) return { ok: false, message: '不支持的音频格式，请使用 wav / mp3 / m4a' };
-      let b64 = '';
-      try {
-        const data = fs.readFileSync(audioPath as string);
-        b64 = data.toString('base64');
-      } catch (e) {
-        return { ok: false, message: '读取音频失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e)) };
-      }
-      if (Buffer.byteLength(b64, 'utf8') > 10 * 1024 * 1024) {
-        return { ok: false, message: '音频过大：Base64 编码后需小于 10 MB（约对应原文件 7.5 MB），请截取 10~20 秒样本' };
-      }
-      dataUri = 'data:' + mime + ';base64,' + b64;
+    if (!audioPath) return { ok: false, message: '请先选择本地音频文件，或粘贴可公开访问的音频 URL' };
+    // 远程地址（http/https/oss）与 data URI 都不落本地，直接用
+    const isRemoteUrl = /^(https?|oss):\/\//i.test(audioPath);
+    const isDataUri = /^data:audio\//i.test(audioPath);
+    // input.prefix 仅允许数字/字母/下划线且不超过 CLONE_PREFIX_MAX 个字符
+    const preferredName = String((payload && payload.preferredName) || '').trim().replace(/[^a-zA-Z0-9_]/g, '');
+    if (!preferredName || preferredName.length > CLONE_PREFIX_MAX) {
+      return { ok: false, message: '音色名称需 1~' + CLONE_PREFIX_MAX + ' 个字符，仅限数字、字母、下划线' };
     }
+    let localSample = '';
     try {
-      // 按模型系列路由：
-      // - Qwen-TTS（qwen3-tts-vc-*）：model=qwen-voice-enrollment, action=create, preferred_name, audio.data
-      // - Qwen-Audio-TTS（qwen-audio-*-tts）URL 模式：model=voice-enrollment, action=create_voice, prefix, audio.url
-      // - Qwen-Audio-TTS（qwen-audio-*-tts）文件模式：model=voice-enrollment, action=create_voice, prefix, audio.data（base64 可能不被接受）
-      const input = isAudioUrl
-        ? { action: 'create_voice', target_model: useModel, prefix: preferredName, audio: { url: audioPath } }
-        : isAudio
-          ? { action: 'create_voice', target_model: useModel, prefix: preferredName, audio: { data: dataUri } }
-          : { action: 'create', target_model: useModel, preferred_name: preferredName, audio: { data: dataUri } };
-      const resp = await fetch(VOICE_API_BASE + '/services/audio/tts/customization', {
+      // input.url：远程地址原样用；本地文件裁 15 秒后转 data URI
+      let urlToSend = audioPath;
+      if (!isRemoteUrl && !isDataUri) {
+        if (!fs.existsSync(audioPath)) return { ok: false, message: '音频文件不存在：' + audioPath };
+        try {
+          localSample = await makeCloneSample(audioPath);
+          urlToSend = 'data:audio/wav;base64,' + fs.readFileSync(localSample).toString('base64');
+        } catch (e) {
+          return { ok: false, message: '准备参考音频失败：' + errMsg(e) };
+        }
+      }
+      const input = {
+        action: 'create_voice',
+        target_model: useModel,
+        prefix: preferredName,
+        url: urlToSend,
+        // 文档参数：语种提示（默认 zh）与参考音频最大时长（3~30 秒，默认 10；这里与本地裁剪的 15 秒一致）
+        language_hints: ['zh'],
+        max_prompt_audio_length: CLONE_SECONDS
+      };
+      const resp = await fetch(prov.def.apiBase + '/services/audio/tts/customization', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
-        body: JSON.stringify({ model: isAudio ? VOICE_ENROLL_MODEL_AUDIO : VOICE_ENROLL_MODEL, input })
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + prov.apiKey },
+        body: JSON.stringify({ model: prov.def.enrollModel, input })
       });
       const raw = await resp.text();
       const json = parseJsonLike(raw);
       if (!resp.ok) {
         const code = (json && json.code) || '';
-        // Qwen-Audio-TTS 对 base64 音频不支持时报 Audio 类错误，提示改用可公开访问的音频 URL
-        if (isAudio && /audio/i.test(code + ' ' + ((json && json.message) || '')) && /url|address|link|preprocess|data/i.test(raw)) {
+        // 音频类报错单独提示（样本不合规是最常见的原因：太短、无人声、格式不对）
+        if (/audio/i.test(code + ' ' + ((json && json.message) || ''))) {
           return {
             ok: false,
-            message: '创建音色失败（Qwen-Audio-TTS 不接受直传音频）：HTTP ' + resp.status
+            message: '创建音色失败（服务端不接受这段参考音频）：HTTP ' + resp.status
               + ((json && json.message) ? '：' + json.message : '')
-              + '。请改用可公开访问的音频 URL 提交（本接口对 Qwen-Audio-TTS 使用 audio.data 直传可能不被支持）。'
+              + '。请换一段 3~30 秒、清晰无噪音的人声（本地文件会自动截取前 ' + CLONE_SECONDS + ' 秒）。'
           };
         }
         throw new Error('HTTP ' + resp.status + ((json && json.message) ? '：' + json.message : ''));
       }
       const out = (json && json.output) || {};
-      // 字段差异：Qwen-TTS 系列返回 output.voice；Qwen-Audio-TTS 系列返回 output.voice_id
-      const voice = out.voice || out.voice_id;
-      if (!voice) throw new Error('接口未返回音色 ID（voice / voice_id）');
+      // 严格按文档口径解析创建返回体：只有 output.voice_id（+ usage.count / request_id，不用）。
+      // 不再读 output.target_model / fallback_mode / fallback_reason —— 这三个字段文档没有、实测也从未返回过。
+      const voice = out.voice_id;
+      if (!voice) throw new Error('接口未返回音色 ID（output.voice_id）');
       return {
         ok: true,
         voice: voice,
-        targetModel: out.target_model || cfg.targetModel,
-        fallbackMode: !!out.fallback_mode,
-        fallbackReason: out.fallback_reason || ''
+        // 回执里的模型取「本次请求发的目标模型」（创建返回体不带 target_model）
+        targetModel: useModel
       };
     } catch (e) {
       return { ok: false, message: voiceFriendlyError(e, '创建音色失败') };
+    } finally {
+      // 本地裁出来的参考样本（15 秒 wav）用完即删，别在用户临时目录里留垃圾
+      if (localSample) { try { fs.unlinkSync(localSample); } catch (e) { /* 删不掉不影响主流程 */ } }
     }
   });
 
-  // 内置 Qwen-TTS 系统音色列表（无需 API Key，直接返回；每项附默认合成模型 model）
+  // 内置系统音色列表（无需 API Key，直接返回；每项附所属厂家 provider 与其默认合成模型 model）
   ipcMain.handle(IPC.Voice.ListSystemVoices, () => {
-    const voices = SYSTEM_VOICES.map((v) => {
-      const prof = settings.getVoiceProfiles()['system:' + v.voice];
-      return {
-        voice: v.voice,
-        desc: v.desc,
-        langs: v.langs,
-        series: v.series,
-        model: prof && prof.targetModel ? prof.targetModel : systemVoiceDefaultModel(v)
-      };
+    const profiles = settings.getVoiceProfiles();
+    const voices: (SystemVoice & { model: string; provider: string; providerLabel: string })[] = [];
+    VOICE_PROVIDERS.forEach((p) => {
+      p.voices.forEach((v) => {
+        const prof = profiles['system:' + v.voice];
+        const bound = prof && prof.targetModel;
+        voices.push({
+          voice: v.voice,
+          desc: v.desc,
+          langs: v.langs,
+          series: v.series,
+          // 绑定的模型必须还在该厂家模型表里，否则按固定绑定回落到系统合成模型
+          model: bound && modelKnownFor(p, bound) ? bound : systemVoiceDefaultModel(p, v),
+          provider: p.key,
+          providerLabel: p.label
+        });
+      });
     });
     return { ok: true, voices: voices, total: voices.length };
   });
 
-  // 候选模型表（音色复制/合成可选模型）
-  ipcMain.handle(IPC.Voice.ListModels, () => ({ ok: true, models: VOICE_MODELS }));
+  // 候选模型表（音色复制/合成可选模型）+ **厂家目录**（label / Key 提示 / 默认模型 / 模型 / 音色）
+  // 渲染层据此把模型与音色按厂家分组展示，不再需要自己维护一份厂家/模型清单。
+  ipcMain.handle(IPC.Voice.ListModels, () => ({
+    ok: true,
+    models: VOICE_MODELS,
+    providers: VOICE_PROVIDERS.map((p): VoiceProviderView => ({
+      key: p.key,
+      label: p.label,
+      apiKeyHint: p.apiKeyHint,
+      defaultModel: p.defaultModel,
+      models: p.models,
+      voices: p.voices
+    }))
+  }));
 
   // 本地音色映射：读取 / 保存 / 删除（key 形如 system:<voice> 或 custom:<voice_id>）
   ipcMain.handle(IPC.Voice.GetProfiles, () => ({ ok: true, profiles: settings.getVoiceProfiles() }));
@@ -341,11 +497,27 @@ function register(ctx?: RegisterCtx): void {
     const p = (payload && payload.profile) || {};
     const key = String(p.key || '').trim();
     if (!key || !p.voice || !p.targetModel) return { ok: false, message: '映射信息不完整' };
+    // 保存映射时就拦住「跨厂家绑定」：系统音色按它所属厂家，克隆音色按当前厂家；
+    // 不再用全量白名单 + 静默回落（那会把别家的音色悄悄绑到千问的默认模型上）。
+    const voice = String(p.voice).trim();
+    const wanted = String(p.targetModel).trim();
+    const voiceVendor = providerOfSystemVoice(voice) || activeProviderDef();
+    const modelVendor = providerOfModel(wanted);
+    if (modelVendor.key !== voiceVendor.key) {
+      return {
+        ok: false,
+        message: '模型「' + wanted + '」属于「' + modelVendor.label + '」，而音色「' + voice + '」属于「'
+          + voiceVendor.label + '」：两者必须同属一个厂家'
+      };
+    }
+    if (!voiceVendor.models.some((m) => m.id === wanted)) {
+      return { ok: false, message: '「' + voiceVendor.label + '」的模型表里没有「' + wanted + '」' };
+    }
     settings.saveVoiceProfile(key, {
       key: key,
       name: String(p.name || p.voice || '').trim() || String(p.voice),
-      voice: String(p.voice).trim(),
-      targetModel: VOICE_TTS_MODELS.includes(p.targetModel) ? p.targetModel : VOICE_TTS_MODELS[0],
+      voice: voice,
+      targetModel: wanted,
       type: p.type === 'system' ? 'system' : 'custom'
     });
     return { ok: true, profiles: settings.getVoiceProfiles() };
@@ -357,13 +529,52 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, profiles: settings.getVoiceProfiles() };
   });
 
-  // 查询克隆音色列表（action=list）
+  // 删除**云端**克隆音色（不可撤销）：schema model = 厂家的克隆模型（千问为 voice-enrollment），
+  // input { action: 'delete_voice', voice_id }（vc 系列的 action='delete' 写法随该系列一同移除）。
+  // 成功响应形如 { output: {}, usage: { count: 1 } }。
+  // 删完顺手清掉该音色的本地映射（音色已不存在，留着只会变成一条指向幽灵音色的条目）。
+  ipcMain.handle(IPC.Voice.DeleteCloud, async (_event, payload?: { voice?: string }) => {
+    const voice = String((payload && payload.voice) || '').trim();
+    if (!voice) return { ok: false, message: '缺少音色 id' };
+    const provider = activeProviderDef();
+    const apiKey = settings.getVoiceProviderConfig(provider.key).config.apiKey;
+    const noKey = getVoiceApiError(provider, apiKey);
+    if (noKey) return { ok: false, message: noKey };
+    try {
+      const resp = await fetch(provider.apiBase + '/services/audio/tts/customization', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+        body: JSON.stringify({ model: provider.enrollModel, input: { action: 'delete_voice', voice_id: voice } })
+      });
+      const raw = await resp.text();
+      const json = parseJsonLike(raw);
+      const code = String((json && json.code) || '');
+      const message = String((json && json.message) || '');
+      if (resp.ok) {
+        settings.deleteVoiceProfile('custom:' + voice);
+        return { ok: true, voice: voice, profiles: settings.getVoiceProfiles() };
+      }
+      if (/VoiceNotFound/i.test(code)) {
+        return { ok: false, message: '云端没有这个音色（可能已被删除）：' + voice };
+      }
+      // 音色不存在时也把本地映射清掉，免得留一条指向幽灵音色的条目
+      if (/not\s*(exist|found)|invalid/i.test(code + ' ' + message)) {
+        settings.deleteVoiceProfile('custom:' + voice);
+        return { ok: false, message: '云端删除被拒绝（' + (code || message) + '），已清除该音色的本地映射' };
+      }
+      throw new Error('HTTP ' + resp.status + (code || message ? '：' + (code ? code + ' ' : '') + message : ''));
+    } catch (e) {
+      return { ok: false, message: voiceFriendlyError(e, '删除云端音色失败') };
+    }
+  });
+
+  // 查询克隆音色列表（model=厂家的克隆模型 + action=list_voice，见 fetchClonedVoices）
   ipcMain.handle(IPC.Voice.List, () => fetchClonedVoices());
 
   // 合并音色列表：系统音色 + 克隆音色，统一 { key, type, name, voiceId, model }（「音色即模型」UI 入口）
   ipcMain.handle(IPC.Voice.ListAll, async () => {
     const profiles = settings.getVoiceProfiles();
-    const sysItems = SYSTEM_VOICES.map((v) => {
+    const sysItems = VOICE_PROVIDERS.flatMap((p) => p.voices.map((v) => {
       const key = 'system:' + v.voice;
       const prof = profiles[key];
       return {
@@ -373,7 +584,7 @@ function register(ctx?: RegisterCtx): void {
         voiceId: v.voice,
         model: resolveVoiceModel(key, ctx)
       };
-    });
+    }));
     const customItems: { key: string; type: string; name: string; voiceId: string; model: string }[] = [];
     const cloud = await fetchClonedVoices();
     if (cloud.ok && Array.isArray(cloud.voices)) {
@@ -382,7 +593,7 @@ function register(ctx?: RegisterCtx): void {
         if (!voiceId) return;
         const key = 'custom:' + voiceId;
         const prof = profiles[key];
-        // 克隆音色模型三级回退：本地映射 targetModel → 云端 target_model → 全局默认
+        // 克隆音色模型三级回退：本地映射 targetModel → 云端 target_model → 当前厂家的默认合成模型
         const cloudModel = String(v.target_model || v.targetModel || '').trim();
         const profModel = (prof && prof.targetModel) || '';
         customItems.push({
@@ -411,7 +622,6 @@ function register(ctx?: RegisterCtx): void {
 
   // 扫描已生成 TTS 音频：默认输出目录 + 自定义保存目录 + 各项目 audio/（供渲染层复用为背景音频）
   ipcMain.handle(IPC.Voice.ListGenerated, async () => {
-    const cfg = getVoiceConfig();
     const projectsRoot = projects.projectsRoot();
     const AUDIO_RE = /\.(wav|mp3|m4a|aac|ogg|flac|mp4)$/i;
     const items: { path: string; name: string; group: string; size: number; mtime: number }[] = [];
@@ -433,8 +643,8 @@ function register(ctx?: RegisterCtx): void {
     };
     // 默认输出目录
     pushDir(path.join(app.getPath('userData'), 'tts-output'), '音频输出目录');
-    // 自定义保存目录（若已设置）
-    const custom = String(cfg.saveDir || '').trim();
+    // 自定义保存目录（若已设置；与厂家无关，全局一份）
+    const custom = String(settings.getVoiceSettings().saveDir || '').trim();
     if (custom) pushDir(custom, '自定义目录');
     // 各项目 audio/
     if (fs.existsSync(projectsRoot)) {
@@ -448,18 +658,20 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, items: items, total: items.length };
   });
 
-  // 文字合成语音并保存（Qwen-TTS：generation 取 audio.url 下载 / Qwen-Audio-TTS：SpeechSynthesizer 直写音频流）
+  // 文字合成语音并保存（两个系列都是「接口 → output.audio.url → 二次下载」，见 synthOne）
   ipcMain.handle(IPC.Voice.Synth, async (_event, payload?: VoiceSynthPayload) => {
-    const cfg = getVoiceConfig();
-    const noKey = getVoiceApiError(cfg);
-    if (noKey) return { ok: false, message: noKey };
     const text = String((payload && payload.text) || '').trim();
     const voice = String((payload && payload.voice) || '').trim();
     if (!text) return { ok: false, message: '合成文本为空' };
     if (!voice) return { ok: false, message: '请先选择（或创建）音色' };
+    // 合成使用的模型：优先取「当前音色绑定/选定的模型」，无则回落当前厂家的默认合成模型；
+    // 用哪家的 Key 由这个模型决定（synthOne 内部按模型选厂家）。
+    const active = providerFor(voice);
+    const useModel = String((payload && payload.targetModel) || '').trim() || active.defaultModel;
+    const prov = providerFor(voice, useModel);
+    const noKey = getVoiceApiError(prov.def, prov.apiKey);
+    if (noKey) return { ok: false, message: noKey };
     try {
-      // 合成使用的模型：优先取「当前音色绑定/选定的模型」，无则回落全局默认（与克隆创建时的 target_model 保持一致）
-      const useModel = String((payload && payload.targetModel) || '').trim() || cfg.targetModel;
       const { buf, ext } = await synthOne(text, voice, useModel);
 
       const projectName = String((payload && payload.projectName) || '').trim();

@@ -37,6 +37,24 @@ export interface CustomModelConfig {
   enabled: boolean
 }
 
+// ===== 语音服务：按厂家（厂商）组织 =====
+// 一家 = 一条记录：只有一把 API Key；模型表与系统音色表都在厂家的目录里（main/voiceCatalog.ts 的 VOICE_PROVIDERS）。
+// **不再有「厂家默认模型」这种全局设置**：系统音色与模型是固定的对应关系（目录里写死），
+// 克隆音色按其本地映射/云端 target_model 走，都没有时才落到目录里该厂家的出厂默认模型。
+export interface VoiceProviderConfig {
+  apiKey: string
+}
+export interface VoiceSettings {
+  /** 当前选中的厂家 key（对应 voiceCatalog 的 VoiceProviderDef.key） */
+  active: string
+  /** 厂家 key → 该厂家已保存的配置 */
+  providers: Record<string, VoiceProviderConfig>
+  /** 自定义保存目录（与厂家无关，全局一份） */
+  saveDir: string
+}
+
+// 旧结构（单厂家、无厂家字段）：仅作为迁移来源读取，新写入一律是上面的 VoiceSettings。
+// 保留类型是为了 settings.ts 的迁移分支能显式声明「我在读旧字段」。
 export interface VoiceTTSConfig {
   apiKey: string
   targetModel: string
@@ -104,7 +122,10 @@ export type RenderOverride = Partial<RenderOptions>
 
 export interface AppSettings {
   customModel: CustomModelConfig
-  voiceTTS: VoiceTTSConfig
+  // 语音服务（按厂家）：唯一写入源
+  voice: VoiceSettings
+  // 旧结构：只读兼容（迁移来源），新写入不再包含该字段
+  voiceTTS?: VoiceTTSConfig
   voiceProfiles: Record<string, VoiceProfile>
   whisper: WhisperSettings
   // 视频渲染全局默认档位（项目未覆盖时生效）
@@ -237,7 +258,8 @@ export interface SystemVoiceItem extends SystemVoice {
 
 // 候选合成模型（voice:list-models）：role=clone 用于克隆音色，role=system 用于系统音色
 export type VoiceModelRole = 'clone' | 'system'
-// 音色克隆的音频输入方式：url = 粘贴可公开访问的音频 URL，file = 上传本地音频文件
+// 音色克隆的音频输入方式：url = 除本地文件外还接受公网音频 URL（qwen-audio-*），file = 只接受本地音频文件
+// （vc 系列移除后千问只剩 url 一档；file 留给将来「只收本地文件」的厂家）
 export type VoiceModelInput = 'url' | 'file'
 export interface VoiceModel {
   id: string
@@ -275,9 +297,23 @@ export interface GeneratedAudioItem {
   mtime: number
 }
 
+// voice:list-models / voice:get-config 回带的「厂家目录」：渲染层据此把模型与音色按厂家分组展示
+export interface VoiceProviderView {
+  key: string
+  label: string
+  /** API Key 输入框的占位提示（形如 sk-...（DASHSCOPE_API_KEY）） */
+  apiKeyHint: string
+  /** 厂家的默认合成模型（音色未单独绑模型时的兜底） */
+  defaultModel: string
+  models: VoiceModel[]
+  voices: SystemVoice[]
+}
+
 export interface VoiceConfigResult {
-  apiKey: string
-  targetModel: string
+  /** 当前选中的厂家 key */
+  active: string
+  /** 各厂家已保存的配置（key 缺失表示该厂家还没配过） */
+  providers: Record<string, VoiceProviderConfig>
   saveDir: string
 }
 
@@ -294,7 +330,12 @@ export interface VoiceSaveDirResult {
 }
 
 export interface VoiceSaveConfigPayload {
-  voiceTTS: Partial<VoiceTTSConfig>
+  /** 要保存的厂家 key；缺省 = 当前 active 厂家 */
+  provider?: string
+  /** 该厂家要更新的字段（未给的字段保持原值） */
+  config?: Partial<VoiceProviderConfig>
+  /** 全局「自定义保存目录」；给了就一并更新（不动 Key、不切厂家） */
+  saveDir?: string
 }
 export interface VoiceProfilesResult {
   profiles: Record<string, VoiceProfile>
@@ -306,17 +347,20 @@ export interface VoiceProfileKeyPayload {
   key: string
 }
 
-// voice:create 载荷：audioPath 在 file 模式为本地绝对路径，在 url 模式为可公开访问的音频 URL
+// voice:create 载荷：audioPath 为本地音频绝对路径、公网 URL / oss:// 地址，或 data:audio/...;base64 URI。
+// 本地文件由主进程用 ffmpeg 裁成前 15 秒 24k 单声道 wav 再转 data URI，放进复刻接口的 input.url
+// （Qwen-Audio-TTS 系列；该系列也接受公网 URL，两者都由主进程按字符串形态分流）。
 export interface VoiceCreatePayload {
   audioPath?: string
   targetModel?: string
   preferredName?: string
 }
+// voice:create 结果：voice 取自返回体的 output.voice_id；targetModel 是本次请求发的目标模型
+// （创建返回体不带 target_model，所以这里不再从响应里猜；曾经的 fallbackMode / fallbackReason 已删——
+//   文档没有这两个字段，实测也从未返回过）
 export interface VoiceCreateResult {
   voice: string
   targetModel: string
-  fallbackMode: boolean
-  fallbackReason: string
 }
 
 // voice:synth 载荷与结果（载荷由 preload 按位置参数组装）
@@ -709,7 +753,7 @@ export interface PreloadApi {
   voiceTools: {
     getConfig(): Promise<IpcResult<VoiceConfigResult>>
     getSaveDir(payload: VoiceSaveDirPayload): Promise<IpcResult<VoiceSaveDirResult>>
-    saveConfig(voiceTTS: Partial<VoiceTTSConfig>): Promise<IpcResult<SettingsSaveResult>>
+    saveConfig(payload: VoiceSaveConfigPayload): Promise<IpcResult<SettingsSaveResult>>
     pickAudio(): Promise<string | null>
     pickDir(): Promise<IpcResult<{ dir: string }>>
     listGenerated(): Promise<IpcResult<{ items: GeneratedAudioItem[]; total: number }>>
@@ -717,10 +761,12 @@ export interface PreloadApi {
     list(): Promise<IpcResult<{ voices: ClonedVoice[]; total: number }>>
     listSystemVoices(): Promise<IpcResult<{ voices: SystemVoiceItem[]; total: number }>>
     listAll(): Promise<IpcResult<{ voices: VoiceListItem[]; total: number; cloudMessage: string }>>
-    listModels(): Promise<IpcResult<{ models: VoiceModel[] }>>
+    listModels(): Promise<IpcResult<{ models: VoiceModel[]; providers: VoiceProviderView[] }>>
     getProfiles(): Promise<IpcResult<VoiceProfilesResult>>
     saveProfile(profile: VoiceProfileInput): Promise<IpcResult<VoiceProfilesResult>>
     deleteProfile(key: string): Promise<IpcResult<VoiceProfilesResult>>
+    /** 删除云端克隆音色（不可撤销）；成功后主进程会一并清掉该音色的本地映射，并回带最新映射表 */
+    deleteCloudVoice(voice: string): Promise<IpcResult<VoiceProfilesResult & { voice: string }>>
     synth(text: string, voice: string, projectName: string, saveDir: string, targetModel: string, audioName: string, defaultOut: boolean): Promise<IpcResult<VoiceSynthResult>>
     synthAligned(payload: VoiceAlignPayload): Promise<IpcResult<VoiceAlignResult>>
     cancelAlign(): void

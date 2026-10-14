@@ -72,7 +72,8 @@ contextBridge.exposeInMainWorld('settingsTools', settingsTools);
 const voiceTools: PreloadApi['voiceTools'] = {
   getConfig: () => ipcRenderer.invoke(IPC.Voice.GetConfig),
   getSaveDir: (payload) => ipcRenderer.invoke(IPC.Voice.GetSaveDir, payload),
-  saveConfig: (voiceTTS) => ipcRenderer.invoke(IPC.Voice.SaveConfig, { voiceTTS }),
+  // 语音服务配置按厂家存：载荷 { provider?, config: { apiKey?, defaultModel? } }（主进程仍兼容旧形态 { voiceTTS }）
+  saveConfig: (payload) => ipcRenderer.invoke(IPC.Voice.SaveConfig, payload),
   pickAudio: (): Promise<string | null> => ipcRenderer.invoke(IPC.Voice.PickAudio),
   pickDir: () => ipcRenderer.invoke(IPC.Voice.PickDir),
   listGenerated: () => ipcRenderer.invoke(IPC.Voice.ListGenerated),
@@ -84,6 +85,8 @@ const voiceTools: PreloadApi['voiceTools'] = {
   getProfiles: () => ipcRenderer.invoke(IPC.Voice.GetProfiles),
   saveProfile: (profile) => ipcRenderer.invoke(IPC.Voice.SaveProfile, { profile }),
   deleteProfile: (key: string) => ipcRenderer.invoke(IPC.Voice.DeleteProfile, { key }),
+  // 删除云端克隆音色（不可撤销）；主进程用当前厂家的 Key 调 DashScope 的 action=delete
+  deleteCloudVoice: (voice: string) => ipcRenderer.invoke(IPC.Voice.DeleteCloud, { voice }),
   synth: (text: string, voice: string, projectName: string, saveDir: string, targetModel: string, audioName: string, defaultOut: boolean) =>
     ipcRenderer.invoke(IPC.Voice.Synth, { text, voice, projectName, saveDir, targetModel, audioName, defaultOut }),
   // 字幕配音（逐句对齐）：逐句合成 + 对齐/重排；进度经 voice:align-progress 回推

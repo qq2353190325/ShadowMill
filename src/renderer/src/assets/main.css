@@ -497,6 +497,20 @@ body {
   background: linear-gradient(135deg, #33ddff, #a078ff);
 }
 
+/* 危险动作按钮（删除类）：与 .hf-btn 同尺寸，红色描边 + hover 半透明红底。
+   注意同 .hf-btn-primary 一样，hover 必须自带 background——基础 .hf-btn:hover 的特异性同为 0,3,0，
+   靠「写在后面」取胜，所以这段必须留在 .hf-btn-primary 之后。 */
+.hf-btn-danger {
+  color: var(--color-danger);
+  border-color: rgba(255, 77, 109, 0.5);
+}
+
+.hf-btn-danger:hover:not(:disabled) {
+  color: var(--color-danger);
+  background: rgba(255, 77, 109, 0.12);
+  box-shadow: 0 0 10px rgba(255, 77, 109, 0.25);
+}
+
 .hf-file {
   flex: 1;
   min-width: 120px;
@@ -1352,6 +1366,94 @@ body {
   color: var(--color-primary);
   background: rgba(0, 212, 255, 0.1);
 }
+
+/* ===== 配音页：我的音色列表 =====
+   列表化的一屏信息：表头固定在列表外（不随行滚动），行区域自己滚；行 13px / 次要列 12px，与表单控件同一档位（规范 §3.1）。 */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 10px;
+}
+/* 头行已经给了下边距，标题自己那份要去掉，否则头行被撑高一倍 */
+.panel-head .panel-title { margin-bottom: 0; }
+.panel-head-actions { display: flex; align-items: center; gap: var(--space-2); flex: none; }
+
+.voice-list {
+  margin-top: var(--space-3);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 10px;
+  overflow: hidden; /* 让表头与末行的直角被圆角裁掉 */
+}
+.voice-list-head,
+.voice-list-row {
+  display: grid;
+  /* 不能写成 1fr：fr 的隐含下限是 min-content，超长文本会把列撑爆、省略号失效。
+     最后一列是行内动作（删除云端音色），宽度按内容走 */
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 9px 12px;
+}
+.voice-list-head {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  background: rgba(10, 17, 32, 0.96);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.18);
+}
+/* 音色多时列表内部滚动，整页不跟着滚 */
+.voice-list-body { max-height: 360px; overflow-y: auto; }
+.voice-list-body::-webkit-scrollbar { width: 8px; }
+.voice-list-body::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(0, 212, 255, 0.25); }
+.voice-list-body::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.45); }
+
+.voice-list-row {
+  font-size: 13px;
+  color: var(--text-primary);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.voice-list-row:last-child { border-bottom: 0; }
+.voice-list-row:hover { background: rgba(0, 212, 255, 0.07); }
+/* 正在下方「音色映射管理」里编辑的那一条：左指示条 + 渐变高亮（与侧栏菜单选中态同一套语言） */
+.voice-list-row.on {
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.22) 0%, rgba(0, 212, 255, 0) 100%);
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+.voice-list-row > span { min-width: 0; }
+
+.voice-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.voice-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-tag {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  border: 1px solid rgba(138, 155, 181, 0.45);
+  border-radius: 999px;
+}
+.voice-tag.clone { color: var(--color-success); border-color: rgba(0, 229, 160, 0.45); }
+.voice-model,
+.voice-extra {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 行内动作列（删除云端音色等）：靠右、不参与省略号 */
+.voice-actions { display: flex; justify-content: flex-end; gap: 6px; }
 
 /* ===== 通用弹窗（转录弹窗） ===== */
 /* ===== 设置页：左侧分类 + 右侧内容 =====

@@ -2,7 +2,7 @@
   <div>
     <div class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>文字生音频（TTS 合成）</div>
-      <div class="hgen-tip">选择音色后按该音色绑定的模型合成语音（克隆音色绑定创建时选择的目标模型，系统音色绑定默认合成模型）。结果默认保存到所选项目的 <code>audio/</code>，也可在「保存到」中选择自定义目录或音频输出目录。展示的目标模型（<b>{{ modelTag }}</b>）为未绑定模型音色时的兜底值，可在「音色管理」标签页为音色改名、改模型。</div>
+      <div class="hgen-tip">音色与模型是绑定的：系统音色固定用厂家目录里的合成模型（当前 <b>{{ modelTag }}</b>），克隆音色用其创建/映射时绑定的模型。结果默认保存到所选项目的 <code>audio/</code>，也可在「保存到」中选择自定义目录或音频输出目录。改名或为克隆音色换模型，到「音色管理」标签页。</div>
       <div style="margin-top:var(--space-4)">
         <div style="display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-2)">
           <div class="panel-title-sm" style="margin:0">合成文本</div>
@@ -12,10 +12,10 @@
       </div>
       <div class="hgen-row">
         <label class="sel-label">音色</label>
-        <HfSelect v-model="voiceId" :groups="voiceGroups" />
+        <HfSelect v-model="voiceId" :groups="voiceGroups" :disabled="!voiceKeyReady" :title="voiceKeyReady ? '' : '先在「设置」-「语音服务」填好该厂家的 API Key，才能选择音色'" />
         <button class="hf-btn" title="重新拉取音色列表" @click="onRefreshVoice">刷新</button>
-        <button class="hf-btn" title="切到本页「音色管理」标签页：克隆音色 / 为音色改名、改模型" style="padding:4px 12px;font-size:12px" @click="onManageVoice">管理音色</button>
       </div>
+      <div class="hgen-tip" v-if="!voiceKeyReady" style="margin-top:0">还没配置「{{ activeProviderLabel || '当前厂家' }}」的 API Key：先在「设置 → 语音服务」填好并保存，才能选择音色与模型（没 Key 时合成/克隆一定失败）。</div>
       <div class="hgen-row">
         <label class="sel-label">保存到</label>
         <HfSelect v-model="saveTo" :groups="saveToGroups" title="合成结果保存位置：项目 audio/（写入项目）· 自定义目录 · 音频输出目录（不写入项目）" @change="onSaveToChange" />
@@ -34,7 +34,7 @@
         <button class="hf-btn hf-btn-primary" :disabled="synthBusy" @click="onSynth">合成并保存</button>
       </div>
       <div class="hf-status" :class="statusClass">{{ status }}</div>
-      <button class="hf-btn" title="跳转到「设置」-「千问语音」（未配置 Key 时合成会自动引导）" style="padding:2px 10px;font-size:12px;opacity:.55;margin-top:var(--space-2)" @click="goPage('settings')">API Key 设置</button>
+      <button class="hf-btn" title="跳转到「设置」-「语音服务」（未配置 Key 时合成会自动引导）" style="padding:2px 10px;font-size:12px;opacity:.55;margin-top:var(--space-2)" @click="goSettingsVoice">API Key 设置</button>
     </div>
     <div class="card hgen-panel" style="margin-top:16px" v-show="ttsResultShown">
       <div class="panel-title"><span class="dot"></span>合成结果</div>
@@ -80,15 +80,16 @@
 
 <script setup lang="ts">
 // pages/TextTtsPage/SynthSection.vue —— 文字生音频（TTS 合成）卡（原 JS 版 textTts 模块 synth.js 移植）
-import { computed, onMounted, ref } from 'vue'
-import { activeMenu, appState, refreshProject } from '@renderer/composables/useAppStore'
+import { computed, onMounted, ref, watch } from 'vue'
+import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { applyRate, stepRate } from '@renderer/utils/rate'
 import { goPage } from '@renderer/pages'
+import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import HfSelect, { type HfSelectGroup, type HfSelectOption } from '@renderer/components/HfSelect.vue'
 import {
-  cfgSaveDir, firstVoiceId, loadVoices, modelTag, requestVoiceTab, requireCfg, setCfgSaveDir,
-  ttsResultShown, voiceGroups, voiceModelOf
+  activeProviderLabel, activeTtsTab, cfgSaveDir, firstVoiceId, loadVoices, modelTag, refreshVoiceKeyState, requireCfg,
+  setCfgSaveDir, ttsResultShown, voiceGroups, voiceKeyReady, voiceModelOf
 } from './helpers'
 
 const status = ref('');
@@ -106,11 +107,10 @@ async function onRefreshVoice(): Promise<void> {
     voiceId.value = firstVoiceId();
   }
 }
-// 「管理音色」：音色管理已是本页第三个 Tab。同页点击只发信号切 Tab（不换页，保住下面已填的合成文本）；
-// 从别的页面点进来时才 goPage 跳本页（跳转后本页重挂载，onMounted 会消费同一信号落在音色管理 Tab）。
-function onManageVoice(): void {
-  requestVoiceTab();
-  if (activeMenu.value !== 'text-tts') void goPage('text-tts');
+// 「API Key 设置」：切到设置页并落在「语音服务」（与音色页同款意图跳转）
+function goSettingsVoice(): void {
+  requestSettingsSection('voice');
+  goPage('settings');
 }
 
 // ===== 合成文本 / 音频名字 =====
@@ -348,6 +348,8 @@ function genRateStep(delta: number): void {
 
 onMounted(() => {
   fillSaveTo();
+  // 先算「当前厂家 Key 是否就绪」：没就绪时音色下拉直接禁用并给出提示（requireCfg 里也会同步该状态）
+  void refreshVoiceKeyState();
   void (async () => {
     if (await requireCfg(setStatus)) {
       fillSaveTo();
@@ -356,5 +358,16 @@ onMounted(() => {
       fillGenAudios(true);
     }
   })();
+});
+
+// 切回本 Tab 时重拉音色列表：三个 Tab 是 v-show 切换、组件不重新挂载，
+// 否则在「音色管理」里新建（或删除）音色后，这里的下拉还是进页面时那份旧列表。
+watch(activeTtsTab, async (t) => {
+  if (t !== 'synth') return;
+  await refreshVoiceKeyState();      // 用户可能刚在设置页存完 Key
+  if (!voiceKeyReady.value) return;  // 没 Key 时下拉本就禁用，别在这里弹跳转
+  await loadVoices(setStatus);
+  // 选中的音色若已不存在（比如在「音色管理」里删了云端音色），回落到第一个可用音色
+  if (!voiceGroups.value.some((g) => g.options.some((o) => o.value === voiceId.value))) voiceId.value = firstVoiceId();
 });
 </script>

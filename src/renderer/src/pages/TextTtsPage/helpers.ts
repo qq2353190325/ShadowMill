@@ -15,36 +15,84 @@ export interface VoiceOptionGroup {
   options: VoiceOption[]
 }
 
+// 三张卡共用的「当前 Tab」：本页三个 Tab 是 v-show 切换的，组件不会重新挂载，
+// 所以各卡 watch 它、在轮到自己显示时重拉一次自己的列表（否则在「音色管理」里新建的音色，
+// 切回「文字生音频」时下拉里还是进页面时那份旧列表）。
+export const activeTtsTab = ref<'synth' | 'align' | 'voice'>('synth');
+
 export const cfgSaveDir = ref('');
 export const voiceGroups = ref<VoiceOptionGroup[]>([]);
-export const modelTag = ref('qwen-audio-3.0-tts-flash');
+// 当前厂家的系统合成模型（= 厂家目录里的出厂默认，如 qwen3-tts-flash）：系统音色固定用它，
+// 界面只把它当说明展示（「厂家默认模型」这个用户可改的设置已废弃）。
+export const modelTag = ref('qwen3-tts-flash');
 export const ttsResultShown = ref(false);
 
-// 「音色管理」Tab 信号：音色管理已并入本页第三个 Tab（原独立「音色管理」页 sound-copy 已下线）。
-// 由合成卡片的「管理音色」按钮置位，TextTtsPage 的 watch 消费它（切 Tab 后立刻复位为 false）：
-//  - 同页点击：走 watch，只切 Tab，不 goPage 换页（换页会重挂载整个配音页，清空合成文本等已填内容）；
-//  - 跨页点击：先置位再 goPage('text-tts')，本页重挂载时在 onMounted 里消费一次。
-// 之所以是布尔而不是计数器：复位 true→false 不会再次触发 watch（计数器复位 1→0 会二次触发）。
-export const voiceTabRequest = ref(false);
+// ===== 当前厂家的 Key 是否就绪 =====
+// 没填对应厂家的 Key 时，选了音色/模型也一定失败（合成与克隆都会以「未配置 …的 API Key」打回），
+// 所以界面上直接禁用「音色 / 模型」下拉并说明原因，比让人选完再报错友好。
+export const voiceKeyReady = ref(false);
+export const activeProviderLabel = ref('');
 
-export function requestVoiceTab(): void {
-  voiceTabRequest.value = true;
+// ===== 语音配置的唯一读取入口 =====
+// 配置形状只有这一个地方知道：主进程回的是 `{ ok, active, providers, saveDir }`，
+// 「当前厂家的 Key」= `providers[active].apiKey`。
+// **别再在别处自己拼这个形状**——VoiceSection 里原来有一份拷贝还在读旧字段 `c.apiKey`
+// （早已不存在 ⇒ 永远判成"未配置 Key" ⇒ 点「选择音频文件」就跳设置页），就是漏改的后果。
+export interface ActiveVoiceCfg { ok: boolean; provider: string; apiKey: string; saveDir: string }
+export async function readActiveCfg(): Promise<ActiveVoiceCfg | null> {
+  const c = await window.voiceTools.getConfig().catch(() => null);
+  if (!c || !c.ok) return null;
+  const provider = String((c as { active?: string }).active || 'qwen');
+  const cfg = (((c as { providers?: Record<string, { apiKey?: string }> }).providers) || {})[provider] || {};
+  return {
+    ok: true,
+    provider,
+    apiKey: String(cfg.apiKey || ''),
+    saveDir: String((c as { saveDir?: string }).saveDir || '').trim()
+  };
 }
+
+// 进页面时算一次：页面在 goPage 时强制重挂载，所以「去设置页存完 Key 再回来」会自动重算。
+export async function refreshVoiceKeyState(): Promise<void> {
+  const [c, mm] = await Promise.all([
+    readActiveCfg(),
+    window.voiceTools.listModels().catch(() => null)
+  ]);
+  const active = (c && c.provider) || '';
+  const providers = ((mm as { providers?: { key: string; label: string; defaultModel?: string }[] } | null)?.providers) || [];
+  const hit = providers.find((p) => p.key === active);
+  activeProviderLabel.value = (hit && hit.label) || active || '';
+  if (hit && hit.defaultModel) modelTag.value = hit.defaultModel;
+  voiceKeyReady.value = !!(c && c.apiKey);
+}
+
+// 切 Tab 信号（voiceTabRequest / requestVoiceTab）已随合成卡片的「管理音色」按钮一起删除：
+// 现在切「音色管理」Tab 只有本页 Tab 按钮一个入口，不需要跨组件信号。
 
 export function setCfgSaveDir(v: string): void {
   cfgSaveDir.value = v;
 }
 
-export async function requireCfg(onError: (text: string, kind: string) => void): Promise<{ ok: boolean; apiKey?: string; targetModel?: string; saveDir?: string } | null> {
-  const c = await window.voiceTools.getConfig().catch(() => null);
-  if (!c || !c.ok || !c.apiKey) {
-    onError('尚未配置千问语音 API Key，请先到「设置」-「千问语音」填写', 'hf-error');
+// 语音配置按厂家存：`active` 是当前厂家，取该厂家的 API Key 与全局保存目录。
+// 未配置 Key 时提示里带上厂家名，并跳到设置页的「语音服务」分类；同时把 voiceKeyReady 置假（禁用下拉）。
+export async function requireCfg(onError: (text: string, kind: string) => void): Promise<{ ok: boolean; apiKey?: string; saveDir?: string; provider?: string } | null> {
+  const c = await readActiveCfg();
+  if (!c) {
+    voiceKeyReady.value = false;
+    onError('读取语音配置失败，请到「设置」-「语音服务」检查', 'hf-error');
     goPage('settings');
     return null;
   }
-  modelTag.value = c.targetModel || 'qwen-audio-3.0-tts-flash';
-  cfgSaveDir.value = String((c as { saveDir?: string }).saveDir || '').trim();
-  return c;
+  if (!c.apiKey) {
+    voiceKeyReady.value = false;
+    if (!activeProviderLabel.value) activeProviderLabel.value = c.provider;
+    onError('尚未配置「' + (activeProviderLabel.value || c.provider) + '」的语音 API Key，请先到「设置」-「语音服务」填写并保存', 'hf-error');
+    goPage('settings');
+    return null;
+  }
+  voiceKeyReady.value = true;
+  cfgSaveDir.value = c.saveDir;
+  return { ok: true, apiKey: c.apiKey, saveDir: cfgSaveDir.value, provider: c.provider };
 }
 
 // 原组装逻辑（voice:list-all 不可用时的回退路径：listSystemVoices + list 组装）

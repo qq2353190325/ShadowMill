@@ -11,9 +11,11 @@
     </div>
     <div class="hgen-row">
       <span class="sel-label" style="flex:none;width:auto">音色</span>
-      <HfSelect v-model="voiceId" :groups="voiceGroups" />
+      <HfSelect v-model="voiceId" :groups="voiceGroups" :disabled="!voiceKeyReady" :title="voiceKeyReady ? '' : '先在「设置」-「语音服务」填好该厂家的 API Key，才能选择音色'" />
       <button class="hf-btn" @click="onRefreshVoice">刷新</button>
+      <button class="hf-btn" v-if="!voiceKeyReady" title="跳转到「设置」-「语音服务」" style="padding:4px 12px;font-size:12px" @click="goSettingsVoice">API Key 设置</button>
     </div>
+    <div class="hgen-tip" v-if="!voiceKeyReady" style="margin-top:0">还没配置「{{ activeProviderLabel || '当前厂家' }}」的 API Key：先在「设置 → 语音服务」填好并保存，才能选择音色与模型（没 Key 时逐句合成一定失败）。</div>
     <div class="hgen-row">
       <span class="sel-label" style="flex:none;width:auto">对齐方式</span>
       <label class="hgen-check"><input type="radio" value="audio-driven" v-model="alignMode" /> 重排字幕（音频驱动）</label>
@@ -60,13 +62,15 @@
 
 <script setup lang="ts">
 // pages/TextTtsPage/AlignSection.vue —— 字幕配音（逐句对齐）卡（原 JS 版 textTts 模块 align.js 移植）
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
+import { goPage } from '@renderer/pages'
+import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import { escTxt } from '@renderer/utils/escape'
 import { fmtTime, fmtTimeMs } from '@renderer/utils/time'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
-import { firstVoiceId, loadVoices, requireCfg, voiceGroups, voiceModelOf } from './helpers'
+import { activeProviderLabel, activeTtsTab, firstVoiceId, loadVoices, refreshVoiceKeyState, requireCfg, voiceGroups, voiceKeyReady, voiceModelOf } from './helpers'
 
 interface AlignDetail {
   index: number
@@ -131,6 +135,11 @@ async function getAlignSubtitleText(): Promise<{ ok: boolean; text?: string; mes
 const voiceId = ref('');
 const alignMode = ref<'audio-driven' | 'timeline-driven'>('audio-driven');
 const gap = ref('0.5');
+// 「API Key 设置」：切到设置页并落在「语音服务」（与合成卡同款意图跳转）
+function goSettingsVoice(): void {
+  requestSettingsSection('voice');
+  goPage('settings');
+}
 async function onRefreshVoice(): Promise<void> {
   if (await requireCfg(setStatus)) {
     await loadVoices(setStatus);
@@ -270,6 +279,8 @@ async function writeAlign(): Promise<void> {
 }
 
 onMounted(() => {
+  // 先算「当前厂家 Key 是否就绪」：没就绪时音色下拉直接禁用并给出提示
+  void refreshVoiceKeyState();
   // 进度推送（preload 单订阅；切页后本页回调不再触发）
   window.voiceTools.onAlignProgress((p) => {
     if (!p) return;
@@ -289,5 +300,14 @@ onMounted(() => {
   });
   syncSubCount();
   void (async () => { if (await requireCfg(setStatus)) { await loadVoices(setStatus); voiceId.value = firstVoiceId(); } })();
+});
+
+// 切回本 Tab 时重拉音色列表（理由同合成卡：v-show 切换不重新挂载，新建的音色不会自动出现）
+watch(activeTtsTab, async (t) => {
+  if (t !== 'align') return;
+  await refreshVoiceKeyState();
+  if (!voiceKeyReady.value) return;
+  await loadVoices(setStatus);
+  if (!voiceGroups.value.some((g) => g.options.some((o) => o.value === voiceId.value))) voiceId.value = firstVoiceId();
 });
 </script>

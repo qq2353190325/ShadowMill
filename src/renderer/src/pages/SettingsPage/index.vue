@@ -57,18 +57,18 @@
       <div class="hf-status" :class="statusClass">{{ status }}</div>
     </div>
     <div v-if="activeSection === 'voice'" class="card hgen-panel">
-      <div class="panel-title"><span class="dot"></span>千问语音（音色管理 &amp; 文字生音频）</div>
-      <div class="hgen-tip">配置千问AI平台 API Key 与目标语音合成模型，供「音色管理」和「文字生音频」使用。API Key 只保存在本电脑。创建音色时所选的模型需与这里的合成模型一致。</div>
+      <div class="panel-title"><span class="dot"></span>语音服务（按厂家配置）</div>
+      <div class="hgen-tip">每个厂家一把 API Key；模型与音色都在厂家的目录里，**系统音色与合成模型是固定绑定**（当前厂家：系统音色用 <code>{{ vendorSystemModel }}</code>）。API Key 只保存在本电脑。</div>
+      <div class="hgen-row">
+        <label class="sel-label">厂家</label>
+        <HfSelect v-model="vProvider" :groups="vendorGroups" @change="syncVoiceForm" />
+      </div>
       <div class="hgen-row">
         <label class="sel-label">API Key</label>
-        <input v-model="vApiKey" type="password" class="hgen-input" style="flex:1" placeholder="sk-...（DASHSCOPE_API_KEY）" />
-      </div>
-      <div class="hgen-row">
-        <label class="sel-label">目标模型</label>
-        <HfSelect v-model="vModel" :groups="voiceModelGroups" />
+        <input v-model="vApiKey" type="password" class="hgen-input" style="flex:1" :placeholder="vendorKeyHint" />
       </div>
       <div class="hgen-actions">
-        <button class="hf-btn hf-btn-primary" @click="onSaveVoice">保存千问语音配置</button>
+        <button class="hf-btn hf-btn-primary" @click="onSaveVoice">保存该厂家配置</button>
       </div>
       <div class="hf-status" :class="vStatusClass">{{ vStatus }}</div>
     </div>
@@ -261,6 +261,15 @@ watch(activeSection, (v) => {
   } catch (e) { /* 隐私模式等场景静默忽略 */ }
 });
 
+// 别的页面点「API Key 设置」之类会带着「落到语音服务」的意图跳进来：先消费意图，
+// 优先级高于 localStorage 里的上次分类（用户这次点的是"去配语音"，不是"回到上次看的那一页"）。
+function applySectionIntent(): void {
+  const want = consumeSettingsSection();
+  if (want && SECTIONS.indexOf(want) >= 0 && want !== activeSection.value) activeSection.value = want;
+}
+// 兜底：本页已在挂载状态时（不经 goPage 重挂载）也能响应
+watch(useSettingsSectionRequest(), () => applySectionIntent());
+
 function setStatus(text: string, kind: string): void {
   status.value = text || '';
   statusClass.value = kind;
@@ -291,19 +300,35 @@ async function onTest(): Promise<void> {
   setStatus(res && res.ok ? (res.message || '连接成功') : ((res as { message?: string })?.message || '测试失败'), res && res.ok ? 'hf-ok' : 'hf-error');
 }
 
-// ===== 千问语音配置 =====
-interface VoiceModelView { id: string; label: string; isDefault?: boolean }
+// ===== 语音服务（按厂家）=====
+// 数据来自 voice:list-models 回带的 providers（厂家目录：label / Key 提示 / 出厂默认模型 / 模型 / 音色），
+// 配置来自 voice:get-config（active + 各厂家已保存的 apiKey）。
+// **这里只有 API Key**：模型与音色的对应关系是固定的（写在厂家目录里），没有「厂家默认模型」这种全局设置。
+interface VoiceModelView { id: string; label: string; role?: string; input?: string; group?: string; isDefault?: boolean }
+interface VoiceProviderView { key: string; label: string; apiKeyHint: string; defaultModel: string; models: VoiceModelView[] }
+const voiceProviders = ref<VoiceProviderView[]>([]);
+const vProvider = ref('');                 // 当前编辑的厂家 key
 const vApiKey = ref('');
-const vModel = ref('');
-const voiceModels = ref<VoiceModelView[]>([]);
 const vStatus = ref('');
 const vStatusClass = ref('');
+// 各厂家已保存的配置（切厂家时用来回填表单，不丢另一家已填的 Key）
+const vSaved = ref<Record<string, { apiKey: string }>>({});
 
-// HfSelect 选项（原为 <option v-for>）
-const voiceModelGroups = computed<HfSelectGroup[]>(() => [{
+const currentVendor = computed<VoiceProviderView | null>(
+  () => voiceProviders.value.find((p) => p.key === vProvider.value) || voiceProviders.value[0] || null
+);
+const vendorGroups = computed<HfSelectGroup[]>(() => [{
   label: '',
-  options: voiceModels.value.map((m) => ({ value: m.id, label: m.label }))
+  options: voiceProviders.value.map((p) => ({ value: p.key, label: p.label }))
 }]);
+const vendorKeyHint = computed(() => (currentVendor.value && currentVendor.value.apiKeyHint) || 'sk-...');
+// 该厂家系统音色固定使用的合成模型（目录里的出厂默认）——只作说明展示
+const vendorSystemModel = computed(() => (currentVendor.value && currentVendor.value.defaultModel) || '');
+
+function syncVoiceForm(): void {
+  const key = (currentVendor.value && currentVendor.value.key) || '';
+  vApiKey.value = (vSaved.value[key] && vSaved.value[key].apiKey) || '';
+}
 
 function setVStatus(text: string, kind: string): void {
   vStatus.value = text || '';
@@ -311,8 +336,16 @@ function setVStatus(text: string, kind: string): void {
 }
 
 async function onSaveVoice(): Promise<void> {
-  const res = await window.voiceTools.saveConfig({ apiKey: vApiKey.value.trim(), targetModel: vModel.value });
-  setVStatus(res && res.ok ? '千问语音配置已保存，可在「音色管理」「文字生音频」中使用' : ((res as { message?: string })?.message || '保存失败'), res && res.ok ? 'hf-ok' : 'hf-error');
+  const vendor = currentVendor.value;
+  if (!vendor) { setVStatus('厂家目录未加载，请重开本页', 'hf-error'); return; }
+  const apiKey = vApiKey.value.trim();
+  const res = await window.voiceTools.saveConfig({ provider: vendor.key, config: { apiKey: apiKey } });
+  if (res && res.ok) {
+    vSaved.value = Object.assign({}, vSaved.value, { [vendor.key]: { apiKey: apiKey } });
+    setVStatus('「' + vendor.label + '」的 API Key 已保存，可在「音色管理」「文字生音频」中使用', 'hf-ok');
+  } else {
+    setVStatus((res as { message?: string })?.message || '保存失败', 'hf-error');
+  }
 }
 
 // ===== 视频渲染默认档位（全局默认；项目级覆盖在「HTML生成」页的「渲染档位」单独设置）=====
@@ -585,6 +618,8 @@ async function onSkipVersion(skip: boolean): Promise<void> {
 }
 
 onMounted(async () => {
+  // 先落实「带意图跳进来」的分类（例：音色管理 → API Key 设置 → 语音服务），再载入配置
+  applySectionIntent();
   // 载入当前配置
   try {
     const s = await window.settingsTools.get();
@@ -599,22 +634,18 @@ onMounted(async () => {
   } catch (e) {
     setStatus('读取配置失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : e), 'hf-error');
   }
-  // 动态填充候选模型表（语音复刻 + 系统音色合成）
-  const mm = await window.voiceTools.listModels().catch(() => ({ ok: false, models: [] } as any));
-  voiceModels.value = ((mm && mm.models) || []) as VoiceModelView[];
+  // 语音服务（按厂家）：厂家目录 + 各厂家已保存配置
+  const mm = await window.voiceTools.listModels().catch(() => ({ ok: false, models: [], providers: [] } as any));
+  voiceProviders.value = ((mm && mm.providers) || []) as VoiceProviderView[];
   try {
     const s = await window.settingsTools.get();
-    const v = (s && s.voiceTTS) || {};
-    vApiKey.value = v.apiKey || '';
-    if (v.targetModel && voiceModels.value.some((m) => m.id === v.targetModel)) {
-      vModel.value = v.targetModel;
-    } else if (voiceModels.value.length) {
-      const def = voiceModels.value.find((m) => m.isDefault);
-      vModel.value = (def || voiceModels.value[0]).id;
-    }
+    const v = ((s as unknown as { voice?: { active?: string; providers?: Record<string, { apiKey: string }> } }).voice) || {};
+    vSaved.value = (v.providers || {}) as Record<string, { apiKey: string }>;
+    vProvider.value = String(v.active || '') || ((voiceProviders.value[0] && voiceProviders.value[0].key) || '');
   } catch (e) {
-    setVStatus('读取千问语音配置失败', 'hf-error');
+    setVStatus('读取语音服务配置失败', 'hf-error');
   }
+  syncVoiceForm();
   // 视频渲染默认档位（读取失败沿用内置默认 standard / 30）
   try {
     const s = await window.settingsTools.get();

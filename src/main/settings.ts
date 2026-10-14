@@ -1,6 +1,7 @@
 // src/main/settings.ts
 // 设置存储（userData/settings.json）与 OpenAI 兼容客户端工具
-// 提供：readSettings / writeSettings / getCustomModel / getVoiceConfig / getUpdaterSettings
+// 提供：readSettings / writeSettings / getCustomModel / getVoiceSettings / getVoiceProviderConfig /
+//       saveVoiceProviderConfig / getUpdaterSettings
 //       以及 settings:get / settings:save / settings:save-render / settings:save-updater / settings:test IPC
 //       + whisper 当前模型档位与自定义模型列表（getWhisperModel / saveWhisperModel / getWhisperCustomModels / saveWhisperCustomModels）
 //       + 视频渲染档位的白名单校验（DEFAULT_RENDER / normalizeRenderOptions / pickRenderOverride，供 projects.ts / video.ts 复用）
@@ -22,9 +23,12 @@ import type {
   SettingsSaveUpdaterPayload,
   UpdaterSettings,
   VoiceProfile,
+  VoiceProviderConfig,
+  VoiceSettings,
   VoiceTTSConfig,
   WhisperCustomModel
 } from '../shared/types'
+import { DEFAULT_PROVIDER_KEY, providerByKey, type VoiceProviderDef } from './voiceCatalog'
 
 // ===== OpenAI SDK 懒加载（settings:test 与 htmlAgent 共用）=====
 // openai SDK 的模块图较大（require 实测 ~110ms，冷启动 + 杀软扫描时更久）。它只在**真正要发请求**的
@@ -84,9 +88,15 @@ function normalizeUpdaterSettings(raw: unknown, fallback?: UpdaterSettings): Upd
   return { feedUrl, autoCheck, skippedVersion };
 }
 
+// 语音服务默认值：按厂家组织，默认厂家与它的「出厂空配置」（只有 API Key，没有全局模型设置）
+const defaultVoiceProviders = (): Record<string, VoiceProviderConfig> => ({
+  [DEFAULT_PROVIDER_KEY]: { apiKey: '' }
+});
+
 const DEFAULT_SETTINGS = (): AppSettings => ({
   customModel: { baseUrl: '', modelId: '', apiKey: '', enabled: false },
-  voiceTTS: { apiKey: '', targetModel: 'qwen-audio-3.0-tts-flash', saveDir: '' },
+  // 语音服务（按厂家）：只有 API Key；模型与音色的对应关系写死在 voiceCatalog 的厂家目录里
+  voice: { active: DEFAULT_PROVIDER_KEY, providers: defaultVoiceProviders(), saveDir: '' },
   voiceProfiles: {}, // 本地音色映射：key 形如 "system:Cherry" / "custom:<voice_id>"，值为 { key, name, voice, targetModel, type }
   whisper: { modelId: '', customModels: [] }, // 语音识别（whisper.cpp）：modelId 为当前使用档位，customModels 为用户自定义模型条目
   render: Object.assign({}, DEFAULT_RENDER), // 视频渲染全局默认档位（项目未覆盖时生效）
@@ -94,13 +104,48 @@ const DEFAULT_SETTINGS = (): AppSettings => ({
   updater: { feedUrl: '', autoCheck: true, skippedVersion: '' }
 });
 
+// 语音服务设置规范化 + 旧结构迁移。
+// 旧版是单厂家、无厂家字段的 voiceTTS: { apiKey, targetModel, saveDir }；这里把 **apiKey** 搬进
+// providers[qwen]（只在还空着时填，绝不覆盖新结构里已有的值），saveDir 归到全局那一份。
+// 旧字段 targetModel（全局「目标模型」）**已废弃、不再读取**：系统音色与模型是固定绑定（写死在厂家目录里），
+// 克隆音色按各自的映射/云端 target_model 走，所以迁移时直接丢弃，不搬进新结构。
+// 迁移结果由 readSettings 返回；下一次写入（任一保存动作）就会把旧字段从文件里挤掉。
+function normalizeVoiceSettings(raw: unknown, legacy: unknown): VoiceSettings {
+  const base = DEFAULT_SETTINGS().voice;
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw as Record<string, unknown> : {};
+  const legacySrc = (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) ? legacy as Record<string, unknown> : {};
+  const s = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+  const providers: Record<string, VoiceProviderConfig> = {};
+  const rawProviders = (src.providers && typeof src.providers === 'object' && !Array.isArray(src.providers))
+    ? src.providers as Record<string, unknown>
+    : {};
+  for (const key of Object.keys(rawProviders)) {
+    const p = (rawProviders[key] && typeof rawProviders[key] === 'object') ? rawProviders[key] as Record<string, unknown> : {};
+    providers[key] = { apiKey: s(p.apiKey) };
+  }
+
+  // 旧字段迁移到兜底厂家（qwen）：填缺失项，不覆盖已有值
+  const legacyKey = DEFAULT_PROVIDER_KEY;
+  if (!providers[legacyKey]) providers[legacyKey] = { apiKey: '' };
+  const legacyApiKey = s(legacySrc.apiKey);
+  if (!providers[legacyKey].apiKey && legacyApiKey) providers[legacyKey].apiKey = legacyApiKey;
+
+  const active = s(src.active) || base.active;
+  return {
+    active: providers[active] ? active : base.active,
+    providers,
+    saveDir: s(src.saveDir) || s(legacySrc.saveDir)
+  };
+}
+
 function readSettings(): AppSettings {
   try {
     const raw = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
     const base = DEFAULT_SETTINGS();
-    return {
+    const out: AppSettings = {
       customModel: Object.assign({}, base.customModel, (raw && raw.customModel) || {}),
-      voiceTTS: Object.assign({}, base.voiceTTS, (raw && raw.voiceTTS) || {}),
+      voice: normalizeVoiceSettings(raw && raw.voice, raw && raw.voiceTTS),
       voiceProfiles: Object.assign({}, (raw && raw.voiceProfiles) || {}),
       whisper: Object.assign({}, base.whisper, (raw && raw.whisper) || {}),
       // 渲染档位：旧 settings.json（无 render 字段）落回默认；已写入的值经白名单规范化
@@ -108,21 +153,59 @@ function readSettings(): AppSettings {
       // 更新设置：旧 settings.json（无 updater 字段）落回默认；逐字段做类型收敛
       updater: normalizeUpdaterSettings(raw && raw.updater)
     };
+    // 旧结构原样带出（只读兼容：isPristineSettings 等仍可能要看它），但不参与新逻辑；
+    // 它不会随 writeSettings 落盘（写的是 out 这份，没有 voiceTTS 字段）
+    if (raw && raw.voiceTTS && typeof raw.voiceTTS === 'object') out.voiceTTS = raw.voiceTTS as VoiceTTSConfig;
+    return out;
   } catch (e) {
     return DEFAULT_SETTINGS();
   }
 }
 function writeSettings(s: AppSettings): void {
   fs.mkdirSync(app.getPath('userData'), { recursive: true });
-  fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2), 'utf8');
+  // 只写新结构：旧 voiceTTS 若还在内存里（readSettings 带出的兼容字段）也不落盘，避免两处漂移
+  const { voiceTTS: _legacy, ...next } = s;
+  fs.writeFileSync(settingsFile(), JSON.stringify(next, null, 2), 'utf8');
 }
 function getCustomModel(): CustomModelConfig {
   const s = readSettings();
   return s.customModel || DEFAULT_SETTINGS().customModel;
 }
-function getVoiceConfig(): VoiceTTSConfig {
+function getVoiceSettings(): VoiceSettings {
   const s = readSettings();
-  return Object.assign({}, DEFAULT_SETTINGS().voiceTTS, (s && s.voiceTTS) || {});
+  return s.voice || DEFAULT_SETTINGS().voice;
+}
+/** 取某厂家（缺省 = active）的配置 + 目录定义；配置缺失时按出厂空值补齐 */
+function getVoiceProviderConfig(key?: string): { key: string; config: VoiceProviderConfig; def: VoiceProviderDef } {
+  const vs = getVoiceSettings();
+  const def = providerByKey(key || vs.active);
+  const cfg = vs.providers[def.key] || { apiKey: '' };
+  return { key: def.key, config: { apiKey: cfg.apiKey || '' }, def };
+}
+/** 保存某厂家的配置（只更新传入的字段）；provider 缺省 = 当前 active。`saveDir` 给了就一并更新那一份全局设置 */
+function saveVoiceProviderConfig(provider: string | undefined, patch: Partial<VoiceProviderConfig>, saveDir?: string): VoiceSettings {
+  const cur = readSettings();
+  const vs = normalizeVoiceSettings(cur.voice, cur.voiceTTS);
+  const def = providerByKey(provider || vs.active);
+  const prev = vs.providers[def.key] || { apiKey: '' };
+  const next: VoiceProviderConfig = {
+    apiKey: typeof patch.apiKey === 'string' ? patch.apiKey.trim() : prev.apiKey
+  };
+  const merged: VoiceSettings = {
+    active: def.key, // 保存某厂家即切到该厂家
+    providers: Object.assign({}, vs.providers, { [def.key]: next }),
+    saveDir: typeof saveDir === 'string' ? saveDir.trim() : vs.saveDir
+  };
+  writeSettings(Object.assign({}, cur, { voice: merged }));
+  return merged;
+}
+/** 只改全局的自定义保存目录（「保存到：自定义目录」用），不动任何厂家的 Key、也不切换 active */
+function saveVoiceSaveDir(dir: string): VoiceSettings {
+  const cur = readSettings();
+  const vs = normalizeVoiceSettings(cur.voice, cur.voiceTTS);
+  const merged: VoiceSettings = { active: vs.active, providers: vs.providers, saveDir: String(dir || '').trim() };
+  writeSettings(Object.assign({}, cur, { voice: merged }));
+  return merged;
 }
 // ===== 应用自更新设置：持久化在 settings.json 的 updater 段（updater.ts 依赖本函数读 feedUrl / autoCheck）=====
 function getUpdaterSettings(): UpdaterSettings {
@@ -275,11 +358,20 @@ function isPristineSettings(file: string): boolean {
   const s = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const cm = (raw.customModel || {}) as Record<string, unknown>;
   const vt = (raw.voiceTTS || {}) as Record<string, unknown>;
+  // 语音服务已改成按厂家存：新结构 voice.providers[*].apiKey / voice.saveDir 都算「用户投入过」；
+  // 旧结构 voiceTTS 仍要认（迁移前的老文件就是那个形状）。
+  const vs = (raw.voice || {}) as Record<string, unknown>;
+  const vproviders = (vs.providers && typeof vs.providers === 'object') ? vs.providers as Record<string, unknown> : {};
+  const anyProviderKey = Object.keys(vproviders).some((k) => {
+    const p = (vproviders[k] && typeof vproviders[k] === 'object') ? vproviders[k] as Record<string, unknown> : {};
+    return !!s(p.apiKey);
+  });
   const wp = (raw.whisper || {}) as Record<string, unknown>;
   const up = (raw.updater || {}) as Record<string, unknown>;
   const profiles = (raw.voiceProfiles || {}) as Record<string, unknown>;
   const touched =
     !!s(cm.apiKey) || !!s(cm.baseUrl) || !!s(cm.modelId) || cm.enabled === true ||
+    anyProviderKey || !!s(vs.saveDir) ||
     !!s(vt.apiKey) || !!s(vt.saveDir) ||
     !!s(wp.modelId) || (Array.isArray(wp.customModels) && wp.customModels.length > 0) ||
     !!s(up.feedUrl) ||
@@ -297,7 +389,10 @@ export {
   normalizeRenderOptions,
   pickRenderOverride,
   getCustomModel,
-  getVoiceConfig,
+  getVoiceSettings,
+  getVoiceProviderConfig,
+  saveVoiceProviderConfig,
+  saveVoiceSaveDir,
   getUpdaterSettings,
   saveUpdaterSettings,
   getWhisperModel,
