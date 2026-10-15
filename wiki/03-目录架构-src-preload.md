@@ -74,7 +74,7 @@ type IpcResult<T = unknown> = ({ ok: true; message?: string } & T) | IpcFail
 
   `message` 为**可选**，因为 `voice:pick-dir` 的用户取消分支只回 `{ ok: false, canceled: true }`；成功分支的业务字段是**平铺**的（没有 `data` 包装，也没有旧版 `OkResult` 的 `[key: string]: any` 索引签名），成功分支的 `message` 同样可选（取消、幂等复用等场景给一句话回执）。`detail` 同为可选，是给排障用的技术详情（原始报错 / HTTP 状态 / 请求地址），由 UI 折叠展示——目前主要用在 `update:*` 一族与 `updateTools.openLog()` 的失败分支上。`needPacks` 是运行环境分包带进来的可选字段：缺包时主进程回 `{ ok:false, needPacks: ['ffmpeg', …] }`，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），`VideoRenderResult` 的失败分支另有同名字段。`needConfig` / `title` 是 2026-10 新增的**配置类**字段：主进程 `friendlyError()` 判出「去设置页改配置就能解决」时回 `needConfig: 'model' | 'voice'`（余额 / 欠费**不在其中**，走内嵌状态行），渲染层据此弹只有 `[去设置]` / `[取消]` 的弹窗（`useConfigPrompt`，见 [04-目录架构-src-renderer](./04-目录架构-src-renderer.md)）。**preload 只是 `ipcRenderer.invoke` 原样转发，这两个字段不需要 preload 任何改动**。
 - 该文件被 `tsconfig.web.json` 的 `include` 显式引入（`src/preload/index.d.ts`），这是渲染层获得 IPC 类型的唯一途径；`tsconfig.node.json` 则包含 `src/preload/index.ts` 本体，两侧共同保证契约不漂移。
-- 少数接口不遵循 `IpcResult`：`projectTools.list()` 返回数组、`projectTools.load()` 返回项目对象或 `null`、`pickAudio()` / `pickVideo()` 返回 `string | null`、`settingsTools.get()` 直接返回 `AppSettings`、`hfTools.renderVideo()` 返回 `VideoRenderResult` —— 这些是历史契约，改动会同时影响渲染层多处调用。
+- 少数接口不遵循 `IpcResult`：`projectTools.list()` 返回数组、`projectTools.load()` 返回项目对象或 `null`、`pickAudio()` 返回 `string | null`、**`pickMedia(kind)` 返回 `string[]`（项目素材库选文件，取消时为空数组；本轮取代已删除的 `pickVideo()`）**、`settingsTools.get()` 直接返回 `AppSettings`、`hfTools.renderVideo()` 返回 `VideoRenderResult` —— 这些是历史契约，改动会同时影响渲染层多处调用。
 - 另有 **1 个同步方法**：`updateTools.version()` 走 `ipcRenderer.sendSync('update:version')`，同步返回版本号字符串（设置页首屏要立刻显示，不愿等一轮异步渲染）。这是全层唯一的同步 IPC，除它之外一律异步。
 
 ---

@@ -15,7 +15,7 @@
 2. **OpenAI 兼容客户端配置**：`customModel` 分区，供 HtmlAgent 等模块调用大模型。
 3. **OpenAI SDK 懒加载**：`loadOpenAI()` 是**全工程唯一的 openai SDK 加载入口**（`settings:test` 与 `htmlAgent` 共用），见 §2 与 §5。
 4. **视频渲染档位白名单**：`DEFAULT_RENDER` / `normalizeRenderOptions` / `pickRenderOverride`——**白名单只此一处**，`projects.ts`（项目级覆盖落盘）与 `video.ts`（渲染 CLI 参数）都复用，避免校验逻辑三处漂移。
-5. **应用自更新设置**：`updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`）由 `getUpdaterSettings` / `saveUpdaterSettings` 管理，`updater.ts` 读它决定更新源与启动检查。
+5. **应用自更新设置**：`updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`）由 `getUpdaterSettings` / `saveUpdaterSettings` 管理，`updater/` 目录（`actions.ts` 读更新源、`index.ts` 读启动检查开关）读它决定更新源与启动检查。
 6. **「出厂状态」判定**：`isPristineSettings(file)` 回答「用户在这个位置配过东西吗」，供 `index.ts` 的 `migrateFrom()` 迁移老数据时决定能否用老 `settings.json` 覆盖新文件（见 §3.5）。
 7. **IPC 注册**：`register(ctx)` 共注册 **6 个频道**——`settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test`，以及运行环境「从本地文件安装…」的 **`settings:pick-runtime-pack`**（见 §3.4）。
 
@@ -164,8 +164,8 @@ function isPristineSettings(file: string): boolean
 | `src/main/projects.ts` | `pickRenderOverride`——`project:set-render` 写 / 清除项目级渲染档位覆盖时做白名单过滤 |
 | `src/main/video.ts` | `pickRenderOverride`——把 `video:render` 载荷里显式给出的档位拼成 `--quality` / `--fps` 参数 |
 | `src/preload/index.ts` | 暴露 `window.settingsTools = { get, save, saveRender, saveUpdater, test, pickRuntimePack }`，分别 invoke `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` / `settings:pick-runtime-pack` |
-| `src/main/updater.ts` | `import { getUpdaterSettings, saveUpdaterSettings }`——读 `feedUrl`（非空即覆盖打包内置更新源）、`autoCheck`（启动静默检查开关）、`skippedVersion`（跳过版本）；用户对已跳过版本点「下载更新」时清掉该标记 |
-| 渲染层设置页 `SettingsPage/index.vue` | 自定义模型分区通过 `window.settingsTools.get()` / `save()` / `test()` 读写；渲染默认档位经 `saveRenderDefaults()` 走 `saveRender()`；更新设置走 `saveUpdater()`（千问语音分区走 `window.voiceTools.saveConfig`）；运行环境「从本地文件安装…」走 `pickRuntimePack()`，成功后再调 `runtimeTools.prepare()` 触发解包 |
+| `src/main/updater/actions.ts`（另 `base.ts` 与 `index.ts` 各取 `getUpdaterSettings`） | `import { getUpdaterSettings, saveUpdaterSettings }`——读 `feedUrl`（非空即覆盖打包内置更新源）、`autoCheck`（启动静默检查开关）、`skippedVersion`（跳过版本）；用户对已跳过版本点「下载更新」时清掉该标记 |
+| 渲染层设置页（`src/renderer/src/pages/SettingsPage/components/` 下的各区块） | 自定义模型分区（`ModelSection.vue`）通过 `window.settingsTools.get()` / `save()` / `test()` 读写；渲染默认档位（`RenderSection.vue`）经 `saveRenderDefaults()` 走 `saveRender()`；更新设置（`UpdateSection.vue`）走 `saveUpdater()`；语音分区（`VoiceSection.vue`）走 `window.voiceTools.saveConfig`；运行环境「从本地文件安装…」（`UpdateSection.vue`）走 `pickRuntimePack()`，成功后再经 `useRuntime` 的 `prepareRuntime()` 触发解包 |
 | 渲染层 `composables/useRenderOptions.ts` | `settingsTools.get()` 读全局默认档位（`loadRenderDefaults()`）、`settingsTools.saveRender()` 保存（`saveRenderDefaults()`） |
 
 协作要点：

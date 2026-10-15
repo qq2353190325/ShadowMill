@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量（含派生类型）
-- **规模**：132 行
+- **规模**：133 行（本轮由 132 → 133：Project 分组多了一行小节注释，**频道总数不变、仍是 85**）
 - **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video / Runtime / **Legacy** 十个分组（共 **85** 个频道））、`IpcChannel`（频道字面量联合类型）
 
 ## 1. 作用与职责
@@ -43,7 +43,7 @@
 | --- | --- | --- |
 | `App.CopyText` | `app:copy-text` | renderer → main，`invoke`，由主进程写剪贴板（sandbox 下渲染层无 clipboard 模块） |
 
-> 这里**曾经**还有一条 `App.OpenExternal`（值 `app:open-external`，主进程用 `shell.openExternal` 打开厂家充值页）：它只服务配置类弹窗上的「去充值」按钮，而那个按钮**从未被用户同意过**，已整条摘除（余额 / 欠费改为走内嵌状态行，文案说明去厂家控制台充值）。频道常量、preload 的 `appTools.openExternal`、主进程 handler 与 `electron` 的 `shell` 导入一并删除，**`App` 分组计数回到 1**；细节见 [shared/errors.ts.md](./errors.ts.md) §6 / §10。
+> 这里**曾经**还有一条 `App.OpenExternal`（值 `app:open-external`）：它只服务配置类弹窗上的「去充值」按钮，而那个按钮**从未被用户同意过**，已整条摘除（余额 / 欠费改为走内嵌状态行）。频道常量、preload 的 `appTools.openExternal`、主进程 handler 与 `electron` 的 `shell` 导入一并删除，**`App` 分组计数回到 1**；细节见 [shared/errors.ts.md](./errors.ts.md) §6 / §10。
 
 ### 2.3 Settings 分组（settings.js / settings.ts）
 
@@ -53,10 +53,10 @@
 | `Settings.Save` | `settings:save` | 保存自定义模型配置（OpenAI 兼容端点） |
 | `Settings.SaveRender` | `settings:save-render` | 保存视频渲染**默认档位**（只更新 `render` 段，不动 customModel） |
 | `Settings.SaveUpdater` | `settings:save-updater` | 保存**更新设置**（只更新 `updater` 段：`feedUrl` / `autoCheck` / `skippedVersion`） |
-| `Settings.Test` | `settings:test` | 用给定 `CustomModelConfig` 发起一次连通性测试（失败分支会带 `detail` 与可能的 `needConfig`，见 `src/shared/errors.ts`；设置页刻意不弹窗，只显示状态行） |
+| `Settings.Test` | `settings:test` | 用给定 `CustomModelConfig` 发起一次连通性测试（失败分支会带 `detail` 与可能的 `needConfig`；设置页刻意不弹窗，只显示状态行） |
 | `Settings.PickRuntimePack` | `settings:pick-runtime-pack` | renderer → main，`invoke`，运行环境「从本地文件安装…」：弹文件框选 `ffmpeg.7z` / `hyperframes.7z`，复制到 `userData/runtime/local-import/` 并生成同名清单（离线 / 内网机器的兜底入口，见 `docs/runtime-pack-split.md` §11.1） |
 
-### 2.4 Update 分组（updater.ts，应用自更新）
+### 2.4 Update 分组（`updater/index.ts` 注册，应用自更新）
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
@@ -75,7 +75,7 @@
 | --- | --- | --- |
 | `Voice.GetConfig` | `voice:get-config` | 取 `{ active, providers, saveDir }`（**按厂家**） |
 | `Voice.GetSaveDir` | `voice:get-save-dir` | 解析本次合成的落盘目录（支持项目目录 / 自定义目录 / 默认输出目录） |
-| `Voice.SaveConfig` | `voice:save-config` | 保存 `VoiceSaveConfigPayload`（`{ provider?, config: { apiKey?, defaultModel? } }`；兼容历史 `{ voiceTTS }` / 裸 `{ apiKey, targetModel }`） |
+| `Voice.SaveConfig` | `voice:save-config` | 保存 `VoiceSaveConfigPayload`（`{ provider?, config: { apiKey? } }`；兼容历史 `{ voiceTTS }` / 裸 `{ apiKey, targetModel }`） |
 | `Voice.PickAudio` | `voice:pick-audio` | 弹出文件框选择音色样本音频 |
 | `Voice.Create` | `voice:create` | 用样本音频克隆音色，返回 voice_id（未配置 Key 时失败体带 `needConfig:'voice'`） |
 | `Voice.ListSystemVoices` | `voice:list-system-voices` | 列出 Qwen-TTS 系统音色 |
@@ -112,29 +112,31 @@
 
 ### 2.7 Project 分组（projects.js / projects.ts）
 
+> 本组共 **25** 个频道。本轮素材库改造是 **3 换 3**：`PickVideo` / `SetVideo` / `ClearVideo` 下线，`PickMedia` / `AddMaterials` / `SaveMaterials` 上线，**组内计数与全库合计都不变**（全库仍是 85）。
+
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
 | `Project.List` | `project:list` | 项目列表（含 hasSubtitle / hasHtml / hasVideo / subtitleCount / updatedAt） |
 | `Project.Create` | `project:create` | 新建项目（参数为裸字符串 `name`） |
-| `Project.Load` | `project:load` | 读取项目元数据与内容 |
+| `Project.Load` | `project:load` | 读取项目元数据与内容（返回值里的 `materials` 已由主进程规范化） |
 | `Project.SaveSubtitle` | `project:save-subtitle` | 保存字幕文本与标题 |
 | `Project.SaveContent` | `project:save-content` | 保存内容（文案/结构化数据） |
-| `Project.GenerateHtml` | `project:generate-html` | 调模型生成 HTML（带素材）；失败体可能带 `needConfig` / `title`（配置类错误，由 `configTargetOf()` 补分类） |
+| `Project.GenerateHtml` | `project:generate-html` | 调模型生成 HTML（带素材：字幕 + `materialIds`）；失败体可能带 `needConfig` / `title`（配置类错误，由 `configTargetOf()` 补分类） |
 | `Project.ModifyHtml` | `project:modify-html` | 调模型修改既有 HTML；失败体同上传配置类字段 |
 | `Project.DownloadHtml` | `project:download-html` | 导出 HTML 到用户选定位置 |
 | `Project.ExportSrt` | `project:export-srt` | 导出 SRT 字幕文件 |
 | `Project.OpenFolder` | `project:open-folder` | 打开项目目录（项目尚未落盘时提示「项目目录不存在（项目尚未保存）」） |
 | `Project.OpenFolderOf` | `project:open-folder-of` | 打开某个绝对路径（文件或目录）所在目录 |
 | `Project.Delete` | `project:delete` | 删除项目 |
-| `Project.SaveVideo` | `project:save-video` | 把渲染产物视频路径写回项目 |
+| `Project.SaveVideo` | `project:save-video` | 把渲染产物视频路径写回项目（与「视频素材」无关） |
 | `Project.SetRender` | `project:set-render` | 写 / 清除项目级渲染档位覆盖（`render` 传 `null` 即回到跟随全局默认） |
 | `Project.PickAudio` | `project:pick-audio` | 选择项目音频 |
 | `Project.SetAudio` | `project:set-audio` | 写入项目音频 |
 | `Project.ClearAudio` | `project:clear-audio` | 清除项目音频 |
-| `Project.PickVideo` | `project:pick-video` | 选择项目视频 |
-| `Project.SetVideo` | `project:set-video` | 写入项目视频 |
-| `Project.ClearVideo` | `project:clear-video` | 清除项目视频 |
-| `Project.ExtractVideoAudio` | `project:extract-video-audio` | 从项目视频抽取音轨作为音频 |
+| `Project.PickMedia` | `project:pick-media` | **项目素材库：选文件**（按 `kind` 给扩展名过滤；图片 `multiSelections`、视频单选，返回绝对路径数组） |
+| `Project.AddMaterials` | `project:add-materials` | **项目素材库：复制入库 + 登记**（超限 / 格式不支持则跳过并回报跳过数） |
+| `Project.SaveMaterials` | `project:save-materials` | **项目素材库：整份列表回写**（移除与勾选共用；移除只摘登记、不删文件） |
+| `Project.ExtractVideoAudio` | `project:extract-video-audio` | 从项目视频抽取音轨作为音频（**频道与 handler 保留，界面入口本轮临时下线**；handler 仍读历史字段 `proj.videoMaterial`） |
 | `Project.ReadHtml` | `project:read-html` | 读取项目 HTML 源码 |
 | `Project.PreviewHtml` | `project:preview-html` | 生成预览用 HTML |
 | `Project.SaveHtml` | `project:save-html` | 保存手工编辑后的 HTML |
@@ -195,7 +197,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 | `src/main/ttsAlign.ts` | 同上 |
 | `src/main/whisper.ts` | 同上 |
 | `src/main/video.ts` | 同上 |
-| `src/main/updater.ts` | 同上 |
+| `src/main/updater/index.ts`（目录出口） | 同上 |
 | `src/main/runtime.ts` | 同上（`Runtime` 四频道：`Status` / `Prepare` / `Cancel` / `Progress`） |
 | `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`，逐方法绑定频道 |
 | `tsconfig.web.json` | `include` 含 `"src/shared/**/*.ts"`，故渲染层也可直接引用 |
@@ -209,18 +211,20 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 
 | 方向 | 通道举例 | 典型注册方式 |
 | --- | --- | --- |
-| renderer → main（请求-响应） | `settings:get`、`project:list`、`voice:synth`、`update:open-log`、`legacy:status`、`legacy:resolve`、`app:copy-text` | 主进程 `ipcMain.handle`，preload `invoke` |
+| renderer → main（请求-响应） | `settings:get`、`project:list`、**`project:pick-media`**、`voice:synth`、`update:open-log`、`legacy:status`、`legacy:resolve`、`app:copy-text` | 主进程 `ipcMain.handle`，preload `invoke` |
 | renderer → main（单向） | `window:minimize`、`voice:align-cancel` | 主进程 `ipcMain.on`，preload `send` |
 | main → renderer（推送） | `window:maximized-change`、`video:progress`、`whisper:progress`、`voice:align-progress`、`project:html-progress`、`update:progress`、`runtime:progress` | 主进程 `win.webContents.send`，preload `on` |
 
 > `Legacy` 组**刻意只走第一种方向**：旧数据是否存在的结论由渲染层主动拉取，主进程不推送、不弹窗。
+>
+> `project:pick-media` 是少数**返回裸数组**的请求-响应频道（`string[]`，不走 `IpcResult`），取消时返回空数组。
 
 ## 4. 依赖与协作
 
 | 方向 | 对象 | 说明 |
 | --- | --- | --- |
 | 依赖 | 无 | 本文件零 import、零副作用，是纯常量模块 |
-| 被 import | `src/main/` 9 个模块 | 全部 IPC 注册点（`index.ts` / `settings.ts` / `projects.ts` / `voice.ts` / `ttsAlign.ts` / `whisper.ts` / `video.ts` / `updater.ts` / `runtime.ts`；`hfEnv.ts` / `htmlAgent.ts` / `systemVoices.ts` / `vad.ts` 不注册 IPC） |
+| 被 import | `src/main/` 9 个模块 | 全部 IPC 注册点（`index.ts` / `settings.ts` / `projects.ts` / `voice.ts` / `ttsAlign.ts` / `whisper.ts` / `video.ts` / `updater/index.ts` / `runtime.ts`；`hfEnv.ts` / `htmlAgent.ts` / `systemVoices.ts` / `vad.ts` 不注册 IPC） |
 | 被 import | `src/preload/index.ts` | 全部 API 绑定点（11 个命名空间） |
 | 被 include | `tsconfig.node.json` / `tsconfig.web.json` | 分别覆盖主进程/preload 与渲染层编译 |
 | 类型被消费 | `IpcChannel` | 供需要约束频道名的工具函数使用 |
@@ -228,11 +232,12 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 ## 5. 注意事项与实现要点
 
 - **禁止改动频道名字符串**：文件首行注释即写明"频道名与现行实现逐一对应，禁止改动"。改动会导致 `ipcMain.handle` 未命中，渲染层收到 `Error: No handler registered for 'xxx'`。
+- **素材库这一次是三处齐改的正面实例**：`shared/ipc.ts` 换 3 个常量 → `src/main/projects.ts` 换 3 个 handler → `src/preload/index.ts` 换 3 个桥接方法，并同步 `src/shared/types.ts` ⑨ 节 `PreloadApi.projectTools` 的签名（`pickVideo` / `setVideo` / `clearVideo` 出、`pickMedia` / `addMaterials` / `saveMaterials` 进）。**组内计数与全库合计都不变**（25 / 85）——「3 换 3」时不要顺手改动总数。
 - **命名不再完全对齐**：`Window.*` 用 `window:` 前缀、`Video.OpenHtml` 却用 `dialog:open-html` 前缀，属历史遗留，**不可"顺手统一"**，因为字符串就是协议本身。
 - **新增频道需三处齐改**：本文件加常量 → `src/main/*.ts` 注册 handler（载荷用 `shared/types.ts` 的 `*Payload` 标注）→ `src/preload/index.ts` 绑定方法，并在 `src/shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`src/preload/index.d.ts` 只做 `extends`，无需改动）。`legacy:status` / `legacy:resolve`、运行环境分包的 `Runtime.Cancel` 与 `Settings.PickRuntimePack` 都是这条流程的实例（其中 `app:open-external` 曾按同法加过，又在 `909526c` 按「摘除未经同意的按钮」整条三处一起删掉——**加与删都要走齐三处**）。
 - **往 `IpcFail` 加字段不必改 preload**：preload 只是 `ipcRenderer.invoke` 转发、原样返回主进程对象，因此 `IpcFail` 新增的 `needConfig` / `title` 与 preload 无关（改动只落在 `src/shared/types.ts` 的声明与主进程/渲染层的读写上）。
 - **`Update.OpenLog` 的位置与语义**（2026-10 新增）：它排在 `Status` 与 `Progress` 之间，值 `update:open-log`。主进程侧刻意**不经过** `ensureUpdater()`——更新失败时最常见的场景恰恰是 electron-updater 没加载起来，若把它挂在懒加载之后，最需要看日志的时候反而打不开日志。
-- **`Update.Status` 的位置与语义**（2026-10 新增）：它排在 `Version` 之后、`OpenLog` 之前，值 `update:status`，`ipcMain.handle(IPC.Update.Status, () => payload())`。存在的理由：启动静默检查发生在设置页订阅 `update:progress` 之前，没有这条通道渲染层只会看到 `idle`——那次失败（以及它的「查看详情 / 打开日志目录」入口）就丢了。主进程 `state` 常驻，设置页每次挂载都能拉到当前状态；它与 `OpenLog` 一样不进 `ensureUpdater()`（只读常驻状态，与 electron-updater 能否加载无关）。
+- **`Update.Status` 的位置与语义**（2026-10 新增）：它排在 `Version` 之后、`OpenLog` 之前，值 `update:status`，`ipcMain.handle(IPC.Update.Status, () => payload())`。存在的理由：启动静默检查发生在设置页订阅 `update:progress` 之前，没有这条通道渲染层只会看到 `idle`。主进程 `state` 常驻，设置页每次挂载都能拉到当前状态；它与 `OpenLog` 一样不进 `ensureUpdater()`。
 - **分组名 ≠ 文件名**：`Settings` 对应 `settings.ts`，`Video` 对应 `video.ts`，`App` 分组实际由 `src/main/index.ts` 处理，`Voice` 分组横跨 `voice.ts` 与 `ttsAlign.ts`，**`Legacy` 分组也由 `src/main/index.ts` 处理**（与 `App` 同理）。
 - **`as const` 后不可写**：所有属性为只读，运行时尝试 `IPC.Window.Close = 'x'` 在严格模式下会抛错。
 - **`IpcChannel` 粒度提示**：如上文所述它是"分组对象"的并集，误当作"频道字符串联合"使用会得到过于宽泛的类型。

@@ -9,7 +9,9 @@
 //      「runtime.7z 在安装包里被压到约 90MB」重复算了一次——实际是整块移出），且装完即离线可用
 //      （转录 / 配音 / 字幕 / HTML 生成都不需要下载）；
 //   ② ffmpeg 与 hyperframes 各成一个包，各自独立升级、独立校验：改渲染引擎不必让转录功能重下 ffmpeg；
-//   ③ 是否下载由**用户决定**（用到相关功能时提示体积、可取消），下载进度可视化。
+//   ③ 是否下载由**用户决定**（用到相关功能时提示体积、可取消），下载进度可视化；
+//   ④ 下载与校验都有**收尾保护**（字节达标即收尾 + 停滞看门狗 + 校验读超时）：任何一步走不动，都要落在
+//      「一条人话报错 + 进度留着可续传」上，而不是无声地停在 100%（2026-10-15 实测踩过一次）。
 //
 // 提供：register(ctx)（runtime:status / runtime:prepare / runtime:cancel + runtime:progress 回推）
 //       packsStatus()（纯探测，不下载）/ ensurePacks(packs)（下载+解包，可取消）/ packRoots() / runtimeDir()
@@ -33,14 +35,16 @@ import * as hfEnv from './hfEnv'
 import { getUpdaterSettings } from './settings'
 
 // ===== 包定义（scripts/pack-runtime.mjs 的 PACKS 必须与之对应）=====
-// hint：界面在用户确认下载前给出的体积提示。两个都已按 2026-10-14 的实测回填：
-//   ffmpeg 42.6 MB（build/runtime-pack/ffmpeg.json 的 bytes = 44,698,068）
-//   hyperframes 103.1 MB（bytes = 108,076,664，内含 chrome-headless-shell 268 MB 的未压缩体量）
+// hint：界面在用户确认下载前给出的体积提示。两个都已按 2026-10-14 的实测回填，并**取整到 MiB**：
+//   ffmpeg 42.6 MiB（build/runtime-pack/ffmpeg.json 的 bytes = 44,698,068）⇒ 43
+//   hyperframes 103.1 MiB（bytes = 108,076,664，内含 chrome-headless-shell 268 MB 的未压缩体量）⇒ 103
+// 取整值之和（43 + 103 = 146.0）与实测合计 145.7 MiB 一致；**不要回退成向上取整**（105 那版界面会报
+// 148.0 MB，比真实下载量多报 2 MiB，与 README / CHANGELOG 的「约 146 MB」自相矛盾）。
 // 准备过程中会用清单里的真实字节覆盖这个提示值。
 // files：判定「解包完整」的关键文件（相对包目录），缺一即视为未就绪并触发重下。
 const PACK_DEFS: { name: RuntimePackName; title: string; hint: number; files: string[] }[] = [
   { name: 'ffmpeg', title: '音视频处理（ffmpeg）', hint: 43 * 1024 * 1024, files: [path.join('ffmpeg', 'bin', 'ffmpeg.exe'), path.join('ffmpeg', 'bin', 'ffprobe.exe')] },
-  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 105 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] }
+  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 103 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] }
 ]
 const PACK_NAMES: RuntimePackName[] = PACK_DEFS.map((d) => d.name)
 
@@ -141,7 +145,7 @@ function payload(): RuntimeProgressPayload {
     bytes: state.bytes,
     unpackedBytes: state.unpackedBytes,
     files: state.files,
-    cancellable: state.phase === 'downloading' || state.phase === 'extracting'
+    cancellable: state.phase === 'checking' || state.phase === 'downloading' || state.phase === 'extracting'
   }
 }
 
@@ -359,24 +363,62 @@ function readLocalManifest(dir: string, name: RuntimePackName): PackManifest | n
 }
 
 // ===== HTTP：清单（小、当文本读）与包（大、可断点续传）=====
+// 取清单的等待上限：网络卡住时不能让「下载运行环境」永远停在 checking —— inFlight 会一直挂着，
+// 之后每次点击都被「正在准备另一个运行环境包」挡回，界面上就成了「点了没反应」（实测踩过）。
+const MANIFEST_TIMEOUT_MS = 20 * 1000
+// 超时不是用户取消：残片要留着续传，判定取消时要先把它排掉（见 isCancelError）
+const TIMEOUT_TEXT = '超时'
+
+// 下载大包的「停滞」上限：**从发出请求起算**（含「连不上 / 服务端不回响应头」那段，不只是收数据之间），
+// 这么久没有任何进展（也没下满）就判为卡住。
+// 起因（2026-10-15 实测）：一次 ffmpeg 下载把 42.6 MB 全部写完——`.part` 尺寸与清单 bytes 一字不差、
+// sha512 也对得上——但响应流始终没有 end，而这条链路的成功出口只有 out 的 'finish' ⇒ Promise 永不落定：
+// 界面永久停在「42.6 MB / 42.6 MB（100%）」、不报错、不重试，主进程 CPU 为 0（不是忙，是干等）。
+const DOWNLOAD_STALL_MS = 30 * 1000
+// 卡住不是用户取消：`.part` 残片要留着续传（同 TIMEOUT_TEXT 的理由，见 isCancelError）
+const STALL_TEXT = '下载中断'
+// 校验阶段同样要有上限（大包 42.6 / 103.1 MB，读流卡住也会把 installOne 永远挂在这儿）。
+// 「校验没做成」（读不动 / 超时）与「校验不符」是两回事：前者保留 `.part` 可重试，只有后者才丢弃（BADSHA）
+const HASH_TIMEOUT_MS = 60 * 1000
+const HASH_STALL_TEXT = '校验中断'
+
 // 注：Electron 的 IncomingMessage 类型只暴露 statusCode / headers / on，resume / pipe 在运行时存在
 // （它就是 Readable），故统一断言成 NodeJS.ReadableStream 再用。
-function httpText(url: string): Promise<string> {
+function httpText(url: string, timeoutMs: number = MANIFEST_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
-    const req = net.request(url)
+    let settled = false
+    let timer: NodeJS.Timeout | null = null
+    const finish = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      fn()
+    }
+    let req: ClientRequest
+    try {
+      req = net.request(url)
+    } catch (e) {
+      reject(e)
+      return
+    }
+    timer = setTimeout(() => {
+      // 先落定再 abort：abort 触发的 error 事件会因为 settled 被忽略，不会覆盖这条更准确的文案
+      finish(() => reject(new Error(TIMEOUT_TEXT + '（' + Math.round(timeoutMs / 1000) + ' 秒无响应）：' + url)))
+      try { req.abort() } catch (e) { /* 请求可能已经结束 */ }
+    }, timeoutMs)
     req.on('response', (res) => {
       const stream = res as unknown as NodeJS.ReadableStream
       if (res.statusCode !== 200) {
         stream.resume()
-        reject(new Error('HTTP ' + res.statusCode + ' ' + url))
+        finish(() => reject(new Error('HTTP ' + res.statusCode + ' ' + url)))
         return
       }
       const chunks: Buffer[] = []
       res.on('data', (c: Buffer) => chunks.push(Buffer.from(c)))
-      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-      res.on('error', reject)
+      res.on('end', () => finish(() => resolve(Buffer.concat(chunks).toString('utf8'))))
+      res.on('error', (e: Error) => finish(() => reject(e)))
     })
-    req.on('error', reject)
+    req.on('error', (e: Error) => finish(() => reject(e)))
     req.end()
   })
 }
@@ -384,6 +426,18 @@ function httpText(url: string): Promise<string> {
 // 断点续传下载：已经下过的部分留在 <dest>.part 里，用 Range 续；服务端不支持（回 200）则从头覆盖。
 // 只有「取消」才删残片；网络中断一律保留 .part，下次接着下（ffmpeg/hyperframes 包有 60-70MB，重下不可接受）。
 // 注意：**成功的字节落在 <dest>.part**，调用方校验通过后必须自己 rename 成 <dest>（见 installOne）。
+//
+// 三条收尾保护（2026-10-15 实测「永久停在 100%」之后加的，缺一条都可能让流程无声卡死）：
+//   ① **收满即收尾**：content-length 收齐就是下完了，不再等响应流的 'end'（实测出现过「字节全到、
+//      流却不 end」⇒ 成功出口只有 out 的 'finish' ⇒ Promise 永不落定）。这里主动 unpipe + 丢掉流 +
+//      显式 out.end()；内容对不对由调用方的 sha512 兜底。
+//   ② **停滞看门狗**：从请求发出起算（含等服务端响应头那段），DOWNLOAD_STALL_MS 没有任何进展就落定成
+//      失败并 abort 这条连接（`.part` 保留 ⇒ 重试走 Range 续传）。
+//   ③ **416 当作已下完**：S3 语义下「Range 起点已在文件末尾」回 416（残片其实是完整的），此时没有更多
+//      字节可拿 ⇒ 直接回到调用方交给 sha512 判定，而不是报一个 HTTP 416 让用户重下整包。
+//      注意实测差异（2026-10-15）：**阿里云 OSS 对 `Range: bytes=<文件大小>-` 回的是 200 + 整个文件**
+//      （不是 416）⇒ 走不到这条分支，`append` 判为 false、从头覆盖，重试会把整包重下一遍（能用但费流量）。
+//      要省掉这次重下，得在 installOne 里先认领「尺寸已达清单 bytes 的 `.part`」。
 function downloadToFile(
   url: string,
   dest: string,
@@ -396,12 +450,40 @@ function downloadToFile(
   } catch (e) { start = 0 }
   return new Promise<{ bytes: number; resumedFrom: number; part: string }>((resolve, reject) => {
     let settled = false
-    const finish = (fn: () => void) => { if (!settled) { settled = true; fn() } }
+    let stallTimer: NodeJS.Timeout | null = null
+    let done = false      // 字节已收满：只等 <dest>.part 落盘完（out 的 'finish'）就 resolve
+    let settling = false  // 收尾动作（unpipe + destroy + out.end()）只做一次
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      if (stallTimer) clearTimeout(stallTimer)
+      fn()
+    }
     const req = net.request({ method: 'GET', url, headers: start > 0 ? { Range: 'bytes=' + start + '-' } : {} })
     activeReq = req
+    // 看门狗：**从发出请求就开始计时**，每收到一段数据重置一次，超时即判卡住。
+    // 计时必须覆盖「连不上 / 服务端收了请求却不回响应头」这一段——实测踩过：http 层复用了一条上一次
+    // 响应没收尾的连接，这个请求的 response 事件永远不来，而若只在拿到响应后才计时 ⇒ 又永久卡死。
+    // 落定后顺手 abort 这条连接：别让它继续挂着，也别让它被复用去跑下一次重试（abort 触发的 error 会被 settled 挡掉）。
+    const armStall = (): void => {
+      if (stallTimer) clearTimeout(stallTimer)
+      stallTimer = setTimeout(() => {
+        finish(() => reject(new Error(STALL_TEXT + '：下载 ' + Math.round(DOWNLOAD_STALL_MS / 1000) +
+          ' 秒没有进展（' + url + '）')))
+        try { req.abort() } catch (e) { /* 请求可能已经结束 */ }
+      }, DOWNLOAD_STALL_MS)
+    }
     req.on('response', (res) => {
       const stream = res as unknown as NodeJS.ReadableStream
       const code = res.statusCode || 0
+      // ③ 416：Range 起点已到文件末尾（残片其实是完整的）⇒ 没有更多字节可拿，按「已下完」收尾
+      //    （阿里云 OSS 对同样的请求回 200 + 整包，走不到这里；见函数头 ③ 的实测差异）
+      if (code === 416 && start > 0) {
+        stream.resume()
+        onProgress(start, start)
+        finish(() => resolve({ bytes: start, resumedFrom: start, part }))
+        return
+      }
       if (code !== 200 && code !== 206) {
         stream.resume()
         finish(() => reject(new Error('HTTP ' + code + ' ' + url)))
@@ -413,32 +495,75 @@ function downloadToFile(
       const missing = Number(res.headers['content-length']) || 0
       const total = append ? start + missing : missing
       let got = start
-      onProgress(got, total)
       const out = fs.createWriteStream(part, append ? { flags: 'a' } : {})
+      // ① 收满即收尾：摘掉管道、丢掉还在等 'end' 的流，再显式 out.end()，让 'finish' 把 Promise 落定。
+      //    两个要点：**先 unpipe**（否则 destroy 之后残留的数据事件还会往 out 里写）；调用方一律
+      //    **延后一拍**（setImmediate）—— 本次 'data' 事件里 pipe 自己的监听器还要把这一块写进 out
+      //    （Node 派发事件用的是监听器快照，unpipe 拦不住本次），提前 end() 会撞
+      //    ERR_STREAM_WRITE_AFTER_END，把一次成功的下载判成失败。
+      const settleIfDone = (): void => {
+        if (settled || !done || settling) return
+        settling = true
+        if (stallTimer) { clearTimeout(stallTimer); stallTimer = null }
+        try { stream.unpipe(out) } catch (e) { /* ignore */ }
+        try { (stream as unknown as { destroy?: () => void }).destroy?.() } catch (e) { /* ignore */ }
+        try { out.end() } catch (e) { /* ignore */ }
+      }
+      // 续传时残片本来就完整：服务端可能回 206 + 空体（一点数据都不会来），这里先判一次
+      if (total > 0 && got >= total) done = true
+      onProgress(got, total)
+      armStall()
       stream.on('data', (c: Buffer) => {
         got += c.length
         onProgress(got, total)
+        armStall()
+        if (total > 0 && got >= total) { done = true; setImmediate(settleIfDone) }
       })
-      stream.on('error', (e: any) => finish(() => reject(e)))
+      // 收满之后的流上报错一律忽略（字节已齐，报错只可能来自我们主动 destroy，或服务端的收尾噪音）
+      stream.on('error', (e: any) => { if (!done) finish(() => reject(e)) })
       out.on('error', (e: any) => finish(() => reject(e)))
       out.on('finish', () => finish(() => resolve({ bytes: got, resumedFrom: start, part })))
       stream.pipe(out)
+      // 同样是延后一拍：pipe 在本次同步流程里可能就吐出已缓冲的数据块，先让它写完再收尾
+      if (done) setImmediate(settleIfDone)
     })
     req.on('error', (e: any) => finish(() => reject(e)))
+    armStall()
     req.end()
   }).finally(() => {
     activeReq = null
   })
 }
 
+// 大包校验（42.6 / 103.1 MB）也要有上限：读流若卡住，installOne 会一直等在这里。
+// 超时按「校验没做成」处理 ⇒ `.part` 保留、可重试，**不**当作 sha 不符把已下好的包丢掉（只有 BADSHA 才丢）。
+//
+// ⚠️ **不能用 `rs.pipe(hash)` + `hash.on('end')` 来收结果**：crypto 的 Hash 是 Transform，它的**读侧**
+// 没人消费时不会流动，`pipe()` 只把读流的数据写进去（写侧最终发 'finish'），`'end'` 是读侧事件，
+// 于是那个监听器**永远不会被调用** ⇒ 每次校验都只能等 HASH_TIMEOUT_MS 超时，报「校验中断」。
+// 实测（同一实现搬到 Node 跑）：4 MiB 文件在 TEMP 目录也一样，事件序列停在 `rs:end, hash:finish`；
+// 改成「读流 on('data') 手工 update」或把 hash 的 readable 读干，'end' 才正常触发。
+// 这里选前者：不需要管道，读完就地 digest，超时语义不变。
 async function sha512Of(file: string): Promise<string> {
   return new Promise((resolve, reject) => {
+    let settled = false
+    let timer: NodeJS.Timeout | null = null
     const hash = crypto.createHash('sha512')
     const rs = fs.createReadStream(file, { highWaterMark: 1024 * 1024 })
-    rs.on('error', reject)
-    hash.on('error', reject)
-    hash.on('end', () => resolve(hash.digest('base64')))
-    rs.pipe(hash)
+    const done = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      fn()
+    }
+    timer = setTimeout(() => {
+      done(() => reject(new Error(HASH_STALL_TEXT + '：读 ' + path.basename(file) + ' 超过 ' +
+        Math.round(HASH_TIMEOUT_MS / 1000) + ' 秒没读完')))
+      try { rs.destroy() } catch (e) { /* ignore */ }
+    }, HASH_TIMEOUT_MS)
+    rs.on('data', (c) => { hash.update(c) })
+    rs.on('end', () => done(() => resolve(hash.digest('base64'))))
+    rs.on('error', (e) => done(() => reject(e)))
   })
 }
 
@@ -454,7 +579,10 @@ async function fetchRemoteManifest(name: RuntimePackName): Promise<PackManifest 
     }
     return m
   } catch (e) {
-    writeLog('[' + name + '] 远端清单不可用（' + base + name + '.json）：' + String(e))
+    const msg = String((e as Error)?.message || e)
+    writeLog('[' + name + '] 远端清单不可用（' + base + name + '.json）：' + msg)
+    // 超时 ≠ 清单不存在：错在连不上更新源，得让用户看到真实原因（否则会被误报成 404「没有清单」）
+    if (msg.indexOf(TIMEOUT_TEXT) >= 0) throw new Error('MANIFEST_TIMEOUT')
     return null
   }
 }
@@ -513,6 +641,8 @@ function cleanupHalfDone(name: RuntimePackName, file: string, dest: string): voi
 // ===== 主流程 =====
 function isCancelError(e: unknown): boolean {
   const msg = String((e as Error)?.message || e)
+  // 超时 / 卡住都不是取消：`.part` 残片要留着续传，不能被 cleanupHalfDone() 当成「用户取消」清掉
+  if (msg.indexOf(TIMEOUT_TEXT) >= 0 || msg.indexOf(STALL_TEXT) >= 0 || msg.indexOf(HASH_STALL_TEXT) >= 0) return false
   return cancelRequested || msg.indexOf(CANCEL_MSG) >= 0 || /aborted|ERR_ABORTED/i.test(msg)
 }
 
@@ -549,6 +679,29 @@ async function installOne(sevenZip: string, name: RuntimePackName): Promise<void
     } catch (e) { ok = false }
     if (!ok) {
       try { fs.rmSync(cached, { force: true }) } catch (e) { /* ignore */ }
+      // 「上次已经下完、只是校验/解包那一步没走成」的收尾：把完整的 .part 认领下来，
+      // 避免重下整个包。判据是**字节数与清单逐字相等**（.part 只有在收满时才可能到这个长度），
+      // 再算一次 sha512 确认——相符就改名成交付名直接进解包，不符则照旧走下面的重新下载。
+      // 注意：这段必须在 downloadToFile 之前，因为它一见到服务端回 200（OSS 对整文件请求就是 200）
+      // 就会以覆盖模式打开 .part 从头写，残留的好字节会被就地截断。
+      const partFile = cached + '.part'
+      let claimed = false
+      try {
+        const partBytes = fs.existsSync(partFile) ? fs.statSync(partFile).size : 0
+        if (Number(manifest.bytes) > 0 && partBytes === Number(manifest.bytes) && (await sha512Of(partFile)) === manifest.sha512) {
+          try { fs.rmSync(cached, { force: true }) } catch (e) { /* 不存在也无所谓 */ }
+          fs.renameSync(partFile, cached)
+          claimed = true
+          writeLog('[' + name + '] 复用上次下完的残片 ' + bytesText(partBytes) + '（无需重新下载）')
+        }
+      } catch (e) { /* 读不动 / 校验超时：按没有残片处理，下面照常下载 */ }
+      if (claimed) {
+        packFile = cached
+        state.percent = 100
+        setPhase('extracting', '正在准备运行环境（' + def.title + '）0%')
+      }
+    }
+    if (!packFile) {
       state.percent = 0
       setPhase('downloading', '正在下载运行环境（' + def.title + '，' + bytesText(state.bytes) + '）…')
       const t0 = Date.now()
@@ -560,7 +713,9 @@ async function installOne(sevenZip: string, name: RuntimePackName): Promise<void
       })
       if (cancelRequested) throw new Error(CANCEL_MSG)
       // 校验通过后才把 .part 变成正式名：内容不完整的一律不叫「已下载」
-      const got512 = await sha512Of(r.part).catch(() => '')
+      // 校验**没做成**（读不动 / 超时）不能吞成空串 —— 那会被下面的 BADSHA 分支当成「内容不符」，
+      // 把已经下好的整包删掉重下。让它按 HASH_STALL_TEXT 抛出去：`.part` 留着，重试只重新校验。
+      const got512 = await sha512Of(r.part)
       if (got512 !== manifest.sha512) {
         try { fs.rmSync(r.part, { force: true }) } catch (e) { /* ignore */ }
         try { fs.rmSync(cached, { force: true }) } catch (e) { /* ignore */ }
@@ -572,8 +727,8 @@ async function installOne(sevenZip: string, name: RuntimePackName): Promise<void
       fs.renameSync(r.part, cached)
       writeLog('[' + name + '] 下载完成 ' + bytesText(r.bytes) + '（续传起点 ' + r.resumedFrom + ' 字节，用时 ' +
         ((Date.now() - t0) / 1000).toFixed(1) + ' 秒）')
+      packFile = cached
     }
-    packFile = cached
   }
 
   // ③ 解包（先删掉半成品目录，避免上一次中断残留的文件被当成完整包）
@@ -678,6 +833,20 @@ async function runOnce(packs: RuntimePackName[]): Promise<IpcResult> {
       if (msg === 'NO_MANIFEST') {
         return fail('运行环境需要联网下载，但更新源上没有找到对应清单',
           '已尝试：' + (feed || '(未配置更新源)') + name + '.json；本地包目录：' + (ldir || '(未设置)'), state.missing)
+      }
+      if (msg === 'MANIFEST_TIMEOUT') {
+        return fail('连接更新源超时，没能取到运行环境清单',
+          '已在 ' + (feed || '(未配置更新源)') + name + '.json 上等待 ' + Math.round(MANIFEST_TIMEOUT_MS / 1000) +
+          ' 秒无响应；请检查网络 / 代理后重试，或改用「从本地文件安装…」导入本机的 ' + name + '.7z。', state.missing)
+      }
+      // 卡住（下载没数据 / 校验读不完）：残片没坏、也没下错，别让用户重下整包
+      if (msg.indexOf(STALL_TEXT) >= 0) {
+        return fail('运行环境下载中断，已下好的部分留着',
+          msg + '；再点「下载运行环境」会从断点续传，不必重下整个包。', state.missing)
+      }
+      if (msg.indexOf(HASH_STALL_TEXT) >= 0) {
+        return fail('运行环境已下载完，但完整性校验没能走完',
+          msg + '；包留在本机的 downloads 目录里，重试只会重新校验，不会重下。', state.missing)
       }
       if (msg === 'BADSHA') {
         return fail('运行环境下载校验失败（sha512 不符），已丢弃',

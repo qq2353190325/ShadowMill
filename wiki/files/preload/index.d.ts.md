@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：全局类型声明（`.d.ts`，纯类型、无运行时代码）
-- **规模**：11 行
+- **规模**：11 行（**本轮未改动**——素材三件套的方法签名换在 `PreloadApi` 里，本文件只做 `extends`，一个字都不用改）
 - **对外导出**：`export {}`（仅使文件成为模块）；通过 `declare global` 声明 `interface Window extends PreloadApi {}`。**本文件不再定义任何自己的类型**，`IpcResult` 等结果类型已上移到 `src/shared/types.ts`
 
 ## 1. 作用与职责
@@ -50,7 +50,7 @@
 | `settingsTools` | 6 | `get`、`save`、`saveRender`、`saveUpdater`、`test`、`pickRuntimePack` |
 | `voiceTools` | 19 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`deleteCloudVoice`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` |
-| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` |
+| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、**`pickMedia`、`addMaterials`、`saveMaterials`**、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress`（**本轮 3 换 3：`pickVideo` / `setVideo` / `clearVideo` 出，`pickMedia` / `addMaterials` / `saveMaterials` 进，成员数仍是 25**） |
 | `updateTools` | 8 | `version`、`check`、`download`、`cancel`、`install`、`status`、`openLog`、`onProgress` |
 | `runtimeTools` | 4 | `status`、`prepare`、`cancel`、`onProgress` |
 | `legacyTools` | 2 | `status`、`resolve`（**无 `on*` 订阅**：旧数据是否存在由渲染层主动拉取，主进程不推送） |
@@ -64,7 +64,18 @@
 | `message` | 可选 `string`（仅失败分支） | 错误/取消说明。**可选**：`voice:pick-dir` 的用户取消分支没有 `message` |
 | 业务字段 | `T` 的键**平铺**在结果对象上（仅成功分支） | 如 `{ ok: true, htmlPath, compatible }`，直接 `res.htmlPath` 访问，没有 `data` 包装 |
 
-不走 `IpcResult` 的方法仍有一批：`settingsTools.get()` 直接返回 `AppSettings`、`projectTools.list()` 返回数组、`projectTools.load()` 返回 `Project | null`、`hfTools.openHtml` / `projectTools.pickAudio` / `pickVideo` 返回 `string | null`、`appTools.copyText` 返回 `boolean`、`hfTools.renderVideo` 返回 `VideoRenderResult`。这是历史契约，改动会同时影响渲染层多处调用。
+不走 `IpcResult` 的方法仍有一批：`settingsTools.get()` 直接返回 `AppSettings`、`projectTools.list()` 返回数组、`projectTools.load()` 返回 `Project | null`、**`projectTools.pickMedia()` 返回 `string[]`（本轮新增，取消时为空数组）**、`hfTools.openHtml` / `projectTools.pickAudio` 返回 `string | null`、`appTools.copyText` 返回 `boolean`、`hfTools.renderVideo` 返回 `VideoRenderResult`。这是历史契约，改动会同时影响渲染层多处调用。
+
+### 2.4 本轮素材接口的签名变化（在 `PreloadApi.projectTools` 内）
+
+| 方法 | 签名要点 |
+| --- | --- |
+| `pickMedia(kind: ProjectMaterialKind)` | `Promise<string[]>`（**无 `IpcResult` 包装**；`kind` 决定文件框过滤：图片多选、视频单选） |
+| `addMaterials(name: string, paths: string[])` | `Promise<IpcResult<ProjectMaterialsResult>>`（复制入库 + 登记；`materials` = 落盘后的完整列表，部分成功时 `message` 说明跳过数） |
+| `saveMaterials(name: string, materials: ProjectMaterial[])` | `Promise<IpcResult<ProjectMaterialsResult>>`（整份列表回写：移除与勾选共用） |
+| `extractVideoAudio(name: string)` | 签名不变；**界面入口暂未开放**，注释标明「保留（界面入口暂未开放）」 |
+
+> `PreloadApi` 里删掉的三个方法（`pickVideo` / `setVideo` / `clearVideo`）与 `src/shared/ipc.ts` 删除的三个频道、`src/main/projects.ts` 删除的三个 handler 一一对应；本文件因为只做 `extends`，**不需要跟着改**。
 
 ## 3. 关键流程或结构
 
@@ -94,7 +105,7 @@ tsconfig.web.json ── include: ["src/renderer/src/**/*.ts", "src/renderer/src
 
 - `import type { PreloadApi } from '../shared/types'` —— 从共享层引入唯一契约，使渲染层看到的签名与主进程/preload 使用的类型完全同源。
 - 文件末尾 `export {}` 把文件标记为模块，`declare global` 才能合法地向全局 `Window` 做**声明合并**（而非新建一个局部 interface）。
-- `interface Window extends PreloadApi {}` —— 用接口继承（而非在 `Window` 内重复列出成员）。若将来 `PreloadApi` 增删命名空间或方法，本文件**一个字都不用改**。
+- `interface Window extends PreloadApi {}` —— 用接口继承（而非在 `Window` 内重复列出成员）。若将来 `PreloadApi` 增删命名空间或方法，本文件**一个字都不用改**（本轮的素材三件套正是如此）。
 
 ### 3.3 结果类型的收窄流程
 
@@ -111,7 +122,7 @@ tsconfig.web.json ── include: ["src/renderer/src/**/*.ts", "src/renderer/src
 | 被校验 | `npm run typecheck` | `tsc --noEmit -p tsconfig.web.json` 会同时校验渲染层调用与本文声明 |
 | 契约来源 | `src/shared/types.ts` ⑨ 节 | `PreloadApi` 是唯一真源；本文件只转发 |
 | 契约对端 | `src/preload/index.ts` | 11 个命名空间、方法名、参数顺序、返回结构由同一份 `PreloadApi` 约束 |
-| 契约下游 | `src/renderer/src/**` | `pages/`、`composables/`、`App.vue` 等全部 `window.*` 调用 |
+| 契约下游 | `src/renderer/src/**` | `pages/`（含 `HtmlGenPage/MaterialsSection.vue` 的素材三件套调用）、`composables/`、`App.vue` 等全部 `window.*` 调用 |
 
 ## 5. 注意事项与实现要点
 

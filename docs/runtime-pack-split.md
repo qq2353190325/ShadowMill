@@ -109,7 +109,7 @@
 | 1 | 引入包注册表 | `PACKS`：`{ name, need: ('transcribe'\|'render')[], title, approxBytes }`；`ffmpeg` 同时服务两种需求，`hyperframes` 只服务渲染 |
 | 2 | 状态文件由「单指针」改为「多包状态」 | `<userData>/runtime/packs.json`：`{ packs: { ffmpeg: { id, files, unpackedBytes, at }, hyperframes: {...} }, legacy?: {...} }`（见 §4.3） |
 | 3 | 每包独立标记与目录 | `<userData>/runtime/<packName>/ok.json` + 解包直落该目录 |
-| 4 | `ensureRuntime(needs?)` 拆成三个函数 | ① `packsStatus()`：**纯探测**，不下载不阻塞（供消费点校验）② `ensurePacks(packs, opts)`：下载 + 解包（带进度与取消）③ `prepareInBackground()`：启动时的静默预下载（见 §5.3） |
+| 4 | `ensureRuntime(needs?)` 拆成三个函数 | ① `packsStatus()`：**纯探测**，不下载不阻塞（供消费点校验）② `ensurePacks(packs, opts)`：下载 + 解包（带进度与取消）③ `prepareInBackground()`：启动时的**纯探测**（不下载；缺包时推一次「需要下载（体积）」，见 §5.3） |
 | 5 | 下载 | `fetchRemotePack(pack)` 按包名 GET `<feed>/<pack>.json` 与 `<pack>.7z`；**新增 `Range` 断点续传**（`.part` 落盘 + 完成后复核 sha512 再改名），传输中断不清残片 |
 | 6 | 取消 | 引入 `AbortController`/`aborted` 标志；`cancelPrepare()` 中断进行中的下载与 `7za` 子进程（`child.kill()`），并清掉 `.part` 与半解目录 |
 | 7 | 解包器定位 | `resolveSevenZip()` 不变（`<resources>/tools/7za.exe`；dev 为 `build/tools/`） |
@@ -192,7 +192,7 @@ if (missing.length) {
 |---|---|---|---|
 | `packsStatus()` | 否（同步探测） | 否 | 消费点校验、界面显示「已就绪 / 需下载」 |
 | `ensurePacks(packs, { silent, signal })` | 是（带进度/取消） | 是 | 用户确认后真正下载 + 解包 |
-| `prepareInBackground()` | 否（fire-and-forget） | 是 | 首次安装的**静默**预下载（见 §5.3） |
+| `prepareInBackground()` | 否（fire-and-forget） | 否（只探测，不联网） | 启动时探测一次并把「需要下载（体积）」推给界面，**不下载**（见 §5.3） |
 
 ### 4.2 消费点的三态
 
@@ -225,10 +225,10 @@ if (missing.length) {
 ### 5.1 首次启动（安装包只带 whisper）
 
 1. `register()` 装配后调用 `prepareInBackground()`。
-2. 它先 `packsStatus()`：
-   - 两包都缺 ⇒ 进入**静默下载**（默认策略，见 5.3），界面顶部横幅显示细进度条（可取消）；
-   - 有包已就绪 ⇒ 只下缺的那个；
-   - `feed` 不可达 ⇒ **不报错、不弹窗**，只把状态置为 `missing`（文案「运行环境需要联网下载」+ 重试按钮），不影响任何本地功能。
+2. 它先 `packsStatus()`（纯探测，不联网、不下载）：
+   - 两包都缺 ⇒ 只把状态置为 `idle`（`percent = 0`、`source = ''`）并推一次「运行环境需要下载（体积）」，界面顶部横幅显示「下载运行环境」按钮（**不下载**，见 §5.3）；
+   - 有包已就绪 ⇒ 只把缺的那一个算作「需要下载」；
+   - 启动时**不访问更新源**：更新源不可达不影响首屏，只在用户点了「下载运行环境」之后才会失败并给出来因。
 3. 用户此时可以正常使用：项目、音色、配音、转录、字幕、HTML 生成**全部可用**（whisper 随包、不再依赖下载）。
 
 ### 5.2 使用到缺失环境的功能（校验 → 提示 → 取消/继续）
@@ -252,16 +252,18 @@ if (missing.length) {
 - 续做所需的状态（哪个操作、什么参数）**只存在于那个确认框的组件作用域内**：下载中取消或关框即丢弃，主进程不需要「待续做」标记，也就不存在成环问题（见 §11.1 的决策记录）。
 - 下载途中按「取消」（框内 / 横幅 / 设置页的取消按钮）等价于同一条路径：中断 + 清残片 + 状态回到 `missing`；原操作早已结束，不需要额外回滚。
 
-### 5.3 静默下载的策略（可配置）
+### 5.3 下载一律由用户触发（原「静默下载」策略，实施时未采纳）
+
+> 历史注记：本节原设计为「启动后静默后台下载两包（可在设置里关掉）」。实施时改为**启动只探测、用户点击才下载**，理由见 §12——静默下载与「取消＝不下载」的语义冲突，是否下 146 MB 应由用户决定。
 
 | 场景 | 行为 |
 |---|---|
-| 首次安装启动、`feed` 可达 | **静默后台下载两包**（横幅显示细进度，可取消） |
-| dev 环境（`app.isPackaged === false`） | 不静默下载（走项目根 `resources/`，本来就是展开形态） |
-| 用户设置里关掉「自动准备运行环境」 | 不静默下载，只在用到时按 §5.2 询问 |
-| 更新源不可达 / 离线 | 不重试风暴：失败后进入 `missing`，仅在用户点重试或再次使用相关功能时重试 |
+| 首次启动（`register()` 装配后调 `prepareInBackground()`） | **只做一次纯探测**（`packsStatus()` 里几个 `existsSync` / `statSync`），不发起任何网络请求；缺包时把 `phase` 置 `idle`、`percent = 0`、`source = ''`，推一次「运行环境需要下载（体积）」，界面顶部横幅显示「下载运行环境」按钮 |
+| 用户点「下载运行环境」（外壳横幅 / 缺包确认框 / 设置页那一行，三个入口同一条路径） | `runtimeTools.prepare(packs)` → 主进程 `ensurePacks(packs)` → `runOnce(want)`：取清单（20 秒硬超时）→ 断点续传下载 → `7za` 解包；横幅 / 设置页显示细进度条（可取消） |
+| 下载中取消（`runtime:cancel` → `cancelPrepare()`） | 不下载、清半成品（`.part` 与半解目录）、不写 `packs.json`；`payload().cancellable = phase ∈ {checking, downloading, extracting}`；**超时不算取消**（`.part` 保留待续传） |
+| dev 态（`app.isPackaged === false`）且没有 `dev-app-update.yml` | `feed` 为空 ⇒ 点了会直接报「更新源未配置且本机没有运行环境包」（可用 `SHADOWMILL_RUNTIME_PACK` 指向本地包目录，或用设置页「从本地文件安装…」） |
 
-> 新增设置项建议放 `settings.json` 的 `runtime.autoPrepare`（默认 `true`），设置页文案：「启动后自动在后台准备运行环境（ffmpeg / hyperframes，约 130 MB）」。
+> **未实施**：曾计划新增设置项 `settings.json` 的 `runtime.autoPrepare`（默认 `true`）与设置页「自动准备运行环境」开关——现无此设置项，设置页也没有这个开关。
 
 ### 5.4 下载与解包细节
 
@@ -277,11 +279,11 @@ if (missing.length) {
 
 | 位置 | 现状 | 改为 |
 |---|---|---|
-| 外壳顶部横幅（`App.vue` + `useRuntime.ts`） | 「正在准备运行环境 x%」+ 失败重试 | 增加：① **取消** 按钮（`stage ∈ {downloading, extracting}` 时）② `missing` 态文案「运行环境需要下载（约 130 MB）」+「立即下载」 |
-| 设置页运行环境一行（`SettingsPage/index.vue`） | 只在「准备中 / 失败」时占一行 | 增加 `missing` 态（含各包体积与「下载」按钮）与「已就绪（ffmpeg / hyperframes / 各自版本）」的折叠详情；加「自动准备」开关 |
+| 外壳顶部横幅（`App.vue` + `useRuntime.ts`） | 「正在准备运行环境 x%」+ 失败重试 | 增加：① **取消** 按钮（`stage ∈ {checking, downloading, extracting}` 时）② `missing` 态文案「运行环境需要下载（约 130 MB）」+「立即下载」 |
+| 设置页运行环境一行（`SettingsPage/index.vue`） | 只在「准备中 / 失败」时占一行 | 增加 `missing` 态（含各包体积与「下载运行环境」按钮）与「已就绪（ffmpeg / hyperframes / 各自版本）」的折叠详情；~~加「自动准备」开关~~（**未实施**，见 §5.3） |
 | 各功能页动作（`VideoPage` / `TextSubPage` / `ProjectsPage` 等） | 直接请求，失败后看报错 | 收到 `needPacks` ⇒ 弹确认框（体积 + 「本次需要下载什么」），按钮 `[下载运行环境]` / `[取消]`；**下载期间框不关闭、原地显示进度与取消**；装好后按钮变 `[继续]`，点它用原参数重发该操作（详见 §5.2） |
 | 公共逻辑 | 无 | 新增 `src/renderer/src/composables/useEnvGate.ts`：统一承载「校验 → 确认框 → 下载进度 → 继续」，各页面只管「怎么重发自己的操作」 |
-| 文案 | 「运行环境包（ffmpeg/node/hyperframes/whisper 约 716MB）」等 | 全部改为分项口径（**2026-10-14 实测**）：「whisper 随安装包」「ffmpeg 约 43 MB」「hyperframes 约 105 MB」；两个都要时合计约 146 MB |
+| 文案 | 「运行环境包（ffmpeg/node/hyperframes/whisper 约 716MB）」等 | 全部改为分项口径（**2026-10-14 实测**）：「whisper 随安装包」「ffmpeg 约 43 MB」「hyperframes 约 103 MB」；两个都要时合计约 146 MB |
 
 设计规范遵循 `src/renderer/agents.md`（配色、字号刻度、按钮与卡片风格、弹窗样式），不新造视觉语言。
 
@@ -311,7 +313,7 @@ if (missing.length) {
    - `ffmpeg.7z` / `ffmpeg.json`、`hyperframes.7z` / `hyperframes.json`
 2. **命名与去重（推荐）**：包按内容 id 命名上传（如 `ffmpeg-r1a2b3c4d5e6f.7z`），同时在更新源维护固定名 `ffmpeg.json` / `hyperframes.json`（指向当前版本的 id 文件名）。好处：内容不变 ⇒ 不重复上传，且**旧版本客户端也能取到与它清单匹配的那一份**。
 3. **OSS 要求**：bucket 公共读（generic provider 匿名 GET）；**必须支持 Range**（断点续传与 electron-updater 差分包都依赖它）。
-4. 上传目标目录现为 `publish.url`（`https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/MarvisStudio/`），目录里已有 0.0.1~0.0.4 的历史文件，注意不要误删 `latest.yml`。
+4. 上传目标目录现为 `publish.url`（`https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/`，2026-10-15 由 `…/MarvisStudio/` 统一而来 —— 起因是「应用内置源（`app-update.yml` ← `publish.url`）」与「实际发版上传目录」两处漂移：`runtime.log` 里 `[ffmpeg] 远端清单不可用（…/MarvisStudio/ffmpeg.json）：HTTP 404`，而四个运行环境包实际都在 `…/shadowmill/` 下）。**远端现状实测**（2026-10-15，匿名 GET + `Range: bytes=0-0`）：`shadowmill/` 下有 `ffmpeg.json` / `ffmpeg.7z` / `hyperframes.json` / `hyperframes.7z` 四个运行环境包文件（均 206）以及 0.0.5 的 `latest.yml` + `ShadowMill Setup 0.0.5.exe` + `.blockmap`（均 206）；旧目录 `MarvisStudio/` 只剩 0.0.3 的 `latest.yml` 与旧 `ShadowMill Setup 0.0.3.exe`，**四个运行环境包文件在那里全是 404**。注意：**本版决定按 0.0.3 发布**，因此要用本版 0.0.3 的安装包 + `.blockmap` + `latest.yml` **覆盖** `shadowmill/` 下那套 0.0.5 的三件套，否则客户端会被提示升级到 0.0.5；覆盖时不要误删 `latest.yml`，四个运行环境包照常上传。
 5. **发版自检（写进 release 脚本的输出）**：`latest.yml` 与安装包 sha512 一致、`.blockmap` 已上传、两个 `pack.json` 可匿名 GET、`Range` 请求返回 206。
 
 ---
@@ -338,7 +340,7 @@ if (missing.length) {
 3. `runtime.ts`：包注册表 + `packs.json` + `packsStatus/ensurePacks/cancel` + 断点续传 + 文案。
 4. `hfEnv.ts` 按包解析路径；`whisper.ts` 查找顺序调正、等待改校验。
 5. 四个消费点改「先校验再返回 needPacks」；`shared/{ipc,types}.ts` + preload 同步。
-6. 渲染层：新增 `composables/useEnvGate.ts`（校验 → 确认框 → 下载进度 → `[继续]` 重发原操作）；外壳横幅加取消按钮与 `missing` 态；设置页加分项状态、「自动准备」开关、「从本地文件安装…」（仅缺失/失败时出现）。
+6. 渲染层：新增 `composables/useEnvGate.ts`（校验 → 确认框 → 下载进度 → `[继续]` 重发原操作）；外壳横幅加取消按钮与 `missing` 态；设置页加分项状态与「从本地文件安装…」（仅缺失 / 失败时出现）。~~设置页「自动准备」开关~~**未实施**（下载一律由用户点击触发，见 §5.3 / §12）。
 7. `scripts/release.mjs` + 发版自检。
 8. `CHANGELOG.md` 逐条记录；wiki 交给后台 subagent 整体重写（一次读一次重写）。
 
@@ -347,7 +349,7 @@ if (missing.length) {
 - [ ] `npm run typecheck` 退出码 0。
 - [ ] `npm run runtime:pack` 产出两个 7z + 两个 json；重复执行第二次能命中缓存跳过。
 - [ ] 安装包体积实测落到 145-150 MB 区间（**由用户跑 `npm run dist`**）。
-- [ ] 全新安装（清空 `userData/runtime/`）后：首启静默下载两包、横幅可取消；取消后无 `.part`、无半解目录、`packs.json` 无记录。
+- [ ] 全新安装（清空 `userData/runtime/`）后：首启**只探测**（显示「运行环境需要下载（体积）」+ 横幅「下载运行环境」按钮，不自动下载）；点横幅「下载运行环境」才开始下载，下载中可取消；取消后无 `.part`、无半解目录、`packs.json` 无记录。
 - [ ] 断网首启：不报错弹窗，本地功能全可用；用「转成视频」时弹确认框，取消则不下载、操作终止。
 - [ ] 下载中断（手动断网 / 关进程）后重启：能续传，最终 sha512 校验通过。
 - [ ] 老用户升级：能沿用 legacy 目录、不重下 147 MB（用 `runtime.json` 里被改动的 id 模拟一次真更新，确认只下变的那一包）。
@@ -385,7 +387,7 @@ if (missing.length) {
 | 项 | 设计预估 | 实施结果 |
 |---|---|---|
 | `ffmpeg.7z` 体积 | 约 55-60 MB | **42.6 MB（实测）**：`bytes` = 44,698,068、`unpackedBytes` = 188,683,776、9 文件、耗时 76 秒、`id` = `rb0fc1c8a7e3e`。界面体积提示据此改为 43 MB |
-| `hyperframes.7z` 体积 | 约 55-65 MB | **103.1 MB（实测，比预估大得多）**：`bytes` = 108,076,664、`unpackedBytes` = 461,299,233、4892 文件、`id` = `r724f4002624d`。大头是 `chrome/chrome-headless-shell`（未压缩 268.6 MB）；体积提示据此改为 105 MB |
+| `hyperframes.7z` 体积 | 约 55-65 MB | **103.1 MB（实测，比预估大得多）**：`bytes` = 108,076,664、`unpackedBytes` = 461,299,233、4892 文件、`id` = `r724f4002624d`。大头是 `chrome/chrome-headless-shell`（未压缩 268.6 MB）；体积提示据此取整为 **103 MB**（与 ffmpeg 43 相加 = 146.0 MB，对齐实测合计 145.7 MiB） |
 | 拆包总体积「+5~15 MB」 | 预计略增 | **实测反而略减**：单包时代 `runtime.7z` = 147.4 MB，两包合计 = **145.7 MB**（42.6 + 103.1），差 −1.7 MB |
 | 安装包体积 | 预估 257.6 → 145-150 MB | **实测 257.6 → 105.08 MB（−152.5 MB，−59%）**：`dist\ShadowMill Setup 0.0.3.exe`。原先的估算把「`runtime.7z` 在安装包里被压到约 90 MB」重复算了一遍——实际是整块移出；另一部分来自 `electronLanguages`（`locales/` 55 个 `.pak` 48.3 MB → 2 个 1.1 MB）。`win-unpacked/resources` 从 173 MB 降到 38.1 MB（`app.asar` 24.7 + `whisper` + `tools`） |
 | 静默下载 | 启动静默下载（可关） | **改为「启动只探测、不下载」**：`prepareInBackground()` 只调 `packsStatus()` 并推送「运行环境需要下载（体积）」，下载由用户在确认框点「下载运行环境」触发。理由：既然要求「缺包必须提示、可取消」，静默下载就与「取消＝不下载」语义冲突，也违背「是否下 60 MB 由用户决定」 |
@@ -399,6 +401,7 @@ if (missing.length) {
 - **下载产物落在错误的文件名上**：断点续传把数据写进 `<包>.7z.part`，而首版实现去校验 `<包>.7z`（必然不存在 ⇒ 每次下载都判 sha512 不符、删掉重下）。改为校验 `.part`、通过后再 `rename` 成正式名。
 - **`EXCLUDE_TOP` 变更不会让缓存失效**（设计阶段发现的隐患，实施时修掉）：指纹由整棵 `resources/` 的 `files:bytes:maxMtime` 改为 `包名:roots:files:bytes:maxMtime`，扫描范围限定在该包 `roots` 内。实测：首次 `--list` 两个包都判「需要重打」；打完 `ffmpeg` 后再 `--list`，`ffmpeg` 命中缓存跳过、`hyperframes` 仍待打。
 - **`IpcResult` 成功分支没有 `message`**：取消 / 幂等回执（「当前没有正在进行的下载」）需要一句话，给成功分支加了可选 `message`。
+- **点「下载运行环境」毫无反应（两处根因，已修）**：① `window.runtimeTools.prepare()` 的参数要过**结构化克隆**，而 `missing.value`（`runtime` 是 `ref`、深层响应式）与确认框里的 `packs`（`ref([])`）都是 Vue 的响应式 **Proxy**，**代理对象不可克隆** ⇒ `invoke` 直接抛 `DataCloneError: [object Array] could not be cloned.`，主进程 handler 根本没执行（`runtime.log` 一个字都没有、`userData/runtime/` 也没创建），异常又被 `prepare()` 的空 `catch` 吞掉 ⇒ 横幅 / 设置页 / 确认框三个按钮点了都没反应；改为 `toRaw(list).slice()` 交出普通数组，并让 `prepare()` 把「没能启动」的原因写进状态（不再静默）。② **取清单没有超时**：网络卡住时永远停在 `checking`、`inFlight` 一直挂着，之后每次点击都被「正在准备另一个运行环境包，请稍候再试」挡回；现给 `httpText()` 加 **20 秒硬超时**（`MANIFEST_TIMEOUT` → 「连接更新源超时，没能取到运行环境清单」），并明确**超时不算取消**（`.part` 残片保留续传）。
 
 ### 12.2 仍未验证（需用户执行打包 / 手测）
 
@@ -407,4 +410,5 @@ if (missing.length) {
 - `npm run dev` 手测：**仍未做**。缺包提示 → 下载 → 取消 → 继续、断点续传、legacy 沿用、离线时各消费点的 `needPacks` 提示，全链路都要在真实 Electron 里走一遍。
 - **上传到更新源**：`ffmpeg.7z/.json` 与 `hyperframes.7z/.json` 必须与安装包三件套一起上传（`npm run release` 会校验齐全），OSS 需公共读 + 支持 `Range`。**这一步未做**——不做的话新装用户点「下载运行环境」会拿到 404。
   2026-10-14 用 `curl -H "Range: bytes=0-0"` 实测更新源现状：`latest.yml` 返回 **206 Partial Content**（`Content-Range: bytes 0-0/381`）⇒ **Range 支持正常**，差分下载与断点续传的前提成立；`ffmpeg.json` / `ffmpeg.7z` / `hyperframes.json` / `hyperframes.7z` 均为 **404**。
+  > 上一条是 2026-10-14 的历史情形，**现状（2026-10-15）已不同**：四个运行环境包文件均已上传，且上传目录随 CHANGELOG #14 由 `…/MarvisStudio/` 统一为 `…/shadowmill/` —— 匿名 GET + `Range: bytes=0-0` 实测 `ffmpeg.json` / `ffmpeg.7z` / `hyperframes.json` / `hyperframes.7z` 在 `shadowmill/` 下**均 206**（旧 `MarvisStudio/` 下这四个文件才是 404）。
   上传命令：`npm run release -- --oss --bucket <bucket>`（或 `--rclone <remote>` / `--copy <dir>` 导出后手工传）；脚本会在最后对 `latest.yml` 与两份 `pack.json` 做匿名 GET + Range 自检。

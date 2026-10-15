@@ -178,7 +178,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ⑤ 节（本文件**�
 |--------|----------|
 | `src/main/index.ts` | `import * as whisper from './whisper'`，在启动流程中调用 `whisper.register(ctx)` |
 | `src/preload/index.ts` | 暴露 `window.whisperTools`：`status` / `download` / `delete` / `setCurrent` / `addModel` / `updateModel` / `removeModel` / `openDir` / `pickAudio` / `projectAudio` / `transcribe`，并用 `onProgress` 订阅 `whisper:progress` |
-| `src/renderer/src/pages/SettingsPage/WhisperSection.vue` | 设置页「语音识别模型」区块：模型列表、下载/删除/设为当前、自定义模型增删改、打开模型目录、进度条 |
+| `src/renderer/src/pages/SettingsPage/components/WhisperSection.vue` | 设置页「语音识别模型」区块：模型列表、下载/删除/设为当前、自定义模型增删改、打开模型目录、进度条 |
 | `src/renderer/src/pages/SubtitlePage/TranscribeSection.vue` | 字幕页转录弹窗：选择音频 / 使用项目音频、语言选择、调用 `transcribe`、按 `stage` 渲染进度 |
 | `src/renderer/src/pages/TextTtsPage/AlignSection.vue` | 复用同一进度条样式与 `whisper:progress` 回推做文本对齐 |
 

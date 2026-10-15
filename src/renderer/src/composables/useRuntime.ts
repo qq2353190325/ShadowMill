@@ -3,7 +3,7 @@
 // （whisper 随安装包，不需要下载）。所以这里要能表达三件事：正在下 / 缺哪些包 / 失败原因。
 // 状态由主进程 runtime:progress 推送 + 首次用 runtime:status 补齐（见 src/main/runtime.ts、
 // 方案见 docs/runtime-pack-split.md）。
-import { computed, ref } from 'vue'
+import { computed, ref, toRaw } from 'vue'
 import type { RuntimePackName, RuntimeProgressPayload } from '@shared/types'
 
 // 模块级单例：外壳初始化一次，所有页面共享同一份状态（与 useAppStore 同思路）
@@ -52,12 +52,32 @@ export function useRuntime() {
 
   const missingText = computed(() => missing.value.map((n) => PACK_LABEL[n]).join('、'))
 
+  // ⚠️ 交给 IPC 的包名数组必须是**普通数组**，不能是 Vue 的响应式代理：
+  // window.runtimeTools.prepare 的参数要过结构化克隆（structured clone），而 missing.value 与
+  // 确认框里的 packs 都是 ref/reactive 包出来的 **Proxy**，代理对象**不可克隆** ⇒ invoke 直接抛
+  // "An object could not be cloned."，主进程的 handler 根本不会被执行（runtime.log 里一个字都没有）。
+  // toRaw + slice 交出去的才是干净的普通数组（元素是字符串）。这一条是「点『下载运行环境』毫无反应」的根因。
+  const plainPacks = (list: RuntimePackName[]): RuntimePackName[] => toRaw(list).slice()
+
+  // 「没能启动」的失败写进状态：横幅转失败态（带「重试」）、设置页与确认框显示同一句人话。
+  // 主进程失败时本来会自己推一条 error 状态，但下面两种情况没有推送 —— 重复点击撞上忙碌期、
+  // IPC 本身没送达 —— 以前它们被 catch 吞掉，界面上就是「点了没反应」。正在跑（busy）时不覆盖，
+  // 免得把进行中的进度顶掉。
+  function reportNotStarted(message: string, detail: string): void {
+    if (busy.value) return
+    runtime.value = { ...runtime.value, phase: 'error', percent: 0, message, detail: detail || undefined }
+  }
+
   // 主动准备指定包（省略 = 全部缺的）：用户确认下载 / 失败后重试
   async function prepare(packs?: RuntimePackName[]): Promise<boolean> {
+    const want = plainPacks(packs && packs.length ? packs : missing.value)
     try {
-      const r = await window.runtimeTools.prepare(packs && packs.length ? packs : missing.value)
-      return !!(r && r.ok)
+      const r = await window.runtimeTools.prepare(want)
+      if (r && r.ok) return true
+      reportNotStarted((r && r.message) || '运行环境下载没能启动', (r && r.detail) || '')
+      return false
     } catch (e) {
+      reportNotStarted('运行环境下载没能启动', String((e as Error)?.message || e))
       return false
     }
   }

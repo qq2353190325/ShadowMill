@@ -19,7 +19,7 @@
 
 > 注释与实现此前曾在「余额不足」上不一致（摘除「去充值」时漏改头部注释），2026-10 已把该词从 `needConfig` 适用范围中删除，见 §10。
 
-完整映射清单（58 条、含官方码表来源）见仓库文档 `docs/error-mapping.md`，改这里之前先看那份文档。与 `src/main/updater.ts` 的 `humanError()` 是**同一分层约定**（message 说人话 / detail 给排障），区别是 updater 只管自更新一条链路、且要抠出请求 URL，故仍留在原处不合并。
+完整映射清单（58 条、含官方码表来源）见仓库文档 `docs/error-mapping.md`，改这里之前先看那份文档。与 `src/main/updater/base.ts` 的 `humanError()` 是**同一分层约定**（message 说人话 / detail 给排障），区别是 updater 只管自更新一条链路、且要抠出请求 URL，故仍留在原处不合并。
 
 ## 2. 导出与内部实现
 
@@ -132,7 +132,7 @@ function detailOf(text: string, extras?: string[]): string | undefined {
 }
 ```
 
-- 原始报文取**首行**（`trim()` 后按 `\n` 切第一段）并截断 **500** 字符（与 `updater.humanError` 同一口径，只是阈值放宽）；
+- 原始报文取**首行**（`trim()` 后按 `\n` 切第一段）并截断 **500** 字符（与 `updater/base.ts` 的 `humanError` 同一口径，只是阈值放宽）；
 - 前缀固定为 `原始报错：`；
 - `extras` 过滤空值后用「；」连接追加在后（`htmlAgent.ts` 传来的是 `'请求地址：<apiUrl>'` 与 `httpDetail`）；
 - 两者都为空时返回 `undefined`（`FriendlyError.detail` 是可选字段）。

@@ -28,3 +28,14 @@ export const APP_SLOGAN_SHORT = '音视频创作流水线';
 // ===== 出网请求标识 =====
 // 主进程下载 whisper 模型等外部请求的 User-Agent：带上应用名便于对端统计与排查
 export const APP_USER_AGENT = APP_NAME_EN + '/1.0';
+
+// ===== 项目素材（HTML 生成用的图片 / 视频素材库，结构见 types.ts 的 ProjectMaterial）=====
+// 上限按「图片 + 视频合计」算：素材会逐个写进 Agent 提示词并成为页面元素，数量一多提示词过长、
+// HTML 生成质量与渲染耗时都会明显变差，20 是权衡后的取值。主进程校验，渲染层用它显示「n / 20」。
+export const MAX_MATERIALS = 20;
+
+// 图片素材白名单（svg 也收：矢量图做图标/装饰最省体积，且不涉及解码器）
+export const IMAGE_MATERIAL_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'];
+
+// 视频素材白名单（与原来的单个视频素材一致）
+export const VIDEO_MATERIAL_EXTS = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'];

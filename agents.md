@@ -14,7 +14,7 @@
 - **项目化管理**：每个「项目」对应 `userData/projects/<项目名>/` 一个目录，统一存放 `project.json`、`subtitle.txt`、`index.html`、`audio/`、`video/`。
 - **本机完成重活**：语音识别（whisper.cpp）与视频渲染（HyperFrames + FFmpeg）均在本机 CPU 运行，不消耗 API 额度；HTML 动画页面由用户自配置的 OpenAI 兼容模型 Agent 流式生成/修改。
 - **技术栈**：Electron 31 + Vue 3 + electron-vite 5 + TypeScript（全量 TS；main/preload 输出 CJS）；无 vue-router / pinia，导航用页面注册表 + `goPage()`，全局状态为模块级 `reactive` 单例。
-- **源码分层**：`src/main`（主进程 12 个模块）· `src/preload`（9 个命名空间的桥接层）· `src/renderer`（Vue 界面：外壳 / 8 页面 / 设计系统）· `src/shared`（IPC 频道常量与跨进程类型）· `src/agent`（独立实验脚本，不进构建图、不打包）。
+- **源码分层**：`src/main`（主进程 13 个模块：`index` + 11 个业务模块 + `updater/` 目录）· `src/preload`（9 个命名空间的桥接层）· `src/renderer`（Vue 界面：外壳 / 8 页面 / 设计系统）· `src/shared`（IPC 频道常量与跨进程类型）· `src/agent`（独立实验脚本，不进构建图、不打包）。
 - **运行**：`npm install` → `npm run dev`（开发）/ `npm run build`（构建）/ `npm run typecheck`（类型检查）；打包用 `npm run pack` 或 `npm run dist`。
 
 ## 二、wiki 地址
@@ -72,5 +72,26 @@
 6. **wiki 文档粒度**：渲染层——**每个页面一篇**（该页面自己的子组件与助手并入同一篇，代码侧对应 `src/renderer/src/pages/<PageName>/` 一页一目录、入口 `index.vue`，代码与文档同构）、**目录级一篇**（`wiki/files/renderer/src/assets.md` 覆盖 `assets/`、`wiki/files/renderer/src/components.md` 覆盖 `components/`）、**公共方法与工具一篇**（`wiki/files/renderer/src/common.md`，覆盖 composables / utils / 页面注册表）；主进程、preload、shared 仍按源文件逐篇。
 7. **跨目录导入用别名**：渲染层跨目录导入统一走 `@renderer/...`（如 `@renderer/composables/useAppStore`、`@renderer/utils/time`、`@renderer/components/StepBar.vue`、`@renderer/pages`）；仅同页面/同目录内部使用相对路径（`./Xxx.vue`）。
 8. **`composables` 与 `utils` 的分界**：依赖 Vue 响应式 API（`ref`/`reactive`/`computed`/`watch`/生命周期）或有状态、带副作用（IPC 订阅、localStorage）的复用逻辑放 `src/renderer/src/composables/`，文件名以 **`use`** 开头（如 `useAppStore.ts`、`useToast.ts`、`useRenderProgress.ts`）；无状态纯函数放 `src/renderer/src/utils/`（如 `escape.ts`、`time.ts`、`rate.ts`）。
+9. **文件行数：300 行考虑拆，500 行是硬上限**：
+   - **超过 300 行**：就该**考虑**拆分，并按「一个文件一件事」找自然边界（IPC 装配 / 纯计算 / 外部进程调用 / 状态机 / 路径与文件操作…）——不是任务式地凑行数，而是让每个文件只回答一个问题。
+   - **超过 500 行**：**不允许**。新增或改动任何文件后都要核一下（`[IO.File]::ReadAllLines($f).Count`），超了就必须拆或落到下面的例外。
+   - **模块拆分的形态**：一个模块拆成多文件时，**建同名目录 + `index.ts` 作统一出口**（如 `src/main/updater/index.ts`），并把**具名导出原样挂在 `index.ts` 上**——全库大量使用 `import * as x from './x'` 这种聚合式导入，这样改完**调用方一行都不用动**。
+   - **拆分的依赖方向必须单向**：共享状态放依赖最上游那个文件（如 `updater/base.ts`），其余文件都从它读写；**上游不许 import 下游**，否则会成环。拆开后跨文件共享的 `let` 状态一律收进一个 `state` / `flags` 对象或改成取值函数——**别按值导出**（跨文件后只会交出初始快照，读的人永远看到空值）。
+   - **例外（可不拆，但必须在该文件头部注释写明理由）**——只有这 4 类：
+     ① **纯类型与常量声明**：整文件都是 `interface` / `type` / 常量表，是跨进程或跨模块契约的唯一真源（如 `src/shared/types.ts`），拆开只会让「接口定义散落各处」；
+     ② **单一且顺序敏感的装配清单**：如 `src/main/index.ts`（窗口 / 协议 / 菜单 / 生命周期与 `register()` 顺序），拆开会让「启动顺序」这一件事散掉；
+     ③ **紧耦合的单一状态机**：若一个文件全部代码都围绕同一份状态、同一组事件回调展开，把它按行数强行切碎只会让「谁在什么时候改状态」散落各处——这种整体保留是可以的。判据是「切出来的每一块单独看都不成立」，而不是「行数刚好超线」。（`src/main/updater/` 就是按这条判据处理的：它拆到 `base` / `actions` / `install` / `index` 四个文件后每块都能独立读懂，所以拆了；若切完每块都缺一半上下文，就该整体保留。）
+     ④ **拆分本身会引入混乱**：需要新增跨文件共享可变状态、或拆完会互相 import 成环时。
+   - **现状待办（不追溯**，改到哪个文件顺手处理哪个）：`src/shared/types.ts`（例外①）、`src/renderer/src/pages/HtmlGenPage/index.vue`（751 行）、`src/renderer/src/pages/TextTtsPage/VoiceSection.vue`（526 行）三处超过硬上限；300~500 之间的还有若干，按「动到它时再拆」处理。
 
 不要做需要等待的事情，比如打包，如果需要让我来
+
+1. 请提问，不要臆测。如果某件事不清楚，请在动手写一行代码之前先问清楚。切勿对意图、架构或需求做出任何未加说明的默认假设。
+
+2. 首选最简单的方案。始终实现能够正常工作的最简单方案，不要引入未经明确要求的抽象或灵活性，如果有更好的方法，提出来，不要擅自改动方案。
+
+3. 不要改动无关的代码。如果某个文件或函数与当前任务无直接关联，即使你认为它可以改进，也请勿修改，先提出来。
+
+4. 明确标注不确定性。如果你对某种方法或技术细节缺乏把握，请在继续之前坦诚说明。没有把握却假装自信，其危害往往比承认自身不足更大。
+
+5. 修改前先确认计划。在动手改代码之前，先列出计划修改的文件清单及改动要点，等用户确认后再执行。避免未经同意就大范围改动。

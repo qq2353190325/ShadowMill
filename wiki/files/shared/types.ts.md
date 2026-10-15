@@ -4,14 +4,14 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：864 行
-- **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 3 个（`IpcFail`、`IpcResult`、**`ConfigTarget`**）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境（**分包**）4 个（`RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个；另有 ① 节 `IpcFail.needPacks`（缺哪个运行环境包）与 `IpcFail.needConfig` / `title`（配置类错误）、⑨ 节 `settingsTools.pickRuntimePack` 等成员
+- **规模**：905 行
+- **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 3 个（`IpcFail`、`IpcResult`、**`ConfigTarget`**）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境（**分包**）4 个（`RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 **（本轮新增 `ProjectMaterialKind` / `ProjectMaterial` / 三个素材载荷与 `ProjectMaterialsResult`）** ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个；另有 ① 节 `IpcFail.needPacks`（缺哪个运行环境包）与 `IpcFail.needConfig` / `title`（配置类错误）、⑨ 节 `settingsTools.pickRuntimePack` 等成员
 
 ## 1. 作用与职责
 
 本文件定义主进程、preload、渲染层三端共同使用的数据形状，并集中收敛原先散落在各处的类型声明：
 
-1. **统一载荷格式**：IPC 两端对同一份数据（设置文件、音色条目、模型条目、项目结构）使用完全相同的字段名与类型，避免「主进程叫 `voiceId`、渲染层叫 `voice_id`」这类漂移。
+1. **统一载荷格式**：IPC 两端对同一份数据（设置文件、音色条目、模型条目、项目结构、**项目素材**）使用完全相同的字段名与类型，避免「主进程叫 `voiceId`、渲染层叫 `voice_id`」这类漂移。
 2. **统一 IPC 结果形状**：`IpcFail` / `IpcResult<T>` 是全部 `{ ok, ... }` 结果类型的唯一来源 —— 它们原先只在 `src/preload/index.d.ts` 内部以 `OkResult` / `FailResult` / `IpcResult` 三个未导出类型存在，现在上移到共享层并被主进程、preload、渲染层共同引用。
 3. **描述持久化结构**：`CustomModelConfig` / `VoiceSettings`（含按厂家的 `VoiceProviderConfig`）/ `VoiceProfile` / `WhisperCustomModel` / `WhisperSettings` / `AppSettings` 共同构成 `userData/settings.json` 的完整 schema；旧的 `VoiceTTSConfig` 保留但**只作迁移来源**。
 4. **定义 `window.*` 契约**：⑨ 节的 `PreloadApi` 用 11 个命名空间的完整方法签名描述「preload 实现 ↔ 渲染层消费」的唯一真源 —— `src/preload/index.ts` 用它标注各 `contextBridge` 对象，`src/preload/index.d.ts` 用它给 `Window` 补类型，因此两端不会再各自漂移。
@@ -26,12 +26,12 @@
 | ① 通用 IPC 结果 | `ConfigTarget`、`IpcFail`、`IpcResult<T>` | `PreloadApi` 全体成员、各主进程模块的返回结构、`src/renderer/src/composables/useConfigPrompt.ts` |
 | ② 主进程装配上下文 | `RegisterCtx` | `src/main/*.ts` 的 `register(ctx)` |
 | ③ 设置 | `settings.json` 的 schema（含渲染档位 `render` 与更新设置 `updater`）与 `settings:*` / `voice:save-config` 载荷 | `src/main/settings.ts`、设置页、配音页 |
-| ③.5 应用自更新 | `update:*` 的检查结果（`message` + `detail` 分层）与进度载荷 | `src/main/updater.ts`、设置页 |
+| ③.5 应用自更新 | `update:*` 的检查结果（`message` + `detail` 分层）与进度载荷 | `src/main/updater/`（目录，出口 `updater/index.ts`）、设置页 |
 | ③.6 运行环境（分包） | `RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`（包名、每包状态、阶段与下载 / 解包进度） | `src/main/runtime.ts`、设置页、`src/renderer/src/composables/useRuntime.ts`、`src/renderer/src/composables/useEnvGate.ts` |
 | ⑧b 历史数据目录 | `LegacyDataInfo`（扫描结论）、`LegacyResolveAction`（三选一）、`LegacyResolveResult`（执行结果与迁移计数） | `src/main/index.ts`、`src/renderer/src/composables/useLegacyData.ts`、`src/renderer/src/components/LegacyDataDialog.vue` |
 | ④ 音色与配音 | 系统音色、克隆音色、音色映射、合成/对齐载荷与结果 | `src/main/voice.ts`、`src/main/ttsAlign.ts` |
 | ⑤ 语音识别 | whisper 模型状态、转录载荷与结果 | `src/main/whisper.ts` |
-| ⑥ 项目与字幕 | `project.json`（含渲染档位覆盖 `render`）、字幕行、项目列表项、HTML 生成载荷 | `src/main/projects.ts` |
+| ⑥ 项目与字幕 | `project.json`（含 `materials` 素材库、渲染档位覆盖 `render`）、**素材条目与素材三件套载荷**、字幕行、项目列表项、HTML 生成载荷 | `src/main/projects.ts`、`src/renderer/src/pages/HtmlGenPage/`（素材墙）、`src/renderer/src/composables/useAppStore.ts` |
 | ⑦ 预览 / 转视频 | 渲染载荷与渲染结果 | `src/main/video.ts` |
 | ⑧ 进度推送 | 6 路 main → renderer 推送的载荷 | `src/main/*.ts` 推送方 + `src/preload/index.ts` 订阅方 |
 | ⑨ `window.*` API 契约 | `PreloadApi`（11 个命名空间） | `src/preload/index.ts`、`src/preload/index.d.ts`、渲染层全部 `window.*` 调用 |
@@ -44,7 +44,7 @@
 | --- | --- | --- |
 | `ConfigTarget` | `type` | `'model' \| 'voice'`——**「配置类」错误的目标设置分类**，**定义在文件最前**（紧挨 `RuntimePackName` 之后，因为 `IpcFail` 的名称要用它）。源码注释：这类错误用户去设置页改一下配置就能解决，界面据此把它从内嵌状态行升级成弹窗（`[去设置]` / `[取消]`）；取值与 `SettingsPage` 的分类、`useNavIntent.SettingsSectionKey` 对齐；判定由主进程的 `friendlyError()` **单点产出**（见 `src/shared/errors.ts` 与 `docs/error-mapping.md` §11.1）。**没有 `'billing'`**：余额 / 欠费类去设置也修不好，走内嵌状态行（文案说明去厂家充值），不弹窗 |
 | `IpcFail` | `interface` | 失败分支：`ok: false` + 可选 `message?: string` + 可选 `detail?: string` + 可选 `canceled?: boolean` + 可选 **`needPacks?: RuntimePackName[]`**（缺哪个运行环境包；见 ③.6 节）+ 可选 **`needConfig?: ConfigTarget`** / **`title?: string`**（配置类错误，见下） |
-| `IpcResult<T = unknown>` | `type` | `({ ok: true; message?: string } & T) \| IpcFail`，成功分支是 `{ ok: true }` 与业务字段 `T` 的**交叉类型**（业务字段平铺在结果对象上，没有 `data` 包装）；成功分支的 `message` 可选，供「取消」「幂等复用（当前没有正在进行的下载）」等场景给一句话回执 |
+| `IpcResult<T = unknown>` | `type` | `({ ok: true; message?: string } & T) \| IpcFail`，成功分支是 `{ ok: true }` 与业务字段 `T` 的**交叉类型**（业务字段平铺在结果对象上，没有 `data` 包装）；成功分支的 `message` 可选，供「取消」「幂等复用」「部分成功（如素材添加跳过了几个文件）」等场景给一句话回执 |
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -56,7 +56,7 @@
 | `needConfig` | 可选 `ConfigTarget` | **本次失败属于「配置类」**（缺 Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用）：界面据此弹「去设置 / 取消」弹窗而不是只显示一行红字。源码注释强调：**它不驱动流程**（不像 `needPacks` 要续做），只是一个分类标记；**不显示原始报文**（排障详情仍落日志）；**余额 / 欠费不属于此处**。写入方是主进程（`htmlAgent.ts` / `settings.ts` / `voice.ts` 直接产出，`projects.ts` 用 `configTargetOf()` 补分类） |
 | `title` | 可选 `string` | 配置类弹窗的**标题**（主进程用 `errors.configTitle()` 单点产出：`需要设置自定义模型` / `需要设置语音服务`，兜底 `需要先完成设置`）；界面只显示、不判断 |
 
-`T` 缺省为 `unknown`，表示调用方只关心 `ok`（如 `clearAudio` / `clearVideo` / `delete` 等无载荷的写操作）。
+`T` 缺省为 `unknown`，表示调用方只关心 `ok`（如 `clearAudio` / `delete` 等无载荷的写操作）。
 
 ### 2.2 ② RegisterCtx（主进程装配上下文）
 
@@ -117,7 +117,7 @@
 | `AppSettings` | `render` | `RenderOptions` | 视频渲染**全局默认档位**（项目未覆盖时生效；读取时经 `normalizeRenderOptions` 规范化） |
 | `SettingsSaveResult` | `settings` | `AppSettings` | 保存后的完整设置（主进程回带） |
 
-### 2.3.1 ③.5 应用自更新（`src/main/updater.ts`）
+### 2.3.1 ③.5 应用自更新（`src/main/updater/`，出口 `updater/index.ts`）
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
@@ -199,8 +199,8 @@
 | `VoiceProfilesResult` | `interface` | `{ profiles: Record<string, VoiceProfile> }`（`getProfiles` / `saveProfile` / `deleteProfile` 共用） |
 | `VoiceProfilePayload` | `interface` | `voice:save-profile` 线上载荷：`{ profile: Partial<VoiceProfile> & { type?: string } }` |
 | `VoiceProfileKeyPayload` | `interface` | `voice:delete-profile` 线上载荷：`{ key }` |
-| `VoiceCreatePayload` | `interface` | `voice:create` 载荷：`audioPath?` / `targetModel?` / `preferredName?`。源码注释：**`audioPath` 为本地音频绝对路径、公网 URL / `oss://` 地址，或 `data:audio/...;base64` URI**；本地文件由主进程用 ffmpeg 裁成前 15 秒 24k 单声道 wav 再转 data URI，**放进复刻接口的 `input.url`**（Qwen-Audio-TTS 系列；该系列也接受公网 URL，两者都由主进程按字符串形态分流） |
-| `VoiceCreateResult` | `interface` | **`{ voice: string; targetModel: string }`**（本轮由 4 字段收缩为 2 字段）。源码注释：`voice` 取自返回体的 `output.voice_id`；`targetModel` 是**本次请求发的目标模型**（创建返回体不带 `target_model`，所以不再从响应里猜）；**`fallbackMode` / `fallbackReason` 已删除**——文档没有这两个字段，实测也从未返回过 |
+| `VoiceCreatePayload` | `interface` | `voice:create` 载荷：`audioPath?` / `targetModel?` / `preferredName?`。源码注释：**`audioPath` 为本地音频绝对路径、公网 URL / `oss://` 地址，或 `data:audio/...;base64` URI**；本地文件由主进程用 ffmpeg 裁成前 15 秒 24k 单声道 wav 再转 data URI，**放进复刻接口的 `input.url`** |
+| `VoiceCreateResult` | `interface` | **`{ voice: string; targetModel: string }`**（由 4 字段收缩为 2 字段）。源码注释：`voice` 取自返回体的 `output.voice_id`；`targetModel` 是**本次请求发的目标模型**；**`fallbackMode` / `fallbackReason` 已删除** |
 | `VoiceSynthPayload` | `interface` | `voice:synth` 载荷（由 preload 按位置参数组装）：`text?` / `voice?` / `targetModel?` / `projectName?` / `saveDir?` / `defaultOut?` / `audioName?` |
 | `VoiceSynthResult` | `interface` | `{ savePath, projectName, savedTo, size }` |
 | `VoiceSavedTo` | `type` | `'custom' \| 'output' \| 'project' \| 'default'`（`voice:synth` 的落盘位置） |
@@ -256,7 +256,9 @@
 | --- | --- | --- |
 | `Scene` | `interface` | 内容脚本场景：`id` / `narration` / `visual` / `durHint` |
 | `ContentScript` | `interface` | 内容脚本：`style` + `scenes: Scene[]` |
-| `Project` | `interface` | `userData/projects/<项目名>/project.json` 的完整结构 |
+| `Project` | `interface` | `userData/projects/<项目名>/project.json` 的完整结构（含 `materials` 素材库与历史字段 `videoMaterial`） |
+| `ProjectMaterialKind` | `type` | **`'image' \| 'video'`**（本轮新增）——决定素材落在哪个目录，也决定提示词里给模型的嵌入方式（`<img>` / `<video>`） |
+| `ProjectMaterial` | `interface` | **一条素材**（本轮新增）：`id` / `kind` / `file` / `label` / `selected` / `addedAt` |
 | `SubtitleLine` | `interface` | 字幕行（`parseSubtitle` 输出）：`n` / `text` / `time` / `end`（秒，可带小数；`end` 可为 `null`） |
 | `ProjectMeta` | `interface` | `project:list` 结果项（首页/步骤条的项目卡片与下拉） |
 | `ProjectNamePayload` | `interface` | 仅以项目名定位的载荷 `{ name }`（`delete` / `open-folder` / `extract-video-audio` 等） |
@@ -265,38 +267,50 @@
 | `ProjectSaveResult` | `interface` | `{ project: Project }`（`create` / `saveSubtitle` / `saveContent` / `saveVideo` 共用） |
 | `ProjectExportSrtPayload` | `interface` | `{ name?, srt? }` |
 | `ProjectDownloadResult` | `interface` | `{ savedPath }`（下载 HTML / 导出 SRT 共用） |
-| `ProjectSetAudioPayload` / `ProjectSetVideoPayload` | `interface` | `{ name?, audioPath? }` / `{ name?, videoPath? }` |
-| `ProjectSetAudioResult` | `interface` | `{ audioFile, htmlUpdated? }`（`setAudio` / `extractVideoAudio` 共用）；`htmlUpdated` 为「设置 / 移除背景音频时 `index.html` 的注入音轨是否被同步改写」，可选（未改写 / 主进程未上报时为 `undefined`） |
-| `ProjectSetVideoResult` | `interface` | `{ videoFile, abs }` |
+| `ProjectSetAudioPayload` / `ProjectSetVideoPayload` | `interface` | `{ name?, audioPath? }` / `{ name?, videoPath? }`——**`ProjectSetVideoPayload` 的注释已改为「只服务 `project:save-video` 的产物回写」**：它与「项目视频素材」无关（素材走 `project:add-materials` / `project:save-materials`） |
+| `ProjectSetAudioResult` | `interface` | `{ audioFile, htmlUpdated? }`（`setAudio` / `extractVideoAudio` 共用）；`htmlUpdated` 为「设置 / 移除背景音频时 `index.html` 的注入音轨是否被同步改写」，可选 |
+| `ProjectPickMediaPayload` | `interface` | **`project:pick-media` 载荷**（本轮新增）：`{ kind?: ProjectMaterialKind }`——`kind` 决定文件框的扩展名过滤；图片允许一次多选（一屏素材），视频单选（单个文件常很大） |
+| `ProjectAddMaterialsPayload` | `interface` | **`project:add-materials` 载荷**（本轮新增）：`{ name?, paths?: string[] }`——把用户选中的**外部绝对路径**复制进项目素材目录并登记为素材 |
+| `ProjectSaveMaterialsPayload` | `interface` | **`project:save-materials` 载荷**（本轮新增）：`{ name?, materials?: unknown }`——整份素材列表回写（**移除与勾选都走这条**）；`materials` 刻意是 `unknown`，因为渲染层提交的是完整列表、主进程只做规范化（id/kind/file 校验 + 上限）后落盘 |
+| `ProjectMaterialsResult` | `interface` | **素材接口回执**（本轮新增）：`{ materials: ProjectMaterial[]; message?: string }`——`materials` 恒为落盘/读取后的完整列表，渲染层直接用它替换本地状态；`message` 非空表示「部分成功」之类需要告知用户的补充说明（如跳过了几个不支持的文件） |
 | `ProjectReadHtmlResult` | `interface` | `{ html }` |
 | `ProjectSaveHtmlPayload` | `interface` | `{ name?, html? }` |
 | `ProjectPreviewHtmlResult` | `interface` | `{ previewPath }` |
 | `ProjectOpenFolderOfResult` | `interface` | `{ dir }` |
-| `ProjectHtmlMaterials` | `interface` | HTML 生成/修改的素材选择：`subtitleProject?` / `videoPath?`（**`audioPath?` 已删除**：背景音频不是生成素材，由应用按 `project.audioFile` 注入 HTML 的 `<audio id="myv-bgm">`。`videoPath` 只承载「要不要带当前项目视频素材」，自定义导入的文件路径不经此载荷，走 `project:set-video`） |
+| `ProjectHtmlMaterials` | `interface` | HTML 生成/修改的素材选择：`subtitleProject?` / **`materialIds?: string[]`**（**`audioPath?` 已删除**：背景音频不是生成素材，由应用按 `project.audioFile` 注入 HTML 的 `<audio id="myv-bgm">`。`materialIds` = 本次参与生成的素材 id 列表，顺序即提示词里的顺序，空/缺省 = 不带素材） |
 | `ProjectAgentPayload` | `interface` | `extends ProjectHtmlMaterials` + `name` / `prompt`（`generateHtml` / `modifyHtml` 线上载荷） |
 | `ProjectHtmlResult` | `interface` | `{ htmlPath, compatible, message? }` |
 | `ProjectSetRenderPayload` | `interface` | `project:set-render` 线上载荷：`{ name?: string; render?: RenderOverride \| null }`——`render` 传 `null`（或字段全非法）表示清除项目覆盖、回到跟随全局默认 |
+
+> **已删除**（本轮）：`ProjectSetVideoResult`（原 `{ videoFile, abs }`）——它描述的「导入视频素材并回带项目内绝对路径」语义随单视频素材一起下线，素材三件套改由 `ProjectMaterialsResult` 描述回执。
 
 | 归属 | 字段 | 类型 | 说明 |
 | --- | --- | --- | --- |
 | `Project` | `name` / `title` / `subtitle` | `string` | 项目名、标题、字幕文本 |
 | `Project` | `subtitleCount` | 可选 `number` | 字幕条数 |
 | `Project` | `htmlPath` / `videoPath` | `string` | 产物路径（**绝对路径**；空串表示未生成或已失效，HTML 变更后 `videoPath` 会被置空） |
-| `Project` | `videoMaterial` | 可选 `string` | 视频**素材**相对引用（`video/xxx`，与成品 `videoPath` 严格区分） |
+| `Project` | `materials` | 可选 `ProjectMaterial[]` | **项目素材库**（图片 + 视频，多素材）：由 `project:add-materials` / `project:save-materials` 维护 |
+| `Project` | `videoMaterial` | 可选 `string` | **历史字段**（源码注释逐字）：「历史字段（素材多视频化之前的那「一个视频素材」）：本轮起**不再写入**、素材列表也不读它。保留声明只为不改动被暂时隐藏入口的 project:extract-video-audio handler（它仍按此字段定位视频）。」 |
 | `Project` | `audioFile` | `string` | 背景音频 / 生成语音相对引用（`audio/xxx`，空串表示无）；也是主进程注入 HTML 音轨（`<audio id="myv-bgm">`）的唯一来源 |
 | `Project` | `content` | `ContentScript` | 内容脚本 |
 | `Project` | `render` | 可选 `RenderOverride` | 视频渲染档位的**项目级覆盖**（字段缺省即跟随全局默认；`render` 为空覆盖时该字段被删除） |
 | `Project` | `createdAt` / `updatedAt` | `string` / 可选 `string` | 创建与更新时间（ISO 字符串） |
+| `ProjectMaterial` | `id` | `string` | 素材 id（主进程 `newMaterialId()` 生成）：勾选、移除都按它定位，**与文件名解耦**（同名文件重复导入也不会串） |
+| `ProjectMaterial` | `kind` | `ProjectMaterialKind` | `'image'` / `'video'`——决定落盘目录（`images/` / `video/`）与提示词分块 |
+| `ProjectMaterial` | `file` | `string` | **项目内相对引用**（源码注释：`images/xxx.png` \| `video/xxx.mp4`），与场景/字幕同级的跨进程契约；主进程 `normalizeMaterials` 强制它落在本项目素材目录下且不含 `..` |
+| `ProjectMaterial` | `label` | `string` | **原始文件名**（源码注释：界面显示 + 提示词里给模型读） |
+| `ProjectMaterial` | `selected` | `boolean` | 本次生成是否带上（`normalizeMaterials` 里 `o.selected !== false`，即缺省视为 true） |
+| `ProjectMaterial` | `addedAt` | `string` | 加入时间（ISO 字符串） |
 | `SubtitleLine` | `n` / `time` / `end` | `number` / `number` / `number \| null` | 序号、起始秒、结束秒（`null` 表示无结束时间） |
 | `ProjectMeta` | `name` / `title` / `updatedAt` | `string` | 项目名、标题、更新时间 |
-| `ProjectMeta` | `hasSubtitle` / `hasHtml` / `hasVideo` | `boolean` | 三类产物的文件系统存在性（主进程 `scanProjects()` 判定） |
+| `ProjectMeta` | `hasSubtitle` / `hasHtml` / `hasVideo` | `boolean` | 三类产物的文件系统存在性（主进程 `scanProjects()` 判定）；`hasVideo` 也是「视频预览」页下拉的筛选依据 |
 | `ProjectMeta` | `subtitleCount` | `number` | 字幕条数 |
 | `ProjectHtmlMaterials` | `subtitleProject` | 可选 `string` | `''` = 不使用；`'__current__'` = 当前项目字幕；其他 = 指定带字幕的项目名 |
-| `ProjectHtmlMaterials` | `videoPath` | 可选 `string` | `''` = 不使用；`'__current__'` = 当前项目视频素材（**自定义导入走 `project:set-video`，不由本载荷传路径**；其他值一律按「不使用」处理） |
+| `ProjectHtmlMaterials` | `materialIds` | 可选 `string[]` | 本次参与生成的素材 id 列表：主进程 `resolveMaterials()` 按 id 从 `normalizeMaterials(proj.materials)` 里取，**顺序即提示词里的列举顺序**，取不到的 id 静默忽略；空 / 缺省 = 不带素材 |
 | `ProjectHtmlResult` | `compatible` | `boolean` | HTML 是否通过 HyperFrames 合规校验 |
 | `ProjectHtmlResult` | `message` | 可选 `string` | **成功分支也可能带提示**：合规校验未过 / 修改后旧视频已置空等 |
 
-两个键名与主进程 `resolveMaterials` 严格对应（`subtitleProject` / `videoPath`），`ProjectAgentPayload` 由 preload 用 `{ name, prompt, ...materials }` 展开合并而成。**背景音频不在素材里**：它由应用按 `project.audioFile` 直接注入 HTML 的 `<audio id="myv-bgm">`，提示词只声明「不要写音轨标签」，模型不需要也无法处理音轨。
+键名与主进程严格对应（`resolveMaterials` 读 `subtitleProject` / `materialIds`；`normalizeMaterials` 读 `id` / `kind` / `file` / `label` / `selected` / `addedAt`），`ProjectAgentPayload` 由 preload 用 `{ name, prompt, ...materials }` 展开合并而成。**背景音频不在素材里**：它由应用按 `project.audioFile` 直接注入 HTML 的 `<audio id="myv-bgm">`，提示词只声明「不要写音轨标签」。
 
 ### 2.7 ⑦ 预览 / HyperFrames 转视频（`video.ts`）
 
@@ -346,7 +360,7 @@
 | `settingsTools` | 6 | `get`、`save`、`saveRender`、`saveUpdater`、`test`、**`pickRuntimePack`** | `get` → `Promise<AppSettings>`（**不经 `ok` 包裹**）；`save(customModel)` / `saveRender(render)` / `saveUpdater(updater)` → `Promise<IpcResult<SettingsSaveResult>>`（preload 分别包装为 `{ customModel }` / `{ render }` / `{ updater }`）；`test(customModel)` → `Promise<IpcResult>`（失败分支可能带 `detail` / `needConfig`，见 §2.1）；`pickRuntimePack()` → `Promise<IpcResult<{ pack?: RuntimePackName }>>`（弹文件框选 `ffmpeg.7z` / `hyperframes.7z`，导入 `userData/runtime/local-import/`；取消时 `{ ok:false, canceled:true }`，导入成功后由调用方接着 `runtimeTools.prepare()`） |
 | `voiceTools` | 19 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、**`deleteCloudVoice`**、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` | 见下 |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` | 见下 |
-| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、`pickVideo`、`setVideo`、`clearVideo`、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下 |
+| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、**`pickMedia`、`addMaterials`、`saveMaterials`**、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下（**本轮 3 换 3，成员数仍是 25**） |
 | `updateTools` | 8 | `version`、`check`、`download`、`cancel`、`install`、**`status`**、`openLog`、`onProgress` | 见下 |
 | `runtimeTools` | 4 | `status`、`prepare`、**`cancel`**、`onProgress` | `status()` → `Promise<RuntimeProgressPayload>`；`prepare(packs?: RuntimePackName[])` → `Promise<IpcResult>`（省略 `packs` = 全部缺的包；忙碌期重复调用返回 `{ ok:false, message }`）；`cancel()` → `Promise<IpcResult>`（中断下载 / 解包并清半成品，成功后 `message` 为「已取消下载」）；`onProgress(cb: (data: RuntimeProgressPayload) => void)`（单订阅） |
 | `legacyTools` | 2 | `status`、`resolve` | `status()` → `Promise<LegacyDataInfo \| null>`；`resolve(action: LegacyResolveAction)` → `Promise<LegacyResolveResult>`（preload 只把 `action` 字符串透传，见 §2.3.3） |
@@ -402,13 +416,16 @@
 | `whisperTools` | `onProgress(cb)` | `void`，回调 `(data: WhisperProgressPayload) => void`（单订阅） |
 | `projectTools` | `list()` | `Promise<ProjectMeta[]>`（**不走 `IpcResult`**） |
 | `projectTools` | `create` / `saveSubtitle` / `saveContent` / `saveVideo` / `setRender` | `Promise<IpcResult<ProjectSaveResult>>`（`setRender(name, render \| null)` 传 `null` 即清除项目级渲染档位覆盖） |
-| `projectTools` | `load(name)` | `Promise<Project \| null>`（**不走 `IpcResult`**；项目名为空时主进程返回 `null`，见 §5） |
-| `projectTools` | `generateHtml` / `modifyHtml(name, prompt, materials?: ProjectHtmlMaterials)` | `Promise<IpcResult<ProjectHtmlResult>>`（失败分支可能带 `needConfig` / `title`：配置类错误由主进程 `projects.ts` 用 `configTargetOf()` 补分类） |
+| `projectTools` | `load(name)` | `Promise<Project \| null>`（**不走 `IpcResult`**；项目名为空时主进程返回 `null`，见 §5；非空时返回的 `materials` 已由主进程规范化） |
+| `projectTools` | `generateHtml` / `modifyHtml(name, prompt, materials?: ProjectHtmlMaterials)` | `Promise<IpcResult<ProjectHtmlResult>>`（失败分支可能带 `needConfig` / `title`：配置类错误由主进程 `projects.ts` 用 `configTargetOf()` 补分类；`materials` 里带的是 `materialIds` 不是路径） |
 | `projectTools` | `downloadHtml` / `exportSrt` | `Promise<IpcResult<ProjectDownloadResult>>` |
 | `projectTools` | `readHtml` / `saveHtml` / `previewHtml` | `IpcResult<ProjectReadHtmlResult>` / `IpcResult<ProjectHtmlResult>` / `IpcResult<ProjectPreviewHtmlResult>` |
-| `projectTools` | `pickAudio()` / `pickVideo()` | `Promise<string \| null>` |
-| `projectTools` | `setAudio` / `extractVideoAudio` / `setVideo` | `IpcResult<ProjectSetAudioResult>`（含可选 `htmlUpdated`，表示注入音轨改写了 `index.html`） / `IpcResult<ProjectSetAudioResult>` / `IpcResult<ProjectSetVideoResult>` |
-| `projectTools` | `clearAudio` / `clearVideo` / `openFolder` / `delete` | `Promise<IpcResult>`（无载荷）；主进程 `project:clear-audio` 实际上还返回 `htmlUpdated`（是否摘掉了 HTML 里的注入音轨），但**未纳入本契约**，渲染层不使用该字段 |
+| `projectTools` | `pickAudio()` | `Promise<string \| null>` |
+| `projectTools` | `pickMedia(kind: ProjectMaterialKind)` | `Promise<string[]>`（**不走 `IpcResult`**：取消 / 无窗口返回空数组；图片可多选、视频单选） |
+| `projectTools` | `addMaterials(name, paths: string[])` | `Promise<IpcResult<ProjectMaterialsResult>>`（复制入库 + 登记；「部分成功」时 `ok: true` 且 `message` 说明跳过了几个） |
+| `projectTools` | `saveMaterials(name, materials: ProjectMaterial[])` | `Promise<IpcResult<ProjectMaterialsResult>>`（整份列表回写：**移除与勾选共用**） |
+| `projectTools` | `setAudio` / `extractVideoAudio` | `IpcResult<ProjectSetAudioResult>`（含可选 `htmlUpdated`，表示注入音轨改写了 `index.html`） / `IpcResult<ProjectSetAudioResult>`（后者**界面入口暂未开放**，签名保留） |
+| `projectTools` | `clearAudio` / `openFolder` / `delete` | `Promise<IpcResult>`（无载荷）；主进程 `project:clear-audio` 实际上还返回 `htmlUpdated`（是否摘掉了 HTML 里的注入音轨），但**未纳入本契约**，渲染层不使用该字段 |
 | `projectTools` | `openFolderOf(dirOrFile)` | `Promise<IpcResult<ProjectOpenFolderOfResult>>` |
 | `projectTools` | `onHtmlProgress(cb)` | `void`，回调 `(data: HtmlProgressPayload) => void`（单订阅） |
 
@@ -433,7 +450,15 @@
 3. 音色映射以 `Record<string, VoiceProfile>` 存储，`voiceTools.saveProfile(profile)` / `deleteProfile(key)` 按 key 增删，入参用 `VoiceProfileInput`（`name` / `type` 可缺省），线上载荷分别是 `VoiceProfilePayload` / `VoiceProfileKeyPayload`。
 4. whisper 分区即以 `WhisperSettings` 落盘，`whisperTools.addModel/updateModel/removeModel` 对应 `customModels` 数组的增删改，载荷为 `WhisperAddModelPayload` / `WhisperUpdateModelPayload` / `WhisperIdPayload`。
 
-### 3.3 主进程 register 模式
+### 3.3 项目素材的读写闭环（本轮新增）
+
+1. **选文件**：`projectTools.pickMedia(kind)` → `project:pick-media`，主进程按 `kind` 给扩展名过滤（白名单来自 `src/shared/constants.ts`），返回**外部绝对路径数组**（不落盘、不登记）。
+2. **入库**：`projectTools.addMaterials(name, paths)` → `project:add-materials`，主进程 `copyMaterialIntoProject()` 把文件复制进项目 `images/` / `video/`，再以 `newMaterialId()` 生成 id 登记进 `proj.materials`（新素材 `selected: true`），返回 `ProjectMaterialsResult`（`materials` = 落盘后的完整列表，部分成功时另有 `message`）。
+3. **勾选 / 移除**：渲染层持完整列表，改动后整体回写 `projectTools.saveMaterials(name, materials)` → `project:save-materials`，主进程 `normalizeMaterials()` 规范化后覆盖落盘（**移除只摘登记、不删文件**）。
+4. **读回**：`project:load` 返回 `{ ...proj, materials: normalizeMaterials(proj.materials) }`，因此渲染层拿到的永远是通过校验的列表；`HtmlGenPage/MaterialsSection.vue` 每次写操作成功后调 `refreshProject()`，把最新列表放进 `appState.project.materials`。
+5. **进提示词**：生成 / 修改时提交 `ProjectHtmlMaterials.materialIds`（勾选项的 id），主进程 `resolveMaterials()` 按 id 过滤、`buildMaterialBlock()` 拼「【图片素材】/【视频素材】」两段。
+
+### 3.4 主进程 register 模式
 
 ```ts
 // src/main/*.ts 的统一签名（示意）
@@ -442,13 +467,13 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 
 `RegisterCtx` 用 `getWindow: () => BrowserWindow | null` 而非 `window: BrowserWindow`，使各功能模块在窗口尚未创建时也能安全加载；每个推送型频道（`whisper:progress` 等）发送前都需对 `null` 做判空。
 
-### 3.4 `PreloadApi` 契约如何生效
+### 3.5 `PreloadApi` 契约如何生效
 
 1. `src/preload/index.ts` 的 11 个 `contextBridge` 对象分别标注为 `PreloadApi['electronAPI']`、`PreloadApi['hfTools']` … —— 方法名、参数顺序、返回类型写错会在 `tsconfig.node.json` 阶段直接编译失败（实现被契约校验）。
 2. `src/preload/index.d.ts` 只有 `import type { PreloadApi } from '../shared/types'` + `declare global { interface Window extends PreloadApi {} }`，不再自己定义任何类型；渲染层看到的 `window.*` 与 preload 实现同源。
 3. 因此「改契约」变成**只改本文件 ⑨ 节**这一件事：两端同时生效。⑨ 节注释同时指明命名空间与 IPC 频道的对应关系见 `src/shared/ipc.ts`（11 个命名空间 ↔ 10 组频道常量）。
 
-### 3.5 `IpcResult` 的判别联合与收窄
+### 3.6 `IpcResult` 的判别联合与收窄
 
 1. 调用方 `const res = await window.projectTools.generateHtml(name, prompt)`。
 2. 判 `if (res.ok)` → TS 收窄到 `{ ok: true } & ProjectHtmlResult`，可平铺访问 `res.htmlPath` / `res.compatible` / `res.message`（业务字段直接平铺，没有 `data` 包装）。
@@ -460,7 +485,8 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | --- | --- | --- |
 | 依赖（仅类型） | `electron` | 仅引入 `BrowserWindow` 类型（`ConfigTarget` 定义在本文件内，不需要额外 import） |
 | 被 import | `src/main/settings.ts` | `AppSettings`、`CustomModelConfig`、`RegisterCtx`、`VoiceProfile`、`VoiceProviderConfig`、`VoiceSettings`、`VoiceTTSConfig`（旧结构，迁移来源）、`WhisperCustomModel` |
-| 被 import（+ 再导出） | `src/main/projects.ts` | `RegisterCtx`、`ProjectAgentPayload`、`ProjectExportSrtPayload`、`ProjectNamePayload`、`ProjectSaveContentPayload`、`ProjectSaveHtmlPayload`、`ProjectSaveSubtitlePayload`、`ProjectSetAudioPayload`、`ProjectSetVideoPayload`；并 `export type { ContentScript, Project, Scene, SubtitleLine }` 再导出四个项目结构 |
+| 被 import（+ 再导出） | `src/main/projects.ts` | `RegisterCtx`、`ProjectAgentPayload`、`ProjectExportSrtPayload`、`ProjectNamePayload`、`ProjectSaveContentPayload`、`ProjectSaveHtmlPayload`、`ProjectSaveSubtitlePayload`、`ProjectSetAudioPayload`、`ProjectSetVideoPayload`、**`ProjectMaterial`、`ProjectMaterialKind`、`ProjectAddMaterialsPayload`、`ProjectPickMediaPayload`、`ProjectSaveMaterialsPayload`**；并 `export type { ContentScript, Project, Scene, SubtitleLine }` 再导出四个项目结构 |
+| 被 import（仅类型） | `src/renderer/src/composables/useAppStore.ts` | `ProjectMaterial`（`ProjectState.materials` 的元素类型）、`ProjectMeta`（并 `export type { ProjectMeta }` 再导出） |
 | 被 import | `src/main/index.ts` | `RegisterCtx`、`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`（后三者服务于 `legacy:status` / `legacy:resolve`） |
 | 被 import | `src/main/whisper.ts` | `RegisterCtx`、`WhisperCustomModel` 与全部 `Whisper*Payload`（含 `WhisperProgressPayload`） |
 | 被 import | `src/main/voice.ts` | `RegisterCtx`、**`ConfigTarget`**（`voiceNoKeyFail()` 的返回类型）、`SystemVoice`、`VoiceModel`、`VoiceProviderView`、`VoiceSettings`、`VoiceProfile`、`VoiceCreatePayload`、`VoiceProfileKeyPayload`、`VoiceProfilePayload`、`VoiceSaveConfigPayload`、`VoiceSaveDirPayload`、`VoiceSynthPayload` |
@@ -471,7 +497,7 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | 被 import | `src/main/systemVoices.ts` | `SystemVoice` |
 | 被 import（仅类型） | `src/preload/index.ts` | `PreloadApi`、`AlignProgressPayload`、`HtmlProgressPayload`、`RenderOverride`、`RuntimePackName`、`RuntimeProgressPayload`、`UpdateProgressPayload`、`WhisperProgressPayload` |
 | 被 import（仅类型） | `src/preload/index.d.ts` | `PreloadApi`，供 `declare global Window` 使用 |
-| 被 import（仅类型） | `src/renderer/src/composables/useAppStore.ts` | `ProjectMeta`（并 `export type { ProjectMeta }` 再导出，取代原本地同名 interface） |
+| 被 import（仅类型） | `src/renderer/src/pages/HtmlGenPage/MaterialsSection.vue` | `ProjectMaterial`、`ProjectMaterialKind`（素材卡片与 `onAdd(kind)` 的类型） |
 | 被 import（仅类型） | `src/renderer/src/composables/useConfigPrompt.ts` | **`ConfigTarget`**（`useConfigPrompt()` 的 `target` ref 与 `open()` / `fromResult()` 的形参类型） |
 
 ## 5. 注意事项与实现要点
@@ -479,19 +505,23 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 - **字段名禁止改动**：注释写明「载荷格式必须与现行实现逐字段一致，禁止改动结构」。设置文件已在用户 `userData` 中落盘，改字段名等于丢失既有配置；项目结构改动还会打断 `project.json` 的向后兼容。
 - **新增 / 修改 IPC 须三处齐改**：主进程 `register()` 回调、本文件类型、preload 桥接方法；若签名发生变化，`PreloadApi`（⑨ 节）必须同步，否则 preload 侧直接编译不过。
 - **只往 `IpcFail` 加可选字段时不必改 preload**：`needConfig` / `title` 是主进程写、渲染层读的**纯分类字段**，preload 只是 `ipcRenderer.invoke` 原样转发 —— 把「新增失败字段」也算进三处齐改会白改一处。
+- **本轮素材接口的契约形状（`ProjectMaterial` 一族）**：`Project` 只新增**可选**字段 `materials`（老项目读回来 `undefined`，由主进程 `normalizeMaterials` 归为 `[]`），因此**不构成破坏性变更**；`ProjectHtmlMaterials.videoPath` 被 `materialIds?: string[]` 取代——它只被 `project:generate-html` / `project:modify-html` 两个频道消费，且渲染层与主进程同步改完，所以可以直接替换字段名。
+- **`ProjectMaterial.file` 是相对引用、`label` 是原始文件名**：前者必须落在本项目 `images/` / `video/` 下（跨进程契约 + 越权防护），后者只作展示与给模型读的说明；两者不要互相替代。
+- **`ProjectSaveMaterialsPayload.materials` 刻意是 `unknown`**：渲染层提交的是完整列表，主进程必须自己规范化后才能信任它（防脏数据与越权路径），写成 `ProjectMaterial[]` 会给人「已经校验过」的错觉。
+- **`Project.videoMaterial` 是历史字段**：本轮起不再写入、素材列表也不读它；仅被暂时隐藏入口的 `project:extract-video-audio` handler 使用。**不要在新代码里读它**。
 - **`IpcFail.message` 是可选字段**：`voice:pick-dir` 的用户取消分支只回 `{ ok: false, canceled: true }`，因此读取 `message` 的代码要容忍 `undefined`（渲染层约定式写法 `(res as { message?: string })?.message || '默认文案'`）。
-- **`IpcFail.detail` 是「可选的技术详情」**（2026-10 新增）：与 `message` 分工明确 —— `message` 说人话（用户能做什么）、`detail` 给排障（原始报错 / HTTP 状态 / 请求 URL），UI 用「查看详情」折叠展示。它同样是可选的，取消分支与部分简单失败分支不带它。
-- **`IpcFail.needConfig` / `title` 是「配置类」两件套**（2026-10 新增）：它们**不驱动流程**（对比 `needPacks` 需要用户下载完环境再「继续」重发操作），只把「这个错误该去哪修」从渲染层的正则猜测改成主进程单点分类；界面据此弹出**只有 `[去设置]` / `[取消]` 两个按钮**的弹窗。**配置类弹窗刻意不显示 `detail`**（见 `docs/error-mapping.md` §11.1）。它曾有第三个字段 `configUrl`（余额类的充值页）与对应的「去充值」按钮，**已按用户要求整条摘除**——余额 / 欠费改为走内嵌状态行。
+- **`IpcFail.detail` 是「可选的技术详情」**：与 `message` 分工明确 —— `message` 说人话（用户能做什么）、`detail` 给排障（原始报错 / HTTP 状态 / 请求 URL），UI 用「查看详情」折叠展示。它同样是可选的，取消分支与部分简单失败分支不带它。
+- **`IpcFail.needConfig` / `title` 是「配置类」两件套**：它们**不驱动流程**（对比 `needPacks` 需要用户下载完环境再「继续」重发操作），只把「这个错误该去哪修」从渲染层的正则猜测改成主进程单点分类；界面据此弹出**只有 `[去设置]` / `[取消]` 两个按钮**的弹窗。**配置类弹窗刻意不显示 `detail`**（见 `docs/error-mapping.md` §11.1）。它曾有第三个字段 `configUrl`（余额类的充值页）与对应的「去充值」按钮，**已按用户要求整条摘除**——余额 / 欠费改为走内嵌状态行。
 - **`ConfigTarget` 与 `SettingsSectionKey` 取值不同名但语义对齐**：`ConfigTarget = 'model' | 'voice'`，而设置页分类键是 `SettingsSectionKey`（`'model' | 'voice' | 'update'`）；映射写在 `useConfigPrompt.ts` 的 `SECTION_OF`（`model → model`、`voice → voice`）。改任一侧都要一起看。
-- **`UpdateCheckResult.message` 是必填、`IpcFail.message` 是可选的**：前者由主进程**单点产出**（`available` / `skipped` / `none` 三种状态文案都在 `updater.ts` 的 `bindEvents()` 里写），渲染层只渲染不再拼串——早前渲染层也拼一套，与事件推送的文案互相覆盖；后者必须保持可选以兼容 `voice:pick-dir` 的取消分支。两者的 `detail` 都只在 UI「查看详情」里展开。
+- **`UpdateCheckResult.message` 是必填、`IpcFail.message` 是可选的**：前者由主进程**单点产出**（`available` / `skipped` / `none` 三种状态文案都在 `updater/base.ts` 的 `bindEvents()` 里写），渲染层只渲染不再拼串；后者必须保持可选以兼容 `voice:pick-dir` 的取消分支。两者的 `detail` 都只在 UI「查看详情」里展开。
 - **`VoiceSavedTo` 与 `VoiceSaveDirMode` 取值集合相同但字段名不同**：前者是 `voice:synth` 结果里的 `savedTo`，后者是 `voice:get-save-dir` 结果里的 `mode`；源码注释明确「现行实现如此，勿『统一化』」。
 - **`VoiceProfile.type` 是字面量联合**：类型为 `VoiceProfileType`（`'system' | 'custom'`），不再是宽泛 `string`；但线上保存分支的 `VoiceProfilePayload.profile.type` 仍是 `type?: string`（主进程按「非 `system` 一律归 `custom`」归一），两者不要混用。
 - **`AppSettings.whisper` 有独立 interface**：即 `WhisperSettings`，需要复用该分区时直接引用，不要重复内联声明。
-- **`SystemVoice` 与 `SystemVoiceItem` 的分工**：`SystemVoice` 是内置音色表的 4 字段条目（由 `src/main/systemVoices.ts` 提供）；`voice:list-system-voices` 下发的元素是 `SystemVoiceItem`（多一个 `model` 字段）。历史上 `index.d.ts` 的元素类型与共享 `SystemVoice` 不同步的问题，已由这两个类型显式区分解决。
+- **`SystemVoice` 与 `SystemVoiceItem` 的分工**：`SystemVoice` 是内置音色表的 4 字段条目（由 `src/main/systemVoices.ts` 提供）；`voice:list-system-voices` 下发的元素是 `SystemVoiceItem`（多一个 `model` 字段）。
 - **`VideoRenderResult` 不是 `IpcResult`**：失败分支 `message` 必填、成功分支带 `outputVideo` / `projectDir`，且失败可带 `compatible?: boolean`（HTML 不合规）与 `needPacks?: RuntimePackName[]`（缺运行环境包）；文档与代码不要一律按 `IpcResult` 处理。
-- **少数 API 不走 `ok` 包裹**：`settingsTools.get()` → `AppSettings`、`projectTools.list()` → 数组、`projectTools.load()` → `Project | null`、`hfTools.openHtml` / `pickAudio` / `pickVideo` → `string | null`、`appTools.copyText` → `boolean`、`updateTools.version()` → `string`（同步）。其中 `projectTools.load()` 在项目名为空时**确实返回 `null`**，调用方必须做空值守卫（`useAppStore.refreshProject` 已据此加守卫）。
+- **少数 API 不走 `ok` 包裹**：`settingsTools.get()` → `AppSettings`、`projectTools.list()` → 数组、`projectTools.load()` → `Project | null`、**`projectTools.pickMedia()` → `string[]`**、`hfTools.openHtml` / `pickAudio` → `string | null`、`appTools.copyText` → `boolean`、`updateTools.version()` → `string`（同步）。其中 `projectTools.load()` 在项目名为空时**确实返回 `null`**，调用方必须做空值守卫（`useAppStore.refreshProject` 已据此加守卫）。
 - **`RegisterCtx.getWindow` 可为 `null`**：所有 `webContents.send` 前必须判空，否则窗口关闭或重载期间会抛异常。
 - **结构类型靠「再导出」保引用面**：`src/main/projects.ts` 的 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'`、`src/renderer/src/composables/useAppStore.ts` 的 `export type { ProjectMeta }` 都只是转发 —— `projects.Project`、`from './projects'`、`import { ProjectMeta } from '@renderer/composables/useAppStore'` 这类既有引用不需要改动，但结构本身只在本文档定义一处。新增字段时改这里即可，不要在被再导出的文件里重建 interface。
-- **主进程 handler 的 `payload` 参数一律标注契约类型**：如 `ProjectSaveSubtitlePayload`、`ProjectAgentPayload`、`Partial<WhisperIdPayload>`、`VoiceSaveConfigPayload`（`voice:save-config` 的形参另**联合**了历史形态 `{ voiceTTS?: { apiKey?; targetModel? }; apiKey?; targetModel? }`）、`VoiceAlignPayload`；因此字段名改动会在主进程侧直接编译报错，而不是等运行时才发现。
-- **并非所有导出名都会出现在 import 语句里**：文件内类型相互引用（如 `IpcResult` 被 `PreloadApi` 的多个成员使用、`SystemVoiceItem extends SystemVoice`），另有一批 `*Result` / `*Payload` 类型只用于描述 handler 的返回结构与线上载荷形状（其中一部分被 `PreloadApi` 的返回类型内联引用）；这不代表它们是死代码，删除前需确认契约文档的完整性。
-- **纯类型文件**：编译后不产出 JS；不要在此文件写常量或函数（常量请放 `src/shared/ipc.ts`，需要纯函数映射时放 `src/shared/errors.ts`）。
+- **主进程 handler 的 `payload` 参数一律标注契约类型**：如 `ProjectSaveSubtitlePayload`、`ProjectAgentPayload`、**`ProjectPickMediaPayload` / `ProjectAddMaterialsPayload` / `ProjectSaveMaterialsPayload`**、`VoiceSaveConfigPayload`（`voice:save-config` 的形参另**联合**了历史形态）、`VoiceAlignPayload`；因此字段名改动会在主进程侧直接编译报错。
+- **并非所有导出名都会出现在 import 语句里**：文件内类型相互引用（如 `IpcResult` 被 `PreloadApi` 的多个成员使用、`SystemVoiceItem extends SystemVoice`），另有一批 `*Result` / `*Payload` 类型只用于描述 handler 的返回结构与线上载荷形状；这不代表它们是死代码，删除前需确认契约文档的完整性。
+- **纯类型文件**：编译后不产出 JS；不要在此文件写常量或函数（常量请放 `src/shared/ipc.ts` / `src/shared/constants.ts`，需要纯函数映射时放 `src/shared/errors.ts`）。

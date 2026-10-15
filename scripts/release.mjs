@@ -194,7 +194,7 @@ function ossBackend(bucket) {
   }
   for (const f of files) {
     if (!f.exists) continue
-    const dest = 'oss://' + bucket + '/MarvisStudio/' + f.name
+    const dest = 'oss://' + bucket + '/shadowmill/' + f.name
     const args = ['cp', '-f', f.abs, dest]
     if (env.OSS_ACCESS_KEY_ID && env.OSS_ACCESS_KEY_SECRET) {
       args.push('--access-key-id', env.OSS_ACCESS_KEY_ID, '--access-key-secret', env.OSS_ACCESS_KEY_SECRET)

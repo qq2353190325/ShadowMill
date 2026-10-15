@@ -11,8 +11,8 @@
 
 本文件集中渲染层自己的约定，两类：
 
-1. **`localStorage` 键名**（原有）。此前 `'myapp.projectCtx'` 在 `App.vue` 与 `useAppStore.ts` 两处各写一遍字面量、`'myapp.settingsSection'` 写在 `SettingsPage/index.vue` 里，「同一个键散落多处」没有任何编译期提示。
-2. **自定义模型的服务商预设**（`MODEL_PROVIDERS`）。设置页「自定义模型」的 Base URL / 模型 ID 由手填输入框改为下拉预设（保留手填兜底），**预设表放这里**——它是跨文件的字面量，且将来别的入口（如首次配置向导）也可能复用；设置页只负责把表渲染成 `HfSelect` 的分组选项（见 [pages/SettingsPage.md](./pages/SettingsPage.md) §2.2 / §2.3）。
+1. **`localStorage` 键名**（原有）。此前 `'myapp.projectCtx'` 在 `App.vue` 与 `useAppStore.ts` 两处各写一遍字面量、`'myapp.settingsSection'` 由设置页自己转存（现在是 `pages/SettingsPage/constants.ts` 的 `SETTINGS_SECTION_KEY`），「同一个键散落多处」没有任何编译期提示。
+2. **自定义模型的服务商预设**（`MODEL_PROVIDERS`）。设置页「自定义模型」的 Base URL / 模型 ID 由手填输入框改为下拉预设（保留手填兜底），**预设表放这里**——它是跨文件的字面量，且将来别的入口（如首次配置向导）也可能复用；设置页的「模型配置」区块（`pages/SettingsPage/components/ModelSection.vue`）只负责把表渲染成 `HfSelect` 的分组选项（见 [pages/SettingsPage.md](./pages/SettingsPage.md) §4.1 / §4.1.1）。
 
 它与 `@shared/constants` 的分工（源码头部注释写明）：
 
@@ -29,7 +29,7 @@
 |---|---|---|
 | `STORAGE_PREFIX` | `'myapp.'` | 两个键的公共前缀（源码说明：这是首次上线时的 npm 包名） |
 | `STORAGE_KEY_PROJECT_CTX` | `STORAGE_PREFIX + 'projectCtx'`（即 `'myapp.projectCtx'`） | 上次打开的项目名。`useAppStore.saveProjectCtx()` 写、`App.vue` 的 `initApp()` 启动时读 |
-| `STORAGE_KEY_SETTINGS_SECTION` | `STORAGE_PREFIX + 'settingsSection'`（即 `'myapp.settingsSection'`） | 设置页上次停留的分类。`SettingsPage/index.vue` 用 `readSection()` 读（经页面内别名 `SETTINGS_SECTION_KEY`），并用 `watch(activeSection)` 写 |
+| `STORAGE_KEY_SETTINGS_SECTION` | `STORAGE_PREFIX + 'settingsSection'`（即 `'myapp.settingsSection'`） | 设置页上次停留的分类。`pages/SettingsPage/helpers.ts` 用私有的 `readActiveSection()` 读、`persistActiveSection()` 写（键名经页面级 `SETTINGS_SECTION_KEY`（在 `pages/SettingsPage/constants.ts` 里由本常量赋值得来）转一手），外壳 `index.vue` 用 `watch(activeSection)` 触发写入 |
 
 ### 2.1 值的推导关系
 
@@ -40,7 +40,7 @@
 | 键 | 值形态 | 写入方 | 读取方 | 容错 |
 |---|---|---|---|---|
 | `STORAGE_KEY_PROJECT_CTX` | `JSON.stringify({ name })`（**只存项目名**；历史值里可能残留的 `builtin` 字段被忽略） | `useAppStore.saveProjectCtx()`（`switchProject()` 内调用） | `App.vue` 的 `initApp()`：`JSON.parse(localStorage.getItem(键) \|\| 'null')`，取到 `saved.name` 才回填 `appState.currentName` | 整段包在 `try/catch` 中，脏数据 / 非 JSON 静默忽略 |
-| `STORAGE_KEY_SETTINGS_SECTION` | 设置分类字符串：`'model'` / `'voice'` / `'render'` / `'update'` / `'whisper'` | `SettingsPage/index.vue` 的 `watch(activeSection, v => localStorage.setItem(键, v))` | 同页 `readSection()`：值必须落在 `SECTIONS` 白名单内，否则回退 `'model'` | 读与写各自 `try/catch`（注释说明「隐私模式等场景静默忽略」） |
+| `STORAGE_KEY_SETTINGS_SECTION` | 设置分类字符串：`'model'` / `'voice'` / `'render'` / `'update'` / `'whisper'` | `pages/SettingsPage/helpers.ts` 的 `persistActiveSection(v)`（由外壳 `index.vue` 的 `watch(activeSection, v => persistActiveSection(v))` 调用） | 同文件私有的 `readActiveSection()`：值必须落在 `SETTINGS_SECTION_KEYS` 白名单内，否则回退 `'model'` | 读与写各自 `try/catch`（注释说明「隐私模式等场景静默忽略」） |
 
 ## 3. 服务商预设（`ProviderPreset` / `MODEL_PROVIDERS`）
 
@@ -55,7 +55,7 @@ export interface ProviderPreset {
 }
 ```
 
-`baseUrls` 是**纯 URL 字符串数组**：`HfSelect` 的选项 `label` 直接取 URL 本身，设置页把它整条映射成选项（见 [pages/SettingsPage.md](./pages/SettingsPage.md) §2.2.1）。早前的 `{ url; note; disabled? }` 对象与「Anthropic 灰项」已一并删除，理由见 §3.3 最后两条。
+`baseUrls` 是**纯 URL 字符串数组**：`HfSelect` 的选项 `label` 直接取 URL 本身，设置页把它整条映射成选项（见 [pages/SettingsPage.md](./pages/SettingsPage.md) §4.1.1）。早前的 `{ url; note; disabled? }` 对象与「Anthropic 灰项」已一并删除，理由见 §3.3 最后两条。
 
 > `HfSelect` 组件**本身仍然支持** `HfSelectOption.disabled`（不可点选的选项行，[components.md](./components.md)），只是本表不再用它——组件能力与预设表的设计取舍是两件事。
 
@@ -78,7 +78,7 @@ export interface ProviderPreset {
 - **智谱：编码来源 + 两处注意**。编码有官方原文的是 `glm-5.3`（迁移页 checklist「更新模型编码为 `glm-5.3`」、示例 `model="glm-5.3"`）与 `glm-5.3-flash` / `glm-5.3-flashx`（Flash 页原文「Model Code：`glm-5.3-flash/glm-5.3-flashx`」）；`glm-5.2` / `glm-5.1` / `glm-5` 不在当前「推荐模型」表里，编码是**推断**的（未在官方文档中查到），要用「测试连接」或控制台核对。① 智谱**强制开启思考**（`thinking.type` 只支持 `enabled`、不支持禁用），但流式仍回传 `delta.reasoning_content` / `delta.content`，与 `htmlAgent` 的解析字段一致，所以能直接跑；② **智谱的 base URL 已确认为** `https://open.bigmodel.cn/api/paas/v4/`（官方写法**带结尾斜杠**，由使用者核对后提供）；本表**刻意存成不带结尾斜杠**——本项目两条消费路径最终都是「baseUrl + `/chat/completions`」，带斜杠会拼出双斜杠 `.../v4//chat/completions`（服务端会不会拒绝未验证，但没必要冒这个险），不带斜杠则两条路都拼得干净。**「不存结尾斜杠」这条约定适用于将来新增的每一家**：接口文档给的是带斜杠写法时照此去掉再存。
 - **MiniMax：9 个编码全部照抄官方原文，且大小写敏感**（`MiniMax-M2.7-highspeed`，不是 `minimax-m2.7-hs` 之类），官方 OpenAI 兼容 base_url 就是 `https://api.minimax.cn/v1`（其 curl 示例为 `.../v1/chat/completions`，与本项目「baseUrl + `/chat/completions`」拼法一致）。三处注意：① 官方注明 **`MiniMax-M3.1-Flash-Preview` 暂时仅通过 M Plan 和 MiniMax Code 提供**——普通按量付费 API Key 可能调不通，**这不是编码写错了**；② 官方同时给出 Anthropic 兼容端点 `https://api.minimax.cn/anthropic` 并且**推荐**那条，本应用不支持，因此**不列入本表**（理由见本节最后两条；官方首推它这一点正是需要留意的地方——使用者若照官方文档抄了那条，应用用不了）；③ MiniMax **同样不支持关闭思考**（传 `thinking:{"type":"disabled"}` 或 `effort:"none"` 返回 400），但思考内容也走 `reasoning_content`，与 `htmlAgent` 的解析字段一致。
 - **只列 OpenAI 格式的端点**：本应用**只实现了 OpenAI 格式**，所以表里只放该家的 OpenAI 兼容 base URL，**Anthropic 格式的端点一条都不列**（DeepSeek 与 MiniMax 都有、MiniMax 官方还首推它）。理由：这不是「漏了」——卡片提示已经写明「只支持 OpenAI 格式的端点，Anthropic 格式暂不支持」，再在下拉里列两个灰项属于**同一句话说两遍**（用户此前对「OpenAI 兼容模式」重复出现的同类反馈，见 [pages/SettingsPage.md](./pages/SettingsPage.md) §5.24）；只显示能用的端点，**每家的下拉就只有一条、没有可纠结的选项**。
-- **Base URL 每家用一条官方写法**：DeepSeek 的 OpenAI 格式同时接受带与不带 `/v1` 两种拼法，属**同一格式的写法差异**，所以**只列一条、不并列**（并列会让用户以为要在两条里挑一条"更对的"）；百炼兼容模式的 `/v1` 则是它路径的**固定组成部分**、不是可选项，照原样保留。既然没有 `note` 字段，设置页就把 URL 本身当选项文字（不再拼接任何说明），见 [pages/SettingsPage.md](./pages/SettingsPage.md) §2.2.1。
+- **Base URL 每家用一条官方写法**：DeepSeek 的 OpenAI 格式同时接受带与不带 `/v1` 两种拼法，属**同一格式的写法差异**，所以**只列一条、不并列**（并列会让用户以为要在两条里挑一条"更对的"）；百炼兼容模式的 `/v1` 则是它路径的**固定组成部分**、不是可选项，照原样保留。既然没有 `note` 字段，设置页就把 URL 本身当选项文字（不再拼接任何说明），见 [pages/SettingsPage.md](./pages/SettingsPage.md) §4.1.1。
 
 ## 4. 为什么前缀故意不跟随品牌名
 
@@ -97,7 +97,8 @@ export interface ProviderPreset {
 | 依赖 | 无 | 零 import、零副作用，是纯常量 / 纯数据模块 |
 | 被 import | `src/renderer/src/App.vue` | `STORAGE_KEY_PROJECT_CTX`（`import { … } from '@renderer/constants'`） |
 | 被 import | `src/renderer/src/composables/useAppStore.ts` | `STORAGE_KEY_PROJECT_CTX`（`saveProjectCtx()` 写入） |
-| 被 import | `src/renderer/src/pages/SettingsPage/index.vue` | `STORAGE_KEY_SETTINGS_SECTION`（赋给页面内 `SETTINGS_SECTION_KEY` 后读写）+ `MODEL_PROVIDERS`（构建 Base URL / 模型 ID 两个下拉的分组选项） |
+| 被 import | `src/renderer/src/pages/SettingsPage/constants.ts` | `STORAGE_KEY_SETTINGS_SECTION`（转成页面级 `SETTINGS_SECTION_KEY`，由 `pages/SettingsPage/helpers.ts` 读写） |
+| 被 import | `src/renderer/src/pages/SettingsPage/components/ModelSection.vue` | `MODEL_PROVIDERS`（构建 Base URL / 模型 ID 两个下拉的分组选项） |
 | 类型归属 | `tsconfig.web.json` | 本文件在渲染层源码根，由渲染层子工程编译 |
 | 别名 | `@renderer/*` → `src/renderer/src` | 跨目录导入统一走别名（与项目约定一致）；同目录内部才用相对路径 |
 

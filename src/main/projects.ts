@@ -3,9 +3,12 @@
 // 每个项目 = userData\projects\<项目名>\ 下一个目录：
 //   subtitle.txt  字幕文本
 //   index.html    由字幕生成的 HTML composition
-//   project.json  项目元数据（name/subtitle/htmlPath/videoPath/title 等）
+//   project.json  项目元数据（name/subtitle/htmlPath/videoPath/materials/title 等）
+//   images/       图片素材（HTML 生成用，project.json 的 materials 以相对引用登记）
+//   video/        视频素材（同上）
 // 提供：scanProjects / projectDir / projectFilePath / readProject / writeProject /
-//       ensureProject / parseSubtitle / copyAudioIntoProject（供 voice 引用）+ 全部 project:* IPC
+//       ensureProject / parseSubtitle / copyAudioIntoProject（供 voice 引用）/
+//       copyMaterialIntoProject + normalizeMaterials + 全部 project:* IPC
 // 依赖：htmlAgent(chatWithCustomModel / extractHtmlFromReply) /
 //       hfEnv(isHyperframesComposition) / runtime(确保运行环境包已解包) / settings(渲染档位白名单) / dialog / shell
 import { app, ipcMain, dialog, shell } from 'electron'
@@ -14,6 +17,7 @@ import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './htmlAgent'
 import { configTargetOf } from '../shared/errors'
+import { IMAGE_MATERIAL_EXTS, MAX_MATERIALS, VIDEO_MATERIAL_EXTS } from '../shared/constants'
 import * as hfEnv from './hfEnv'
 import * as runtime from './runtime'
 import { pickRenderOverride } from './settings'
@@ -21,11 +25,16 @@ import { IPC } from '../shared/ipc'
 import type {
   ContentScript,
   Project,
+  ProjectAddMaterialsPayload,
   ProjectAgentPayload,
   ProjectExportSrtPayload,
+  ProjectMaterial,
+  ProjectMaterialKind,
   ProjectNamePayload,
+  ProjectPickMediaPayload,
   ProjectSaveContentPayload,
   ProjectSaveHtmlPayload,
+  ProjectSaveMaterialsPayload,
   ProjectSaveSubtitlePayload,
   ProjectSetAudioPayload,
   ProjectSetRenderPayload,
@@ -89,6 +98,7 @@ function ensureProject(name: string): Project {
     subtitle: '',
     htmlPath: '',
     videoPath: '',
+    materials: [],
     audioFile: '',
     content: { style: '', scenes: [] },
     createdAt: new Date().toISOString()
@@ -197,28 +207,81 @@ function copyAudioIntoProject(name: string, audioPath: string): string {
   }
 }
 
-// 将外部视频复制进项目 video/ 目录，返回相对引用（video/xxx）；复制失败返回 ''
-function copyVideoIntoProject(name: string, videoPath: string): string {
-  if (!name || !videoPath || !fs.existsSync(videoPath)) return '';
+// ===== 项目素材库（图片 / 视频）=====
+// 素材按 kind 落到各自的目录；与场景/字幕一样，project.json 里只登记**项目内相对引用**（file），
+// 因此项目目录可以整体搬走/复制，页面里的 <img src="images/x.png"> 也不会失效。
+const MATERIAL_DIR: Record<ProjectMaterialKind, string> = { image: 'images', video: 'video' };
+
+// 素材 id：进入界面即稳定不变（勾选、移除都按它定位），与文件名解耦（同名文件重复导入也不会串）
+let materialSeq = 0;
+function newMaterialId(): string {
+  materialSeq++;
+  return 'mat-' + Date.now().toString(36) + '-' + materialSeq;
+}
+
+// 由扩展名判素材类型；白名单外一律不认（返回 ''），调用方自行跳过
+function materialKindOf(filePath: string): ProjectMaterialKind | '' {
+  const ext = path.extname(String(filePath || '')).replace('.', '').toLowerCase();
+  if (IMAGE_MATERIAL_EXTS.includes(ext)) return 'image';
+  if (VIDEO_MATERIAL_EXTS.includes(ext)) return 'video';
+  return '';
+}
+
+// 将外部图片 / 视频复制进项目素材目录，返回相对引用（images/xxx | video/xxx）；复制失败返回 ''
+function copyMaterialIntoProject(name: string, kind: ProjectMaterialKind, srcPath: string): string {
+  if (!name || !srcPath || !fs.existsSync(srcPath)) return '';
   try {
-    const videoDir = path.join(projectDir(name), 'video');
-    fs.mkdirSync(videoDir, { recursive: true });
-    const basename = path.basename(videoPath).replace(/[\\/:*?"<>|]/g, '_');
+    const dirName = MATERIAL_DIR[kind];
+    const dir = path.join(projectDir(name), dirName);
+    fs.mkdirSync(dir, { recursive: true });
+    const basename = path.basename(srcPath).replace(/[\\/:*?"<>|]/g, '_');
     const extIndex = basename.lastIndexOf('.');
     const stem = extIndex > 0 ? basename.slice(0, extIndex) : basename;
     const ext = extIndex > 0 ? basename.slice(extIndex) : '';
     let saveName = basename;
     let i = 1;
-    while (fs.existsSync(path.join(videoDir, saveName))) {
+    while (fs.existsSync(path.join(dir, saveName))) {
       saveName = stem + '_' + i + ext;
       i++;
       if (i > 1000) break;
     }
-    fs.copyFileSync(videoPath, path.join(videoDir, saveName));
-    return 'video/' + saveName;
+    fs.copyFileSync(srcPath, path.join(dir, saveName));
+    return dirName + '/' + saveName;
   } catch (e) {
     return '';
   }
+}
+
+// 素材列表规范化（**读盘与写盘共用**）：脏数据在进入渲染层之前就被清掉，写回时也不会落进 project.json。
+// ① 非数组/非对象丢弃；② kind 只认 image/video；③ file 必须是本项目 images/ 或 video/ 下的相对路径
+// （挡掉 ../ 与绝对路径这类越权引用）；④ id 缺失补一个；⑤ selected 缺省视为 true；⑥ 条数截到 MAX_MATERIALS。
+function normalizeMaterials(raw: unknown): ProjectMaterial[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: ProjectMaterial[] = [];
+  for (const item of list) {
+    if (out.length >= MAX_MATERIALS) break;
+    const o = (item && typeof item === 'object' && !Array.isArray(item)) ? item as Record<string, unknown> : null;
+    if (!o) continue;
+    const kind: ProjectMaterialKind | '' = o.kind === 'image' ? 'image' : (o.kind === 'video' ? 'video' : '');
+    if (!kind) continue;
+    const file = typeof o.file === 'string' ? o.file.replace(/\\/g, '/').replace(/^\.\//, '') : '';
+    if (!file || file.includes('..') || !file.startsWith(MATERIAL_DIR[kind] + '/')) continue;
+    const addedAt = typeof o.addedAt === 'string' && o.addedAt ? o.addedAt : new Date().toISOString();
+    out.push({
+      id: (typeof o.id === 'string' && o.id) ? o.id : newMaterialId(),
+      kind,
+      file,
+      label: (typeof o.label === 'string' && o.label) ? o.label : path.basename(file),
+      selected: o.selected !== false,
+      addedAt
+    });
+  }
+  return out;
+}
+
+// 素材白名单的可读文案（失败提示里给用户看）
+function materialExtsText(): string {
+  return ['图片 ' + IMAGE_MATERIAL_EXTS.join('/'), '视频 ' + VIDEO_MATERIAL_EXTS.join('/')].join('，');
 }
 
 // 拼接生成/修改 HTML 时的用户提示（字幕 + 背景音频素材，均可选）
@@ -452,10 +515,10 @@ function applyBgmToHtml(name: string, proj?: Project): boolean {
   }
 }
 
-// 素材选择结果（生成/修改共用）：字幕 / 视频引用
-// 两者都只是「要不要带上」，都不带路径：视频的自定义导入走 project:set-video（复制进项目 video/ 并登记），
+// 素材选择结果（生成/修改共用）：字幕 / 本次参与生成的项目素材
+// 两者都只是「要不要带上」，都不带绝对路径：素材的导入走 project:add-materials（复制进项目并登记），
 // 音频则由 applyBgmToHtml 注入 HTML，完全不经过这里。
-function resolveMaterials(proj: Project, payload: ProjectAgentPayload): { subtitleText: string; videoRef: string } {
+function resolveMaterials(proj: Project, payload: ProjectAgentPayload): { subtitleText: string; materials: ProjectMaterial[] } {
   // 字幕：'' = 不使用；'__current__' = 当前项目字幕；其他 = 指定带字幕的项目名
   let subtitleText = '';
   const subSel = payload.subtitleProject;
@@ -464,20 +527,42 @@ function resolveMaterials(proj: Project, payload: ProjectAgentPayload): { subtit
     const src = readProject(subSel);
     subtitleText = (src && src.subtitle) || '';
   }
-  // 视频素材：'' = 不使用；'__current__' = 当前项目视频素材
-  const videoRef = payload.videoPath === '__current__' ? (proj.videoMaterial || '') : '';
-  return { subtitleText, videoRef };
+  // 素材：按 id 从项目素材库取（顺序 = 渲染层列表顺序）；取不到的 id 静默忽略
+  const ids = Array.isArray(payload.materialIds) ? payload.materialIds : [];
+  const all = normalizeMaterials(proj.materials);
+  const materials = ids
+    .map((id) => all.find((m) => m.id === id))
+    .filter((m): m is ProjectMaterial => !!m);
+  return { subtitleText, materials };
+}
+
+// 素材块（图片 / 视频分开写）：给模型的是**项目内相对路径**——页面里直接 <img src="images/x.png">，
+// 预览走 hgpreview:// 协议、转视频时同目录相对引用同样成立（与背景音轨、gsap.min.js 同一套相对引用规则）。
+function buildMaterialBlock(materials: ProjectMaterial[]): string {
+  const imgs = materials.filter((m) => m.kind === 'image');
+  const vids = materials.filter((m) => m.kind === 'video');
+  const list = (arr: ProjectMaterial[]): string => arr.map((m) => m.file + '（原文件名 ' + m.label + '）').join('、');
+  const parts: string[] = [];
+  if (imgs.length) {
+    parts.push('\n【图片素材】项目内图片文件：' + list(imgs) + '。请按 <img src="' + imgs[0].file
+      + '"> 这类项目内相对路径嵌入，并用 GSAP 为每张图编排入场/退场（淡入淡出、位移、缩放）与切换节奏；多张图片按内容脚本的场景顺序分配。');
+  }
+  if (vids.length) {
+    parts.push('\n【视频素材】项目内视频文件：' + list(vids) + '。请用 <video src="' + vids[0].file
+      + '" autoplay muted loop playsinline> 嵌入，并用 GSAP 时间轴编排其入场/出场与播放时段。');
+  }
+  return parts.join('');
 }
 
 // 构造 Agent 用户提示（生成与修改共用；extra 置于最前——修改场景为「当前 HTML 源码」段）
-function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText: string; videoRef: string }, extra: string[]): string {
+function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText: string; materials: ProjectMaterial[] }, extra: string[]): string {
   return buildAgentPrompt([
     ...extra,
     prompt,
     buildContentBlock(proj.content),
     mats.subtitleText ? '\n【项目字幕】每行格式为 [开始-结束] 文本，时间为秒、可带小数（毫秒精度，如 17.920）：该条字幕必须在开始时间出现、在结束时间前完成淡出，严格按此窗口显示，不得挂到下一条开始；GSAP 时间轴直接用这些小数秒定位（如 tl.to(el,{...},17.920)）；仅 [开始] 无结束时间的行自行按语义安排节奏。\n' + mats.subtitleText : '',
     '\n【音轨】背景音轨由应用在渲染前自动注入（<audio id="myv-bgm">），请勿写入、修改或删除任何 <audio> 标签，也不要为音轨预留页面元素。',
-    mats.videoRef ? '\n【视频素材】项目内视频文件：' + mats.videoRef + '，请将该视频作为页面内容的一部分嵌入（<video src="' + mats.videoRef + '" autoplay muted loop playsinline>），并用 GSAP 时间轴编排其入场/出场与播放时段。' : ''
+    buildMaterialBlock(mats.materials)
   ]);
 }
 
@@ -511,7 +596,9 @@ function register(ctx?: RegisterCtx): void {
 
   ipcMain.handle(IPC.Project.Load, (_event, name?: string) => {
     if (!name) return null;
-    return readProject(name) || ensureProject(name);
+    const proj = readProject(name) || ensureProject(name);
+    // 素材列表按当前盘上数据规范化后再交给渲染层（脏数据/越权路径在这里就被清掉，界面不必再校验一遍）
+    return { ...proj, materials: normalizeMaterials(proj.materials) };
   });
 
   // 保存字幕到当前项目
@@ -778,45 +865,69 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, htmlUpdated };
   });
 
-  // ===== 项目视频素材：让生成的 HTML 可嵌入视频片段（作为页面内容的一部分） =====
-  ipcMain.handle(IPC.Project.PickVideo, async () => {
+  // ===== 项目素材库：图片 / 视频（HTML 生成用；替代原来的「单个视频素材」） =====
+  // 一个文件框按 kind 给不同扩展名过滤；图片允许多选（一屏素材一次加完），视频单选（单文件常很大）
+  ipcMain.handle(IPC.Project.PickMedia, async (_event, payload?: ProjectPickMediaPayload) => {
     const win = getWindow();
-    if (!win) return null;
+    if (!win) return [];
+    const kind: ProjectMaterialKind = (payload && payload.kind === 'image') ? 'image' : 'video';
+    const exts = kind === 'image' ? [...IMAGE_MATERIAL_EXTS] : [...VIDEO_MATERIAL_EXTS];
     const r = await dialog.showOpenDialog(win, {
-      title: '选择视频文件（将复制进项目，作为页面素材嵌入 HTML）',
-      filters: [{ name: '视频文件', extensions: ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'] }],
-      properties: ['openFile']
+      title: kind === 'image'
+        ? '选择图片素材（将复制进项目，作为页面素材嵌入 HTML）'
+        : '选择视频素材（将复制进项目，作为页面素材嵌入 HTML）',
+      filters: [{ name: kind === 'image' ? '图片文件' : '视频文件', extensions: exts }],
+      properties: kind === 'image' ? ['openFile', 'multiSelections'] : ['openFile']
     });
-    if (r.canceled || !r.filePaths.length) return null;
-    return r.filePaths[0];
+    if (r.canceled) return [];
+    return r.filePaths || [];
   });
 
-  // 把视频复制进项目目录 video/ 并记录相对引用（videoMaterial 与成品 videoPath 字段区分）
-  ipcMain.handle(IPC.Project.SetVideo, (_event, payload?: ProjectSetVideoPayload) => {
+  // 把用户选中的外部文件复制进项目素材目录并登记（新素材默认参与生成；到上限或格式不支持则跳过并如实回报）
+  ipcMain.handle(IPC.Project.AddMaterials, (_event, payload?: ProjectAddMaterialsPayload) => {
     const name = payload && payload.name;
-    const videoPath = payload && payload.videoPath;
     if (!name) return { ok: false, message: '缺少项目名' };
-    if (!videoPath || !fs.existsSync(videoPath)) return { ok: false, message: '视频文件不存在' };
-    const videoFile = copyVideoIntoProject(name, videoPath);
-    if (!videoFile) return { ok: false, message: '视频复制到项目失败' };
+    const paths = (payload && Array.isArray(payload.paths) ? payload.paths : []).filter((p) => typeof p === 'string' && p);
+    if (!paths.length) return { ok: false, message: '没有选择文件' };
     const proj = ensureProject(name);
-    proj.videoMaterial = videoFile;
+    const list = normalizeMaterials(proj.materials);
+    const added: ProjectMaterial[] = [];
+    let skipped = 0;
+    for (const p of paths) {
+      if (list.length + added.length >= MAX_MATERIALS) { skipped++; continue; }
+      const kind = materialKindOf(p);
+      if (!kind) { skipped++; continue; }
+      const file = copyMaterialIntoProject(name, kind, p);
+      if (!file) { skipped++; continue; }
+      added.push({ id: newMaterialId(), kind, file, label: path.basename(p), selected: true, addedAt: new Date().toISOString() });
+    }
+    if (!added.length) {
+      return { ok: false, message: '没有可添加的素材：仅支持 ' + materialExtsText() + '，且上限 ' + MAX_MATERIALS + ' 个' };
+    }
+    proj.materials = [...list, ...added];
     writeProject(proj);
-    // abs：项目内绝对路径，供渲染层预览
-    return { ok: true, videoFile: proj.videoMaterial, abs: path.join(projectDir(name), videoFile) };
+    return {
+      ok: true,
+      materials: proj.materials,
+      message: skipped ? '已添加 ' + added.length + ' 个素材，跳过 ' + skipped + ' 个（格式不支持或已达上限 ' + MAX_MATERIALS + ' 个）' : undefined
+    };
   });
 
-  // 移除当前项目视频素材引用（保留视频文件，避免误删资源）
-  ipcMain.handle(IPC.Project.ClearVideo, (_event, payload?: ProjectNamePayload) => {
+  // 整份素材列表回写：**移除与勾选都走这条**（渲染层持完整列表，主进程只做规范化后落盘）。
+  // 移除素材只摘登记、**不删项目内的文件**（与原来的 clear-video 语义一致，避免误删资源）。
+  ipcMain.handle(IPC.Project.SaveMaterials, (_event, payload?: ProjectSaveMaterialsPayload) => {
     const name = payload && payload.name;
     if (!name) return { ok: false, message: '缺少项目名' };
     const proj = ensureProject(name);
-    proj.videoMaterial = '';
+    proj.materials = normalizeMaterials(payload && payload.materials);
     writeProject(proj);
-    return { ok: true };
+    return { ok: true, materials: proj.materials };
   });
 
   // 从项目视频素材提取原声音轨 → audio/ 下 .m4a（AAC 192k，同名前缀），设为背景音频
+  // 注意：素材改为多图/多视频素材库之后，本 handler 的**界面入口已临时注释下线**（原按钮在「HTML生成」页的
+  // 视频素材行；多视频下「提哪一条」需要按素材 id 重做，见 MaterialsSection.vue 里的注释块）。
+  // 本轮按用户要求「IPC 与 handler 原样保留」，因此它仍读历史字段 project.videoMaterial；恢复入口前先重做这一步。
   ipcMain.handle(IPC.Project.ExtractVideoAudio, async (_event, name?: string) => {
     if (!name) return { ok: false, message: '缺少项目名' };
     const proj = ensureProject(name);
@@ -920,5 +1031,6 @@ export {
   parseSubtitle,
   normalizeContent,
   copyAudioIntoProject,
-  copyVideoIntoProject
+  copyMaterialIntoProject,
+  normalizeMaterials
 };

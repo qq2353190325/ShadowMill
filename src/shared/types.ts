@@ -559,13 +559,31 @@ export interface Project {
   subtitleCount?: number
   htmlPath: string
   videoPath: string
+  // 历史字段（素材多视频化之前的那「一个视频素材」）：本轮起**不再写入**、素材列表也不读它。
+  // 保留声明只为不改动被暂时隐藏入口的 project:extract-video-audio handler（它仍按此字段定位视频）。
   videoMaterial?: string
+  // 项目素材库（图片 + 视频，多素材）：由 project:add-materials / project:save-materials 维护
+  materials?: ProjectMaterial[]
   audioFile: string
   content: ContentScript
   // 视频渲染档位的项目级覆盖：字段缺省即跟随全局默认（settings.json 的 render）
   render?: RenderOverride
   createdAt: string
   updatedAt?: string
+}
+
+// ===== 项目素材（HTML 生成用的图片 / 视频）=====
+// kind 决定素材落在哪个目录，也决定提示词里给模型的嵌入方式（<img> / <video>）
+export type ProjectMaterialKind = 'image' | 'video'
+// 一条素材：file 是**项目内相对引用**（images/xxx.png | video/xxx.mp4），
+// 与场景/字幕同级的跨进程契约；label 是原始文件名（界面显示 + 提示词里给模型读）
+export interface ProjectMaterial {
+  id: string
+  kind: ProjectMaterialKind
+  file: string
+  label: string
+  selected: boolean
+  addedAt: string
 }
 
 // 字幕行（projects.ts parseSubtitle 输出）：time / end 为秒，可带小数
@@ -614,7 +632,8 @@ export interface ProjectSetAudioPayload {
   name?: string
   audioPath?: string
 }
-// project:set-video 与 project:save-video 载荷同形（name + 绝对 videoPath），共用此类型
+// project:save-video 载荷（name + 绝对 videoPath）——注意这是**渲染产物的回写**，
+// 与「项目视频素材」无关（素材走 project:add-materials / project:save-materials）
 export interface ProjectSetVideoPayload {
   name?: string
   videoPath?: string
@@ -628,10 +647,6 @@ export interface ProjectSetAudioResult {
   audioFile: string
   // 设置/移除背景音频时，若 index.html 里的注入音轨被同步改写则为 true（渲染层据此刷新预览）
   htmlUpdated?: boolean
-}
-export interface ProjectSetVideoResult {
-  videoFile: string
-  abs: string
 }
 export interface ProjectReadHtmlResult {
   html: string
@@ -647,14 +662,38 @@ export interface ProjectOpenFolderOfResult {
   dir: string
 }
 
+// ===== 项目素材（图片 / 视频素材库）=====
+// project:pick-media 载荷：kind 决定文件框的扩展名过滤（白名单见 shared/constants.ts）；
+// 图片允许一次多选（一屏素材），视频单选（单个文件常很大）。
+export interface ProjectPickMediaPayload {
+  kind?: ProjectMaterialKind
+}
+// project:add-materials 载荷：把用户选中的**外部绝对路径**复制进项目素材目录并登记为素材
+export interface ProjectAddMaterialsPayload {
+  name?: string
+  paths?: string[]
+}
+// project:save-materials 载荷：整份素材列表回写（**移除与勾选都走这条**）。
+// 渲染层持有完整列表，主进程只做规范化（id/kind/file 校验 + 上限）后落盘，避免多组窄接口各写一遍读改写。
+export interface ProjectSaveMaterialsPayload {
+  name?: string
+  materials?: unknown
+}
+// 素材接口回执：materials 恒为落盘/读取后的完整列表，渲染层直接用它替换本地状态；
+// message 非空表示「部分成功」之类需要告知用户的补充说明（如跳过了几个不支持的文件）
+export interface ProjectMaterialsResult {
+  materials: ProjectMaterial[]
+  message?: string
+}
+
 // HTML 生成/修改的素材选择（键名与主进程 resolveMaterials 严格对应）：
 // subtitleProject：'' = 不使用；'__current__' = 当前项目字幕；其他 = 指定带字幕的项目名
-// videoPath：'' = 不使用；'__current__' = 当前项目视频素材（自定义导入走 project:set-video，不由本载荷传路径）
+// materialIds：本次参与生成的素材 id 列表（顺序即提示词里的顺序；空/缺省 = 不带素材）
 // 注：背景音频不是生成素材——它由应用按 project.audioFile 直接注入 HTML 的 <audio id="myv-bgm">，
 //     提示词只声明「不要写音轨标签」，模型不需要也无法处理音轨。
 export interface ProjectHtmlMaterials {
   subtitleProject?: string
-  videoPath?: string
+  materialIds?: string[]
 }
 // project:generate-html / project:modify-html 线上载荷 = 项目名 + 需求描述 + 素材（preload 展开合并）
 export interface ProjectAgentPayload extends ProjectHtmlMaterials {
@@ -849,9 +888,11 @@ export interface PreloadApi {
     pickAudio(): Promise<string | null>
     setAudio(name: string, audioPath: string): Promise<IpcResult<ProjectSetAudioResult>>
     clearAudio(name: string): Promise<IpcResult>
-    pickVideo(): Promise<string | null>
-    setVideo(name: string, videoPath: string): Promise<IpcResult<ProjectSetVideoResult>>
-    clearVideo(name: string): Promise<IpcResult>
+    // 项目素材（图片 / 视频素材库）：选文件 → 复制入库 → 列表回写
+    pickMedia(kind: ProjectMaterialKind): Promise<string[]>
+    addMaterials(name: string, paths: string[]): Promise<IpcResult<ProjectMaterialsResult>>
+    saveMaterials(name: string, materials: ProjectMaterial[]): Promise<IpcResult<ProjectMaterialsResult>>
+    // 保留（界面入口暂未开放）：从项目视频素材提取原声，覆盖设为背景音频
     extractVideoAudio(name: string): Promise<IpcResult<ProjectSetAudioResult>>
     openFolder(name: string): Promise<IpcResult>
     openFolderOf(dirOrFile: string): Promise<IpcResult<ProjectOpenFolderOfResult>>

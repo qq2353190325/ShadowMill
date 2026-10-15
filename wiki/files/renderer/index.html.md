@@ -35,10 +35,10 @@
 
 ### 2.1 CSP 指令逐条对照
 
-原始策略为：
+原始策略为（**本轮 `img-src` 新增 `hgpreview:`**）：
 
 ```
-default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:;
+default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: hgpreview: data:;
 frame-src file: hgpreview:; media-src 'self' file:; script-src 'self' 'unsafe-inline';
 connect-src 'self' ws://localhost:5173
 ```
@@ -47,9 +47,9 @@ connect-src 'self' ws://localhost:5173
 | --- | --- | --- |
 | `default-src` | `'self'` | 兜底策略：未显式列出的资源类型只允许同源。因此字体（`font-src`）与后续可能新增的类型都被限制为打包进产物的本地资源，不允许外链 CDN |
 | `style-src` | `'self' 'unsafe-inline'` | 允许同源样式表与**内联样式**。Vue SFC 的 `<style scoped>` 在运行时会以 `<style>` 标签注入，组件上也大量使用行内 `style`（如 StepBar 的 `width:210px`），故必须放开 `'unsafe-inline'`；启动画面的内联 `<style>` 同样依赖它 |
-| `img-src` | `'self' file: data:` | 图片允许同源、本地 `file:` 与 `data:`（占位图/内联图）。`file:` 是必需的：项目素材与预览缩略图直接来自磁盘路径 |
+| `img-src` | `'self' file: hgpreview: data:` | 图片允许同源、本地 `file:`、**`hgpreview:` 应用内协议**与 `data:`（占位图/内联图）。`file:` 是必需的：本地素材与试听图直接来自磁盘路径；**`hgpreview:` 是本轮为「HTML生成页」的素材缩略图新放行的**——`MaterialsSection.vue` 的 `thumbUrl()` 把图片素材拼成 `hgpreview://p/<项目名>/<相对路径>` 交给 `<img :src>`，dev 态 http 页面下 `file://` 会被 Chromium 拦截，因此缩略图与预览 iframe 走同一条自定义协议（见 2.4） |
 | `frame-src` | `file: hgpreview:` | 限定 iframe 可加载的源。`file:` 用于生产环境（`loadFile` 后同属 file 源）直接内嵌本地 HTML；`hgpreview:` 是主进程注册的预览专用协议，用于 dev 下绕过 Chromium 对 `http://localhost` 页面加载 `file://` iframe 的拦截 |
-| `media-src` | `'self' file:` | 音视频只允许同源与本地文件，禁止网络流媒体（配音试听、视频预览均为本地文件） |
+| `media-src` | `'self' file:` | 音视频只允许同源与本地文件，禁止网络流媒体（配音试听、视频预览均为本地文件）。**素材库不涉及媒体请求**：视频卡片刻意不抽帧，只用 `▶` 字符标记（见 2.4） |
 | `script-src` | `'self' 'unsafe-inline'` | 允许同源脚本与内联脚本。dev 下 Vite 会注入内联模块脚本/HMR 引导代码；生产构建产物为 `'self'` 的本地 JS |
 | `connect-src` | `'self' ws://localhost:5173` | XHR/fetch/WebSocket 目标。`ws://localhost:5173` 专为开发期 HMR 的 WebSocket 通道预留 |
 
@@ -85,6 +85,18 @@ HTML 是**静态标记、无法 `import` TS 常量**，而启动画面必须在�
 
 **收尾**：`src/renderer/src/main.ts` 在 `mount()` 之后加 `.boot-done`（`opacity: 0` + `pointer-events: none`，0.28s 过渡），300ms 后 `remove()` 掉节点。
 
+### 2.4 `hgpreview:` 的两个用途（都与 CSS 里的一条指令对应）
+
+| 用途 | 消费方 | 形态 | 对应 CSP 指令 |
+| --- | --- | --- | --- |
+| 预览 iframe | `HtmlGenPage/PreviewSection.vue` 的 `loadFrame()` | `hgpreview://p/<encodeURIComponent(项目名)>/<encodeURIComponent(relFile)>?v=<时间戳>`（`relFile` 取 `previewPath` 的文件名，兜底 `index.preview.html`） | `frame-src hgpreview:` |
+| **素材缩略图**（本轮新增） | `HtmlGenPage/MaterialsSection.vue` 的 `thumbUrl(file)` | `hgpreview://p/<encodeURIComponent(项目名)>/<encodeURIComponent(file)>`，`file` 是 `project.json` 里的项目内相对引用（`images/xxx.png`）；**整段做一次 `encodeURIComponent` 也成立**——主进程处理器按 `/` 切段后逐段 decode 再拼回相对路径，因此 `/` 变成 `%2F` 不影响定位 | `img-src hgpreview:` |
+
+其余两点：
+
+- **视频素材不抽帧**：卡片用 `<span class="mat-play">▶</span>` 占位（源码注释：抽帧要额外依赖，收益不抵成本），因此**不产生任何媒体请求**，`media-src` 不需要为素材库放行新源。
+- **协议本体在主进程**：`hgpreview` 由 `src/main/index.ts` 注册（`projects.projectDir(name)` 定位根目录 + 越权校验，见 [main/index.ts.md](../main/index.ts.md)）。本文件只负责「允许页面用它」。
+
 ## 3. 关键流程
 
 1. **开发模式**：主进程 `createWindow()` 检测到 `ELECTRON_RENDERER_URL`，调用 `loadURL(...)` 指向 `127.0.0.1:5173`；Vite 读取本文件，两个 `transformIndexHtml` 插件按 `order: 'pre'` 依次生效——`brandHtmlPlugin` 注入品牌文案、`cspDevWsPlugin` 修正 `connect-src`，随后再注入 HMR 客户端。
@@ -102,16 +114,16 @@ HTML 是**静态标记、无法 `import` TS 常量**，而启动画面必须在�
 | 协作 | `src/renderer/src/main.ts` | 挂载后加 `.boot-done` 并在 300ms 后移除 `#boot-splash`（本条是启动画面的收尾契约） |
 | 协作 | `src/main/index.ts` | 该文件的 `backgroundColor: '#0B1220'` 与启动画面同色，保证「窗口 → 画面」之间不闪白 |
 | 协作 | `src/shared/constants.ts` | 三个占位符的值来源（`APP_NAME` / `APP_NAME_EN` / `APP_SLOGAN_SHORT`），经 `brandHtmlPlugin()` 注入 |
-| 契约 | `hgpreview:` 协议 | `frame-src` 中的自定义协议由 `src/main/index.ts` 注册并在应用 ready 后 `protocol.handle` |
+| 契约 | `hgpreview:` 协议 | `frame-src`（预览 iframe）与 **`img-src`（素材缩略图）** 中的自定义协议由 `src/main/index.ts` 注册并在应用 ready 后 `protocol.handle`；两个消费方见 2.4 |
 | 无依赖 | 无第三方 CDN | CSP 未放开任何外部源，所有依赖必须打进产物 |
 
 ## 5. 注意事项与实现要点
 
-- **品牌文案不要在 `<title>` 或启动画面里写死**：一律用 `%APP_NAME%` / `%APP_NAME_EN%` / `%APP_SLOGAN_SHORT%`。写死会让「界面里的名字」与 `src/shared/constants.ts` 各改各的，而这类漂移没有编译期提示（`package.json` 的 `productName` 也只能在构建期告警，见 `checkBrandConsistency()`）。
+- **品牌文案不要在 `<title>` 或启动画面里写死**：一律用 `%APP_NAME%` / `%APP_NAME_EN%` / `%APP_SLOGAN_SHORT%`。写死会让「界面里的名字」与 `src/shared/constants.ts` 各改各的，而这类漂移没有编译期提示。
 - **启动画面的注释块必须保持单块闭合**：head 内 `<style>` 的注释 `/* … */` 一旦被提前闭合，后面那几行说明文字就会变成**无效 CSS 文本**；CSS 错误恢复会把它连同紧随其后的规则一起丢掉，表现是 `#boot-splash` 整条规则失效（启动画面裸奔、闪白）。改这段注释时确认只有一处 `*/`，且位于全部说明文字之后。
 - **CSP 是安全边界，不是装饰**：窗口使用 `contextIsolation: true` + `nodeIntegration: false`，渲染层只能通过 preload 暴露的命名空间访问主进程能力；CSP 进一步限制资源来源。新增外链资源（CDN 字体、在线图床）必须先改这里，否则会被静默拦截。
 - **`'unsafe-inline'` 的必要性**：Vue 运行时注入的 `<style>`、组件行内 style 与启动画面的内联样式都依赖它。移除会导致整个界面丢样式。
-- **`img-src`/`media-src` 必须含 `file:`**：本地素材按绝对路径直接引用，缺 `file:` 时预览会出现"图片/音频不显示但无报错"的现象。
+- **`img-src` 必须同时含 `file:` 与 `hgpreview:`**：`file:` 服务磁盘路径的图片，`hgpreview:` 服务**项目内素材缩略图**（`MaterialsSection.vue` 的 `<img :src="thumbUrl(m.file)">`）；缺 `hgpreview:` 的表现是「素材卡片缩略图位置空白但控制台只有一条 CSP 拦截、页面不报错」。`media-src` 仍只需 `'self' file:`——视频卡片不抽帧、不请求媒体。
 - **端口写死的风险与兜底**：`ws://localhost:5173` 与 `electron.vite.config.ts` 中固定的 `127.0.0.1:5173`/`strictPort: true` 相配套——端口被占用时 Vite 直接报错而不是静默换端口，避免 Electron 仍指向 5173 导致白屏。
 - **挂载点不可改名**：`#app` 必须与 `main.ts` 的 `mount('#app')` 逐字一致。
 - **启动画面不要挪进 `#app`**：`mount('#app')` 会清空 `#app` 的子节点，放进去就等于「靠 Vue 来删除自己」，无法做淡出收尾（现在由 `main.ts` 主动加 `.boot-done` 再 `remove()`）。它的样式也必须自包含——`main.css` 在 Vue 挂载时才随 JS 注入，指望 CSS 变量会先渲染出一片无色背景。

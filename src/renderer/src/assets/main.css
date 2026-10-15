@@ -1509,6 +1509,8 @@ body {
   font-size: 13px;
   font-family: inherit;
   text-align: left;
+  /* 导航项是 v-for 渲染的单行按钮：标签一律不换行，免得 4 字与 6 字的项在 150px 栏宽下高度不一致 */
+  white-space: nowrap;
   color: var(--text-secondary);
   background: transparent;
   border: 0;
@@ -1672,3 +1674,123 @@ body {
   50% { margin-left: 62%; }
   100% { margin-left: 0; }
 }
+
+/* ===== HTML生成页：项目素材库（图片 / 视频卡片墙） =====
+   素材以缩略图卡片呈现，勾选框与「移除」叠在卡片左上 / 右上角：
+   勾选决定「本次生成交给 Agent 的素材」，未勾选的卡片整体压暗（.off）但仍可操作。
+   列宽用 auto-fill + minmax：窄窗自动减列，不出现横向滚动。 */
+.mat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 12px;
+  margin-top: var(--space-2);
+}
+
+.mat-card {
+  position: relative;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(10, 17, 32, 0.72);
+  transition: border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.mat-card:hover { border-color: rgba(0, 212, 255, 0.45); }
+/* 未勾选：整体压暗（不是禁用——勾选框与文件名仍要看得清） */
+.mat-card.off { opacity: 0.5; }
+
+.mat-thumb {
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+/* 缩略图走 hgpreview:// 协议（CSP 的 img-src 需放行，见 src/renderer/index.html） */
+.mat-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 视频不抽帧：统一用 ▶ 标记（抽帧要额外依赖，收益不抵成本） */
+.mat-thumb .mat-play { font-size: 20px; color: var(--color-primary); text-shadow: var(--glow-primary); }
+
+.mat-meta { padding: 8px 10px 9px; }
+.mat-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 相对路径（模型实际拿到的引用）：等宽小字，与「我的音色」列表的次要列同一档位 */
+.mat-path {
+  margin-top: 3px;
+  font-size: 11px;
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 勾选框与「移除」键叠在卡片左上 / 右上角（两者都直接写在按钮上，不是包一层容器）：
+   z-index 是保险——缩略图在正常流里，绝对定位的按钮本就在它之上，显式抬一层免得将来加装饰元素时被盖住。 */
+.mat-check, .mat-del { position: absolute; top: 7px; z-index: 1; }
+.mat-check { left: 7px; }
+.mat-del { right: 7px; }
+/* 卡角上的移除键比常规 .hf-btn 小一号（11px / 更薄的内距），避免盖住缩略图 */
+.mat-del.hf-btn { padding: 2px 7px; font-size: 11px; border-radius: 6px; }
+
+/* 勾选框（复用不了设置页的 .hgen-check——那是「方块 + 文字标签」的行内组合） */
+.mat-check {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: #03131a;
+  background: rgba(10, 17, 32, 0.75);
+  border: 1px solid rgba(0, 212, 255, 0.5);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.mat-check:hover:not(:disabled) { border-color: var(--color-primary); }
+.mat-check.on {
+  background: linear-gradient(135deg, #00d4ff, #8b5cf6);
+  border-color: transparent;
+}
+.mat-check:disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* 每组末尾的添加卡片：虚线占位，与素材卡片同宽同高 */
+.mat-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 132px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px dashed rgba(0, 212, 255, 0.3);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+.mat-add i { font-style: normal; font-size: 18px; color: var(--color-primary); text-shadow: var(--glow-primary); }
+.mat-add:hover:not(:disabled) { border-color: var(--color-primary); color: var(--text-primary); }
+.mat-add:disabled { cursor: not-allowed; opacity: 0.5; }
+
+/* 素材标题旁的小字（「勾选的会随需求一起交给 Agent」/「n / 20」）：说明档 12px，不抢标题 */
+.mat-count {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+}
+/* 图片组的点用辅色（量子紫），与视频组（主色）区分 */
+.panel-title .dot.dot-img { background: var(--color-secondary); box-shadow: 0 0 6px var(--color-secondary); }

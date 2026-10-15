@@ -2,7 +2,7 @@
 // 模块级 reactive 单例；localStorage 键名见 @renderer/constants（STORAGE_KEY_PROJECT_CTX，
 // 结构不变，prod file:// 同源，上下文自动延续）。
 import { computed, reactive, ref } from 'vue'
-import type { ProjectMeta, RenderOverride } from '@shared/types'
+import type { ProjectMaterial, ProjectMeta, RenderOverride } from '@shared/types'
 import { STORAGE_KEY_PROJECT_CTX } from '@renderer/constants'
 import { pickRenderOverride } from '@renderer/utils/render'
 
@@ -19,7 +19,8 @@ export interface ProjectState {
   htmlPath: string
   videoPath: string
   audioFile: string
-  videoMaterial: string
+  // 项目素材库（图片 / 视频）：HTML 生成时勾选参与，结构见 @shared/types 的 ProjectMaterial
+  materials: ProjectMaterial[]
   htmlExists: boolean
   videoExists: boolean
   subtitleCount: number
@@ -90,7 +91,7 @@ export async function refreshProject(): Promise<void> {
     htmlPath: loaded.htmlPath || '',
     videoPath: loaded.videoPath || '',
     audioFile: loaded.audioFile || '',
-    videoMaterial: loaded.videoMaterial || '',
+    materials: Array.isArray(loaded.materials) ? loaded.materials : [],
     htmlExists: !!(entry && entry.hasHtml),
     videoExists: !!(entry && entry.hasVideo),
     subtitleCount: loaded.subtitleCount || 0,

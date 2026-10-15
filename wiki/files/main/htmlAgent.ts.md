@@ -128,7 +128,7 @@
 |--------|------|
 | `src/main/projects.ts` | 导入 `chatWithCustomModel`、`extractHtmlFromReply`、类型 `AgentProgress`；`project:generate-html` 与 `project:modify-html` 两个分支调用「模型调用 → `extractHtmlFromReply` 提取 HTML」，随后由 `hfEnv.localizeGsapHtml()` 把 CDN 引用改写为 `./gsap.min.js` 并落盘 |
 | `src/main/projects.ts` 进度链路 | `onProgress` 回调把 `AgentProgress` 交给 `progressText` 生成文案，再带 `text` 字段经 IPC 频道 `project:html-progress`（`IPC.Project.HtmlProgress`）推给渲染进程 |
-| `src/renderer/src/pages/HtmlGenPage/index.vue` | 通过 `window.projectTools.onHtmlProgress` 接收进度并展示 `thinkText` |
+| `src/renderer/src/pages/HtmlGenPage/index.vue` → `src/renderer/src/pages/HtmlGenPage/PreviewSection.vue` | **`index.vue` 通过 `window.projectTools.onHtmlProgress` 接收进度**（它同时写状态行 `status` / `statusClass` 与思考文本 `thinkText`），再以 props（`:status` / `:status-class` / `:think-text` / `:rendering`）传给同目录的 `PreviewSection.vue`——**展示落在 `PreviewSection.vue`**：`.hf-status` 状态行（`statusDisplay`）与「AI 思考过程（实时）」的 `<pre>{{ thinkText }}</pre>` 都在那里 |
 | `src/main/settings.ts` | `IPC.Settings.Save` / `IPC.Settings.Test` 维护与验证 `customModel` 配置 |
 
 依赖方向（见 `src/main/index.ts` 头部注释）：`settings ← htmlAgent ← projects ← voice ← ttsAlign`。

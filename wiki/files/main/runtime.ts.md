@@ -41,7 +41,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `cancelPrepare` | `() => IpcResult` | 非忙（`phase` 不在 `downloading` / `extracting` / `checking`）⇒ `{ ok:true, message:'当前没有正在进行的下载' }`；否则置 `cancelRequested`、`activeReq.abort()`、`activeChild.kill()`、写日志，返回 `{ ok:true, message:'已取消下载' }` |
 | `packsStatus` | `() => PackStatus` | 纯探测：逐包判 `installedEntry()` → legacy 满足 → `missing`，返回每包的 `{ state, id, root, files, unpackedBytes, bytes, legacy }` |
 | `missingPacks` | `(needs?: RuntimePackName[]) => RuntimePackName[]` | `packsStatus()` + `syncStatus()` 后，返回 `needs`（缺省 = 全部包）里 `state !== 'ready'` 的包（按 `PACK_DEFS` 顺序） |
-| `packSizeText` | `(names: RuntimePackName[]) => string` | 按 `PACK_DEFS.hint`（ffmpeg **43 MiB**、hyperframes **105 MiB**——两者都已按 2026-10-14 实测的 42.6 MB / 103.1 MB 回填）求和后 `bytesText()` 成「约 xx MB」，用于确认框与失败文案 |
+| `packSizeText` | `(names: RuntimePackName[]) => string` | 按 `PACK_DEFS.hint`（ffmpeg **43 MiB**、hyperframes **103 MiB**——两者都已按 2026-10-14 实测值取整到 MiB：42.6 → 43、103.1 → 103，合计 146.0 MB 与实测 145.7 MiB 一致）求和后 `bytesText()` 成「约 xx MB」，用于确认框与失败文案 |
 | `packRoots` | `() => Partial<Record<RuntimePackName, string>>` | 各包解出来的根目录（未就绪的不出现），供主进程其它模块定位资源 |
 | `runtimeStatus` | `() => RuntimeProgressPayload` | 同步探测后整理状态：`phase` 不在 `checking` / `downloading` / `extracting` 时按缺包重置成 `idle`（文案「运行环境需要下载（<体积>）」/ `percent=0`）或 `ready`（「运行环境已就绪」/ `percent=100`），返回 `payload()` |
 | `runtimeDir` | `() => string` | `<userData>/runtime` |
@@ -59,11 +59,11 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 
 | 名称 | 类型 | 说明 |
 |------|------|------|
-| `PACK_DEFS` | 常量数组 | 包注册表，**必须与 `scripts/pack-runtime.mjs` 的 `PACKS` 对应**：`ffmpeg`（title「音视频处理（ffmpeg）」、hint **43 MiB（按实测 42.6 MB 回填）**、关键文件 `ffmpeg/bin/ffmpeg.exe` + `ffmpeg/bin/ffprobe.exe`）、`hyperframes`（title「视频渲染引擎（HyperFrames）」、hint **105 MiB（按实测 103.1 MB 回填）**、关键文件 `hyperframes/node_modules/hyperframes/bin/hyperframes.mjs`）。`PACK_NAMES` 是它的 `name` 列表 |
+| `PACK_DEFS` | 常量数组 | 包注册表，**必须与 `scripts/pack-runtime.mjs` 的 `PACKS` 对应**：`ffmpeg`（title「音视频处理（ffmpeg）」、hint **43 MiB（实测 42.6 MiB 取整）**、关键文件 `ffmpeg/bin/ffmpeg.exe` + `ffmpeg/bin/ffprobe.exe`）、`hyperframes`（title「视频渲染引擎（HyperFrames）」、hint **103 MiB（按实测 103.1 MiB 取整）**、关键文件 `hyperframes/node_modules/hyperframes/bin/hyperframes.mjs`）。`PACK_NAMES` 是它的 `name` 列表 |
 | `PackManifest` | `interface`（**已导出**） | 清单结构：`name?` / `id` / `file` / `sha512` / `bytes` / `files` / `unpackedBytes` + 可选 `sourceKey?` / `appVersion?` / `createdAt?`。**字段必须与 `scripts/pack-runtime.mjs` 一致** |
 | `PacksState` | `interface`（未导出） | `userData/runtime/packs.json` 的形状：`{ version, packs: { <包名>: { id, files, unpackedBytes, at } }, legacy?: { id, root, at } }` |
 | `PackStatusEntry` / `PackStatus` | `interface` / `type`（`PackStatus` 已导出） | 单包探测结果 `{ state, id, root, files, unpackedBytes, bytes, legacy }`；`PackStatus = Record<RuntimePackName, PackStatusEntry>` |
-| `state` | 模块级对象 | `phase` / `pack` / `percent` / `packs` / `missing` / `status` / `message` / `detail` / `source` / `bytes` / `unpackedBytes` / `files`；初值 `phase:'idle'`、`message:'尚未检查运行环境'`、两包 `status` 均为 `'unknown'`。`phase` **刻意放宽为 `string`**（与 `updater.ts` 同因：跨回调写入后 TS 会把联合类型判成不可能分支），交出前由 `payload()` 断言成 `RuntimeProgressPayload['phase']` |
+| `state` | 模块级对象 | `phase` / `pack` / `percent` / `packs` / `missing` / `status` / `message` / `detail` / `source` / `bytes` / `unpackedBytes` / `files`；初值 `phase:'idle'`、`message:'尚未检查运行环境'`、两包 `status` 均为 `'unknown'`。`phase` **刻意放宽为 `string`**（与 `updater/base.ts` 的 `state.stage` 同因：跨回调写入后 TS 会把联合类型判成不可能分支），交出前由 `payload()` 断言成 `RuntimeProgressPayload['phase']` |
 | `inFlight` / `cancelRequested` / `activeReq` / `activeChild` | 模块级状态 | 并发锁（同时只跑一次准备）、取消标志、当前 HTTP 请求、当前 `7za` 子进程 |
 | `payload()` | 函数 | 把 `state` 转成 `RuntimeProgressPayload`：`percent` 先 clamp 到 `[0,100]` 再 `Math.round`；`packs` / `missing` / `status` 都是切片或浅拷贝；`cancellable = phase ∈ {checking, downloading, extracting}`（`cancelPrepare()` 本来就支持取消取清单阶段，界面以前只在下载 / 解包时才给「取消」按钮）——**所有回执与推送的唯一形状** |
 | `push()` / `setPhase(phase, message, detail?)` | 函数 | `push()` 取窗口并 `webContents.send(runtime:progress)`（窗口已销毁则忽略）；`setPhase` 写 `phase` / `message` / `detail` 后推一次 |
@@ -78,7 +78,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `legacyRoot()` | 函数 | 旧版整体包目录：优先 `packs.json` 里记的 `legacy.root`；否则读 `current.json` 的 `id` + `ok.json`，并要求「两包资源同时齐备」（去掉包名那一层再找一遍，避免把某个分包目录误认成整体包），命中就补记 `legacy` 并写日志 |
 | `installedEntry(name)` | 函数 | `packs.json` 有该包记录 **且** `packReadyAt(name, packDir(name))` 为真才返回记录，否则 `null` |
 | `syncStatus(status)` | 函数 | 把探测结果写进 `state.status`，并对已就绪的包调 `hfEnv.refreshPack(name, root)`——**探测即顺手校正 `hfEnv` 的解析** |
-| `feedUrl()` | 函数 | 与 `updater.ts` 同优先级：`getUpdaterSettings().feedUrl`（去尾斜杠、把非协议处的重复斜杠压成一个）→ 打包态 `resources/app-update.yml` / dev `dev-app-update.yml` 里的 `url:` 行 → 空串 |
+| `feedUrl()` | 函数 | 与 `updater/actions.ts` 的 `applyFeedUrl()` 同优先级：`getUpdaterSettings().feedUrl`（去尾斜杠、把非协议处的重复斜杠压成一个）→ 打包态 `resources/app-update.yml` / dev `dev-app-update.yml` 里的 `url:` 行 → 空串 |
 | `resolveSevenZip()` | 函数 | 解包器：`<resources>/tools/7za.exe`（非 win32 为 `7za`）→ dev 下的 `build/tools/7za(.exe)`；都没有返回 `null` |
 | `localPackDir()` | 函数 | 本地包目录：环境变量 `SHADOWMILL_RUNTIME_PACK`（指向文件则取其目录）→ 存在则用 `userData/runtime/local-import/`（设置页「从本地文件安装…」把 7z 与清单放这里）→ 空串 |
 | `readLocalManifest(dir, name)` | 函数 | 读 `<dir>/<name>.json`，校验 `id` / `file` 非空且 `<dir>/<file>` 存在，否则 `null` |
@@ -155,7 +155,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `../shared/ipc` | `IPC` | 频道常量 |
 | `../shared/types` | `type IpcResult`、`type RegisterCtx`、`type RuntimePackName`、`type RuntimePackState`、`type RuntimeProgressPayload` | 回执、注册上下文、包名与推送 / 回执载荷类型（③.6 节） |
 | `./hfEnv` | `* as hfEnv` | `refreshPack()`（按包交接资源根）——不再主要依赖 `refreshBuiltinResources()` |
-| `./settings` | `getUpdaterSettings` | 读 `feedUrl` 作为运行环境包的下载源（与 `updater.ts` 同优先级） |
+| `./settings` | `getUpdaterSettings` | 读 `feedUrl` 作为运行环境包的下载源（与 `updater/actions.ts` 的 `applyFeedUrl()` 同优先级） |
 
 > 本文件**不 import `dialog` / `shell`**：它不弹任何界面，失败信息经 `runtime:progress` / `runtime:prepare` 交给渲染层展示。
 
@@ -172,11 +172,11 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `src/preload/index.ts` | `runtimeTools` 命名空间：`status` / `prepare(packs?)` / `cancel` / `onProgress`（单订阅）分别转发上述四个频道 |
 | `src/renderer/src/composables/useRuntime.ts` | 模块级状态单例：`initRuntime()` 订阅 `runtime:progress` + 查一次 `runtime:status`，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()`。**它交给 `prepare()` 的包名数组必须是普通数组**（`toRaw(list).slice()`——Vue 响应式 `Proxy` 过不了结构化克隆），且非 ok 回执 / `invoke` 抛错会写进 `runtime` 状态（不再静默），见 [renderer/src/common.md](../renderer/src/common.md) §4.1 |
 | `src/renderer/src/composables/useEnvGate.ts` | 「需要下载运行环境」确认框：`guard(need, actionName, onContinue)` → `confirmDownload()`（内部 `rt.prepare(packs)`）/ `cancelDownload()` / `continueAction()`（**不自动续做**）。进度**不自己订阅** `runtime:progress`，而是 `watch(() => useRuntime().runtime.value, applyProgress, { deep: true })`——见 §5 的单订阅说明 |
-| `src/renderer/src/App.vue`、`src/renderer/src/pages/SettingsPage/index.vue` | 外壳横幅（下载中 + 取消 / 缺包 + 下载 / 失败 + 重试）与设置页运行环境行（三态 + 「下载运行环境」/「取消下载」/「从本地文件安装…」） |
+| `src/renderer/src/App.vue`、`src/renderer/src/pages/SettingsPage/components/UpdateSection.vue` | 外壳横幅（下载中 + 取消 / 缺包 + 下载 / 失败 + 重试）与设置页运行环境行（在 `UpdateSection` 内：三态 + 「下载运行环境」/「取消下载」/「从本地文件安装…」） |
 
 ## 5. 注意事项与实现要点
 
-- **`phase` 刻意放宽为 `string`**：与 `updater.ts` 同因——阶段由事件 / 异步回调跨函数写入，标注成 `RuntimePhase` 联合类型后 TS 的控制流分析会把最后一次赋值当成当前类型，后续比较被判「不可能分支」。交出前由 `payload()` 断言成 `RuntimeProgressPayload['phase']` 收口。
+- **`phase` 刻意放宽为 `string`**：与 `updater/base.ts` 的 `state.stage` 同因——阶段由事件 / 异步回调跨函数写入，标注成 `RuntimePhase` 联合类型后 TS 的控制流分析会把最后一次赋值当成当前类型，后续比较被判「不可能分支」。交出前由 `payload()` 断言成 `RuntimeProgressPayload['phase']` 收口。
 - **取清单有 20 秒硬超时（本次修复点）**：`httpText()` 的默认等待上限是 `MANIFEST_TIMEOUT_MS = 20 * 1000`，超时文案为「超时（20 秒无响应）：<url>」，`fetchRemoteManifest()` 把它翻成 `MANIFEST_TIMEOUT`，`runOnce()` 据此报「连接更新源超时，没能取到运行环境清单」——**不再回落成 `null`**（回落会被误报成「更新源上没有清单 / 404」）。修这条之前的实际表现：网络卡住时永远停在 `checking`、`inFlight` 一直挂着，之后每次点「下载运行环境」都被「正在准备另一个运行环境包，请稍候再试」挡回且界面毫无变化。超时**不算取消**（`isCancelError()` 先排掉），`.part` 残片保留待续传。
 - **`prepare` 的载荷必须能过结构化克隆**：`ipcRenderer.invoke` 会把参数结构化克隆，Vue 响应式 `Proxy`（`ref` 深层的数组）**不可克隆** ⇒ 直接抛 `DataCloneError`，主进程 handler 根本不会执行（`runtime.log` 一个字都没有、`userData/runtime/` 也不创建）。渲染层因此用 `toRaw(list).slice()` 交出普通数组；主进程侧不感知这一约束，别在文档 / 类型上把它写成「IPC 契约的一部分」。
 - **`ok.json` 是完整性标记，`packs.json` 是记录**：`installedEntry()` 要求「`packs.json` 有该包 `id`」**且**「目录内有 `ok.json`」**且**「关键文件都在」，三者缺一即视为未就绪并触发重下；解包成功时也**先写 `ok.json` 再写记录**——中途断电不会出现「记录指向一个没解完的目录」。

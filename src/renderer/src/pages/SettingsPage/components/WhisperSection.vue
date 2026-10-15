@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-// pages/SettingsPage/WhisperSection.vue —— 设置页语音识别模型（whisper.cpp）区块
+// pages/SettingsPage/components/WhisperSection.vue —— 设置页语音识别模型（whisper.cpp）区块
 // 原 JS 版 settings 模块 whisper.js（window.__settings.initWhisper）移植为 SettingsPage 子组件；
 // 网格按钮由事件委托改为逐卡 @click；下载进度订阅在 onMounted（preload 单订阅：切页即替换）。
 import { computed, onMounted, ref } from 'vue'

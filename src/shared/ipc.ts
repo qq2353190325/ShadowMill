@@ -95,9 +95,10 @@ export const IPC = {
     PickAudio: 'project:pick-audio',
     SetAudio: 'project:set-audio',
     ClearAudio: 'project:clear-audio',
-    PickVideo: 'project:pick-video',
-    SetVideo: 'project:set-video',
-    ClearVideo: 'project:clear-video',
+    // 项目素材库（图片 / 视频）：选文件 / 复制入库 / 整份列表回写（移除与勾选共用）
+    PickMedia: 'project:pick-media',
+    AddMaterials: 'project:add-materials',
+    SaveMaterials: 'project:save-materials',
     ExtractVideoAudio: 'project:extract-video-audio',
     ReadHtml: 'project:read-html',
     PreviewHtml: 'project:preview-html',

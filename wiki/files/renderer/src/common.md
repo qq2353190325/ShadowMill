@@ -50,7 +50,7 @@
 | `ProjectState` | `htmlPath` | `string` | 生成/修改得到的 HTML 绝对路径 |
 | `ProjectState` | `videoPath` | `string` | 渲染产出的视频路径 |
 | `ProjectState` | `audioFile` | `string` | 背景音频 / 生成语音路径 |
-| `ProjectState` | `videoMaterial` | `string` | 视频素材路径（可从其提取原声） |
+| `ProjectState` | `materials` | `ProjectMaterial[]` | **项目素材库**（图片 / 视频，结构见 `@shared/types` 的 `ProjectMaterial`：`id` / `kind` / `file` / `label` / `selected` / `addedAt`）；`refreshProject` 里写作 `materials: Array.isArray(loaded.materials) ? loaded.materials : []`——**旧的 `videoMaterial` 字段已从 `ProjectState` 删除**（`Project.videoMaterial` 在共享层退化为历史字段） |
 | `ProjectState` | `htmlExists` | `boolean` | HTML 是否真实存在（来自列表项 `hasHtml`，非详情字段） |
 | `ProjectState` | `videoExists` | `boolean` | 视频是否真实存在（来自列表项 `hasVideo`，非详情字段） |
 | `ProjectState` | `subtitleCount` | `number` | 字幕条数 |
@@ -89,7 +89,7 @@
 2. 按 `currentName` 在 `myProjects` 中查找 `entry`；找不到则把 `currentName` 回退为 `myProjects[0].name`（无则 `'demo-project'`）并重新查找一次。
 3. 发起第二次 IPC：`await window.projectTools.load(appState.currentName)`。
 4. **空值守卫**：`if (!loaded) { appState.project = null; return }` —— 主进程只在项目名为空（`currentName === ''`）时返回 `null`（`project:load` 的类型即 `Promise<Project \| null>`）；历史实现在这里直接解引用 `null` 会抛运行时报错，现在显式兜底为「无当前项目」，由页面走空态。
-5. 组装 `appState.project`，缺省值一律显式兜底：`title || '字幕动画'`、`subtitle / htmlPath / videoPath / audioFile / videoMaterial` 均为 `|| ''`、`htmlExists: !!(entry && entry.hasHtml)`、`videoExists: !!(entry && entry.hasVideo)`、`subtitleCount: loaded.subtitleCount || 0`、`content: loaded.content || { style: '', scenes: [] }`、`render: pickRenderOverride(loaded.render)`（渲染档位覆盖只保留合法字段，脏数据/缺省一律归为空覆盖 = 跟随全局默认）。
+5. 组装 `appState.project`，缺省值一律显式兜底：`title || '字幕动画'`、`subtitle / htmlPath / videoPath / audioFile` 均为 `|| ''`、**`materials: Array.isArray(loaded.materials) ? loaded.materials : []`**、`htmlExists: !!(entry && entry.hasHtml)`、`videoExists: !!(entry && entry.hasVideo)`、`subtitleCount: loaded.subtitleCount || 0`、`content: loaded.content || { style: '', scenes: [] }`、`render: pickRenderOverride(loaded.render)`（渲染档位覆盖只保留合法字段，脏数据/缺省一律归为空覆盖 = 跟随全局默认）。
 6. `htmlExists` / `videoExists` **不是**来自 `load` 的详情，而是来自第 2 步列表项 `entry`——产物存在性由主进程 `scanProjects()` 用文件系统检查得出。
 
 **`switchProject(name)`**：`appState.currentName = name` → `saveProjectCtx()` 立即持久化（即使随后刷新失败，下次启动仍记得用户选择）→ `await refreshProject()` 重新拉列表并加载详情。**单参数**（项目名）。
@@ -112,13 +112,13 @@
 
 **渲染端（`App.vue`）**：`const toasts = useToasts();`，模板为 `<TransitionGroup tag="div" name="toast" class="toast-host">` 内 `v-for="t in toasts" :key="t.id"` 的 `.toast-item`，文本 `{{ t.msg }}`。`:key="t.id"` 依赖自增 id 才能正确区分多条内容相同的提示（数组索引做 key 会导致过渡与列表复用错乱）；样式 `.toast-host` / `.toast-item` 由 `App.vue` 的 `<style scoped>` 提供（自旧版 `app.js` 的内联样式移植）。
 
-**使用方**：`App.vue`（`useToasts()` 取队列并渲染宿主）；其余均为调用 `toast()`——`components/NewProjectDialog.vue`（项目名为空、创建失败、创建成功）、`pages/ContentPage/index.vue`（保存成功/失败）、`pages/SubtitlePage/index.vue`（删除条目、复制、导出 SRT、保存、由脚本生成字幕）、`pages/HtmlGenPage/index.vue`（Agent 请求排队、生成/修改完成、导入导出、视频素材设置、背景音频选定与移除）、`pages/TextTtsPage/SynthSection.vue`（试听、设为背景音频）、`pages/TextTtsPage/AlignSection.vue`（对齐合成忙、取消、试听失效、写回结果）、`pages/SubtitlePage/TranscribeSection.vue`（转录回填结果）、`pages/VideoPreviewPage/index.vue`（重新加载结果）。约定式写法：主进程返回 `res.ok === false` 时统一 `toast((res as { message?: string })?.message || '默认文案')`，并且取消类结果（`canceled`）通常**不**提示。（`AboutPage` 与 `VoiceSection` 不使用 toast。）
+**使用方**：`App.vue`（`useToasts()` 取队列并渲染宿主）；其余均为调用 `toast()`——`components/NewProjectDialog.vue`（项目名为空、创建失败、创建成功）、`pages/ContentPage/index.vue`（保存成功/失败）、`pages/SubtitlePage/index.vue`（删除条目、复制、导出 SRT、保存、由脚本生成字幕）、`pages/HtmlGenPage/index.vue`（Agent 请求排队、生成/修改完成、下载 HTML、渲染档位改动与转视频）、`pages/HtmlGenPage/MaterialsSection.vue`（添加 / 移除 / 勾选素材的成功与失败提示）、`pages/HtmlGenPage/PreviewSection.vue`（背景音频选定与移除、语速、暂无预览）、`pages/TextTtsPage/SynthSection.vue`（试听、设为背景音频）、`pages/TextTtsPage/AlignSection.vue`（对齐合成忙、取消、试听失效、写回结果）、`pages/SubtitlePage/TranscribeSection.vue`（转录回填结果）、`pages/VideoPreviewPage/index.vue`（重新加载结果）。约定式写法：主进程返回 `res.ok === false` 时统一 `toast((res as { message?: string })?.message || '默认文案')`，并且取消类结果（`canceled`）通常**不**提示。（`AboutPage` 与 `VoiceSection` 不使用 toast。）
 
 **注意事项**：**模块级单例**使所有页面共享同一队列，因此同一时刻可能叠多条提示（宿主用固定定位 + `TransitionGroup` 依次排布）；**2800ms 是硬编码常量**，没有配置项，如需按类型区分时长需要先扩展 `ToastItem`；**无去重**，连续调用 `toast('保存成功')` 会得到两条独立计时、独立消失的提示；**计时器不随组件卸载取消**，定时器闭包只捕获 `id`，页面切换后仍会执行过滤，但过滤是幂等的（id 已不存在时结果不变）故不会出错；`id` 用普通变量而非响应式，因为它只作为 DOM key 使用、不需要参与响应式追踪；`useToasts()` 返回 `typeof toasts` 即 `Ref<ToastItem[]>`，调用方在模板中写 `v-for="t in toasts"` 时由 Vue 自动解包，若在脚本中使用需要 `.value`；**不适用于需要用户确认的消息**——本模块是“一闪而过”的轻提示，阻塞式确认应使用对话框类能力，而不是在此扩展。
 
 ## 3. 渲染进度：composables/useRenderProgress.ts
 
-HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进程经 `video:progress` 频道回推到渲染层。这些日志里混着两类内容：**结构化事件行** `[Render:trace] {"phase":...,"status":...,"elapsedMs":...,"message":...}` 与**普通日志 / 进度条行**（各种人类可读输出，没有固定结构）。本文件的职责是把这条嘈杂的文本流压成一句人话，写入全局 `renderProgress.text`，由渲染档位所在的「HTML生成」页（`pages/HtmlGenPage/index.vue`，**发起渲染**）与「视频预览」页（`pages/VideoPreviewPage/index.vue`，预览侧）共同展示，例如 `渲染中 · 逐帧捕获（已用 45s · 帧 320/900）：快速捕获未通过校验，改用逐帧截图（会慢一些）`。
+HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进程经 `video:progress` 频道回推到渲染层。这些日志里混着两类内容：**结构化事件行** `[Render:trace] {"phase":...,"status":...,"elapsedMs":...,"message":...}` 与**普通日志 / 进度条行**（各种人类可读输出，没有固定结构）。本文件的职责是把这条嘈杂的文本流压成一句人话，写入全局 `renderProgress.text`，由「HTML生成」页的预览卡片（`pages/HtmlGenPage/PreviewSection.vue`——**当前这页已拆成 3 个文件**，发起渲染的按钮仍在同目录的 `index.vue`）与「视频预览」页（`pages/VideoPreviewPage/index.vue`，预览侧）共同展示，例如 `渲染中 · 逐帧捕获（已用 45s · 帧 320/900）：快速捕获未通过校验，改用逐帧截图（会慢一些）`。
 
 **设计原则：宁可不刷新，也不显示用户看不懂的内容。** 推来的日志分三类，只有第一类能上屏：
 
@@ -178,7 +178,7 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 **展示侧有两处，语义不同**：
 
-- `pages/HtmlGenPage/index.vue`：`statusDisplay = computed(() => (rendering && renderProgress.text) ? renderProgress.text : status)` + `statusDisplayClass`（trace 接管时样式类返回 `''`）——**只有本页渲染中**才让全局 trace 顶掉本页状态文案。
+- `pages/HtmlGenPage/PreviewSection.vue`：`statusDisplay = computed(() => ((props.rendering && renderProgress.text) ? renderProgress.text : props.status))` + `statusDisplayClass`（trace 接管时样式类返回 `''`）——**只有渲染中**才让全局 trace 顶掉状态文案；`rendering` 由父页 `index.vue` 以 prop 传入（**`onHtmlProgress` 的订阅与 `status` / `thinkText` 的写入仍在 `index.vue`**，只是展示随预览卡片搬到了本组件）。
 - `pages/VideoPreviewPage/index.vue`：`statusText = computed(() => renderProgress.text || localStatus.value)`，模板 `:class="statusClass"`——不做 `rendering` 判定，全局 trace 非空即优先显示（本页**不发起渲染**，所以只在用户从「HTML生成」页发起渲染、又切回本页时才会命中 trace）。
 
 **注意事项**：**必须以完整行为单位解析**（`[Render:trace]` 行可能被 IPC 分块从任意位置截断，直接对每次 chunk 做 `JSON.parse` 会频繁失败）；**半行只在“收到换行”后才被消费**，若 CLI 的最后一行没有以 `\n` 结尾（进程结束时常见），它不会被本次解析计入——这是刻意取舍，避免解析半截 JSON；**“宁可不刷新”的代价**：若 CLI 一条 trace 都不发（例如人为调高日志级别）、或长时间停在未登记阶段，状态区会一直停在上一条文案（整场都无 trace 时停在本页占位文案），这是为“不显示术语”付的代价，判断为可接受；**唯一显示英文的出口是 `status === 'error'` 的失败原因**（截断 120 字），属刻意保留的诊断信息；**`slice(tIdx + 14)` 的魔法数**与 `'[Render:trace]'.length` 绑定，若日志标记改名，必须同步改 `indexOf` 判定与偏移量两处；**`elapsedMs` 是自流水线开始的总耗时**（CLI 另有 `durationMs` 表示本阶段耗时，本模块不使用），`Math.round` 四舍五入，因此 1499ms 显示 `已用 1s`、1500ms 显示 `已用 2s`；**帧进度只对三个 `capture_*` 显示**，`capture_calibration` 写的是探针帧、`framesCompleted` 恒为 0，报帧数会误导；**映射缺失既不吞也不显示**——查不到 `HF_PHASE_LABELS` 就整条不上屏，所以 HyperFrames 升级后若新增/改名阶段，界面上会“少一段进度”，需要补表（CLI 内部的 `pipeline` / `file_server` / `worker_resolution` / `capture_strategy` / `hdr_detection` 属有意不补）；**`catch (e)` 为空块**，解析异常只用于“放弃本条”，不打印错误避免刷屏，代价是排查解析问题需自行打断点；**单例与订阅次数**——`renderProgress` 是模块级 `reactive`，多个页面读同一份文本，但 `initRenderProgress()` 若被多处调用，最终生效的是**最后一次**传入的回调（preload 单订阅语义），不会重复处理同一 chunk。
@@ -212,7 +212,7 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 > 旧的 `retry()` 与 `sizeText` 已删除：重试统一走 `prepare()`，体积文案由主进程的 `message` 与确认框的 `HINT_MB` 承担。
 
-### 4.2 `useEnvGate.ts`（158 行，**本轮新增**）—— 「需要下载运行环境」确认框
+### 4.2 `useEnvGate.ts`（159 行，**本轮新增**）—— 「需要下载运行环境」确认框
 
 任何用到 ffmpeg / hyperframes 的功能在动手前先校验，缺包时**不下载、不阻塞**，而是把 `needPacks` 交给这里弹确认框：
 
@@ -222,7 +222,7 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
   └─ 下载 ⇒ 框内原地显示进度与「取消」；装好后按钮变 [继续]，点它才用原参数重发原来的操作
 ```
 
-**模块级单例**（全局只有一个框）：`visible` / `packs` / `title` / `phase: 'confirm' | 'downloading' | 'ready'` / `percent` / `readyNow` / `message` / `detail` / `onContinue`；常量 `LABEL`（同 `PACK_LABEL`）与 `HINT_MB = { ffmpeg: 43, hyperframes: 105 }`（**体积提示**：两者都已按 2026-10-14 实测的 42.6 MB / 103.1 MB 回填；真实值以主进程清单为准）。
+**模块级单例**（全局只有一个框）：`visible` / `packs` / `title` / `phase: 'confirm' | 'downloading' | 'ready'` / `percent` / `readyNow` / `message` / `detail` / `onContinue`；常量 `LABEL`（同 `PACK_LABEL`）与 `HINT_MB = { ffmpeg: 43, hyperframes: 103 }`（**体积提示**：两者都已按 2026-10-14 实测值取整到 MiB（43 / 103），合计 146.0 MB（实测合计 145.7 MiB）；真实值以主进程清单为准）。
 
 | 导出 | 说明 |
 | --- | --- |
@@ -307,7 +307,7 @@ configPrompt.open('尚未配置「…」的语音 API Key，请先到「设置 �
 
 **使用方**：`App.vue`（唯一渲染弹窗宿主的地方，`const configPrompt = useConfigPrompt()`，紧跟 `const gate = useEnvGate()`）、`pages/HtmlGenPage/index.vue`、`pages/TextTtsPage/{helpers.ts,SynthSection.vue,AlignSection.vue,VoiceSection.vue}`。
 
-**注意事项**：**没有 init 步骤**——与 `initEnvGate()` / `initRuntime()` 不同，它不订阅任何推送，模块级 ref 由页面按需触发即可；**设置页刻意不用它**（`SettingsPage.onTest()` 的按钮与失败状态行都在本页，弹「去设置」等于让用户原地跳）；**`jump = true` 只用于配音页的本地校验**（那里原本就是「直接 `goPage('settings')` 把用户拽走」，改为 `jump = true` 后行为等价但多了一句「为什么」）；**它不碰 preload**（只用 `./useNavIntent` 的 `requestSettingsSection` 与 `@renderer/pages` 的 `goPage`），因此摘除「去充值」时 `window.appTools.openExternal` 一并消失、本模块不受影响。
+**注意事项**：**没有 init 步骤**——与 `initEnvGate()` / `initRuntime()` 不同，它不订阅任何推送，模块级 ref 由页面按需触发即可；**设置页刻意不用它**（`pages/SettingsPage/components/ModelSection.vue` 的 `onTest()`：按钮与失败状态行都在该区块上，弹「去设置」等于让用户原地跳）；**`jump = true` 只用于配音页的本地校验**（那里原本就是「直接 `goPage('settings')` 把用户拽走」，改为 `jump = true` 后行为等价但多了一句「为什么」）；**它不碰 preload**（只用 `./useNavIntent` 的 `requestSettingsSection` 与 `@renderer/pages` 的 `goPage`），因此摘除「去充值」时 `window.appTools.openExternal` 一并消失、本模块不受影响。
 
 ## 6. 语速：utils/rate.ts
 
@@ -351,7 +351,7 @@ configPrompt.open('尚未配置「…」的语音 API Key，请先到「设置 �
 
 **典型调用形态**：页面脚本中 `import { escTxt } from '@renderer/utils/escape'`（跨目录导入统一走 `@renderer` 别名），再在拼接 HTML 字符串或绑定 `title` 时包裹外部数据，如 `'<b>' + escTxt(p.title || p.name) + '</b>'`、`:title="'打开项目 ' + escTxt(p.name)"`。执行链路：页面拿到主进程返回的原始字符串（含可能的 `<` 等字符）→ 调用 `escTxt(raw)` 得到实体化后的安全字符串 → 拼进 HTML 字符串 / 绑定到 `:title` / 用于 `v-html` → 浏览器解析时实体被还原为字面字符，标签注入失效。
 
-**调用方（已核对 import）**：`pages/HtmlGenPage/index.vue`（背景音频文件名 `appState.project.audioFile` 的展示；视频素材名改由 `<option>` 文本插值输出、不经 `escTxt`）、`pages/VideoPreviewPage/index.vue`（**已无 `escTxt` 调用**：成品路径改由 `{{ videoPath }}` 插值输出，Vue 自动转义）、`pages/HomePage/index.vue`（**已无 `escTxt` 调用**：项目名、状态标记与时间全部走 `{{ }}` 插值，卡片标题用 `:title="'打开项目 ' + p.name"` 由 Vue 转义）、`pages/TextTtsPage/VoiceSection.vue`（音色条目名称、音色值、目标模型、附加说明、降级原因文案；原 `pages/SoundCopyPage/index.vue`）、`pages/SettingsPage/WhisperSection.vue`（模型名称、文件名、描述、下载地址等说明文本）、`pages/TextTtsPage/AlignSection.vue`（对齐结果中的每句文本 `d.text`，含 `:title` 与文本节点两处）。使用场景高度集中在「**字幕/文本类内容 + 文件路径类内容**」——正是最可能包含 `<`、`&` 的数据来源（例如 SRT 文本里的 `<i>`、路径里的 `&`）。
+**调用方（已核对 import）**：`pages/HtmlGenPage/PreviewSection.vue`（背景音频文件名 `appState.project.audioFile` 的展示——**本轮的 `audioPick` 与背景音频行随预览卡片从 `index.vue` 搬到此处**；旧的「视频素材名由 `<option>` 文本插值输出」说法随单视频素材下拉一起作废）、`pages/VideoPreviewPage/index.vue`（**已无 `escTxt` 调用**：成品路径改由 `{{ videoPath }}` 插值输出，Vue 自动转义）、`pages/HomePage/index.vue`（**已无 `escTxt` 调用**：项目名、状态标记与时间全部走 `{{ }}` 插值，卡片标题用 `:title="'打开项目 ' + p.name"` 由 Vue 转义）、`pages/TextTtsPage/VoiceSection.vue`（音色条目名称、音色值、目标模型、附加说明、降级原因文案；原 `pages/SoundCopyPage/index.vue`）、`pages/SettingsPage/components/WhisperSection.vue`（模型名称、文件名、描述、下载地址等说明文本）、`pages/TextTtsPage/AlignSection.vue`（对齐结果中的每句文本 `d.text`，含 `:title` 与文本节点两处）。使用场景高度集中在「**字幕/文本类内容 + 文件路径类内容**」——正是最可能包含 `<`、`&` 的数据来源（例如 SRT 文本里的 `<i>`、路径里的 `&`）。
 
 **注意事项**：**只转义 `& < >`**，这是“文本节点防注入”的最小充分集，不要把它当通用 HTML 过滤函数使用，它**不做**属性值转义、不剥离标签、不防 `javascript:` URL；**不做反转义**，没有对应的 `unescape`，如果拿到的是 HTML 实体文本却需要原文，需另行处理；**幂等性**——对已转义文本再次调用会二次转义（`&lt;` → `&amp;lt;`），因为 `&` 会被再处理一次，**切勿对同一值重复调用**；**入参类型是 `unknown`**，设计上允许传任何值（对象会被 `String()` 成 `[object Object]`），但不建议把结构化数据交给它，需要展示对象字段时先取字段再转义；**`null` / `undefined` 视为空串**，界面上表现为“该处无内容”而不是显示 `null`，调用方因此可以省掉前置空值判断；**它不能替代 Vue 的默认转义**——在 `{{ }}` 插值中 Vue 已自动转义，重复调用 `escTxt()` 会让用户看到 `&amp;` 之类的实体文本，本函数只用于**必须手工拼 HTML 字符串**的场合（如 `v-html`、动态 `title`、表格行拼接）；**源文件仅 4 行**，任何功能扩展（例如补引号转义）都会改变上述使用点的行为，需同时检查上表全部调用方。
 
@@ -410,11 +410,11 @@ configPrompt.open('尚未配置「…」的语音 API Key，请先到「设置 �
 | `content` | `ContentPage` | `pages/ContentPage/index.vue` |
 | `text-tts` | `TextTtsPage` | `pages/TextTtsPage/index.vue` |
 | `subtitle` | `SubtitlePage` | `pages/SubtitlePage/index.vue` |
-| `html-gen` | `HtmlGenPage` | `pages/HtmlGenPage/index.vue` |
+| `html-gen` | `HtmlGenPage` | `pages/HtmlGenPage/index.vue`（+ 同目录 `MaterialsSection.vue` / `PreviewSection.vue`） |
 | `video-preview` | `VideoPreviewPage` | `pages/VideoPreviewPage/index.vue` |
 | `settings` | `SettingsPage` | `pages/SettingsPage/index.vue` |
 
-说明：视频环节的 key 是 `video-preview`，绑定 `VideoPreviewPage`（页名「视频预览」，只做预览与定位；**转视频动作与渲染档位在 `HtmlGenPage`**）；`text-tts` 绑定 `TextTtsPage`——这是唯一一处 key 与组件名不同形（`text-tts` 的连字符对应组件名里的 `Tts`），其余 key 都是组件名的短横线小写形式。**导入清单**：`vue` → `ref`、`shallowRef`、`type Component`；`@renderer/composables/useAppStore` → `activeMenu`、`refreshProject`、`type PageKey`；`@renderer/composables/useToast` → `toast`；`./HomePage/index.vue` … `./SettingsPage/index.vue` 共 8 个页面组件（每个页面一个文件夹，入口统一 `index.vue`；跨目录导入统一走 `@renderer/*` 别名，页面注册表内的同目录导入用相对路径）。原「音色管理」页（`sound-copy` → `SoundCopyPage/index.vue`）已并入 `TextTtsPage` 的第三个 Tab，不再单列。
+说明：视频环节的 key 是 `video-preview`，绑定 `VideoPreviewPage`（页名「视频预览」，**本轮起可选任意「有视频成品」的项目预览**——默认当前工作项目，下拉切换只换本页播放的成品、**不改 `appState.currentName`**；**转视频动作与渲染档位在 `HtmlGenPage`**）；`text-tts` 绑定 `TextTtsPage`——这是唯一一处 key 与组件名不同形（`text-tts` 的连字符对应组件名里的 `Tts`），其余 key 都是组件名的短横线小写形式。`html-gen` 绑定 `HtmlGenPage`，其页面目录下另有 `MaterialsSection.vue` / `PreviewSection.vue` 两个子组件（注册表只指向入口 `index.vue`）。**导入清单**：`vue` → `ref`、`shallowRef`、`type Component`；`@renderer/composables/useAppStore` → `activeMenu`、`refreshProject`、`type PageKey`；`@renderer/composables/useToast` → `toast`；`./HomePage/index.vue` … `./SettingsPage/index.vue` 共 8 个页面组件（每个页面一个文件夹，入口统一 `index.vue`；跨目录导入统一走 `@renderer/*` 别名，页面注册表内的同目录导入用相对路径）。原「音色管理」页（`sound-copy` → `SoundCopyPage/index.vue`）已并入 `TextTtsPage` 的第三个 Tab，不再单列。
 
 **`goPage(key)` 的四步**
 
@@ -482,7 +482,7 @@ export async function goPage(key: PageKey): Promise<void> {
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `SettingsSectionKey` | 字符串字面量联合（`export type`） | 设置页分类：`'model' \| 'voice' \| 'render' \| 'update' \| 'whisper'` |
-| `SETTINGS_SECTIONS` | `SettingsSectionKey[]` | 五类分类的**唯一枚举来源**（`SettingsPage` 的左侧导航与校验共用这一份，避免两处漂移） |
+| `SETTINGS_SECTIONS` | `SettingsSectionKey[]` | 五类分类的**唯一枚举来源**（`pages/SettingsPage/constants.ts` 由它派生导航项 `SETTINGS_NAV_ITEMS` 与校验白名单 `SETTINGS_SECTION_KEYS`，`helpers.ts` 用后者做「上次分类 / 导航意图是否合法」的校验——共用这一份，避免两处漂移） |
 | `requestSettingsSection(section)` | `(SettingsSectionKey) => void` | 置位；**调用方自行 `goPage('settings')`** |
 | `consumeSettingsSection()` | `() => SettingsSectionKey \| null` | 目标页消费：读取并复位；没有待处理请求时返回 `null` |
 | `useSettingsSectionRequest()` | `() => Ref<SettingsSectionKey \| null>` | 返回内部 ref，供目标页 `watch` 用（watch 回调里仍需调 `consumeSettingsSection()` 复位） |
@@ -491,9 +491,9 @@ export async function goPage(key: PageKey): Promise<void> {
 
 **可靠性来自重挂载**：源码注释写明——`goPage` 每次都递增 `pageNavKey` 强制目标页重挂载，所以「源页置位 → 目标页 `onMounted` 消费」是**主路径**；目标页的 `watch` 只是兜底（该页已在挂载状态、不经重挂载时也能响应）。
 
-**使用方**：`pages/TextTtsPage/VoiceSection.vue`（`goSettingsVoice()` = `closeCreate()` + `requestSettingsSection('voice')` + `goPage('settings')`；卡内 `requireCfg()` 发现没配 API Key 时走同一条路径）、`pages/SettingsPage/index.vue`（`applySectionIntent()` 里 `consumeSettingsSection()` → 命中 `SECTIONS` 且与当前不同就写 `activeSection`，`watch(useSettingsSectionRequest(), () => applySectionIntent())` 兜底，`onMounted` 的第一句（载入配置之前）调用它，注释：先落实带意图跳进来的分类，再载入配置）。
+**使用方**：`pages/TextTtsPage/VoiceSection.vue`（`goSettingsVoice()` = `closeCreate()` + `requestSettingsSection('voice')` + `goPage('settings')`；卡内 `requireCfg()` 发现没配 API Key 时走同一条路径）、`pages/SettingsPage/helpers.ts`（`applySectionIntent()` = `applySection(consumeSettingsSection())`——命中 `SETTINGS_SECTION_KEYS` 且与当前不同才写 `activeSection`；`watchSectionIntent()` = `watch(useSettingsSectionRequest(), () => applySectionIntent())` 作兜底）+ `pages/SettingsPage/index.vue`（在自己的 `<script setup>` 里先调 `applySectionIntent()`、再调 `watchSectionIntent()`；源码注释：先落实「带意图跳进来」的分类，再交由各组件的 `onMounted` 载入配置）。
 
-**注意事项**：**枚举只有这一处**——`SettingsPage` 用 `type SettingsSection = SettingsSectionKey`（别名保留）与 `const SECTIONS = SETTINGS_SECTIONS`，页面里不再写本地字面量数组；**消费即复位**——`consumeSettingsSection()` 读完就置 `null`，因此同一意图不会被消费两次；**意图优先于记忆**——目标页先消费意图再回落到 `localStorage` 里的上次分类（用户这次点的是「去配语音」，不是「回到上次看的那一页」）；**本模块零依赖**（只用 Vue 的 `ref`，不碰 IPC / `localStorage`），也**不自带 `goPage`**：置位与跳转由调用方两步完成。
+**注意事项**：**枚举只有这一处**——设置页不再写本地字面量数组，而是在 `pages/SettingsPage/constants.ts` 里由它派生导航项 `SETTINGS_NAV_ITEMS` 与校验白名单 `SETTINGS_SECTION_KEYS`（`helpers.ts` 的读记忆与意图校验都用后者；页面里没有 `SettingsSection` 之类的别名）；**消费即复位**——`consumeSettingsSection()` 读完就置 `null`，因此同一意图不会被消费两次；**意图优先于记忆**——目标页先消费意图再回落到 `localStorage` 里的上次分类（用户这次点的是「去配语音」，不是「回到上次看的那一页」）；**本模块零依赖**（只用 Vue 的 `ref`，不碰 IPC / `localStorage`），也**不自带 `goPage`**：置位与跳转由调用方两步完成。
 
 ## 11. 协作与约定
 
@@ -505,14 +505,14 @@ export async function goPage(key: PageKey): Promise<void> {
 | `window.projectTools.load(name)` | 拉当前项目详情（`project.json` 内容）；返回 `Project \| null`，`refreshProject()` 已加空值守卫 | `useAppStore.refreshProject()` |
 | `window.projectTools.create(name)` | 频道 `project:create`，新建项目 | `components/NewProjectDialog.vue` |
 | `window.hfTools.onProgress(callback)` | 频道 `video:progress`，渲染进度订阅，回调参数形如 `{ text: string }`（日志 chunk） | `renderProgress.initRenderProgress()` |
-| `window.settingsTools.get()` | 频道 `settings:get`，读 `settings.json`（含 `render` 段） | `useRenderOptions.loadRenderDefaults()`；`SettingsPage` 另单独调用一次以回填表单 |
+| `window.settingsTools.get()` | 频道 `settings:get`，读 `settings.json`（含 `render` 段） | `useRenderOptions.loadRenderDefaults()`；设置页另有四个区块各自在自己的 `onMounted` 里调用一次以回填表单（`pages/SettingsPage/components/` 的 `ModelSection.vue` / `VoiceSection.vue` / `RenderSection.vue` / `UpdateSection.vue`，只在实际挂载的分类里发生） |
 | `window.settingsTools.saveRender(render)` | 频道 `settings:save-render`，只更新渲染默认档位 | `useRenderOptions.saveRenderDefaults()` |
 | `window.projectTools.setRender(name, render \| null)` | 频道 `project:set-render`，写 / 清除项目级档位覆盖 | `useRenderOptions.saveProjectRenderOverride()` |
 | `window.runtimeTools.onProgress(callback)` | 频道 `runtime:progress`，运行环境进度推送（单订阅），回调参数为 `RuntimeProgressPayload`（`phase` / `pack` / `missing` / …） | **只有** `useRuntime.initRuntime()` 注册（全渲染层唯一订阅者）；`useEnvGate` 经 `watch(useRuntime().runtime)` 消费同一份状态，不再注册第二个回调 |
 | `window.runtimeTools.status()` | 频道 `runtime:status`，查一次当前状态（补齐首帧，此后由推送驱动） | `useRuntime.initRuntime()` |
-| `window.runtimeTools.prepare(packs?)` | 频道 `runtime:prepare`，主动准备指定包（省略 = 全部缺的；忙碌期重复调用返回一句提示）；**参数必须是普通数组**（`toRaw(list).slice()`）——`invoke` 要过结构化克隆，Vue 响应式代理会抛 `DataCloneError` 且主进程 handler 不执行；**只触发，成败由 `runtime:progress` 回填**，非 ok 回执 / 抛错由 `prepare()` 写进 `runtime`（不再静默） | `useRuntime.useRuntime().prepare()` → `App.vue` 横幅（下载 / 重试）/ `SettingsPage` / `useEnvGate.confirmDownload()` |
-| `window.runtimeTools.cancel()` | 频道 `runtime:cancel`，取消进行中的**检查 / 下载 / 解包**（中断请求与 7za 子进程、清半成品；取清单 20 秒无响应属**超时**而不是取消，残片保留） | `useRuntime.useRuntime().cancel()` → `App.vue` 横幅「取消」/ `SettingsPage`「取消下载」/ `useEnvGate.cancelDownload()` |
-| `window.settingsTools.pickRuntimePack()` | 频道 `settings:pick-runtime-pack`，选一个本地 `ffmpeg.7z` / `hyperframes.7z` 导入（离线兜底） | `pages/SettingsPage/index.vue`（`onPickLocalPack()`，成功后接着 `runtimeTools.prepare()`） |
+| `window.runtimeTools.prepare(packs?)` | 频道 `runtime:prepare`，主动准备指定包（省略 = 全部缺的；忙碌期重复调用返回一句提示）；**参数必须是普通数组**（`toRaw(list).slice()`）——`invoke` 要过结构化克隆，Vue 响应式代理会抛 `DataCloneError` 且主进程 handler 不执行；**只触发，成败由 `runtime:progress` 回填**，非 ok 回执 / 抛错由 `prepare()` 写进 `runtime`（不再静默） | `useRuntime.useRuntime().prepare()` → `App.vue` 横幅（下载 / 重试）/ `pages/SettingsPage/components/UpdateSection.vue`（`onPrepareRuntime()`）/ `useEnvGate.confirmDownload()` |
+| `window.runtimeTools.cancel()` | 频道 `runtime:cancel`，取消进行中的**检查 / 下载 / 解包**（中断请求与 7za 子进程、清半成品；取清单 20 秒无响应属**超时**而不是取消，残片保留） | `useRuntime.useRuntime().cancel()` → `App.vue` 横幅「取消」/ `pages/SettingsPage/components/UpdateSection.vue`「取消下载」/ `useEnvGate.cancelDownload()` |
+| `window.settingsTools.pickRuntimePack()` | 频道 `settings:pick-runtime-pack`，选一个本地 `ffmpeg.7z` / `hyperframes.7z` 导入（离线兜底） | `pages/SettingsPage/components/UpdateSection.vue`（`onPickLocalPack()`，成功后接着 `prepareRuntime()`——经 `useRuntime` 落到 `runtimeTools.prepare()`） |
 | `window.legacyTools.status()` | 频道 `legacy:status`，问一次有没有待处理的旧数据（返回 `LegacyDataInfo \| null`） | `useLegacyData.initLegacyData()` |
 | `window.legacyTools.resolve(action)` | 频道 `legacy:resolve`，回传 `'migrate' \| 'delete' \| 'later'` | `useLegacyData.useLegacyData().resolve()` → `components/LegacyDataDialog.vue` |
 
@@ -520,19 +520,19 @@ export async function goPage(key: PageKey): Promise<void> {
 
 **谁用谁（被导入情况）**
 
-- `appState` / `activeMenu` / `refreshProject` / `PageKey` / 5 个 `has*`：`App.vue`（`activeMenu`、`appState`、`refreshProject`、`PageKey`，启动时读 `localStorage[STORAGE_KEY_PROJECT_CTX]`（`@renderer/constants`）回填）、`components/StepBar.vue`（`appState`、`hasContent`、`hasAudio`、`hasSubtitle`、`hasHtml`、`hasVideo`、`switchProject`、`PageKey`）、`components/NewProjectDialog.vue`（`refreshProject`、`switchProject`）、`pages/HomePage/index.vue`（`appState`、5 个 `has*`、`switchProject`、`PageKey`）、`pages/HtmlGenPage/index.vue`（`appState`、`hasHtml`、`refreshProject`）、`pages/VideoPreviewPage/index.vue`（`appState`、`refreshProject`）、`pages/ContentPage/index.vue` / `pages/SubtitlePage/index.vue` / `pages/TextTtsPage/SynthSection.vue` / `pages/SubtitlePage/TranscribeSection.vue`（`appState` 读写）、`pages/TextTtsPage/AlignSection.vue`（`appState`、`appState.myProjects` 跨项目取字幕源）。
+- `appState` / `activeMenu` / `refreshProject` / `PageKey` / 5 个 `has*`：`App.vue`（`activeMenu`、`appState`、`refreshProject`、`PageKey`，启动时读 `localStorage[STORAGE_KEY_PROJECT_CTX]`（`@renderer/constants`）回填）、`components/StepBar.vue`（`appState`、`hasContent`、`hasAudio`、`hasSubtitle`、`hasHtml`、`hasVideo`、`switchProject`、`PageKey`）、`components/NewProjectDialog.vue`（`refreshProject`、`switchProject`）、`pages/HomePage/index.vue`（`appState`、5 个 `has*`、`switchProject`、`PageKey`）、`pages/HtmlGenPage/index.vue`（`appState`、`hasHtml`、`refreshProject`）、**`pages/HtmlGenPage/MaterialsSection.vue`（`appState` 读 `project.materials`、`refreshProject` 落盘后刷新；类型 `ProjectMaterial` / `ProjectMaterialKind` 取 `@shared/types`）、`pages/HtmlGenPage/PreviewSection.vue`（`appState` 读 `audioFile` / `htmlExists` / `htmlPath`、`refreshProject`）**、`pages/VideoPreviewPage/index.vue`（`appState`、`refreshProject`；另用 `appState.myProjects` 的 `hasVideo` / `hasHtml` 构造项目下拉）、`pages/ContentPage/index.vue` / `pages/SubtitlePage/index.vue` / `pages/TextTtsPage/SynthSection.vue` / `pages/SubtitlePage/TranscribeSection.vue`（`appState` 读写）、`pages/TextTtsPage/AlignSection.vue`（`appState`、`appState.myProjects` 跨项目取字幕源）。
 - `switchProject`：`components/StepBar.vue`、`pages/HomePage/index.vue`。
 - `toast` / `useToasts`：见 §2「使用方」。
-- `renderProgress` / `initRenderProgress` / `resetRenderProgress`：`App.vue`（`onMounted` 中调用 `initRenderProgress()`，全局只订阅一次）、`pages/HtmlGenPage/index.vue`（**发起渲染**：`statusDisplay` 让 trace 在渲染中接管，`onMounted` 与 `onRenderVideo` 结束时 `resetRenderProgress()`）、`pages/VideoPreviewPage/index.vue`（预览侧：`statusText = renderProgress.text || localStatus`，`onMounted` 里 `resetRenderProgress()`）。
+- `renderProgress` / `initRenderProgress` / `resetRenderProgress`：`App.vue`（`onMounted` 中调用 `initRenderProgress()`，全局只订阅一次）、`pages/HtmlGenPage/index.vue`（**发起渲染**：`onMounted` 与 `onRenderVideo` 结束时 `resetRenderProgress()`）、**`pages/HtmlGenPage/PreviewSection.vue`（展示侧：`statusDisplay` 在 `props.rendering` 为真且 trace 非空时接管状态行）**、`pages/VideoPreviewPage/index.vue`（预览侧：`statusText = renderProgress.text || localStatus`，`onMounted` 里 `resetRenderProgress()`）。
 - `renderDefaults` / `loadRenderDefaults`：`App.vue`（`initApp()` 中与 `refreshProject()` 并行调用）、`pages/HtmlGenPage/index.vue`（`isRenderOverridden(renderDefaults, ...)` 判断是否显示「恢复默认档位」）。
 - `effectiveRenderOptions` / `saveProjectRenderOverride`：`pages/HtmlGenPage/index.vue`（`syncFromEffective()` 读、`onOptionChange()` / `onResetOptions()` 写）。**「视频预览」页不消费渲染档位**，只读 `renderProgress.text` 展示进度。
-- `saveRenderDefaults`：`pages/SettingsPage/index.vue`（「保存渲染默认档位」按钮）。
-- `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` / `FALLBACK_RENDER` / `renderOptionsText` / `renderQualityLabel`：`pages/SettingsPage/index.vue`（全局默认档位下拉与保存文案）、`pages/HtmlGenPage/index.vue`（档位下拉、`optionNote`、渲染状态文案）。
+- `saveRenderDefaults`：`pages/SettingsPage/components/RenderSection.vue`（「保存渲染默认档位」按钮）。
+- `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` / `FALLBACK_RENDER` / `renderOptionsText` / `renderQualityLabel`：`pages/SettingsPage/components/RenderSection.vue`（全局默认档位下拉与保存文案）、`pages/HtmlGenPage/index.vue`（档位下拉、`optionNote`、渲染状态文案）。
 - `pickRenderOverride`：`composables/useAppStore.ts`（`refreshProject` 规范化 `loaded.render`）、`composables/useRenderOptions.ts`（覆盖写入后回写 `appState.project.render`）。
 - `rateClamp` / `applyRate` / `stepRate`：见 §6「使用方」；`escTxt`：见 §7.1「调用方」；`fmtTime` / `fmtTimeMs`：见 §7.2「调用方」。
-- `pages` / `currentPage` / `pageNavKey` / `goPage`：`App.vue`（`currentPage`、`pageNavKey` 渲染容器；`goPage(item.key)` 绑定菜单点击；`watch(currentPage)` 做滚动复位；启动时**不**调 `goPage`（首页本就是初始页））、`components/StepBar.vue`（`goPage('content')`、`goPage('text-tts')`、`goPage('subtitle')`、`goPage('html-gen')`、`goPage('video-preview')`、`onCreated()` / `onSelect()` 里的 `goPage(props.page)` 回跳）、`pages/HomePage/index.vue`（流程图节点 `goPage(n.page)`；项目卡片 `openMy()` → `goPage('html-gen')`）、`pages/TextTtsPage/VoiceSection.vue`（`goSettingsVoice()` 先 `requestSettingsSection('voice')` 再 `goPage('settings')` 跳「API Key 设置」，卡内 `requireCfg()` 未配 Key 时同路径；原 `pages/SoundCopyPage/index.vue`）、`pages/SettingsPage/index.vue`（消费端：`applySectionIntent()` + `watch(useSettingsSectionRequest())` + `onMounted` 首句）、`pages/TextTtsPage/SynthSection.vue`（`goSettingsVoice()` = `requestSettingsSection('voice')` + `goPage('settings')`；**原「管理音色」按钮与 `goPage('text-tts')` 跨页请求已删除**）、`pages/SubtitlePage/TranscribeSection.vue`（`goPage('settings')`）、`pages/TextTtsPage/helpers.ts`（`goPage('settings')`）。
+- `pages` / `currentPage` / `pageNavKey` / `goPage`：`App.vue`（`currentPage`、`pageNavKey` 渲染容器；`goPage(item.key)` 绑定菜单点击；`watch(currentPage)` 做滚动复位；启动时**不**调 `goPage`（首页本就是初始页））、`components/StepBar.vue`（`goPage('content')`、`goPage('text-tts')`、`goPage('subtitle')`、`goPage('html-gen')`、`goPage('video-preview')`、`onCreated()` / `onSelect()` 里的 `goPage(props.page)` 回跳）、`pages/HomePage/index.vue`（流程图节点 `goPage(n.page)`；项目卡片 `openMy()` → `goPage('html-gen')`）、`pages/TextTtsPage/VoiceSection.vue`（`goSettingsVoice()` 先 `requestSettingsSection('voice')` 再 `goPage('settings')` 跳「API Key 设置」，卡内 `requireCfg()` 未配 Key 时同路径；原 `pages/SoundCopyPage/index.vue`）、`pages/SettingsPage/index.vue` + `pages/SettingsPage/helpers.ts`（消费端：`index.vue` 的 `<script setup>` 先调 `applySectionIntent()`、再调 `watchSectionIntent()`，两者都定义在 `helpers.ts` 里）、`pages/TextTtsPage/SynthSection.vue`（`goSettingsVoice()` = `requestSettingsSection('voice')` + `goPage('settings')`；**原「管理音色」按钮与 `goPage('text-tts')` 跨页请求已删除**）、`pages/SubtitlePage/TranscribeSection.vue`（`goPage('settings')`）、`pages/TextTtsPage/helpers.ts`（`goPage('settings')`）。
 
-- `initRuntime` / `useRuntime`（`runtime` / `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` / `prepare` / `cancel`）：`App.vue`（`onMounted` 调 `initRuntime()`；横幅用 `busy` / `failed` / `hasMissing` / `runtime.message` / `percent` / `prepare` / `cancel`）、`pages/SettingsPage/index.vue`（运行环境一行三态 + 「下载运行环境」/「取消下载」/「从本地文件安装…」）。
+- `initRuntime` / `useRuntime`（`runtime` / `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` / `prepare` / `cancel`）：`App.vue`（`onMounted` 调 `initRuntime()`；横幅用 `busy` / `failed` / `hasMissing` / `runtime.message` / `percent` / `prepare` / `cancel`）、`pages/SettingsPage/components/UpdateSection.vue`（运行环境一行三态 + 「下载运行环境」/「取消下载」/「从本地文件安装…」）。
 - `initEnvGate` / `useEnvGate`（`visible` / `packs` / `title` / `phase` / `percent` / `readyNow` / `message` / `detail` / `sizeText` / `guard` / `confirmDownload` / `cancelDownload` / `continueAction` / `close`）：`App.vue`（`onMounted` 调 `initEnvGate()`；模板内联渲染确认框）、`pages/HtmlGenPage/index.vue`、`pages/SubtitlePage/TranscribeSection.vue`、`pages/TextTtsPage/AlignSection.vue`（缺包时 `guard(...)`，用户点「继续」以 `skipEnvGuard = true` 重发原操作）。
 - `useConfigPrompt`（`visible` / `title` / `message` / `target` / `open` / `fromResult` / `go` / `close`）：`App.vue`（渲染 `.hf-modal` 弹窗宿主）、`pages/HtmlGenPage/index.vue`（`configPrompt.open(msg, res.needConfig, false, res.title)`，配置类不叠 toast）、`pages/TextTtsPage/SynthSection.vue` / `VoiceSection.vue`（失败分支 `configPrompt.fromResult(res)`）、`pages/TextTtsPage/AlignSection.vue`（`if (configPrompt.fromResult(fail)) … else if (fail.needPacks …)` —— **配置类优先于缺包弹窗**）、`pages/TextTtsPage/helpers.ts`（`requireCfg()` 未配 Key 时 `open(…, 'voice', true)`）。**它不接触 preload**，只用 `requestSettingsSection` + `goPage`。
 - `initLegacyData` / `useLegacyData`（`info` / `visible` / `busy` / `entryText` / `resolve`）：`App.vue`（`onMounted` 调 `initLegacyData()`；模板挂 `<LegacyDataDialog />`）、`components/LegacyDataDialog.vue`（唯一消费方：展示 `info.dir` / `entryText`，三个按钮分别 `resolve('later' / 'delete' / 'migrate')`，迁移后 `refreshProject()` + `toast(...)`）。

@@ -58,7 +58,7 @@
 | --- | --- | --- |
 | `openai` | `^7.15.0` | LLM / TTS 云端调用 SDK；被主进程在**运行时** require，故必须留在 `dependencies` |
 | `opencc-js` | `^1.4.2` | 简繁转换库；同样在运行时 require |
-| `electron-updater` | `^6.8.9` | 应用自更新库；被 `src/main/updater.ts` 在**运行时** `require`（CJS 包，不能 `import`），故必须留在 `dependencies` 并进 `files` 白名单 |
+| `electron-updater` | `^6.8.9` | 应用自更新库；被 `src/main/updater/base.ts` 在**运行时** `require`（CJS 包，不能 `import`），故必须留在 `dependencies` 并进 `files` 白名单 |
 | `vue` | `^3.5.43` | 渲染层框架；由 Vite 打进 renderer bundle（但仍按惯例列在 `dependencies`） |
 
 ### 2.5 build 段（electron-builder）
@@ -82,7 +82,7 @@
 | `nsis.createDesktopShortcut` | `true` | 创建桌面快捷方式 |
 | `nsis.createStartMenuShortcut` | `true` | 创建开始菜单快捷方式 |
 | `nsis.differentialPackage` | `true` | 生成差分包元数据，配合安装包旁的 `.exe.blockmap` 让客户端只下变化部分 |
-| `publish` | `[{ "provider": "generic", "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/MarvisStudio/" }]` | 更新源（阿里云 OSS，公共读 + 尾斜杠必备）。**`npm run dist` 借此生成 `resources/app-update.yml` 与 `dist/latest.yml`；generic 源不会自动上传**，安装包 / `.exe.blockmap` / `latest.yml` / 两个运行环境包都要上传到该 URL 下（用 `npm run release` 做检查与上传，见 §3） |
+| `publish` | `[{ "provider": "generic", "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/" }]` | 更新源（阿里云 OSS，公共读 + 尾斜杠必备；前缀 2026-10-15 由 `…/MarvisStudio/` 统一为 `…/shadowmill/`，见 CHANGELOG #14）。**`npm run dist` 借此生成 `resources/app-update.yml` 与 `dist/latest.yml`；generic 源不会自动上传**，安装包 / `.exe.blockmap` / `latest.yml` / 两个运行环境包都要上传到 `…/shadowmill/` 下（用 `npm run release` 做检查与上传、`--oss` 时 ossutil 的目标目录同样是 `/shadowmill/`，见 §3）。注意 `app-update.yml` 是**打包时烘进安装包**的静态文件 ⇒ 改 `url` 只影响之后打出的包，存量已装版本需用设置页「自定义更新源」过渡 |
 | `extraResources` | `[{ "from": "resources/whisper", "to": "whisper" }, { "from": "build/tools", "to": "tools" }]` | 只把两样东西复制到安装目录的 `resources/`（asar **外**）：**whisper**（12.5 MB / 15 文件，转录缺它就完全不能用，所以随包，装完即离线可用）与 **7za 解包器**（约 1 MB，用于解运行环境包）。`ffmpeg` / `hyperframes` 已**不再**随安装包，改为打成 `build/runtime-pack/<包名>.7z` 走更新源按需下载（见 `scripts/pack-runtime.mjs` 与 `src/main/runtime.ts`） |
 
 ### 2.6 files 收口（逐条）

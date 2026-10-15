@@ -42,9 +42,10 @@ const LABEL: Record<RuntimePackName, string> = {
 }
 
 // 体积按经验值提示（真实值以主进程清单为准，准备过程中会回推）。
-// 两个都是 2026-10-14 的实测值：ffmpeg 42.6 MB、hyperframes 103.1 MB；合计约 146 MB，
-// 与单包时代的 runtime.7z（147.4 MB）基本持平（实测 145.7 MB）。源码常量 PACK_DEFS.hint 同此口径。
-const HINT_MB: Record<RuntimePackName, number> = { ffmpeg: 43, hyperframes: 105 }
+// 两个都是 2026-10-14 的实测值取整到 MiB：ffmpeg 42.6 → 43、hyperframes 103.1 → 103；合计 146.0，
+// 与单包时代的 runtime.7z（147.4 MiB）基本持平（实测合计 145.7 MiB）。**不要改成 105**：界面会报
+// 148.0 MB，比真实下载量多报 2 MiB，与 README / CHANGELOG 的「约 146 MB」自相矛盾。主进程 PACK_DEFS.hint 同此口径。
+const HINT_MB: Record<RuntimePackName, number> = { ffmpeg: 43, hyperframes: 103 }
 
 export function initEnvGate(): void {
   // 进度来源：**不再自己订阅 runtime:progress**。

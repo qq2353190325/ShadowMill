@@ -1,12 +1,17 @@
 # src/renderer/src/pages/HtmlGenPage/（页面）
 
-> HTML 生成 / 修改 + 素材选配（字幕 / 视频）+ 背景音频选定（音轨由主进程注入 HTML）+ 实时预览 + AI 思考过程展示 + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染）**。
+> HTML 生成 / 修改 + 项目素材库（多图片 / 多视频的增删与勾选）+ 背景音频选定（音轨由主进程注入 HTML）+ 实时预览（含播放控制与拖动 seek）+ AI 思考过程展示 + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染）**。
 
-- **覆盖文件**：`HtmlGenPage/index.vue`（本目录唯一文件，741 行）
-- **所在目录**：`src/renderer/src/pages/HtmlGenPage/`
+- **覆盖文件**（AGENTS.md 第五节 6：页面自己的子组件与助手并入同一篇）：
+  | 文件 | 行数 | 角色 |
+  |------|------|------|
+  | `HtmlGenPage/index.vue` | 373 | 页面入口：状态条 / 字幕下拉 / 需求描述 / 四个动作按钮 / 转视频弹窗；生成与渲染两套动作链 |
+  | `HtmlGenPage/MaterialsSection.vue` | 167 | 「项目素材」区块：图片组 / 视频组的卡片墙（勾选、移除、添加） |
+  | `HtmlGenPage/PreviewSection.vue` | 331 | 「预览」卡片：背景音频、状态行、AI 思考过程、iframe 预览副本、播放控制条 |
+- **所在目录**：`src/renderer/src/pages/HtmlGenPage/`（一页一目录，入口 `index.vue`）
 - **类型**：页面组件（SFC，`<script setup lang="ts">`）
-- **规模**：741 行
-- **对外导出**：默认导出组件（无 props；模板内渲染子组件 `StepBar`）
+- **规模**：3 个文件合计 871 行（`index.vue` 373 + `MaterialsSection.vue` 167 + `PreviewSection.vue` 331）
+- **对外导出**：`index.vue` 默认导出组件（无 props，模板内渲染 `StepBar` / `MaterialsSection` / `PreviewSection`）；两个子组件分别是「无 props / 无 emits」与「4 个 props + `reload()`」
 
 ## 1. 作用与职责
 
@@ -16,364 +21,491 @@
 
 **「转视频」也已并入本页**（渲染动作原在独立的视频页，现已整体搬到这里）：动作行多一个「转视频」按钮，**点它先弹出「转视频」弹窗**（`.hf-modal-mask`，内为「渲染档位」：质量 / 帧率 + 档位来源说明 + 画质说明 + 按需出现的「恢复默认档位」），在弹窗里点「开始渲染」才真正发起渲染；渲染成功后就地回写项目并 toast 引导去「视频预览」页看成片。这样做的原因是渲染需要 HTML 生成流程的上下文（`hasHtml` / `htmlPath`），放在同一页即可用同一个按钮闭环；而档位从「页面下方一行常驻控件」改成「弹窗内确认一次」，是为了让选档位 → 确认成为一次显式动作，也避免误改落盘。
 
-| 职责 | 实现位置 |
-|------|----------|
-| 项目状态概览（原 `renderMeta` 的 `#hg-meta`） | `meta` computed + `.proj-meta` / `.proj-stat` |
-| 需求描述（提示词）输入 | `prompt` + `textarea.hgen-subtitle`（`:placeholder="promptPlaceholder"`，占位文案随 `hasHtml` 变） |
-| 生成素材选配（字幕 / 视频素材，均在「项目素材」块） | `subSel` / `videoSel` + `HfSelect`（选项数据来自 `subSelGroups` / `videoSelGroups`） |
-| 视频素材（**唯一入口**）：选择 / 当场导入 / 移除 / 提取原声 | `videoSel` 下拉 + `onVideoSelect` `onClearVideo` `onExtractAudio`（下拉初值与复位由 `currentVideoSel` / `syncVideoSelFromProject` 维护） |
-| 背景音频选定（在「预览」卡片内：已生成音频下拉 / 选文件 / 移除 / 试听 + 语速） | `genLoad` / `onAudioPick` / `onPickAudioFile` / `onRemoveAudio` / `onRateInput` / `rateStep` |
-| 背景音轨注入 HTML（**不进提示词、不交给 Agent**） | 主进程 `applyBgmToHtml`；本页只负责选定后重载预览（`afterAudioChange`） |
-| **生成 HTML**（主按钮，**点一次即执行，无二次确认**；已有 HTML 时直接覆盖） | `onGenerate` → `runAgent('generate')` |
-| **按需求修改**（次要按钮，无 HTML 时禁用） | `onModify` → `runAgent('modify')`（函数内仍有 `htmlExists` 兜底守卫） |
-| 行内帮助 `?`（**每个动作按钮内部各一个**，各自只说明自己那个动作） | 按钮内部的 `.hg-help` > `.hg-help-icon`（`?`）+ `.hg-help-pop`（说明气泡）；纯模板 + CSS、无脚本，`@click.stop` 使点 `?` 不触发按钮动作 |
-| **转视频**（渲染动作原在独立的视频页；**先弹窗确认档位**） | `openRenderModal()`（守卫后打开弹窗）→ `confirmRenderVideo()` → `onRenderVideo()` → `window.hfTools.renderVideo(htmlPath, { quality, fps })` → `saveVideo` → `refreshProject()` |
-| 渲染档位（**在「转视频」弹窗内**：质量 / 帧率、项目级覆盖、恢复默认） | `quality` / `fps` / `projectOverride` / `overridden` / `optionNote` + `syncFromEffective()` / `onOptionChange()` / `onResetOptions()` |
-| 状态合并显示（渲染中优先显示全局 trace） | `statusDisplay` / `statusDisplayClass` computed |
-| 进度阶段文案 + AI 思考原文实时展示 | `onHtmlProgress` 订阅 + `status` / `thinkText` + `thinkPreEl` |
-| 预览画布（1920×1080 等比缩放） | `loadFrame` + `fitFrame` + `iframe.hgen-frame` |
-| 预览播放控制（默认静止；暂停/播放/重新播放/进度条**可点可拖跳转**） | `onPrevToggle` `onPrevReplay` `onPrevMessage` + `seeking` / `seekPending` / `onSeekStart` / `onSeekMove` / `onSeekEnd`（seek，带 ack 与 800ms 兜底） |
-| 下载 HTML 到本地 | `onDownload` |
-| 顶部流程条 | `<StepBar :page="'html-gen'" />` |
+### 1.1 三个文件的职责边界
 
-## 2. 模板结构
+拆分按「一个文件一件事」切（源码注释在 `index.vue:92`、`MaterialsSection.vue:66`、`PreviewSection.vue:52`）：
+
+| 文件 | 只回答一个问题 | 不负责什么 |
+|------|----------------|------------|
+| `index.vue` | 「这一页要生成 / 修改 / 渲染什么」——项目状态条、字幕素材下拉、需求描述、四个动作按钮、转视频弹窗与渲染档位、两套动作的状态文案 | 素材的增删勾选（交 `MaterialsSection`）、预览与背景音频/试听（交 `PreviewSection`） |
+| `MaterialsSection.vue` | 「这次生成用哪些素材」——图片 / 视频素材库的展示与增删勾选 | 生成流程、预览、渲染；不碰文件系统，全部经主进程 |
+| `PreviewSection.vue` | 「产物长什么样」——预览副本 iframe、播放控制与 seek、AI 思考过程展示、背景音频选定与试听 | 发起生成 / 渲染（按钮在父页），因此状态由父页以 props 传入 |
+
+## 2. `index.vue`：模板结构
 
 | 区块 | 说明 |
 |------|------|
 | `<StepBar :page="'html-gen'" />` | 顶部五节点流水线 + 工作项目切换条，`page` 传字面量 `'html-gen'` |
-| `.card.hgen-panel`（第 1 张） | 标题仍随状态自适应：`HTML · Agent {{ hasHtml ? '修改' : '生成' }}`（无 HTML 时不出现「修改」字样）；卡片内区块顺序为 **`.proj-meta` 项目状态条 → `.hgen-block`「项目素材（均可选，留空则跳过）」（块内含 `.hgen-tip` 说明）→ `.hgen-block`「需求描述（提示词）」→ `.hgen-actions` 动作行**（原来的「渲染档位行 + 档位提示行」已整块搬进页面级的「转视频」弹窗，见下方弹窗行）。动作行是「生成 HTML」（主按钮，**按钮内含 `?`**）+「按需求修改」（次要按钮，**按钮内含 `?`**）+「下载 HTML」+「转视频」；两个 `?` 各自只讲自己那个动作，**动作行末尾不再有独立的 `?`** |
+| `.card.hgen-panel`（第 1 张） | 标题仍随状态自适应：`HTML · Agent {{ hasHtml ? '修改' : '生成' }}`（无 HTML 时不出现「修改」字样）；卡片内区块顺序为 **`.proj-meta` 项目状态条 → `.hgen-block`「字幕素材（可选，留空则跳过）」→ `<MaterialsSection />` → `.hgen-block`「需求描述（提示词）」→ `.hgen-actions` 动作行** |
 | `.proj-meta` | 项目状态条（源码注释标为「原 renderMeta 的 `#hg-meta`」），无条件渲染 4 条 `.proj-stat`（数据源 `meta` computed） |
 | `.proj-stat`（HTML） | `:class="{ on: meta.hasH }"`，文案 `已生成` / `尚未生成` |
 | `.proj-stat`（内容脚本） | `:class="{ on: meta.sceneN > 0 }"`，`meta.sceneN` 为场景数（按 `narration` 非空过滤），文案提示「生成时自动附带」 |
-| `.proj-stat`（素材） | 字幕 `meta.subCount` 条 + 是否已配背景音频 / 视频素材；无字幕时引导去「字幕生成」页 |
-| `.proj-stat`（用法） | 按 `meta.hasH` 给两种操作引导文案：已有 HTML → 「填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份」；未生成 → 「在「项目素材」里选好素材，再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定」 |
-| `.hgen-block`（项目素材，**排在「需求描述」之前**） | 标题「项目素材（均可选，留空则跳过）」；区块内为字幕行 + 视频素材行（背景音频**不在此处**，已整体搬进「预览」卡片）。字幕为 `HfSelect` `v-model="subSel"` `:groups="subSelGroups"`；视频行为常驻（下拉 + 「移除视频」+ `{{ extractText }}`），见下面「视频素材行」——**视频素材全页只有这一个入口**（选项目现有素材或当场导入）：原先独立的视频素材导入卡片（导入 / 移除 / 提取原声 / 素材预览）已删除并全部并入这一行 |
-| `.hgen-block`（需求描述，**排在「项目素材」之后**） | `textarea.hgen-subtitle`，`v-model="prompt"`、`spellcheck="false"`、`:placeholder="promptPlaceholder"`（**占位文案改为绑定，textarea 不再写死**）；文案随 `hasHtml` 变：已有 HTML 讲「这次要改什么」（换紫色霓虹配色 / 字幕节奏放慢），否则讲「你想要的 HTML 效果」（深空科技风格标题动画页 / 每条字幕间隔两秒依次上浮淡入） |
-| 字幕下拉的项目选项 | `v-for="mp in appState.myProjects.filter((m) => m.name !== appState.currentName && m.hasSubtitle)"`，`:value="mp.name"`，文案带 `mp.subtitleCount` 条数 |
-| `.hgen-tip`（素材块） | 面向用户的说明（不含实现细节）：「所选素材会用在页面里：字幕逐条依次做动画，视频作为页面片段放进画面。下拉里的「选择本地视频文件…」会导入一份新素材并自动选中；某次不想用视频，选「不使用视频素材」即可。」 |
-| 视频素材行（`.hgen-row`，在「项目素材」块内） | 标签「视频素材」+ **唯一入口** `HfSelect`（`v-model="videoSel"`、`:groups="videoSelGroups"`、`@change="onVideoSelect"`，`title` 为「把哪个视频片段放进页面；没有现成素材时可当场导入」）三个选项：`''`「不使用视频素材」/ `'__current__'`「当前项目视频素材（`appState.project.videoMaterial`）」（仅在该字段存在时出现）/ `'__pick__'`「选择本地视频文件…（导入为项目素材）」；右侧 `移除视频`（`:disabled="!appState.project?.videoMaterial"`，`onClearVideo`）与 `{{ extractText }}`（`:disabled="!appState.project?.videoMaterial"`，`title` 为「把视频里的声音提取出来，作为背景音频」，`onExtractAudio`） |
-| 视频素材预览行（`.hgen-row`，与上一行同一 `<template>` 内）`v-show="videoPrevRowVisible"` | `<video ref="videoPrevEl" :src="videoPrevSrc" controls>`；`videoMaterial` 是项目内相对引用、渲染层拿不到绝对路径，因此该行只在**本次会话导入成功后**出现（与背景音频试听同一取舍） |
-| `.hgen-actions` | 动作行，顺序固定为：**「生成 HTML」**（`hf-btn hf-btn-primary`，`:disabled="rendering"`，`@click="onGenerate"`，文案恒为字面量 `生成 HTML`，**无 `:title`、无自适应文案、无二次确认**）→ **「按需求修改」**（`hf-btn`，`:disabled="!hasHtml \|\| rendering"`，`@click="onModify"`，**无 `:title`**）→ 「下载 HTML」（`onDownload`，`title`「下载当前项目 HTML 到本地」）→ **「转视频」**（主按钮，`:disabled="!hasHtml \|\| rendering"`，`openRenderModal`，`title` 为「把当前 HTML 渲染成 MP4（约 30 秒）」）。**行内帮助 `?` 在 `<button>` 内部、每个动作按钮里各一个**（`<span class="hg-help" @click.stop>` > `.hg-help-icon`「?」 + `.hg-help-pop`），各自只说明自己那个动作、原文照抄：「生成 HTML」按钮内 —「不参考现有页面，从零做一版新的。点一次即开始并覆盖当前页面，想留底稿可先「下载 HTML」。」；「按需求修改」按钮内 —「在当前页面的基础上，按你描述的改一版——换配色、调节奏、改文案都用它。还没生成过 HTML 时不可用。」。**动作行末尾不再有独立的 `?`，也没有「两行对照」的合并说明**；`?` 上的 `@click.stop` 保证点它不触发按钮动作 |
-| 「转视频」弹窗（页面级，位于两张卡片之外） | `.hf-modal-mask`（`v-show="renderModalVisible"`，遮罩点击自身关闭 `@click.self="closeRenderModal"`）> `.hf-modal`（行内 `style="width:min(520px,92vw)"` 收窄宽度；**样式全部复用 `assets/main.css` 的通用弹窗类，未新增 CSS 类**）：`.hf-modal-head`（`.hf-modal-title`「转视频」+ `.hf-modal-close`「×」，`title`「关闭」）→ `.hf-modal-body`（`.panel-title-sm`「渲染档位」（行内 `style="margin-top:0"`）→ 质量 `.hgen-row`（`label.sel-label`「质量」+ `HfSelect` `v-model="quality"`、`:groups="qualityGroups"`、`:disabled="rendering"`、`@change="onOptionChange"`）→ 帧率 `.hgen-row`（同上，`v-model="fps"` / `:groups="fpsGroups"`）→ 档位来源 `.hgen-row`（`style="margin-bottom:0"`：`.hf-file` 显示 `optionNote` + `v-if="overridden"` 的「恢复默认档位」）→ `.hgen-tip`）→ `.hf-modal-foot`（「取消」`closeRenderModal` / 「开始渲染」（主按钮）`confirmRenderVideo`） |
+| `.proj-stat`（素材） | `:class="{ on: meta.matN > 0 \|\| meta.subCount > 0 }"`，文案为 `meta.matText`——**一格同时反映字幕 / 背景音频 / 素材库**（见 2.1） |
+| `.proj-stat`（用法） | 按 `meta.hasH` 给两种操作引导文案：已有 HTML → 「填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份」；未生成 → 「在「项目素材」里选好素材（可多张图片 / 多个视频，勾选决定这次用哪些），再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定」 |
+| `.hgen-block`（字幕素材） | `.panel-title-sm`「字幕素材（可选，留空则跳过）」+ `.hgen-row`：`span.sel-label`「字幕」+ `HfSelect` `v-model="subSel"` `:groups="subSelGroups"` `title="按所选字幕逐条设计动画"`。**本页素材侧只剩这一处下拉**：视频素材不再是「一个入口的下拉」，改为 `MaterialsSection` 里的素材卡片墙 |
+| `<MaterialsSection />` | 无 props、无 emits（见第 3 节） |
+| `.hgen-block`（需求描述） | `textarea.hgen-subtitle`，`v-model="prompt"`、`spellcheck="false"`、`:placeholder="promptPlaceholder"`；文案随 `hasHtml` 变：已有 HTML 讲「这次要改什么」（换紫色霓虹配色 / 字幕节奏放慢），否则讲「你想要的 HTML 效果」（深空科技风格标题动画页 / 每条字幕间隔两秒依次上浮淡入） |
+| `.hgen-actions` | 动作行，顺序固定为：**「生成 HTML」**（`hf-btn hf-btn-primary`，`:disabled="rendering"`，`@click="onGenerate"`，文案恒为字面量 `生成 HTML`，**无 `:title`**）→ **「按需求修改」**（`hf-btn`，`:disabled="!hasHtml \|\| rendering"`，`@click="onModify"`，**无 `:title`**）→ 「下载 HTML」（`onDownload`，`title`「下载当前项目 HTML 到本地」）→ **「转视频」**（主按钮，`:disabled="!hasHtml \|\| rendering"`，`openRenderModal`，`title` 为「把当前 HTML 渲染成 MP4（约 30 秒）」）。**行内帮助 `?` 在 `<button>` 内部、每个动作按钮里各一个**（`<span class="hg-help" @click.stop>` > `.hg-help-icon`「?」 + `.hg-help-pop`），原文照抄：「生成 HTML」按钮内 —「不参考现有页面，从零做一版新的。点一次即开始并覆盖当前页面，想留底稿可先「下载 HTML」。」；「按需求修改」按钮内 —「在当前页面的基础上，按你描述的改一版——换配色、调节奏、改文案都用它。还没生成过 HTML 时不可用。」。**动作行末尾没有独立的 `?`** |
+| `<PreviewSection />`（第 1 张卡片之外） | `ref="previewRef"`，四个 props：`:status` / `:status-class` / `:think-text` / `:rendering`（全部来自本页状态），见第 4 节 |
+| 「转视频」弹窗（页面级，位于两张卡片之外） | `.hf-modal-mask`（`v-show="renderModalVisible"`，遮罩点击自身关闭 `@click.self="closeRenderModal"`）> `.hf-modal`（行内 `style="width:min(520px,92vw)"`；**样式全部复用 `assets/main.css` 的通用弹窗类，未新增 CSS 类**）：`.hf-modal-head`（`.hf-modal-title`「转视频」+ `.hf-modal-close`「×」，`title`「关闭」）→ `.hf-modal-body`（`.panel-title-sm`「渲染档位」（行内 `style="margin-top:0"`）→ 质量 `.hgen-row`（`label.sel-label`「质量」+ `HfSelect` `v-model="quality"`、`:groups="qualityGroups"`、`:disabled="rendering"`、`@change="onOptionChange"`）→ 帧率 `.hgen-row`（同上，`v-model="fps"` / `:groups="fpsGroups"`）→ 档位来源 `.hgen-row`（`style="margin-bottom:0"`：`.hf-file` 显示 `optionNote` + `v-if="overridden"` 的「恢复默认档位」）→ `.hgen-tip`）→ `.hf-modal-foot`（「取消」`closeRenderModal` / 「开始渲染」（主按钮）`confirmRenderVideo`） |
 | `.hgen-tip`（**在弹窗内、档位来源行下方**） | `{{ qualityHint }}` + 「转视频」说明：「把当前 HTML 渲染成 MP4（约 30 秒）；渲染完成后到「视频预览」页查看成品。」|
-| `.card.hgen-panel`（第 2 张） | 标题「预览」，卡片最上方是背景音频块（常驻渲染：标签「背景音频」+ 文件名 + 已生成音频下拉 + 「选择音频文件…」/「移除音频」） |
-| 背景音频行（预览卡片内） | 标签「背景音频」+ `.hf-file` 显示 `escTxt(appState.project.audioFile)` 或「未设置音频」+ `HfSelect` `v-model="audioPick"` `:groups="audioSelGroups"`（首项「从已生成音频中选择…」、其后按 `genAudios` 下标生成 `:value="String(i)"`、`@change="onAudioPick"`，选中即生效）+ `选择音频文件…`（`onPickAudioFile`）+ `移除音频`（`:disabled="!appState.project?.audioFile"`，`onRemoveAudio`） |
-| 试听行 `v-show="audioPreviewVisible"`（预览卡片内） | `<audio ref="audioEl" :src="audioSrc" controls>` + 语速标签 + `−` / 输入框 / `+`（见第 4.9 节） |
-| `.hf-status` | `:class="statusDisplayClass"`，文本 `statusDisplay`（渲染中优先显示全局 trace，其余为阶段文案 / 结果文案 / 失败原因） |
+
+### 2.1 项目状态条文案（`meta` computed）
+
+```js
+const mats = (p && p.materials) || [];
+const images = mats.filter((m) => m.kind === 'image').length;
+const videos = mats.filter((m) => m.kind === 'video').length;
+const picked = mats.filter((m) => m.selected).length;
+const subCount = (p && p.subtitleCount) || 0;
+const parts: string[] = [];
+if (subCount) parts.push('字幕 ' + subCount + ' 条');
+if (p && p.audioFile) parts.push('已配背景音频');
+if (mats.length) parts.push('素材 ' + mats.length + ' 个（图片 ' + images + ' · 视频 ' + videos + '，参与生成 ' + picked + '）');
+```
+
+- `meta` 返回 `{ hasH, sceneN, subCount, matN, matText }`（`hasH` 取 `hasHtml.value`，`sceneN` 统计非空 `narration` 场景数）。
+- 三段都为空时 `matText` 恒为「无素材（可先到「字幕生成」页添加字幕，或在上方「项目素材」里添加图片 / 视频）」。
+- 与素材库的联动是**自动的**：`MaterialsSection` 每次落盘后调 `refreshProject()`，本 computed 直接读 `appState.project.materials`，因此计数与「参与生成 N 个」无需父页参与。
+
+## 3. `MaterialsSection.vue`：「项目素材」区块
+
+### 3.1 契约：无 props、无 emits（自包含）
+
+源码注释（`MaterialsSection.vue:66`）：
+
+> 自包含：不接 props、不 emit —— 素材状态就是 appState.project.materials（模块级 reactive 单例），每次落盘后调 refreshProject() 刷新，页面上的计数、生成时的取材都自动跟着变。增删改一律经主进程（复制入库 + 规范化 + 上限校验），本组件不直接碰文件系统。
+
+由此推出的三条约定：
+
+1. **状态真源只有一个**：`appState.project.materials`（`computed mats`），本组件不复制一份本地列表；父页的 `meta` computed 也读同一份，所以「素材」格与本组件的 `n / 20` 自动一致。
+2. **落盘即刷新**：所有写操作成功（`res.ok`）后都 `await refreshProject()`，再由父页 `index.vue` 的 `runAgent()` 在生成时读 `materials.filter(m => m.selected)` 取 id。
+3. **不碰文件系统**：选文件走 `pickMedia`、复制入库与登记走 `addMaterials`、移除与勾选都走 `saveMaterials`（整份列表回写），组件里没有任何 `fs` / 路径拼接逻辑。
+
+### 3.2 模板结构
+
+| 区块 | 说明 |
+|------|------|
+| `.hgen-block` 根 | 整块在根节点，直接插在父页动作链中间；无 props 因此没有属性透传 |
+| `.panel-head` | 左 `.panel-title-sm`「项目素材」+ `<span class="mat-count">勾选的会随需求一起交给 Agent</span>`；右 `.panel-head-actions` 内 `<span class="mat-count" :title="'图片 + 视频合计上限 ' + MAX_MATERIALS + ' 个'">{{ mats.length }} / {{ MAX_MATERIALS }}</span>` |
+| `.panel-title`（图片组） | `<span class="dot dot-img"></span>图片 · {{ images.length }} 张`（行内 `style="margin:0;letter-spacing:1px"`；`.dot-img` 用辅色，与视频组的主色点区分） |
+| `.mat-grid`（图片组） | `v-for="m in images"` 渲染 `.mat-card`（`:class="{ off: !m.selected }"`）+ 末尾一个 `.mat-add` |
+| `.mat-card` 内部 | ① `.mat-check`（`:class="{ on: m.selected }"`、`:disabled="busy"`、`@click="onToggle(m)"`，`title` 随勾选态在「本次生成会带上这张图片（点击取消）」/「本次生成不带这张图片（点击选中）」间切换，内容为 `{{ m.selected ? '✓' : '' }}`）；② `.hf-btn.hf-btn-danger.mat-del`（「移除」，`:disabled="busy"`，`title="从素材列表移除（项目内的文件保留）"`，`@click="onRemove(m)"`）；③ `.mat-thumb` 内 `<img :src="thumbUrl(m.file)" :alt="m.label" />`；④ `.mat-meta` 内 `.mat-name`（`{{ m.label }}`，带 `:title="m.label"`）与 `.mat-path`（`{{ m.file }}`，带 `:title="m.file"`） |
+| `.mat-add`（图片组末尾） | `<button class="mat-add" :disabled="busy" title="选择本地图片导入项目（可多选）" @click="onAdd('image')"><i>＋</i>添加图片…</button>` |
+| `.panel-title`（视频组） | `<span class="dot"></span>视频 · {{ videos.length }} 个`（行内 `style="margin:16px 0 0;letter-spacing:1px"`） |
+| `.mat-grid`（视频组） | 与图片组同构；**缩略图位置不抽帧**，用 `<span class="mat-play">▶</span>` 占位（源码注释：抽帧要额外依赖，收益不抵成本） |
+| `.mat-add`（视频组末尾） | `title="选择本地视频导入项目"`，`@click="onAdd('video')"`；紧跟其后是**被注释掉的「提取原声为背景音频」按钮**（见 3.5） |
+| `.hgen-tip` | 「勾选的素材会随需求一起交给 Agent：图片按 `images/文件名`、视频按 `video/文件名` 的相对路径写进页面。上限 `{{ MAX_MATERIALS }}` 个（图片 + 视频合计），支持 `{{ extText }}`；「移除」只把素材从列表里摘掉，**项目目录里的文件会保留**。」（`images/` / `video/` 为 `<code>`，加粗为 `<b>`） |
+
+### 3.3 状态与函数
+
+| 名称 | 说明 |
+|------|------|
+| `busy` | `ref(false)`：一轮写操作未结束时为真，**禁用全部按钮**（避免并发「读-改-写」把列表互相冲掉） |
+| `mats` | `computed<ProjectMaterial[]>`：`(appState.project && appState.project.materials) \|\| []` |
+| `images` / `videos` | 按 `m.kind === 'image' / 'video'` 过滤出的两个数组 |
+| `extText` | `IMAGE_MATERIAL_EXTS.join('/') + ' 与 ' + VIDEO_MATERIAL_EXTS.join('/')`（提示行里的支持格式文案） |
+| `thumbUrl(file)` | 缩略图 URL：`'hgpreview://p/' + encodeURIComponent(appState.currentName) + '/' + encodeURIComponent(file)`——**整段 `file` 做一次 `encodeURIComponent` 也成立**，因为主进程按 `/` 切段后逐段 decode 再拼回相对路径（源码注释指向 `main/index.ts` 的 hgpreview 处理器） |
+| `plainList(list)` | 把 reactive 元素铺平成普通对象（见 3.4） |
+| `save(list, tip)` | 写盘统一收尾：`busy = true` → `window.projectTools.saveMaterials(appState.currentName, plainList(list))`（`.catch(() => null)`）→ `busy = false` → 失败 toast `res.message` 或「保存素材失败」并返回 `false`；成功 `await refreshProject()`，`tip` 非空再 toast，返回 `true` |
+| `onToggle(m)` | `busy` 守卫 → 生成新列表（同 id 的那条改成 `{ ...x, selected: !x.selected }`）→ `save(next, (m.selected ? '已取消参与生成：' : '已设为参与生成：') + m.label)` |
+| `onRemove(m)` | `busy` 守卫 → `save(mats.filter(x => x.id !== m.id), '已移除素材：' + m.label + '（项目内文件保留）')` |
+| `onAdd(kind)` | `busy` 守卫 → `window.projectTools.pickMedia(kind)`（`.catch(() => [])`，空数组直接返回）→ `busy = true` → `window.projectTools.addMaterials(appState.currentName, paths)`（`.catch(() => null)`）→ `busy = false` → 失败 toast；成功 `await refreshProject()`，toast 优先用 `res.message`（主进程「部分成功」时带回跳过数），否则「已添加图片/视频素材 ×N」 |
+
+### 3.4 两个实现细节（源码注释明确写过）
+
+**① 提交 IPC 前必须铺平 reactive 元素**（`MaterialsSection.vue:89`）：
+
+```js
+// 交给 IPC 的必须是**普通对象**：mats 来自 reactive 单例，元素是 Proxy，直接传会在结构化克隆时抛
+// DataCloneError（历史事故见 CHANGELOG #11「下载运行环境点了毫无反应」），所以这里显式铺平成新对象。
+function plainList(list: ProjectMaterial[]): ProjectMaterial[] {
+  return list.map((m) => ({ id: m.id, kind: m.kind, file: m.file, label: m.label, selected: m.selected, addedAt: m.addedAt }));
+}
+```
+
+**② 缩略图走 `hgpreview://`**（而不是 `file://`），因此 `src/renderer/index.html` 的 CSP 必须放行 `hgpreview:`（`img-src 'self' file: hgpreview: data:`；样式侧见 `assets/main.css` 的 `.mat-thumb` 注释）。
+
+### 3.5 被注释下线的「提取原声为背景音频」入口
+
+多素材化后「提哪一条视频」需要按素材 id 重做，而主进程 handler 仍读历史字段 `project.videoMaterial`；本轮按用户决定**只隐藏界面入口**：IPC 频道、preload 方法与主进程 handler 一行未改。落地方式是**模板里注释掉按钮 + 脚本里整段注释掉实现**，并写明恢复方式（`MaterialsSection.vue:53`）：
+
+```
+<!-- 提取原声为背景音频：入口临时下线（多视频下「提哪一条」要按素材 id 重做，主进程 handler 仍读
+     历史字段 project.videoMaterial 且一行未改）。恢复时把下面这行按钮放进本组的 .panel-head-actions：
+     <button class="hf-btn" :disabled="!videos.length" title="把视频里的声音提取出来，作为背景音频" @click="onExtractAudio()">{{ extractText }}</button> -->
+```
+
+脚本末尾（`MaterialsSection.vue:138-166`）是一整段注释掉的实现，原样如下（含 `useEnvGate` import、`extractText`、`onExtractAudio`）：
+
+```js
+// ===== 提取视频原声为背景音频（入口临时下线，恢复时取消注释本段，并把上面模板注释里的按钮放回视频组）=====
+// 多素材化后「提哪一条视频」需要按素材 id 重做（主进程 handler 仍读历史字段 project.videoMaterial）；
+// 本轮按用户决定只隐藏界面入口：IPC 频道、preload 方法与主进程 handler 一行未改。
+// import { useEnvGate } from '@renderer/composables/useEnvGate'
+// const envGate = useEnvGate();
+// const extractText = ref('提取原声为背景音频');
+// async function onExtractAudio(skipEnvGuard = false): Promise<void> {
+//   if (!videos.value.length) { toast('还没有视频素材：点「添加视频…」导入'); return; }
+//   // 提取音轨要 ffmpeg 包（不随安装包）：缺则先问用户；点「继续」回到这里时不再弹框
+//   if (!skipEnvGuard) {
+//     const g = await envGate.guard(['ffmpeg'], '提取视频原声', () => { void onExtractAudio(true); });
+//     if (!g.ok) return;
+//   }
+//   extractText.value = '提取中…';
+//   const res = await window.projectTools.extractVideoAudio(appState.currentName).catch(() => null);
+//   extractText.value = '提取原声为背景音频';
+//   if (!res || !res.ok) {
+//     const fail = res as { message?: string; needPacks?: ('ffmpeg' | 'hyperframes')[] } | null;
+//     if (fail && fail.needPacks && fail.needPacks.length) {
+//       toast(fail.message || '需要先下载运行环境');
+//       void envGate.guard(fail.needPacks, '提取视频原声', () => { void onExtractAudio(true); });
+//       return;
+//     }
+//     toast((fail && fail.message) || '提取失败');
+//     return;
+//   }
+//   await refreshProject();
+//   toast('已提取原声并设为背景音频：' + res.audioFile);
+// }
+```
+
+> 结论：`project:extract-video-audio` 频道、`projectTools.extractVideoAudio` 与主进程 handler 都还在（**当前界面无入口，属"保留但不可达"**）；恢复时要先解决「按哪条素材提取」这件事（主进程 handler 至今读 `proj.videoMaterial`，该字段本轮起不再写入）。
+
+## 4. `PreviewSection.vue`：「预览」卡片
+
+### 4.1 契约：4 个 props + `defineExpose({ reload })`
+
+```js
+const props = defineProps<{
+  status: string
+  statusClass: string
+  thinkText: string
+  rendering: boolean
+}>();
+```
+
+```js
+// 父页在 Agent 成功 / 项目状态变化后调用：重新判定并载入预览（原 index.vue 的 syncPreview）
+defineExpose({ reload: syncPreview });
+```
+
+- **props 单向**：生成与渲染两套状态都归父页写（发起两者的按钮都在父页），本组件只读不改；`status` / `statusClass` 是父页的最终文案与样式，`thinkText` 是流式思考原文，`rendering` 用于判断是否让全局 trace 接管状态行。
+- **`reload()` 是唯一对外方法**，父页在两处调用：Agent 成功（`previewRef.value?.reload()`）与生成失败且项目原本无 HTML（同样 `reload()` → 回到「尚未生成」展示）。
+
+### 4.2 模板结构
+
+| 区块 | 说明 |
+|------|------|
+| `.card.hgen-panel`（`style="margin-top:16px"`） | 标题「预览」；卡片内顺序为**背景音频行 → 试听行（`v-show`）→ `.hf-status` → AI 思考过程 → `.empty-hint` → iframe 画布 → 播放控制条** |
+| 背景音频行（`.hgen-row`） | `span.sel-label`「背景音频」+ `.hf-file`（`escTxt(appState.project.audioFile)` 或「未设置音频」，`:title` 取 `audioFile \|\| '未设置音频'`）+ `HfSelect` `v-model="audioPick"` `:groups="audioSelGroups"` `title="选一份已生成音频作为背景音频"` `@change="onAudioPick"` + 「选择音频文件…」（`onPickAudioFile`，`title="选择本地音频文件作为背景音频"`）+ 「移除音频」（`:disabled="!appState.project?.audioFile"`，`title="移除背景音频"`，`onRemoveAudio`） |
+| 试听行 `v-show="audioPreviewVisible"` | `<audio ref="audioEl" :src="audioSrc" controls>` + `label.sel-label`「语速」+ `.rate-spinner`：`−`（`rateStep(-0.05)`）/ `<input ref="rateEl" :value="rateValue" inputmode="decimal" class="hgen-input">`（`@input="onRateInput"`）/ `+`（`rateStep(0.05)`），按钮各自带 `title`（「语速减 0.05」/「语速加 0.05」），输入框 `title`「播放语速 0.5~2.0（非法或空值自动回退 1x）」 |
+| `.hf-status` | `:class="statusDisplayClass"`，文本 `statusDisplay`（渲染中优先显示全局 trace，其余为本页传入的 `status`） |
 | AI 思考过程区 `v-show="showThink"` | 蓝色描边块，标题「AI 思考过程（实时）」，内为 `<pre ref="thinkPreEl">{{ thinkText }}</pre>`（`max-height:220px;overflow-y:auto`） |
 | `.empty-hint` `v-show="emptyVisible"` | 空态 / 失败态提示，文本 `emptyText` |
 | `.hgen-frame-wrap` `v-show="frameVisible"` | 预览画布容器（`ref="frameWrapEl"`，CSS `padding-bottom:56.25%` 维持 16:9） |
 | `iframe.hgen-frame` | `:src="frameSrc"`、`sandbox="allow-scripts allow-same-origin"`、`@load="onFrameLoad"` |
 | `.hg-prev-ctl` `v-show="ctlVisible"` | `暂停`/`播放`（`prevToggleText`，`onPrevToggle`）、`重新播放`（`onPrevReplay`）、进度条 `.hg-prev-bar`（`:class="{ seeking }"`、`title="点击或按住拖动进度条，可跳转到任意播放位置"`、`@pointerdown="onSeekStart"` / `@pointermove="onSeekMove"` / `@pointerup="onSeekEnd"` / `@pointercancel="onSeekEnd"`；内层 `.hg-prev-track` 再包 `.hg-prev-bar-fill`，宽度 `prevFillPct`——热区与视觉条分离）、`.hg-prev-time`（`prevTimeText`）、`.hg-prev-hint`（`v-if="!prevPlaying && prevDur > 0 && prevTimeCur < 0.05"`，文案「已暂停在第 0 帧 · 起始帧本就是空的，点「播放」或拖动进度条」） |
 
-## 3. 脚本逻辑
-
-### 3.1 状态
-
-| 名称 | 类型 | 说明 |
-|------|------|------|
-| `prompt` | `ref<string>` | 需求描述（提示词），生成/修改的入参 |
-| `promptPlaceholder` | `computed<string>` | 提示词框的 `:placeholder` 文案，随 `hasHtml` 变：已有 HTML → 「描述这次要改什么，例如：\n· 换成紫色霓虹配色，并把标题放大\n· 字幕出现得太快，节奏放慢一些」；否则 → 「描述你想要的 HTML 效果，例如：\n· 深空科技风格的标题动画页，标题为“我的作品集”\n· 每条字幕间隔两秒，依次从下方上浮淡入」（源码注释：没 HTML 时讲「要什么样的页面」，已有 HTML 时讲「这次改什么」） |
-| `subSel` | `ref<string>` | 字幕素材选择值：`''` / `'__current__'` / 其他项目名 |
-| `videoSel` | `ref<string>` | 视频素材下拉的**唯一选择值**：`''` = 不使用视频素材（本次生成不带视频）、`'__current__'` = 本次生成沿用当前项目视频素材、`'__pick__'` = **动作项**（选中即弹文件框导入为项目素材，导入成功后自动置回 `'__current__'`；取消 / 失败则复位为 `currentVideoSel()`）。背景音轨不是生成素材，本页不再有「背景音频」下拉状态，相关状态见下面的 `audioPick` / `audioEl` / `audioSrc` / `audioPreviewVisible` |
-| `audioPick` | `ref('')` | 「从已生成音频中选择…」下拉的索引字符串（`''` = 未选）；`@change="onAudioPick"` 选中即生效，用完立即复位为 `''` |
-| `audioEl` | `ref<HTMLAudioElement \| null>` | 背景音频试听元素引用（语速控件作用于它） |
-| `audioSrc` | `ref('')` | 背景音频试听的 `file:///` URL |
-| `audioPreviewVisible` | `ref(false)` | 是否显示试听行（含语速控件） |
-| `status` | `ref<string>` | 状态条文本 |
-| `statusClass` | `ref<string>` | 状态条样式类：`''` / `'hf-ok'` / `'hf-error'` |
-| `thinkText` | `ref<string>` | AI 思考原文，来自 `info.thinkText` |
-| `thinkPreEl` | `ref<HTMLElement \| null>` | `<pre>` 引用，`watch(thinkText)` 中滚动到底部 |
-| `showThink` | `computed<boolean>` | `thinkText.value.length > 0` |
-| `meta` | `computed` | 项目状态条数据源，返回 `{ hasH, sceneN, subCount, audioFile, videoMaterial }`：`hasH` 取 `hasHtml`，`sceneN` 统计非空 `narration` 场景数，其余取 `appState.project` 的 `subtitleCount` / `audioFile` / `videoMaterial` |
-| `frameEl` | `ref<HTMLIFrameElement \| null>` | 预览 iframe 引用 |
-| `frameWrapEl` | `ref<HTMLElement \| null>` | 预览容器引用，`fitFrame` 依据其 `clientWidth` 计算缩放 |
-| `frameVisible` | `ref(false)` | 是否显示预览画布 |
-| `frameSrc` | `ref('')` | iframe 地址（`hgpreview://` URL） |
-| `emptyVisible` | `ref(true)` | 是否显示空态提示 |
-| `emptyText` | `ref('尚未生成 HTML。')` | 空态 / 失败态文案 |
-| `ctlVisible` | `computed<boolean>` | 等同 `frameVisible.value` |
-| `prevPlaying` | `ref(true)` | 预览是否处于播放态，决定 `prevToggleText`；载入完成时置 `false`（预览**不自动播放**），之后由画面回报的 `playing` 校准 |
-| `seeking` | `ref(false)` | 是否正在拖动进度条：拖动期间本地跟手、**忽略画面回报**（见 4.5），并给 `.hg-prev-bar` 加 `.seeking`（关掉填充的 0.25s 过渡） |
-| `seekPending` | `ref(false)` | 松手后等待画面 `ack` 期间：只更新总时长、位置与播放状态一律不采信（避免被「拖动前发出的旧回报」拽回原位） |
-| `seekAckTimer` | `let seekAckTimer = 0` | **模块级普通变量**（非 ref）：`onSeekEnd` 起的 800ms 兜底定时器，收到 `ack` 或卸载时清掉 |
-| `prevDur` | `ref(0)` | 预览总时长（秒，来自 iframe 上报） |
-| `prevTimeCur` | `ref(0)` | 预览当前时间（秒，来自 iframe 上报） |
-| `prevFillPct` | `computed<string>` | 进度条宽度百分比，`prevDur > 0` 时上限 100，保留 2 位小数 |
-| `prevTimeText` | `computed<string>` | `fmtPrev(cur) + ' / ' + (dur > 0 ? fmtPrev(dur) : '--:--')` |
-| `prevToggleText` | `computed<string>` | `prevPlaying` 为真显示 `暂停`，否则 `播放` |
-| `videoPrevSrc` | `ref('')` | 视频素材预览的 `file:///` URL |
-| `videoPrevRowVisible` | `ref(false)` | 是否显示视频预览行 |
-| `genAudios` | `ref<GenAudioItem[]>` | 已生成音频列表（`{ path, name, group, size, mtime }`），**仅用于填充「预览」卡片里「从已生成音频中选择…」下拉** |
-| `extractText` | `ref('提取原声为背景音频')` | 提取按钮文案，提取中改为 `提取中…` |
-| `rateEl` | `ref<HTMLInputElement \| null>` | 语速输入框引用 |
-| `rateValue` | `ref('1')` | 语速输入框的受控值（`@input` 回写规范化结果） |
-| `agentRunning` | `let agentRunning = false` | **模块级普通变量**（非 ref），生成/修改并发互斥标志 |
-| `rendering` | `ref(false)` | 转视频进行中标志：禁用「转视频」/「生成 HTML」/「按需求修改」与弹窗里的两个档位下拉 |
-| `renderModalVisible` | `ref(false)` | 「转视频」弹窗开关（`v-show` 控制 `.hf-modal-mask`）；只有点「转视频」经守卫后置真，点「取消」/「×」/遮罩/ESC 置假，点「开始渲染」在发起渲染前置假 |
-| `qualityOptions` / `fpsOptions` | 常量 | 直接引用 `utils/render.ts` 的 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` |
-| `quality` / `fps` | `ref<RenderQuality>` / `ref<RenderFps>` | 当前所选档位，初值取 `FALLBACK_RENDER`（`standard` / `30`），挂载时按 `effectiveRenderOptions()` 同步 |
-| `projectOverride` | `computed<RenderOverride \| null>` | 当前项目的覆盖值：`(appState.project && appState.project.render) \|\| null` |
-| `overridden` | `computed<boolean>` | `isRenderOverridden(renderDefaults, projectOverride.value)`：覆盖是否真的改变了生效档位（决定是否显示「恢复默认档位」与「本项目自定义档位」） |
-| `optionNote` | `computed<string>` | 档位来源说明：按 `overridden` 显示「本项目自定义档位」或「跟随设置页默认：<档位摘要>」 |
-| `qualityHint` | `computed<string>` | 当前所选质量档位的 `hint`（末尾带 `；`），选「快速预览」时明确提示画质代价 |
-| `statusDisplay` | `computed<string>` | `(rendering && renderProgress.text) ? renderProgress.text : status`——渲染中优先显示全局 trace |
-| `statusDisplayClass` | `computed<string>` | trace 接管文本时返回 `''`（中性样式），否则返回本页 `statusClass` |
-
-### 3.2 函数
+### 4.3 状态
 
 | 名称 | 说明 |
 |------|------|
-| `watch(thinkText, …)` | 思考文本变化后把 `thinkPreEl.scrollTop` 设为 `scrollHeight`，实现自动滚到底部 |
+| `statusDisplay` | `computed`：`(props.rendering && renderProgress.text) ? renderProgress.text : props.status`——**渲染中状态行让位给全局 trace** |
+| `statusDisplayClass` | `computed`：trace 接管时返回 `''`（中性样式），否则返回 `props.statusClass` |
+| `frameEl` / `frameWrapEl` | 预览 iframe 与画布容器引用（`fitFrame` 依据后者 `clientWidth` 计算缩放） |
+| `frameVisible` / `frameSrc` / `emptyVisible` / `emptyText` | 画布显隐、iframe 地址（`hgpreview://` URL）、空态显隐与文案（初值「尚未生成 HTML。」） |
+| `ctlVisible` | 等同 `frameVisible.value` |
+| `thinkPreEl` / `showThink` | `<pre>` 引用；`showThink` = `props.thinkText.length > 0`；`watch(() => props.thinkText)` 每次更新把 `<pre>` 滚到底部 |
+| `prevPlaying` | `ref(true)` 初值，但 `onFrameLoad()` 会置 `false`（预览**不自动播放**），之后由画面回报的 `playing` 校准 |
+| `prevDur` / `prevTimeCur` / `prevFillPct` / `prevTimeText` / `prevToggleText` | 预览总时长、当前时间、进度条宽度百分比、`mm:ss / mm:ss` 文案、按钮文案（`暂停` / `播放`） |
+| `seeking` | `ref(false)`：是否正在拖动进度条（拖动期间本地跟手、忽略画面回报） |
+| `seekPending` | `ref(false)`：松手后等待画面 `ack` 期间只更新总时长 |
+| `seekAckTimer` | `let seekAckTimer = 0`：**模块作用域的普通变量**（非 ref），800ms 兜底定时器，收到 `ack` 或组件卸载时清掉 |
+| `audioPick` | `ref('')`：「从已生成音频中选择…」下拉的索引字符串（`''` = 未选），选中即生效、用完立即复位 |
+| `audioEl` / `audioSrc` / `audioPreviewVisible` | 试听元素引用、`file:///` 试听源、试听行显隐 |
+| `genAudios` | `ref<GenAudioItem[]>`（`{ path, name, group, size, mtime }`），**仅用于填充下拉**（本页不再有独立的列表 + 试听 + 设为背景音频三件套） |
+| `audioSelGroups` | `HfSelect` 选项：首项 `{ value: '', label: '从已生成音频中选择…' }`，其后按 `genAudios` 下标生成 `{ value: String(i), label: it.name + '（' + it.group + '）' }` |
+| `rateEl` / `rateValue` | 语速输入框引用与其受控值（`@input` 回写规范化结果） |
+
+### 4.4 函数
+
+| 名称 | 说明 |
+|------|------|
 | `fmtPrev(sec)` | 秒 → `mm:ss`（`Math.floor`、`padStart(2,'0')`） |
-| `prevPost(type, seconds?)` | 向 iframe 的 `contentWindow` 发送 `{ __hg: true, type, seconds }`，目标源 `'*'`；`seconds` 只在 `'seek'` 时给值（其余类型为 `undefined`，画面侧忽略） |
-| `onPrevMessage(ev)` | 过滤 `d.__hg && d.type === 'progress'`；先看 `d.ack === true`（画面收到 seek 后的应答）：命中则清 `seekPending` 与 `seekAckTimer`；随后**拖动中、或 `seekPending` 且本条不是 ack** 时只更新 `prevDur` 并 `return`（不采信 `time` / `playing`）；否则写 `prevTimeCur` / `prevDur` 并按 `d.playing` 校准 `prevPlaying`；最后播放中且到达 `prevDur - 0.25` 时置 `prevPlaying = false`（视为自然播完） |
-| `seekRatio(ev)` | 指针事件的 `clientX` 相对 `.hg-prev-bar` 的 `getBoundingClientRect()` 求比例，钳制到 `0 ~ 1`（宽度为 0 时返回 0） |
-| `seekTo(ev)` | `prevDur <= 0` 直接返回（总时长还没上报、无从换算）；否则 `sec = seekRatio(ev) * prevDur`，**本地立即**写 `prevTimeCur = sec` 并 `prevPost('seek', sec)` |
-| `onSeekStart(ev)` | 无 `frameSrc` 或 `prevDur <= 0` 时忽略；置 `seeking = true`、`setPointerCapture(ev.pointerId)`（拖出进度条甚至拖到按钮上仍继续收 move），随即 `seekTo(ev)` |
+| `prevPost(type, seconds?)` | 向 iframe 的 `contentWindow` 发送 `{ __hg: true, type, seconds }`，目标源 `'*'`；`seconds` 只在 `'seek'` 时给值 |
+| `onSeekStart(ev)` | 无 `frameSrc` 或 `prevDur <= 0` 时忽略；置 `seeking = true`、`setPointerCapture(ev.pointerId)`，随即 `seekTo(ev)` |
+| `seekRatio(ev)` / `seekTo(ev)` | 按 `clientX` 相对进度条 `getBoundingClientRect()` 求比例（钳制 0~1）；`prevDur <= 0` 直接返回，否则**本地立即**写 `prevTimeCur` 并 `prevPost('seek', sec)` |
 | `onSeekMove(ev)` | 仅当 `seeking` 时 `seekTo(ev)` |
-| `onSeekEnd(ev)` | 非拖动中直接返回；置 `seeking = false`、`releasePointerCapture`；随后置 `seekPending = true` 并起 800ms 兜底定时器（`seekAckTimer`）——在收到画面的 `ack` 之前不采信回报，超时则强制恢复采信（画面里若是旧脚本也不会让进度条永远不更新） |
+| `onSeekEnd(ev)` | 置 `seeking = false`、`releasePointerCapture`，再置 `seekPending = true` 并起 800ms 兜底定时器（在收到画面 `ack` 之前不采信回报） |
+| `onPrevMessage(ev)` | 过滤 `d.__hg && d.type === 'progress'`；`d.ack === true` 时清 `seekPending` 与定时器；**拖动中、或 `seekPending` 且本条不是 ack** 时只更新 `prevDur` 并 `return`；否则写 `prevTimeCur` / `prevDur`，按 `d.playing` 校准 `prevPlaying`，播到 `prevDur - 0.25` 时视为自然播完 |
 | `fitFrame()` | `frame.style.transform = 'scale(' + (wrap.clientWidth / 1920) + ')'` |
-| `onFrameLoad()` | 每次 iframe 载入（含 `restart` 引发的 reload）复位 `prevPlaying = false`（**刻意不主动起播**：预览默认静止在第 0 帧，播放交给用户，按钮由画面回报的 `playing` 校准）、`prevDur = 0`、`prevTimeCur = 0`，并调用 `fitFrame()`；源码注释：合成是 `paused: true` 创建 + 开头 `opacity: 0`，首帧本来就是空的，不是加载失败 |
-| `onPrevToggle()` | 无 `frameSrc` → `toast('暂无预览')`；已自然播完（`!prevPlaying && time >= dur - 0.25`）→ 发 `'restart'` 并重置进度；否则切换 `prevPlaying` 并发 `'play'` / `'pause'` |
-| `onPrevReplay()` | 无 `frameSrc` → `toast('暂无预览')`；否则发 `'restart'` 并置 `prevPlaying = true` |
-| `loadFrame()` | 调 `window.projectTools.previewHtml(appState.currentName)`；失败则关画布、显示 `emptyText`（`res.message` 或 `'预览副本生成失败'`）；成功则拼 `hgpreview://` URL 并显示画布 |
-| `syncPreview()` | 状态联动：`!!(appState.project && appState.project.htmlExists && appState.project.htmlPath)` 成立 → `loadFrame()`；否则关画布并显示空态文案 |
-| `runAgent(mode)` | 生成/修改主流程（见第 4.3 / 4.4 节）：守卫通过后置 `agentRunning = true`，再按 `mode` 调 `generateHtml` / `modifyHtml` |
-| `onGenerate()` | 「生成 HTML」按钮的处理（见 4.3）：渲染中 → `toast('正在渲染视频，请等它结束再提交需求')` 并返回；否则直接 `void runAgent('generate')`。**没有二次确认**：已有 HTML 时也一步直达（`index.html` 被直接覆盖），因此函数内不再有 `hasHtml` 分支，也不再需要「武装态」与定时器 |
-| `onModify()` | 「按需求修改」按钮的处理（按钮本身在无 HTML 时已 `:disabled`，函数内仍留兜底守卫）：`!appState.project?.htmlExists` → `toast('还没有 HTML，先点「生成 HTML」')` 并返回，否则 `void runAgent('modify')` |
+| `onFrameLoad()` | 每次载入完成（含 `restart` 引发的 reload）复位 `prevPlaying = false` / `prevDur = 0` / `prevTimeCur = 0` 并 `fitFrame()`；**刻意不主动起播** |
+| `onPrevToggle()` / `onPrevReplay()` | 无 `frameSrc` → `toast('暂无预览')`；已自然播完时「播放」等价于从头重播（发 `'restart'`）；否则切换 `prevPlaying` 并发 `'play'` / `'pause'`；「重新播放」恒发 `'restart'` 并置播放态 |
+| `loadFrame()` | 调 `window.projectTools.previewHtml(appState.currentName)`；失败则关画布、`emptyText` 取 `res.message` 或「预览副本生成失败」；成功则由 `previewPath` 取文件名（兜底 `'index.preview.html'`）拼出 `'hgpreview://p/' + encodeURIComponent(currentName) + '/' + encodeURIComponent(relFile) + '?v=' + Date.now()` |
+| `syncPreview()` | 状态联动：`!!(appState.project && appState.project.htmlExists && appState.project.htmlPath)` 成立 → `loadFrame()`；否则关画布、清 `frameSrc`、显示空态「尚未生成 HTML。」——**即对父页暴露的 `reload()`** |
+| `setAudioPreview(absPath)` | 有绝对路径则置 `'file:///' + encodeURI(路径反斜杠转正斜杠)` 并显示试听行，否则清空并隐藏 |
+| `afterAudioChange(tip, absPath)` | 设 / 换 / 移除背景音频的统一收尾：`await refreshProject()` → `setAudioPreview(absPath)` → `await loadFrame()`（主进程已同步改写 `index.html` 的音轨，不重载就听不到）→ `toast(tip)` |
+| `onPickAudioFile()` / `onAudioPick()` / `onRemoveAudio()` | 三条入口最终都走 `setAudio` / `clearAudio` + `afterAudioChange`；`onAudioPick` 先取下标并**立即复位为 `''`**，再从 `genAudios` 取路径 |
+| `onRateInput()` / `rateStep(delta)` | `rateValue.value = String(applyRate(rateEl.value, audioEl.value))` / `String(stepRate(rateEl.value, audioEl.value, delta))` |
+| `genLoad()` | `window.voiceTools.listGenerated()`（`.catch` 归为 `{ ok: false, message: '调用失败' }`）；**失败静默返回**（下拉留空即可，生成音频不是本页必需），成功写 `genAudios = res.items \|\| []` |
+| `onMounted(cb)` | `window.addEventListener('message', onPrevMessage)`、`window.addEventListener('resize', fitFrame)`、`syncPreview()`、`genLoad()` |
+| `onBeforeUnmount(cb)` | 成对移除上述两个 window 监听，并清掉 `seekAckTimer`（`if (seekAckTimer) { window.clearTimeout(seekAckTimer); seekAckTimer = 0 }`） |
+
+> **监听归属**：`message` / `resize` 两个 window 监听与 `seekAckTimer` 都在本组件内注册与清理（拆分前在 `index.vue`）；父页只保留 `document` 级的 `keydown`（转视频弹窗 ESC）。若本组件被卸载，iframe 上报不会再被处理。
+
+## 5. `index.vue`：脚本逻辑
+
+### 5.1 状态
+
+| 名称 | 类型 | 说明 |
+|------|------|------|
+| `envGate` | `useEnvGate()` 实例 | 运行环境缺包守卫（本页只服务「转视频」，见第 8 节） |
+| `configPrompt` | `useConfigPrompt()` 实例 | 配置类错误弹窗（Key 无效 / 余额不足 / 配置不完整…），主进程判好分类，本页只负责触发 |
+| `prompt` | `ref<string>` | 需求描述（提示词），生成/修改的入参 |
+| `promptPlaceholder` | `computed<string>` | 提示词框的 `:placeholder` 文案，随 `hasHtml` 变（见第 2 节模板表对应行） |
+| `subSel` | `ref<string>` | 字幕素材选择值：`''`（不使用字幕）/ `'__current__'`（当前项目字幕）/ 其他项目名 |
+| `subSelGroups` | `computed<HfSelectGroup[]>` | 字幕下拉选项：`'不使用字幕'` + 仅当 `appState.project?.subtitle` 非空时出现的 `'当前项目字幕（N 条）'` + `appState.myProjects.filter(m => m.name !== currentName && m.hasSubtitle)` 的项目字幕（文案 `项目「标题或名」字幕（N 条）`） |
+| `status` / `statusClass` / `thinkText` | `ref<string>` | 状态条文本、样式类（`''` / `'hf-ok'` / `'hf-error'`）、AI 思考原文；三者整体传给 `PreviewSection` |
+| `meta` | `computed` | 项目状态条数据源，见 2.1 |
+| `previewRef` | `ref<{ reload: () => void } \| null>` | 预览子组件引用；**对外契约只有 `reload()`** |
+| `agentRunning` | `let agentRunning = false` | **模块作用域普通变量**（非 ref），生成/修改并发互斥标志 |
+| `rendering` | `ref(false)` | 转视频进行中标志（禁用三个动作按钮与弹窗里的两个档位下拉），并传给 `PreviewSection` 决定状态行是否让位给 trace |
+| `qualityOptions` / `fpsOptions` | 常量 | 直接引用 `utils/render.ts` 的 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` |
+| `quality` / `fps` | `ref<RenderQuality>` / `ref<RenderFps>` | 当前所选档位，初值取 `FALLBACK_RENDER`（`standard` / `30`），挂载时按 `effectiveRenderOptions()` 同步 |
+| `qualityGroups` / `fpsGroups` | `computed<HfSelectGroup[]>` | 两个档位下拉的选项（`qualityOptions` / `fpsOptions` 映射成单组） |
+| `projectOverride` | `computed<RenderOverride \| null>` | 当前项目的覆盖值：`(appState.project && appState.project.render) \|\| null` |
+| `overridden` | `computed<boolean>` | `isRenderOverridden(renderDefaults, projectOverride.value)`：覆盖是否真的改变了生效档位 |
+| `optionNote` | `computed<string>` | 「本项目自定义档位」或「跟随设置页默认：<档位摘要>」 |
+| `qualityHint` | `computed<string>` | 当前所选质量档位的 `hint`（末尾带 `；`），选「快速预览」时明确提示画质代价 |
+| `renderModalVisible` | `ref(false)` | 「转视频」弹窗开关（`v-show` 控制 `.hf-modal-mask`） |
+
+### 5.2 函数
+
+| 名称 | 说明 |
+|------|------|
+| `runAgent(mode)` | 生成/修改主流程（见 6.2）：守卫 → 组装 `materials` 载荷 → 按 `mode` 调 `generateHtml` / `modifyHtml` → 成功后 `refreshProject()` + `previewRef.value?.reload()` |
+| `onGenerate()` | 渲染中 → `toast('正在渲染视频，请等它结束再提交需求')` 并返回；否则 `void runAgent('generate')`。**没有二次确认** |
+| `onModify()` | `!appState.project?.htmlExists` → `toast('还没有 HTML，先点「生成 HTML」')`（模板已 `:disabled`，这里是兜底），否则 `void runAgent('modify')` |
 | `onDownload()` | 只走 `window.projectTools.downloadHtml(appState.currentName)`；按 `ok` / `canceled` / `message` 分支提示 |
-| `setAudioPreview(absPath)` | 有绝对路径则置 `audioSrc` 为 `'file:///' + encodeURI(路径反斜杠转正斜杠)` 并显示试听行，否则清空 `audioSrc` 并隐藏试听行 |
-| `afterAudioChange(tip, absPath)` | 设 / 换 / 移除背景音频的统一收尾：`await refreshProject()` → `setAudioPreview(absPath)` → `await loadFrame()` 重载预览 iframe（主进程已同步改写 `index.html` 的音轨，不重载就听不到）→ `toast(tip)` |
-| `onPickAudioFile()` | `pickAudio()`（取消即返回）→ `setAudio(currentName, picked)`，失败 toast `res.message` 或「设置音频失败」；成功后 `afterAudioChange('已设为背景音频：' + res.audioFile, picked)` |
-| `onAudioPick()` | 先取 `audioPick` 下标并**立即复位为 `''`** → `genAudios[Number(idx)]` 无对应条目直接返回 → `setAudio(currentName, it.path)`，失败 toast「设置背景音频失败」；成功后 `afterAudioChange('已设为背景音频：' + res.audioFile, it.path)` |
-| `onRemoveAudio()` | `clearAudio(currentName)` → `afterAudioChange('已移除背景音频（HTML 里的音轨也已摘掉）', '')` |
-| `syncVideoPreview(absPath)` | 有绝对路径则置 `videoPrevSrc` 为 `'file:///' + encodeURI(路径反斜杠转正斜杠)` 并显示预览行，否则清空并隐藏 |
-| `onVideoSelect()` | 视频下拉（**唯一入口**）的 `@change` 处理：`videoSel.value !== '__pick__'` 直接返回（`''` / `'__current__'` 只是本次生成的选择，无需额外动作）；`'__pick__'` 时——`pickVideo()`（取消 → 复位）→ `setVideo(currentName, picked)`（失败 → toast `res.message` 或「设置视频失败」并复位）→ `await refreshProject()` → `syncVideoPreview(res.abs)` → `videoSel.value = '__current__'`（**导入即选中**，不必再去别处选一次）→ toast「已导入视频素材：…（本次生成会交给 Agent 嵌入该片段）」 |
-| `currentVideoSel()` | 项目当前的真实选择：`appState.project?.videoMaterial` 存在返回 `'__current__'`，否则返回 `''` |
-| `syncVideoSelFromProject()` | `videoSel.value = currentVideoSel()`——进页面时按项目状态初始化（项目里已有素材就默认选中，仍可切「不使用视频素材」） |
-| `onClearVideo()` | `clearVideo(currentName)` → `await refreshProject()` → `syncVideoPreview('')` → `videoSel.value = currentVideoSel()` → toast「已移除视频素材」 |
-| `onExtractAudio()` | 无视频素材守卫（toast「还没有视频素材：可在上方『视频素材』里选『选择本地视频文件…』导入」）→ 文案改 `提取中…` → `extractVideoAudio(currentName)` → 恢复文案；失败 toast。成功：`refreshProject()` → `setAudioPreview('')`（项目内音频没有渲染层可用的绝对路径，试听交给预览 iframe 里的音轨）→ `loadFrame()` 重载预览 → toast「已提取原声并设为背景音频：…」 |
-| `genLoad()` | `window.voiceTools.listGenerated()`（`catch` 归为 `{ ok: false }`）；**无参数、失败静默返回**（下拉留空即可，生成音频不是本页必需）；成功则 `genAudios = res.items \|\| []`——只填充列表，不含选中 / 禁用 / 试听逻辑 |
-| `onRateInput()` | `rateValue.value = String(applyRate(rateEl.value, audioEl.value))` |
-| `rateStep(delta)` | `rateValue.value = String(stepRate(rateEl.value, audioEl.value, delta))` |
-| `syncFromEffective()` | 用「项目覆盖 > 全局默认」的有效档位刷新下拉：`const eff = effectiveRenderOptions(); quality.value = eff.quality; fps.value = eff.fps` |
+| `syncFromEffective()` | `const eff = effectiveRenderOptions(); quality.value = eff.quality; fps.value = eff.fps` |
 | `onOptionChange()` | 下拉改动 → `await saveProjectRenderOverride({ quality, fps })`（内部走 `project:set-render`）；失败且有 `message` 时 toast |
-| `onResetOptions()` | `await saveProjectRenderOverride(null)` 清除项目覆盖；成功则 `syncFromEffective()` 回到跟随全局默认，失败且有 `message` 时 toast |
-| `openRenderModal()` | 「转视频」按钮的处理（见 4.10）：依次做 `rendering` 守卫、`agentRunning` 守卫、`htmlPath` / `htmlExists` 校验（三种情况都 toast 后返回，**不开弹窗**），全部通过才 `renderModalVisible = true` |
+| `onResetOptions()` | `await saveProjectRenderOverride(null)` 清除项目覆盖；成功则 `syncFromEffective()`，失败且有 `message` 时 toast |
+| `openRenderModal()` | 三道守卫（`rendering` / `agentRunning` / `htmlPath` + `htmlExists`）全部通过才 `renderModalVisible = true`（见 6.6） |
 | `closeRenderModal()` | `renderModalVisible = false`；供「取消」、「×」、遮罩点击（`@click.self`）与 ESC 共用 |
-| `confirmRenderVideo()` | 弹窗「开始渲染」：**先关弹窗**再 `void onRenderVideo()`（渲染进度显示在本页状态区，成品到「视频预览」页看） |
-| `onModalKeydown(e)` | `document` 级 `keydown`：`e.key === 'Escape' && renderModalVisible.value` 时 `closeRenderModal()`（与「从音频生成字幕」弹窗一致） |
-| `onRenderVideo()` | 转视频主流程（见 4.10）：进行中守卫 → **Agent 忙守卫** → `htmlPath` / `htmlExists` 校验 → `hfTools.renderVideo(htmlPath, { quality, fps })` → 成功后 `saveVideo` + `refreshProject()` + toast；IPC 异常在 `catch` 中转为失败状态（这些守卫与 `openRenderModal` 重复，用于兜住「弹窗打开后状态被改」的窗口期） |
-| `onMounted(cb)` | 清空 `status` / `statusClass` / `thinkText`；`resetRenderProgress()`；`syncFromEffective()`；`syncVideoSelFromProject()`（视频素材下拉按项目状态初始化）；注册 `onHtmlProgress`；注册 `message`、`resize`、`keydown`（`onModalKeydown`，供弹窗 ESC 关闭）监听；`syncPreview()`；`genLoad()` |
-| `onBeforeUnmount(cb)` | `removeEventListener('message', onPrevMessage)`、`removeEventListener('resize', fitFrame)`、`document.removeEventListener('keydown', onModalKeydown)`，并清掉 seek 的兜底定时器（`if (seekAckTimer) { window.clearTimeout(seekAckTimer); seekAckTimer = 0 }`） |
+| `confirmRenderVideo()` | **先关弹窗**再 `void onRenderVideo()` |
+| `onModalKeydown(e)` | `document` 级 `keydown`：`e.key === 'Escape' && renderModalVisible.value` 时 `closeRenderModal()` |
+| `onRenderVideo(skipEnvGuard = false)` | 转视频主流程（见 6.7） |
+| `onMounted(cb)` | 清空 `status` / `statusClass` / `thinkText`；`resetRenderProgress()`；`syncFromEffective()`；注册 `onHtmlProgress`；注册 `document` 级 `keydown`（弹窗 ESC） |
+| `onBeforeUnmount(cb)` | 只 `document.removeEventListener('keydown', onModalKeydown)` |
 
-## 4. 关键流程
+## 6. 关键流程
 
-### 4.1 挂载加载（`onMounted`）
+### 6.1 挂载加载（`onMounted`）
 
 1. 复位 `status`、`statusClass`、`thinkText`，避免复用实例时残留上一次会话的文案。
-2. `resetRenderProgress()` 清掉上一次渲染的 trace 残留（源码注释：渲染中若再次进入本页，随后仍会被新 trace 覆盖）；`syncFromEffective()` 把档位下拉刷成「项目覆盖 > 设置页全局默认」的生效值；`syncVideoSelFromProject()` 把视频素材下拉设为项目真实状态（有素材 → 「当前项目视频素材」，否则 → 「不使用视频素材」）。
-3. `window.projectTools.onHtmlProgress((info) => …)` 注册进度回调（preload 侧为**单订阅**：重复注册只替换回调，因此切页不会叠加监听）。
-4. 注册 `window.addEventListener('message', onPrevMessage)`、`window.addEventListener('resize', fitFrame)` 与 `document.addEventListener('keydown', onModalKeydown)`（弹窗 ESC 关闭）；卸载时在 `onBeforeUnmount` 成对移除（替代旧版模块级 once-guard）。
-5. `syncPreview()` 决定预览或空态；`genLoad()` 预载已生成音频列表（填充「预览」卡片的「从已生成音频中选择…」下拉，失败静默）。
+2. `resetRenderProgress()` 清掉上一次渲染的 trace 残留（源码注释：渲染中若再次进入本页，随后仍会被新 trace 覆盖）；`syncFromEffective()` 把档位下拉刷成「项目覆盖 > 设置页全局默认」的生效值。
+3. `window.projectTools.onHtmlProgress((info) => …)` 注册进度回调（preload 侧为**单订阅**：重复注册只替换回调，因此切页不会叠加监听）。回调只用两个字段：`info.text` → `status`（同时清空 `statusClass`）、`info.thinkText` → `thinkText`（`String(info.thinkText || '')`）。
+4. 注册 `document.addEventListener('keydown', onModalKeydown)`（弹窗 ESC 关闭）；卸载时在 `onBeforeUnmount` 移除。
+5. 预览、已生成音频列表与 iframe 播放控制**不在这里**：`PreviewSection` 自己在 `onMounted` 里 `syncPreview()` + `genLoad()` + 注册 `message` / `resize`。
 
-### 4.2 生成预览副本与 iframe 载入
+> 拆分后本页不再注册 `message` / `resize`，也不再清理 seek 定时器——这些随预览整块搬进了 `PreviewSection.vue`。
 
-1. `loadFrame()` 调 `window.projectTools.previewHtml(appState.currentName)`；主进程读取项目 `index.html`，注入播放控制脚本后写出同目录 `index.preview.html`（并为副本剥离 CSP），返回 `{ ok, previewPath }`。**本页不调用 `projectTools.readHtml`**，读取发生在主进程内部。
-2. 失败（`!res || !res.ok`）：隐藏画布、清空 `frameSrc`、`emptyText` 取 `res.message` 或 `'预览副本生成失败'`。
-3. 成功：`relFile` 由 `previewPath` 按 `[\\/]` 取文件名（兜底 `'index.preview.html'`），拼出
-   `'hgpreview://p/' + encodeURIComponent(appState.currentName) + '/' + encodeURIComponent(relFile) + '?v=' + Date.now()`。
-   源码注释说明两点原因：dev 的 http 页面下 `file://` iframe 会被 Chromium 拦截，故走自定义协议；`?v=` 时间戳强制重新加载。
-4. `frameVisible = true`、`emptyVisible = false`；iframe `@load` 触发 `onFrameLoad()` 复位进度并按容器宽度 `fitFrame()`。
+### 6.2 生成 / 修改 HTML（`runAgent`）
 
-### 4.3 生成 / 修改 HTML：两个按钮 + 生成一步直达（`runAgent` / `onGenerate` / `onModify`）
-
-生成侧在界面上是**两个并列的按钮，各自对应一个明确动作**：`生成 HTML`（主按钮 → `onGenerate`）与 `按需求修改`（次要按钮 → `onModify`）。两者的区别写在**每个动作按钮内部各自的 `?`** 里（`.hg-help`，悬浮只显示该动作自己的说明），按钮文案本身不随状态变化——上一版那条「按 `hasHtml` 分流到同一个按钮」的自适应路径及其处理函数已删除。
-
-- **`生成 HTML`**：不参考现有页面，从零做一版新的（覆盖 `index.html`）。
-- **`按需求修改`**：在当前页面基础上按需求改一版（整页输出、覆盖现有 HTML）；没有 HTML 时按钮直接 `:disabled`（仍可用「生成 HTML」从零生成）。
-
-**「生成 HTML」点一次即执行，没有二次确认**：已有 HTML 时直接覆盖 `index.html`（不拦截、不弹确认框），按钮文案恒为「生成 HTML」。
-
-**主进程侧两个 handler 依旧各自独立、没有合并**：界面把 `generate` 挂在「生成 HTML」按钮后面、把 `modify` 挂在「按需求修改」按钮后面——`generate` 的提示词不含现有页面，`modify` 的提示词含当前 `index.html` 全文。
+生成侧在界面上是**两个并列的按钮，各自对应一个明确动作**：`生成 HTML`（主按钮 → `onGenerate`）与 `按需求修改`（次要按钮 → `onModify`）。两者的区别写在**每个动作按钮内部各自的 `?`** 里，按钮文案本身不随状态变化。
 
 1. `agentRunning` 为真 → `toast('上一个请求还在处理中，请稍候')` 并返回（重复提交防护）。
 2. `rendering` 为真 → `toast('正在渲染视频，请等它结束再提交需求')` 并返回；`prompt.trim()` 为空 → `toast('请先填写需求描述（上方提示词输入框）')` 并返回。
-3. 置 `agentRunning = true`，再按 `meta.sceneN` 写初始状态文案：有场景为「将附带当前项目内容脚本（N 个场景），已提交给 Agent，处理中...」，无场景为「当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...」，并清空 `statusClass`。
-4. 组装 `materials = { subtitleProject: subSel.value, videoPath: videoSel.value }`（**只有字幕与视频素材**：音轨不进提示词，见 4.8）；视频侧只有两种取值：`''` = 不使用、`'__current__'` = 当前项目视频素材——**自定义导入不走本载荷**（`onVideoSelect` 已用 `project:set-video` 把它复制进项目并登记，见 4.12），因此载荷里不会有文件路径；两者的语义由主进程 `resolveMaterials(proj, payload)` 解释。
-5. 按模式调用 IPC：`mode === 'generate'` → `window.projectTools.generateHtml(appState.currentName, p, materials)`；否则 `window.projectTools.modifyHtml(appState.currentName, p, materials)`（preload 会把 `materials` 展开进 payload）。
-6. 成功（`res.ok`）：`await refreshProject()` → `syncPreview()` → `status = 'Agent 已更新 HTML' + (res.htmlPath ? '：' + res.htmlPath : '')`、`statusClass = 'hf-ok'`，并 toast「HTML 已生成」/「HTML 已修改」。主进程在 `index.html` 落盘后已按 `project.audioFile` 补注入音轨（见 4.8），`syncPreview()` 重新生成的预览副本因此自带音轨。
-7. 失败：`status = res.message || '提交失败'`、`statusClass = 'hf-error'`；随后**按主进程分类分流**——`res.needConfig` 为真时调 `configPrompt.open(msg, res.needConfig, false, res.title)`（`jump = false`：只说明原因，不把用户拽离本页）且**不叠 toast**（弹窗已把信息讲全，状态行照旧留着），否则维持 `toast(msg)`；再判「无 HTML 才恢复空态」：若 `!appState.project?.htmlExists` 则关画布、清 `frameSrc`、`emptyVisible = true`（避免误显示为已生成）。**余额 / 欠费不在 `needConfig` 之内**（主进程不给它分类），因此仍走 `toast` + 状态行。
-8. `finally` 中复位 `agentRunning = false`，保证异常路径也能再次提交。
-9. **「生成 HTML」一步直达**（`onGenerate`，模板层）：按钮为 `hf-btn hf-btn-primary`、`:disabled="rendering"`、`@click="onGenerate"`、文案是**字面量 `生成 HTML`**（不再有 `{{ … ? … : … }}` 自适应文案）、**无 `:title`**。处理逻辑只有两步：渲染中 → `toast('正在渲染视频，请等它结束再提交需求')` 直接拒绝；否则 `void runAgent('generate')`。**没有二次确认**——`hasHtml` 为真时同样一步直达并覆盖 `index.html`（源码注释：想先备份可用「下载 HTML」），因此 `regenArmed` / `regenTimer` / `disarmRegen()` 这套武装态机制已整体删除，`onBeforeUnmount` 也不再需要清理定时器。
-10. **「按需求修改」按钮**（`onModify`）：模板层为 `hf-btn`、`:disabled="!hasHtml || rendering"`、`@click="onModify"`、**无 `:title`**（无 HTML 时按钮直接禁用，不再靠点击后 toast 提示）；函数内仍保留 `htmlExists` 兜底守卫——`!appState.project?.htmlExists` → `toast('还没有 HTML，先点「生成 HTML」')` 并返回，否则 `void runAgent('modify')`。行内帮助 `?` 不在动作行末尾，而是**放进两个按钮内部、每个动作按钮各一个**（`.hg-help` / `.hg-help-icon` / `.hg-help-pop`，`@click.stop`），各自只说明自己：「**生成 HTML**：不参考现有页面，从零做一版新的。点一次即开始并覆盖当前页面，想留底稿可先「下载 HTML」。」「**按需求修改**：在当前页面的基础上，按你描述的改一版——换配色、调节奏、改文案都用它。还没生成过 HTML 时不可用。」（动作行末尾不再有独立的 `?`，也没有两行对照的合并说明）
-11. **两个频道的提示词差异（主进程侧，未变）**：`project:generate-html` 的提示词只含需求 + 内容脚本 + 素材（**不含现有页面**）；`project:modify-html` 会把当前 `index.html` 全文作为 `extra` 置于提示词最前，要求「在此基础上改造后输出完整新 HTML」（见 [main/projects.ts.md](../../../main/projects.ts.md) §5.2 / §5.3）。
+3. 置 `agentRunning = true`，再按 `meta.value.sceneN` 写初始状态文案：有场景为「将附带当前项目内容脚本（N 个场景），已提交给 Agent，处理中...」，无场景为「当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...」，并清空 `statusClass`。
+4. 组装本次生成的素材载荷（源码注释：字幕 + 素材库里**勾选**的图片/视频，顺序 = 列表顺序；**音轨不在其中**，主进程在 HTML 落盘后按 `project.audioFile` 注入 `<audio id="myv-bgm">`）：
 
-### 4.4 进度阶段文案与思考原文
+```js
+const materials = {
+  subtitleProject: subSel.value,
+  materialIds: ((appState.project && appState.project.materials) || []).filter((m) => m.selected).map((m) => m.id)
+};
+```
+
+5. 按模式调用 IPC：`mode === 'generate'` → `window.projectTools.generateHtml(appState.currentName, p, materials)`；否则 `window.projectTools.modifyHtml(appState.currentName, p, materials)`。
+6. 成功（`res.ok`）：`await refreshProject()` → `previewRef.value?.reload()` → `status = 'Agent 已更新 HTML' + (res.htmlPath ? '：' + res.htmlPath : '')`、`statusClass = 'hf-ok'`，并 toast「HTML 已生成」/「HTML 已修改」。**`refreshProject()` 必须先做**：素材可能与生成过程无关地变了，且预览副本要基于新的 `index.html` 重生成。
+7. 失败：`status = res.message || '提交失败'`、`statusClass = 'hf-error'`；随后**按主进程分类分流**——`res.needConfig` 为真时调 `configPrompt.open(msg, res.needConfig, false, res.title)`（`jump = false`：只说明原因，不把用户拽离本页）且**不叠 toast**，否则维持 `toast(msg)`；再判「无 HTML 才恢复空态」：若 `!appState.project?.htmlExists` 则 `previewRef.value?.reload()`（等价于旧的关画布 + 空态）。**余额 / 欠费不在 `needConfig` 之内**，因此仍走 `toast` + 状态行。
+8. `finally` 中复位 `agentRunning = false`，保证异常路径也能再次提交。
+9. **两个频道的提示词差异（主进程侧）**：`project:generate-html` 的提示词只含需求 + 内容脚本 + 素材（**不含现有页面**）；`project:modify-html` 会把当前 `index.html` 全文作为 `extra` 置于提示词最前（见 [main/projects.ts.md](../../../main/projects.ts.md)）。素材部分由主进程 `buildMaterialBlock()` 按 `materialIds` 生成「【图片素材】/【视频素材】」两段。
+10. **素材链路**：添加素材（`pick-media` → `add-materials`）→ 复制进项目 `images/` / `video/` 并在 `project.json` 的 `materials` 里登记 → 卡片上勾选（`selected`，经 `save-materials` 整份回写）→ 生成时提交 `materialIds` → 主进程 `resolveMaterials()` 按 id 过滤 → `buildMaterialBlock()` 拼提示词 → 模型在 HTML 里按 `images/文件名` / `video/文件名` 的相对路径引用。
+
+### 6.3 进度阶段文案与思考原文
 
 1. 主进程 Agent 的 `AgentProgress.stage` 取值为 `'connecting' | 'thinking' | 'writing' | 'retry' | 'done'`，主进程 `progressText` 把它翻成 `正在连接模型…` / `AI 正在推理中…（已思考 N 字符）` / `AI 正在生成 HTML…（已输出 N 字符）` / `本次输出为空，正在升档重试…` / `模型输出完成，正在写入文件…`，随 `IPC.Project.HtmlProgress` 推送。
-2. 本页回调只用两个字段：`info.text` → `status`（同时清空 `statusClass`，让进度文案使用默认样式）；`info.thinkText` → `thinkText`（`String(info.thinkText || '')`）。
+2. 本页回调写 `status` / `statusClass` / `thinkText`（见 6.1），**展示由 `PreviewSection` 负责**（`.hf-status` 与 `.pre` 都在「预览」卡片里）。
 3. 主进程上报时对思考原文做**尾部截断**：`thinkText.slice(-20000)`，即最多 2 万字符的末尾片段；完整思考原文与 `thinkChars` / `contentChars` 会落到 userData 下 `html-agent/chat.jsonl` 供分析。
-4. `thinkText` 非空即 `showThink` 为真显示思考区；`watch` 每次更新把 `<pre>` 滚到底部，形成「实时滚动」观感。
+4. `thinkText` 非空即 `showThink` 为真显示思考区；`PreviewSection` 内的 `watch` 每次更新把 `<pre>` 滚到底部，形成「实时滚动」观感。
 
-### 4.5 预览 postMessage 协议
+### 6.4 生成预览副本与 iframe 载入（`PreviewSection`）
 
-父页 → iframe：`prevPost(type, seconds?)` 发送 `{ __hg: true, type, seconds }`，`type` 取 `'pause'` / `'play'` / `'seek'` / `'restart'`；副本注入脚本收到 `'restart'` 时执行 `location.reload()`、收到 `'seek'` 时调 `setTime(d.seconds)`（只挪播放头、不改播放/暂停状态，并立刻回一条带 `ack` 的进度），见 [main/projects.ts.md](../../../main/projects.ts.md) §3.2。**父页在载入完成后不再发 `'play'`**：预览默认静止（画面侧也只 `freeze()` 冻住），播放完全由用户点「播放」或拖动进度条触发。
+1. `loadFrame()` 调 `window.projectTools.previewHtml(appState.currentName)`；主进程读取项目 `index.html`，注入播放控制脚本后写出同目录 `index.preview.html`（并为副本剥离 CSP），返回 `{ ok, previewPath }`。**页面不调用 `projectTools.readHtml`**，读取发生在主进程内部。
+2. 失败（`!res || !res.ok`）：隐藏画布、清空 `frameSrc`、`emptyText` 取 `res.message` 或 `'预览副本生成失败'`。
+3. 成功：`relFile` 由 `previewPath` 按 `[\\/]` 取文件名（兜底 `'index.preview.html'`），拼出 `hgpreview://` URL。源码注释说明两点原因：dev 的 http 页面下 `file://` iframe 会被 Chromium 拦截，故走自定义协议；`?v=` 时间戳强制重新加载。
+4. `frameVisible = true`、`emptyVisible = false`；iframe `@load` 触发 `onFrameLoad()` 复位进度并按容器宽度 `fitFrame()`。
 
-iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报 `{ __hg: true, type: 'progress', time, dur, playing, ack }`（`playing` 是副本 `isPlaying()` 上报的真实播放状态——**已播完不算在播**，父页用它校准按钮；`ack` 只在收到 seek 后的那条上报里为 `true`，父页据此结束 `seekPending`；`time`/`dur` **优先取 composition 时间轴 `rawTimelines()` 的 `duration()`/`time()` 最大值**，没有时间轴时才退回 `<audio>/<video>` 与 `gsap.globalTimeline` 取大者——否则素材比合成长时总时长会显示成素材长度；暂停/恢复另由副本的 `timelines()` 枚举 `window.__timelines` 的「对象 / 数组」两种形态并回退 `gsap.globalTimeline`，详见 [main/projects.ts.md](../../../main/projects.ts.md) §3.2）。
+### 6.5 预览 postMessage 协议与 seek（`PreviewSection`）
 
-父页处理：`onPrevMessage` 只接受 `d.__hg && d.type === 'progress'`；先看 `d.ack === true`（seek 的应答）——命中就清 `seekPending` 与兜底定时器；随后**拖动中、或「松手后还没等到 ack」时只更新 `prevDur`**，位置与播放状态一律不采信（否则松手后可能先收到一条「拖动前发出」的旧回报，看起来像进度条被拽回原位）；正常回报则写 `prevTimeCur = Number(d.time) || 0`、`prevDur = Number(d.dur) || 0`，`typeof d.playing === 'boolean'` 时用画面里的真实状态写 `prevPlaying`（校准「暂停/播放」按钮），最后当处于播放态且 `prevTimeCur >= prevDur - 0.25` 时把 `prevPlaying` 置回 false（进度停满、按钮回到「播放」，再点即从头重播）。**拖动本身不改变播放/暂停状态**：`seekTo` 只发 `'seek'` + 本地跟手，画面侧 `setTime()` 也只挪播放头。
+父页 → iframe：`prevPost(type, seconds?)` 发送 `{ __hg: true, type, seconds }`，`type` 取 `'pause'` / `'play'` / `'seek'` / `'restart'`；副本注入脚本收到 `'restart'` 时 `location.reload()`、收到 `'seek'` 时调 `setTime(d.seconds)`（只挪播放头、不改播放/暂停状态，并立刻回一条带 `ack` 的进度），见 [main/projects.ts.md](../../../main/projects.ts.md)。**载入完成后不再发 `'play'`**：预览默认静止。
 
-监听在 `onMounted` 注册、`onBeforeUnmount` 移除，成对管理。
+iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报 `{ __hg: true, type: 'progress', time, dur, playing, ack }`（`playing` 是真实播放状态、**已播完不算在播**；`ack` 只在收到 seek 后的那条上报里为 `true`）。
 
-### 4.6 下载 HTML（`onDownload`）
+本组件处理（`onPrevMessage`）：只接受 `d.__hg && d.type === 'progress'`；先看 `d.ack === true`——命中就清 `seekPending` 与兜底定时器；随后**拖动中、或「松手后还没等到 ack」时只更新 `prevDur`**，位置与播放状态一律不采信；正常回报则写 `prevTimeCur` / `prevDur`，`typeof d.playing === 'boolean'` 时校准 `prevPlaying`，最后当处于播放态且 `prevTimeCur >= prevDur - 0.25` 时把 `prevPlaying` 置回 false。**拖动本身不改变播放/暂停状态**。
 
-1. 调 `window.projectTools.downloadHtml(appState.currentName)`——本页唯一的导出频道，没有任何形态分支。
-2. `res` 为空直接返回；`res.ok` → `toast('已导出：' + res.savedPath)`；`canceled`（用户取消保存对话框）不提示；其他失败 `toast(res.message || '下载失败')`。
-3. 该频道在主进程侧会把项目内的 `./gsap.min.js` 相对引用换回固定版本 CDN 地址后再写出（`hfEnv.externalizeGsapHtml`）——导出的是单个文件，不带同目录的 `gsap.min.js`，故导出物联网即可独立打开；项目目录内的原件不变。
+### 6.6 转视频：弹窗确认档位（`openRenderModal` / `confirmRenderVideo`）
 
-### 4.7 状态联动（有 HTML → 自动预览；无 HTML → 空态）
-
-`syncPreview()` 的判定条件为 `!!(appState.project && appState.project.htmlExists && appState.project.htmlPath)`：
-
-- 为真 → `loadFrame()` 生成副本并挂载 iframe。
-- 为假 → `frameVisible = false`、`frameSrc = ''`、`emptyVisible = true`，`emptyText` 恒为「尚未生成 HTML。」（不展示空 iframe）。
-
-调用时机：`onMounted`、生成/修改成功后、以及失败且项目无 HTML 时。
-
-### 4.8 背景音频：设定 / 更换 / 移除（音轨由主进程注入 HTML）
-
-背景音轨**不经过 Agent**：本页只负责「选定哪份音频」，写 HTML 由主进程完成——`project:set-audio` / `project:clear-audio` / `project:extract-video-audio` 在 `writeProject` 之后调用 `applyBgmToHtml()`，按 `project.audioFile` 重写 `index.html` 里的 `<audio id="myv-bgm" src="audio/…" autoplay loop>`（先摘掉本应用注入的旧标签、再摘掉引用同一音频文件的历史标签；幂等，内容无变化时不写盘，无 HTML 时静默返回 `false`）。细节见 [main/projects.ts.md](../../../main/projects.ts.md) §3.5。
-
-1. **设定 / 更换**：三条入口最终都用同一个收尾——
-   - 下拉「从已生成音频中选择…」（`onAudioPick`）：**选中即生效**，调 `setAudio(currentName, it.path)`（并立即把下拉复位为 `''`）；
-   - 「选择音频文件…」（`onPickAudioFile`）：`pickAudio()` 拿本地绝对路径（取消则静默返回）后调 `setAudio(...)`；
-   - 「项目素材」块「视频素材」行里的「提取原声为背景音频」（`onExtractAudio`）：主进程从 `videoMaterial` 提取 `audio/<同名>.m4a` 并设为 `project.audioFile`。
-   成功路径统一走 `afterAudioChange(tip, absPath)`：`await refreshProject()` → `setAudioPreview(absPath)` → `await loadFrame()` → `toast(tip)`。**重载预览是必需的**：音轨由主进程写进 `index.html`，预览副本（`project:preview-html` 从 `index.html` 生成）必须重新生成并重新载入才听得到。
-2. **试听**：项目内音频只有相对引用（`audio/xxx`），渲染层拿不到可用的绝对路径，因此只有「选本地文件 / 选已生成音频」两条路径会 `setAudioPreview(absPath)` 显示 `<audio ref="audioEl">` 试听行；提取原声则 `setAudioPreview('')` 隐藏试听行，试听交给预览 iframe 里的音轨（语速控件见 4.9）。
-3. **移除**：「移除音频」（`onRemoveAudio`）调 `clearAudio(currentName)`：主进程清空 `proj.audioFile` 并把 HTML 里注入的 `<audio>` 一并摘掉（否则成片仍有声、与项目状态不符），随后同样 `afterAudioChange(...)` 重载预览。
-4. **与生成 / 修改的衔接**：`project:generate-html` / `project:modify-html` / `project:save-html` 写入 `index.html` 后都会再调一次 `applyBgmToHtml()`（模型重写或手改粘贴时可能整段丢掉注入标签，故必须补回）；提示词里固定只有一行「【音轨】背景音轨由应用在渲染前自动注入（`<audio id="myv-bgm">`），请勿写入、修改或删除任何 `<audio>` 标签，也不要为音轨预留页面元素。」——**音频不占提示词、也不交给 Agent**。
-5. **转视频**：`video.ts` 直接把 `index.html` 所在目录交给 HyperFrames CLI，页面里的 `<audio id="myv-bgm">` 由 CLI 在 trace 阶段 `audio_process` 提取并混入 MP4，应用侧不做任何 ffmpeg 混音。
-
-### 4.9 语速控件（`applyRate` / `stepRate`）
-
-1. 模板中 `−` / `+` 按钮分别调用 `rateStep(-0.05)` / `rateStep(0.05)`；输入框为 `:value="rateValue"`、`@input="onRateInput"`，`inputmode="decimal"`。
-2. 两者都作用于 `utils/rate.ts` 的共享实现：`applyRate(el, audio)` 解析输入值，非有限值回退 1，再 `rateClamp` 到 `0.5~2.0`，写回 `el.value` 并设置 `audio.playbackRate`；`stepRate(el, audio, delta)` 在此基础上按 `Math.round((v + delta) * 100) / 100` 步进后同样钳制。
-3. **只改播放 `playbackRate`，不改磁盘音频**；本页把返回值同步回 `rateValue`，使输入框显示规范化后的值。
-
-### 4.10 转视频：弹窗确认档位 → 渲染（`openRenderModal` / `confirmRenderVideo` / `onRenderVideo`）
-
-**第一步：点「转视频」只开弹窗，不渲染。** `openRenderModal()` 依次做三道守卫，任一不通过就 toast 且**不开弹窗**：
-
-1. **并发守卫**：`rendering.value` 为真直接返回（按钮本身也已 `:disabled`）。
-2. **Agent 忙守卫**：`agentRunning` 为真 → `toast('Agent 正在处理 HTML，请等它结束再转视频')` 并返回（避免在 HTML 正在被覆盖写时渲染半成品）。
-3. **前置校验**：取 `appState.project.htmlPath`；`!htmlPath || !htmlExists` → `toast('还没有 HTML，请先「生成 HTML」')` 并返回。
+**第一步：点「转视频」只开弹窗，不渲染。** 三道守卫，任一不通过就 toast 且**不开弹窗**：① `rendering.value` 为真直接返回（按钮本身也已 `:disabled`）；② `agentRunning` 为真 → `toast('Agent 正在处理 HTML，请等它结束再转视频')`；③ 取 `appState.project.htmlPath`，`!htmlPath || !htmlExists` → `toast('还没有 HTML，请先「生成 HTML」')`。
 
 守卫放在 `openRenderModal` 而不是只放在 `onRenderVideo`，是为了避免「弹窗打开了又被拒」的观感；`onRenderVideo` 内保留同一套守卫，兜住弹窗打开后状态被改的窗口期。
 
-**第二步：在弹窗里确认档位。** 弹窗正文即「渲染档位」块——质量 / 帧率两个下拉直接绑定 `quality` / `fps`（`@change="onOptionChange"`，改动**立即**写入项目级覆盖，见 4.11），`.hf-file` 显示 `optionNote`（「跟随设置页默认：标准 · 30fps」或「本项目自定义档位」），`v-if="overridden"` 时右侧多出「恢复默认档位」，下方 `.hgen-tip` 是当前质量的画质说明 +「转视频」用途说明。关闭有四种：`取消`、`×`、点弹窗外（`@click.self`）、ESC（`onModalKeydown`）——**都只关弹窗，不发起渲染，也不回滚已改的档位**（档位在 `@change` 时就已落盘）。
+**第二步：在弹窗里确认档位。** 质量 / 帧率两个下拉直接绑定 `quality` / `fps`（`@change="onOptionChange"`，改动**立即**写入项目级覆盖），`.hf-file` 显示 `optionNote`，`v-if="overridden"` 时右侧多出「恢复默认档位」，下方 `.hgen-tip` 是当前质量的画质说明 + 用途说明。关闭有四种：`取消`、`×`、点弹窗外（`@click.self`）、ESC（`onModalKeydown`）——**都只关弹窗，不发起渲染，也不回滚已改的档位**。
 
-**第三步：`开始渲染` → `confirmRenderVideo()` 先关弹窗，再走原有 `onRenderVideo()`：**
+**第三步：`开始渲染` → `confirmRenderVideo()` 先关弹窗，再走 `onRenderVideo()`**，见 6.7。
 
-5. 置初始状态：`options = { quality: quality.value, fps: fps.value }`；`status = '已提交渲染（' + renderOptionsText(options) + '，约 30 秒）...'`、`statusClass = ''`、`rendering = true`。
-6. `await window.hfTools.renderVideo(htmlPath, options)`（`video:render`；档位随 `RenderOverride` 合并进载荷，主进程按白名单拼 `--quality` / `--fps`）。
-7. 返回后先 `resetRenderProgress()`：用本地完成/失败文案覆盖全局 trace 残留（渲染期间状态区优先显示 trace，见 4.11）。
-8. **成功分支**（`res.ok`）：`status = '视频已生成（' + renderOptionsText(options) + '）：' + res.outputVideo`、`statusClass = 'hf-ok'`；随后 `await window.projectTools.saveVideo(appState.currentName, res.outputVideo)`（`project:save-video`，把产物写回 `project.json`）→ `await refreshProject()`（刷新后「视频预览」页的 `videoExists` / `videoPath` 才有效）→ `toast('视频已生成，可到「视频预览」页查看')`。
-9. **失败分支**：`status = (res as { message?: string }).message || '渲染失败'`、`statusClass = 'hf-error'`，并 toast 同一文案。
-10. **异常分支**（`catch`）：IPC 层异常（主进程不可用等）同样先 `resetRenderProgress()`（不让 trace 继续占着状态区），再写 `status = '渲染失败：' + message`、`statusClass = 'hf-error'` 并 toast。
-11. `finally` 中复位 `rendering = false`，保证异常路径也能再次提交。
+### 6.7 转视频主流程（`onRenderVideo(skipEnvGuard = false)`）
 
-> 渲染期间弹窗不会重新出现：「转视频」按钮在 `rendering` 期间已 `:disabled`，点不动也就不会再打开弹窗；渲染进度显示在本页状态条（`.hf-status`），成品到「视频预览」页看。
+1. 进行中守卫（`rendering`）→ **Agent 忙守卫**（`agentRunning` → toast）→ `htmlPath` / `htmlExists` 校验。
+2. `options = { quality: quality.value, fps: fps.value }`；`skipEnvGuard` 为假时先过 `envGate.guard(['ffmpeg', 'hyperframes'], '转成视频', () => { void onRenderVideo(true); })`，`!g.ok` 直接返回（见第 8 节）。
+3. `status = '已提交渲染（' + renderOptionsText(options) + '，约 30 秒）...'`、`statusClass = ''`、`rendering = true`。
+4. `await window.hfTools.renderVideo(htmlPath, options)`（`video:render`；主进程按白名单拼 `--quality` / `--fps`）。
+5. 返回后先 `resetRenderProgress()`：用本地完成/失败文案覆盖全局 trace 残留（渲染期间状态区优先显示 trace，见 5.4 的 `statusDisplay`）。
+6. **成功**：`status = '视频已生成（' + renderOptionsText(options) + '）：' + res.outputVideo`、`statusClass = 'hf-ok'`；随后 `await window.projectTools.saveVideo(appState.currentName, res.outputVideo)` → `await refreshProject()` → `toast('视频已生成，可到「视频预览」页查看')`。
+7. **缺包分支**（`res.needPacks` 非空）：写失败状态后 `void envGate.guard(res.needPacks, '转成视频', () => { void onRenderVideo(true); })`。
+8. **失败**：`status = res.message || '渲染失败'`、`statusClass = 'hf-error'`，并 toast 同一文案。
+9. **异常分支**（`catch`）：同样先 `resetRenderProgress()`，再写 `status = '渲染失败：' + message`、`statusClass = 'hf-error'` 并 toast。
+10. `finally` 中复位 `rendering = false`。
 
-### 4.11 渲染档位的同步与项目级覆盖
+> 渲染期间弹窗不会重新出现（按钮 `:disabled`）；渲染进度显示在「预览」卡片的状态行（`.hf-status`，`rendering` 为真时由 `PreviewSection` 优先显示 `renderProgress.text`），成品到「视频预览」页看。
 
-1. **优先级**：项目级覆盖（`project.json` 的 `render`）> 全局默认（`settings.json` 的 `render` 段）> 内置默认（`standard` / `30`）；覆盖里缺省的字段跟随上一级。该合并由 `useRenderOptions.effectiveRenderOptions()` 调 `utils/render.ts` 的 `resolveRenderOptions()` 完成。
-2. **下行（读）**：`onMounted` 与「恢复默认档位」成功后都调 `syncFromEffective()`，把 `quality` / `fps` 两个 ref 刷成生效值。
-3. **上行（写）**：两个下拉的 `@change` 统一走 `onOptionChange()` → `saveProjectRenderOverride({ quality, fps })`（内部 `projectTools.setRender` / `project:set-render`），成功后把返回的 `project.render` 经 `pickRenderOverride` 规范化后写回 `appState.project.render`，因此 `overridden` / `optionNote` 立即更新。两个下拉现在都在「转视频」弹窗内，但落盘时机未变——**改动即写**，取消弹窗不会回滚已改的档位（弹窗只承载「确认后开始渲染」这一步）。
-4. **恢复默认**：`onResetOptions()` 传 `null`，主进程删除 `proj.render`；成功后再次 `syncFromEffective()`，`overridden` 变假，「恢复默认档位」按钮随之消失（`v-if="overridden"`）。
-5. **无当前项目时不落盘**：`saveProjectRenderOverride` 只在 `currentName` 为空时直接返回 `{ ok: true }`、不发起 IPC；只要有当前项目，档位改动都会经 `project:set-render` 落进该项目 `project.json` 的 `render`。
-6. **状态合并显示**：`statusDisplay = (rendering && renderProgress.text) ? renderProgress.text : status`，`statusDisplayClass` 在 trace 接管时返回 `''`——即渲染中状态条显示全局进度文案并保持中性样式，渲染结束后回到本页 `status` + `hf-ok` / `hf-error`。
+### 6.8 渲染档位的同步与项目级覆盖
 
-### 4.12 视频素材：唯一入口（选择 / 当场导入 / 移除 / 提取原声）
+1. **优先级**：项目级覆盖（`project.json` 的 `render`）> 全局默认（`settings.json` 的 `render` 段）> 内置默认（`standard` / `30`）；覆盖里缺省的字段跟随上一级。合并由 `useRenderOptions.effectiveRenderOptions()` 调 `utils/render.ts` 的 `resolveRenderOptions()` 完成。
+2. **下行（读）**：`onMounted` 与「恢复默认档位」成功后都调 `syncFromEffective()`。
+3. **上行（写）**：两个下拉的 `@change` 统一走 `onOptionChange()` → `saveProjectRenderOverride({ quality, fps })`（内部 `projectTools.setRender` / `project:set-render`），成功后把返回的 `project.render` 经 `pickRenderOverride` 规范化后写回 `appState.project.render`。**改动即写**，取消弹窗不会回滚已改的档位。
+4. **恢复默认**：`onResetOptions()` 传 `null`，主进程删除 `proj.render`；成功后再次 `syncFromEffective()`，`overridden` 变假，按钮随之消失。
+5. **无当前项目时不落盘**：`saveProjectRenderOverride` 只在 `currentName` 为空时直接返回 `{ ok: true }`、不发起 IPC。
 
-视频素材全页只有「项目素材」块里的一行（下拉 + 「移除视频」+ 提取原声按钮，无条件渲染）。下拉 `v-model="videoSel"` 的三个选项对应三种语义：`''` 不使用视频素材、`'__current__'` 沿用当前项目视频素材（仅当 `appState.project.videoMaterial` 存在时出现）、`'__pick__'` 当场导入本地文件。**原先独立的视频素材导入卡片（导入 / 移除 / 提取原声 / 素材预览）已全部并入这一行。**
+### 6.9 素材库：添加 / 勾选 / 移除（`MaterialsSection`）
 
-1. **进页面初始化**：`onMounted` 调 `syncVideoSelFromProject()` → `videoSel = currentVideoSel()`，即项目里已有素材就默认选中「当前项目视频素材」，否则为「不使用视频素材」；用户仍可随时切回「不使用」。
-2. **本次生成的选择**：选 `''` / `'__current__'` 不触发任何动作（`onVideoSelect` 首行 `videoSel.value !== '__pick__'` 直接返回），只随 `materials.videoPath` 提交给主进程（见 4.3）。
-3. **当场导入**（选中 `'__pick__'`）：`pickVideo()` 打开文件框 → `setVideo(currentName, picked)`（`project:set-video`：复制进项目 `video/` 并写 `proj.videoMaterial`）→ `await refreshProject()` → `syncVideoPreview(res.abs)` 显示预览行 → `videoSel = '__current__'`（**导入即选中**）→ toast「已导入视频素材：…（本次生成会交给 Agent 嵌入该片段）」。两种复位分支统一回到 `currentVideoSel()`：① 用户在文件框里取消（`pickVideo()` 返回空）；② `setVideo` 失败（`!res.ok`）→ toast `res.message` 或「设置视频失败」。
-4. **移除**（`onClearVideo`）：`clearVideo(currentName)` 只清 `proj.videoMaterial` 引用（保留 `video/` 里的文件）→ `await refreshProject()` → `syncVideoPreview('')` 隐藏预览行 → `videoSel = currentVideoSel()`（移除后即为「不使用视频素材」）→ toast「已移除视频素材」。
-5. **提取原声**（`onExtractAudio`）：无 `videoMaterial` 时提示「还没有视频素材：可在上方『视频素材』里选『选择本地视频文件…』导入」；成功后走背景音频路线（主进程 `extractVideoAudio` 提取 `audio/<同名>.m4a` 并由 `applyBgmToHtml` 注入 HTML），本页 `refreshProject()` → `setAudioPreview('')` → `loadFrame()` 重载预览（详见 4.8）。
-6. **素材预览行的取舍**：`videoMaterial` 是项目内相对引用，渲染层拿不到项目绝对路径，因此 `<video>` 预览行只在**本次会话导入成功后**出现（路径来自 `setVideo` 返回的 `abs`）；这与背景音频试听行行为一致——重新进入本页不会恢复预览行，但页面里嵌入的片段仍可在预览 iframe 中看到。
+1. **添加**：点「添加图片…/添加视频…」→ `pickMedia(kind)` 打开系统文件框（图片多选、视频见主进程 filters）→ 选中则 `addMaterials(currentName, paths)`：主进程把文件复制进项目 `images/` / `video/` 并登记进 `materials`（新素材**默认参与生成**、落在所属分组末尾），超限或不支持的扩展名会被跳过并带回跳过信息（本组件优先用 `res.message` 作 toast 文案）。
+2. **勾选 / 取消**：点卡片左上角的 `.mat-check` → 以 `map` 生成同 id 替换后的新列表 → `saveMaterials` 整份回写。`selected` 是「本次生成是否带上」的开关，**不影响文件、也不影响卡片显示顺序**；未勾选的卡片加 `.off` 整体压暗（仍可读、仍可点）。
+3. **移除**：点卡片右上角「移除」 → 从列表里摘掉该 id 后整份回写；**项目目录里的文件保留**（源码 `title` 与 tip 都写明这一点）。
+4. **上限与白名单**：`mats.length / MAX_MATERIALS` 常驻显示；上限与扩展名白名单来自 `src/shared/constants.ts`，由主进程 `normalizeMaterials()` 强制执行、渲染层只用于显示与提示。
+5. **并发防护**：`busy` 期间所有按钮 `:disabled`，避免两次「读-改-写」互相覆盖。
 
-## 5. 依赖与协作
+### 6.10 背景音频：设定 / 更换 / 移除（`PreviewSection`，音轨由主进程注入 HTML）
+
+背景音轨**不经过 Agent**：本卡片只负责「选定哪份音频」，写 HTML 由主进程完成——`project:set-audio` / `project:clear-audio` / `project:extract-video-audio` 在 `writeProject` 之后调用 `applyBgmToHtml()`，按 `project.audioFile` 重写 `index.html` 里的 `<audio id="myv-bgm" src="audio/…" autoplay loop>`（先摘掉本应用注入的旧标签、再摘掉引用同一音频文件的历史标签；幂等，内容无变化时不写盘，无 HTML 时静默返回 `false`）。细节见 [main/projects.ts.md](../../../main/projects.ts.md)。
+
+1. **设定 / 更换**：两条入口（下拉「从已生成音频中选择…」、「选择音频文件…」）最终都走 `setAudio` + `afterAudioChange`。
+2. **试听**：项目内音频只有相对引用（`audio/xxx`），渲染层拿不到可用的绝对路径，因此只有这两条路径会 `setAudioPreview(absPath)` 显示 `<audio>` 试听行（语速控件见 6.11）。
+3. **移除**：「移除音频」调 `clearAudio(currentName)`：主进程清空 `proj.audioFile` 并把 HTML 里注入的 `<audio>` 一并摘掉，随后同样重载预览。
+4. **与生成 / 修改的衔接**：`project:generate-html` / `project:modify-html` / `project:save-html` 写入 `index.html` 后都会再调一次 `applyBgmToHtml()`；提示词里固定只有一行「【音轨】背景音轨由应用在渲染前自动注入（`<audio id="myv-bgm">`），请勿写入、修改或删除任何 `<audio>` 标签，也不要为音轨预留页面元素。」——**音频不占提示词、也不交给 Agent**。
+5. **转视频**：`video.ts` 直接把 `index.html` 所在目录交给 HyperFrames CLI，页面里的 `<audio id="myv-bgm">` 由 CLI 在 trace 阶段提取并混入 MP4。
+
+### 6.11 语速控件（`applyRate` / `stepRate`）
+
+1. `−` / `+` 按钮分别调用 `rateStep(-0.05)` / `rateStep(0.05)`；输入框为 `:value="rateValue"`、`@input="onRateInput"`，`inputmode="decimal"`。
+2. 两者都作用于 `utils/rate.ts` 的共享实现：`applyRate(el, audio)` 解析输入值，非有限值回退 1，再钳到 `0.5~2.0`，写回 `el.value` 并设置 `audio.playbackRate`；`stepRate(el, audio, delta)` 按 `Math.round((v + delta) * 100) / 100` 步进后同样钳制。
+3. **只改播放 `playbackRate`，不改磁盘音频**；本组件把返回值同步回 `rateValue`。
+
+## 7. 依赖与协作
+
+### 7.1 `index.vue` 的导入
 
 | 依赖 | 用途 |
 |------|------|
-| `vue`：`computed, onBeforeUnmount, onMounted, ref, watch` | 响应式状态与生命周期 |
+| `vue`：`computed, onBeforeUnmount, onMounted, ref` | 响应式状态与生命周期（**`watch` 已随预览块移走**） |
+| `@shared/types`：`type RenderFps`、`type RenderQuality` | 档位下拉（`quality` / `fps`）的类型标注 |
 | `@renderer/composables/useAppStore`：`appState, hasHtml, refreshProject` | 全局项目状态、`hasHtml` 判定、刷新项目列表与详情 |
 | `@renderer/composables/useToast`：`toast` | 统一的轻提示 |
-| `@renderer/utils/escape`：`escTxt` | 「预览」卡片里背景音频文件名渲染前转义 `& < >`（视频素材名走下拉选项的文本插值，框架自带转义，不再用 `escTxt`） |
-| `@renderer/utils/rate`：`applyRate, stepRate` | 试听语速控件共享逻辑 |
-| `@renderer/composables/useRenderProgress`：`renderProgress, resetRenderProgress` | 渲染进度文案的读（合成 `statusDisplay`）与复位 |
+| `@renderer/composables/useRenderProgress`：`resetRenderProgress` | 渲染 trace 复位（读 `renderProgress` 的是 `PreviewSection`） |
+| `@renderer/composables/useEnvGate`：`useEnvGate` | 转视频的运行环境缺包守卫 |
+| `@renderer/composables/useConfigPrompt`：`useConfigPrompt` | 配置类错误弹窗 |
 | `@renderer/utils/render`：`FALLBACK_RENDER, RENDER_FPS_OPTIONS, RENDER_QUALITY_OPTIONS, isRenderOverridden, renderOptionsText` | 档位选项表、默认档位、覆盖判定与档位摘要文案 |
-| `@renderer/composables/useRenderOptions`：`effectiveRenderOptions, renderDefaults, saveProjectRenderOverride` | 生效档位（项目覆盖 > 全局默认）、全局默认（判是否被覆盖）、写入 / 清除项目覆盖 |
-| `@shared/types`：`type RenderFps`、`type RenderQuality` | 档位下拉（`quality` / `fps`）的类型标注 |
+| `@renderer/composables/useRenderOptions`：`effectiveRenderOptions, renderDefaults, saveProjectRenderOverride` | 生效档位、全局默认、写入 / 清除项目覆盖 |
 | `@renderer/components/StepBar.vue` | 顶部流水线步骤条 + 工作项目切换 |
-| `@renderer/components/HfSelect.vue`：`HfSelect`（默认）、`type HfSelectGroup` | 全局自绘下拉组件：字幕 / 视频素材 / 背景音频 / 渲染档位（质量、帧率）共 5 处，替代原生 `<select>`；`@change` 直接给新值字符串 |
+| `@renderer/components/HfSelect.vue`：`HfSelect`（默认）、`type HfSelectGroup` | 全局自绘下拉组件 |
+| `./MaterialsSection.vue` / `./PreviewSection.vue` | 同目录子组件，**相对路径导入**（AGENTS.md 第五节 7） |
 
-调用的 preload / IPC（均挂在 `window.projectTools`）：
+### 7.2 `MaterialsSection.vue` 的导入
 
-| 方法 | 用途 |
+| 依赖 | 用途 |
 |------|------|
-| `previewHtml(name)` | 生成 `index.preview.html` 预览副本，返回 `previewPath` |
-| `generateHtml(name, prompt, materials)` | 生成 `index.html`（`materials` = `{ subtitleProject, videoPath }`，**不含音频**；音轨由主进程在落盘后注入）。提示词**不含现有页面**；界面入口：**「生成 HTML」按钮**（**点一次即执行，无二次确认**；已有 HTML 时直接覆盖） |
-| `modifyHtml(name, prompt, materials)` | 基于现有 HTML 改造并覆盖（同上：`materials` 只有字幕与视频素材）。提示词含当前 `index.html` 全文；界面入口：**「按需求修改」按钮**（无 HTML 时该按钮禁用）。两个频道在主进程各自独立，未合并 |
-| `downloadHtml(name)` | 另存项目 HTML（主进程把 `./gsap.min.js` 换回 CDN 后写出） |
-| `pickAudio()` / `setAudio(name, audioPath)` / `clearAudio(name)` | 背景音频选择 / 设置 / 移除；`setAudio` 返回 `{ ok, audioFile, htmlUpdated }`、`clearAudio` 返回 `{ ok, htmlUpdated }`——主进程同时改写 `index.html` 里的注入音轨，`htmlUpdated` 为「是否改写了 HTML」 |
-| `pickVideo()` / `setVideo(name, videoPath)` / `clearVideo(name)` | 视频素材选择 / 设置 / 移除；`setVideo` 返回 `{ ok, videoFile, abs }`——`abs` 是项目内绝对路径，供本页导入成功后立即预览（`syncVideoPreview`）；`clearVideo` 只清 `proj.videoMaterial` 引用、不删 `video/` 里的文件 |
-| `extractVideoAudio(name)` | 提取视频原声为背景音频，返回 `{ ok, audioFile, htmlUpdated }`（提取出的原声同样立即注入 HTML） |
-| `renderVideo(htmlPath, { quality, fps })` | 调 `video:render`，把当前项目 HTML 渲染为 MP4（档位可缺省，缺省走 CLI 默认） |
-| `saveVideo(name, videoPath)` | 调 `project:save-video`，渲染成功后把产物路径回写到项目 `project.json` |
-| `setRender(name, render \| null)` | 调 `project:set-render`（经 `saveProjectRenderOverride`），写 / 清除项目级渲染档位覆盖 |
-| `onHtmlProgress(callback)` | 订阅 `IPC.Project.HtmlProgress` 流式进度（单订阅） |
+| `vue`：`computed, ref` | `busy` 与三个 computed |
+| `@shared/constants`：`IMAGE_MATERIAL_EXTS, MAX_MATERIALS, VIDEO_MATERIAL_EXTS` | 上限与扩展名白名单文案 |
+| `@shared/types`：`type ProjectMaterial, type ProjectMaterialKind` | 列表元素与 `onAdd(kind)` 的类型 |
+| `@renderer/composables/useAppStore`：`appState, refreshProject` | 读素材列表、落盘后刷新全局状态 |
+| `@renderer/composables/useToast`：`toast` | 增删勾选与失败提示 |
 
-另有 `window.voiceTools.listGenerated()`（已生成音频列表，**仅用于填充「预览」卡片里「从已生成音频中选择…」下拉**；`window.hfTools` 的 `showInFolder` 本页不调用，本页只调 `window.hfTools.renderVideo`）。
+### 7.3 `PreviewSection.vue` 的导入
 
-注册与挂载：`src/renderer/src/pages/index.ts` 中 `import HtmlGenPage from './HtmlGenPage/index.vue'`，注册为 `pages['html-gen']`；页面切换使用 `shallowRef` + 递增的 `pageNavKey` 强制重挂载，因此每次进入本页都会重新执行 `onMounted`。
+| 依赖 | 用途 |
+|------|------|
+| `vue`：`computed, onBeforeUnmount, onMounted, ref, watch` | 响应式状态、生命周期、思考文本自动滚底 |
+| `@renderer/composables/useAppStore`：`appState, refreshProject` | 读 `audioFile` / `htmlExists` / `htmlPath`，音频变更后刷新项目 |
+| `@renderer/composables/useToast`：`toast` | 轻提示 |
+| `@renderer/utils/escape`：`escTxt` | 背景音频文件名渲染前转义（`& < >`） |
+| `@renderer/utils/rate`：`applyRate, stepRate` | 试听语速控件共享逻辑 |
+| `@renderer/composables/useRenderProgress`：`renderProgress` | 渲染中状态行改显全局 trace |
+| `@renderer/components/HfSelect.vue`：`HfSelect`（默认）、`type HfSelectGroup` | 背景音频下拉 |
 
-## 6. 注意事项与实现要点
+### 7.4 调用的 preload / IPC
 
-- **写入类动作不再有形态守卫**：`runAgent`、`onPickAudioFile`、`onAudioPick`、`onRemoveAudio`、`onVideoSelect`、`onClearVideo`、`onExtractAudio`、`openRenderModal`、`onRenderVideo` 的入口只剩并发 / 前置条件校验（`agentRunning`、`rendering`、`htmlExists`、`videoMaterial`、`currentName` 等），没有「项目是否只读」这一类判断——项目一律是 `userData/projects/<项目名>/` 下可读可写的普通目录。渲染相关的两块 UI（「转视频」按钮、**「转视频」弹窗**）、「预览」卡片里的背景音频块与「项目素材」块里的**视频素材行**都是常驻渲染，不带任何 `v-if` 条件。
-- **失败提示（2026-10 改）**：Agent 失败时状态条一律用 `hf-error` 保留原因；**配置类**（Key 无效 / 未启用 / 配置不完整 / Base URL 填错，即 `res.needConfig` 为真）额外弹 `useConfigPrompt` 的「去设置」弹窗并**跳过 toast**（避免弹窗 + toast 重复打扰），其余失败仍 `toast` 同文案；仅当项目原本无 HTML 才恢复空态，避免把「已存在的旧 HTML」误标为未生成。`configPrompt` 的导入与实例化紧跟在 `envGate` 之后（`const envGate = useEnvGate(); const configPrompt = useConfigPrompt();`）。
-- **预览缩放实现**：iframe CSS 固定 `1920px × 1080px` + `transform-origin: 0 0`，容器用 `padding-bottom: 56.25%` 撑出 16:9 高度；`fitFrame()` 以容器 `clientWidth / 1920` 设置 `transform: scale(...)`，因此预览画布带缩放变换，内部坐标可继续按 1920×1080 计算。窗口 `resize` 与每次 `load` 都会重新缩放。
-- **思考文本截断**：页面展示的是主进程 `thinkText.slice(-20000)` 的结果（仅末尾片段），完整原文写入 userData 下 `html-agent/chat.jsonl`；`<pre>` 自身 `max-height:220px` 且可滚动，配合 `watch` 自动滚底。
+| 方法 | 用途 | 调用点 |
+|------|------|--------|
+| `previewHtml(name)` | 生成 `index.preview.html` 预览副本，返回 `previewPath` | `PreviewSection.loadFrame` |
+| `generateHtml(name, prompt, materials)` | 生成 `index.html`（`materials` = `{ subtitleProject, materialIds }`，**不含音频**；音轨由主进程在落盘后注入） | `index.vue` 的「生成 HTML」按钮 |
+| `modifyHtml(name, prompt, materials)` | 基于现有 HTML 改造并覆盖（载荷同上）。提示词含当前 `index.html` 全文 | `index.vue` 的「按需求修改」按钮 |
+| `pickMedia(kind)` | 按素材类型打开文件选择框，返回本地绝对路径数组（取消 → 空数组） | `MaterialsSection.onAdd` |
+| `addMaterials(name, paths)` | 把所选文件复制进项目并登记进 `materials`，返回登记结果（含被跳过数时的 `message`） | `MaterialsSection.onAdd` |
+| `saveMaterials(name, materials)` | 整份素材列表回写（移除与勾选共用） | `MaterialsSection.save` |
+| `downloadHtml(name)` | 另存项目 HTML（主进程把 `./gsap.min.js` 换回 CDN 后写出） | `index.vue.onDownload` |
+| `pickAudio()` / `setAudio(name, audioPath)` / `clearAudio(name)` | 背景音频选择 / 设置 / 移除；主进程同时改写 `index.html` 里的注入音轨 | `PreviewSection` |
+| `extractVideoAudio(name)` | 提取视频原声为背景音频——**本页当前无界面入口**（实现整段被注释，见 3.5），频道与 preload 方法保留 | 无（保留但不可达） |
+| `onHtmlProgress(callback)` | 订阅 `IPC.Project.HtmlProgress` 流式进度（单订阅） | `index.vue.onMounted` |
+| `setRender(name, render \| null)` | 调 `project:set-render`（经 `saveProjectRenderOverride`），写 / 清除项目级渲染档位覆盖 | `index.vue` 档位下拉 |
+| `saveVideo(name, videoPath)` | 调 `project:save-video`，渲染成功后把产物路径回写到项目 `project.json` | `index.vue.onRenderVideo` |
+| `window.hfTools.renderVideo(htmlPath, { quality, fps })` | 调 `video:render`，把当前项目 HTML 渲染为 MP4 | `index.vue.onRenderVideo` |
+| `window.voiceTools.listGenerated()` | 已生成音频列表，**仅用于填充背景音频下拉** | `PreviewSection.genLoad` |
+
+注册与挂载：`src/renderer/src/pages/index.ts` 中 `import HtmlGenPage from './HtmlGenPage/index.vue'`，注册为 `pages['html-gen']`；页面切换使用 `shallowRef` + 递增的 `pageNavKey` 强制重挂载，因此每次进入本页都会重新执行三个组件的 `onMounted`。
+
+## 8. 注意事项与实现要点
+
+- **写入类动作不再有形态守卫**：`runAgent`、`onPickAudioFile`、`onAudioPick`、`onRemoveAudio`、`onAdd`、`onRemove`、`onToggle`、`openRenderModal`、`onRenderVideo` 的入口只剩并发 / 前置条件校验（`agentRunning`、`rendering`、`busy`、`htmlExists`、`currentName` 等），没有「项目是否只读」这一类判断——项目一律是 `userData/projects/<项目名>/` 下可读可写的普通目录。
+- **失败提示**：Agent 失败时状态条一律用 `hf-error` 保留原因；**配置类**（`res.needConfig` 为真）额外弹 `useConfigPrompt` 的「去设置」弹窗并**跳过 toast**，其余失败仍 `toast` 同文案；仅当项目原本无 HTML 才 `previewRef.value?.reload()` 恢复空态，避免把「已存在的旧 HTML」误标为未生成。
+- **`refreshProject()` 是素材侧唯一的「广播」**：`MaterialsSection` 不接 props，靠刷新 `appState` 让父页状态条与生成载荷同步；因此任何新增写操作都必须以 `await refreshProject()` 收尾。
+- **reactive 对象不能直接过 IPC**：`plainList()` 是必须的（DataCloneError），新增素材写操作时不要图省事直接传 `mats.value`。
+- **视频缩略图不抽帧**：统一用 `▶` 标记（`main.css` 注释：抽帧要额外依赖，收益不抵成本）。
+- **预览缩放实现**：iframe CSS 固定 `1920px × 1080px` + `transform-origin: 0 0`，容器用 `padding-bottom: 56.25%` 撑出 16:9 高度；`fitFrame()` 以容器 `clientWidth / 1920` 设置 `transform: scale(...)`。窗口 `resize` 与每次 `load` 都会重新缩放。
+- **思考文本截断**：展示的是主进程 `thinkText.slice(-20000)` 的结果（仅末尾片段），完整原文写入 userData 下 `html-agent/chat.jsonl`。
 - **思考区样式与状态样式互斥**：进度回调每次设置 `status` 都会把 `statusClass` 清空，只有最终成功/失败分支才写入 `hf-ok` / `hf-error`。
-- **取消 / 重复提交防护**：`agentRunning` 为模块级普通变量（非响应式），`try/finally` 保证复位；并发点击「生成 HTML」/「按需求修改」会被直接 toast 拒绝。两个按钮各走各的入口（`onGenerate` / `onModify`），「按需求修改」在无 HTML 时由模板 `:disabled` 拦下、函数内再有一层 `htmlExists` 兜底。渲染与 Agent 互斥：渲染中禁用两个按钮与「转视频」，Agent 处理中调 `openRenderModal` / `onRenderVideo` 都会被 toast 拦下。
-- **弹窗与页面级监听**：转视频弹窗用的是通用弹窗类（`.hf-modal-mask` / `.hf-modal*`，与「从音频生成字幕」弹窗同一套），**没有新增 CSS 类**，因此 `assets/main.css` 无需改动；弹窗节点写在模板末尾（两张卡片之外），靠 `position: fixed` 覆盖全屏。ESC 关闭走 `document` 级 `keydown`（`onModalKeydown`），必须与 `onMounted` / `onBeforeUnmount` 成对，否则切页后会留下悬挂监听。
-- **弹窗不承担「取消档位改动」**：质量 / 帧率下拉的 `@change` 仍然即时落盘（项目级覆盖），点「取消」只关弹窗、不回滚档位；弹窗的语义只是「确认要开始渲染」。若要让取消回滚，需要在打开弹窗时快照 `quality` / `fps` 并在关闭时写回，当前**有意不做**。
-- **生成侧是两个并列按钮，各自对应一个明确动作**：「生成 HTML」走 `project:generate-html`（提示词不含现有页面），「按需求修改」走 `project:modify-html`（提示词含当前 `index.html` 全文）；没有 HTML 时「按需求修改」禁用。两者的区别由**每个动作按钮内部各带一个的 `?`**（`.hg-help`，悬浮只显示该动作自己的说明）承载，而不是靠按钮文案随状态变化；上一版那条「按 `hasHtml` 分流到同一个按钮」的自适应路径已随该方案一并删除；**「生成 HTML」在已有 HTML 时也没有二次确认**——点一次即覆盖 `index.html`（曾经的 `regenArmed` + 5 秒自动解除那套武装态已整体删除），要留底稿得自己先点「下载 HTML」。
+- **取消 / 重复提交防护**：`agentRunning` 为模块作用域普通变量（非响应式），`try/finally` 保证复位；并发点击「生成 HTML」/「按需求修改」会被直接 toast 拒绝。渲染与 Agent 互斥：渲染中禁用两个按钮与「转视频」，Agent 处理中调 `openRenderModal` / `onRenderVideo` 都会被 toast 拦下。
+- **弹窗与页面级监听**：转视频弹窗用的是通用弹窗类（`.hf-modal-mask` / `.hf-modal*`，与「从音频生成字幕」弹窗同一套），**没有新增 CSS 类**，`assets/main.css` 无需为它改动（本轮该文件新增的是素材卡片墙的 `.mat-*` 一节）；弹窗节点写在模板末尾（两张卡片之外），靠 `position: fixed` 覆盖全屏。ESC 关闭走 `document` 级 `keydown`（`onModalKeydown`），必须与 `onMounted` / `onBeforeUnmount` 成对，否则切页后会留下悬挂监听。**iframe 的 `message` / `resize` 监听改由 `PreviewSection` 自己成对管理**（含 `seekAckTimer`）。
+- **弹窗不承担「取消档位改动」**：质量 / 帧率下拉的 `@change` 仍然即时落盘，点「取消」只关弹窗、不回滚档位；弹窗的语义只是「确认要开始渲染」。
 - **进度订阅的单订阅语义**：`onHtmlProgress` 在 preload 中只绑定一次 `ipcRenderer.on`，后续注册仅替换回调；本页因此只需在 `onMounted` 注册、无需（也无法）取消订阅。
-- **事件监听成对**：`message`、`resize` 两个 window 监听与 `keydown`（document，弹窗 ESC）都在 `onBeforeUnmount` 移除，避免切页后仍响应 iframe 上报、resize 或按键。
-- **播放控制边界**：`ctlVisible` 跟随 `frameVisible`；无 `frameSrc` 时点「暂停/播放」「重新播放」只 toast「暂无预览」。自然播完判定带 `0.25s` 容差，避免因上报精度抖动而卡在「暂停」。**预览默认静止**：载入完成后父页不再主动发 `'play'`（画面侧也只 `freeze()` 冻住），`prevPlaying` 初值置 `false`，按钮文案由画面回报的 `playing` 校准——合成是 `paused: true` 创建 + 开头 `opacity: 0`，**首帧本来就是空的**，所以「停在第 0 帧」不是故障；`.hg-prev-hint`（`!prevPlaying && prevDur > 0 && prevTimeCur < 0.05`）就是把这句说明写在进度条旁边。
-- **进度条拖动跳转（seek）的四条约定**：① **拖动期间不采信画面回报**（`seeking` 为真时 `onPrevMessage` 只更新 `prevDur`）；② **松手后等 `ack`**：`onSeekEnd` 置 `seekPending = true` 并起 800ms 兜底定时器，收到画面 `ack: true` 的回报才恢复采信（避免被「拖动前发出的旧回报」拽回原位；画面里若是旧脚本，800ms 后也会强制恢复）；③ **本地立即跟手**：`seekTo()` 先按比例写 `prevTimeCur` 再 `prevPost('seek', sec)`，画面侧 `setTime()` 只挪播放头（`t.time(s)` + 媒体 `currentTime` + WAAPI `currentTime`）、**不改播放/暂停状态**；④ **总时长未上报时忽略拖动**（`prevDur <= 0` 直接返回，`onSeekStart` 也直接忽略），并用 `setPointerCapture` 保证拖出控件甚至拖到按钮上仍继续收 `pointermove`。
+- **播放控制边界**：`ctlVisible` 跟随 `frameVisible`；无 `frameSrc` 时点「暂停/播放」「重新播放」只 toast「暂无预览」。**预览默认静止**：载入完成后不再主动发 `'play'`，`prevPlaying` 置 `false`，按钮文案由画面回报的 `playing` 校准——首帧本来就是空的（合成 `paused: true` + 开头 `opacity: 0`），`.hg-prev-hint` 就是把这句说明写在进度条旁边。
+- **进度条拖动跳转（seek）的四条约定**：① 拖动期间不采信画面回报；② 松手后等 `ack`（800ms 兜底）；③ 本地立即跟手，画面侧 `setTime()` 只挪播放头、不改播放/暂停状态；④ 总时长未上报时忽略拖动，并用 `setPointerCapture` 保证拖出控件仍继续收 `pointermove`。
 - **预览副本与原件分离**：预览用 `index.preview.html`（剥离 CSP、注入控制脚本），下载与转视频始终使用原件 `index.html`。
-- **视频素材只有一个入口**：选择 / 当场导入 / 移除 / 提取原声都在「项目素材」块的那一行下拉里（见 4.12）。新增素材后**导入即选中**（`videoSel = '__current__'`，不必再去别处选一次），移除后 `videoSel = currentVideoSel()` 回到「不使用」；两次操作都先 `await refreshProject()`，让下拉的 `__current__` 选项与两个按钮的禁用态跟着项目实际状态刷新。**背景音频没有 `*Sel`**——它不进提示词，选定即由主进程写进 HTML（见 4.8），本页只做「刷新项目 + 更新试听源 + 重载预览」。
-- **音轨注入的三条不变量**：① 标签 id 固定为 `myv-bgm`，重复设置不会叠出多条音轨（注入前先 `stripInjectedBgm`）；② 引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入）会被 `stripAudioOfFile` 摘掉，避免双份播放；③ 没有 `index.html` 时静默返回 `false`，因此「先生成音频、后生成 HTML」的顺序不会报错。
-- **`genLoad()` 失败必须静默**：已生成音频只是下拉的可选项，不是本页必需；`listGenerated()` 失败时直接返回、下拉留空，不 toast 打断（与旧版带 `silent` 形参的行为等价，只是不再有选中 / 试听逻辑）。
+- **素材的三种「非破坏性」**：勾选只改 `selected`、移除只改列表、移除后项目文件保留；页面 tip 与按钮 `title` 都向用户明说了这三点。
+- **`genLoad()` 失败必须静默**：已生成音频只是下拉的可选项，不是本页必需；`listGenerated()` 失败时直接返回、下拉留空，不 toast 打断。
 - **语速仅影响试听**：`applyRate` / `stepRate` 只改 `playbackRate`，不写磁盘、不影响最终产物。
 - **「转视频」用原件而非预览副本**：渲染入参是 `appState.project.htmlPath`（项目 `index.html`），预览用的是 `index.preview.html`，两者不要混用。
 - **渲染产物落 userData**：MP4 由主进程写在 `userData/hf-projects/html-video-<时间戳>/output.mp4`；本页调 `projectTools.saveVideo` 把它回写到 `project.json` 的 `videoPath`，因此「视频预览」页进入时才能自动加载。
-- **档位读取时机**：下拉初值取 `FALLBACK_RENDER`，真正生效值在 `onMounted` 的 `syncFromEffective()` 里写入（下拉虽然藏在弹窗里，也在挂载时就同步好，因此打开弹窗看到的即是最新生效档位）；只有挂载前就发起渲染（不可能，按钮 `:disabled`）才会用到内置默认。
-- **状态区文本与样式成对切换**：`statusDisplay` 与 `statusDisplayClass` 必须一起用；若只换文本不换样式，渲染中的 trace 文案会继承上一次的 `hf-ok` / `hf-error` 颜色。
-- **渲染中切页的语义**：`resetRenderProgress()` 只在页面挂载与渲染结束时调用；渲染进行中切走再回来，本页会先清空 trace，随后的新 trace 会重新写入（源码注释已说明此取舍）。
+- **状态区文本与样式成对切换**：`statusDisplay` 与 `statusDisplayClass` 必须一起用（都在 `PreviewSection`）；若只换文本不换样式，渲染中的 trace 文案会继承上一次的 `hf-ok` / `hf-error` 颜色。
+- **渲染中切页的语义**：`resetRenderProgress()` 只在 `HtmlGenPage/index.vue` 的挂载与渲染结束时调用；渲染进行中切走再回来，本页会先清空 trace，随后的新 trace 会重新写入（源码注释已说明此取舍）。
+- **`hgpreview:` 是素材缩略图与预览副本的共同出口**：`<img :src="thumbUrl(...)">`（`MaterialsSection`）与 `iframe.hgen-frame`（`PreviewSection`）都经该协议，因此 `src/renderer/index.html` 的 CSP 需要同时放行 `img-src` 与 `frame-src`。
 
-## 7. 运行环境缺包守卫（`useEnvGate`）
+## 9. 运行环境缺包守卫（`useEnvGate`）
 
-`转成视频` 与 `提取视频原声` 都要用到**不随安装包**的运行环境：`video:render` 需要 `ffmpeg` + `hyperframes`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14），`project:extract-video-audio` 需要 `ffmpeg`（42.6 MB）（分包方案见 `docs/runtime-pack-split.md`、主进程实现见 [main/video.ts.md](../../../main/video.ts.md) / [main/projects.ts.md](../../../main/projects.ts.md)）。
+`转成视频` 需要**不随安装包**的运行环境：`video:render` 需要 `ffmpeg` + `hyperframes`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）；`project:extract-video-audio` 需要 `ffmpeg`（42.6 MB）——但该入口当前已下线（见 3.5），所以本目录现在**只有 `onRenderVideo(skipEnvGuard)` 一个守卫调用点**（分包方案见 `docs/runtime-pack-split.md`、主进程实现见 [main/video.ts.md](../../../main/video.ts.md) / [main/projects.ts.md](../../../main/projects.ts.md)）。
 
-- 两个入口函数都带守卫参数：`onRenderVideo(skipEnvGuard)` / `onExtractAudio(skipEnvGuard)`；
-- 动手前先 `const g = await envGate.guard(['ffmpeg','hyperframes'], '转成视频', () => { void onRenderVideo(true) })`（提取原声是 `guard(['ffmpeg'], '提取视频原声', …)`）；`!g.ok`（缺包已弹框或用户取消）就 `return`，**不发后续 IPC、不产生任何下载**；
+- 动手前先 `const g = await envGate.guard(['ffmpeg','hyperframes'], '转成视频', () => { void onRenderVideo(true) })`；`!g.ok`（缺包已弹框或用户取消）就 `return`，**不发后续 IPC、不产生任何下载**；
 - 主进程返回 `res.needPacks`（并发 / 探测窗口造成的二次缺包）时再 `envGate.guard(res.needPacks, '转成视频', …)` 一次；
-- 用户在确认框里点「继续」时，`onContinue` 以 `skipEnvGuard = true` 重发同一次操作（**不自动续做**，见 [common.md](../common.md) §4.2）；
-- 确认框本身由 `App.vue` 内联渲染（`useEnvGate` 是模块级单例），本页只调 `guard()`；**取消下载 = 取消这次转视频 / 提取**，界面上横幅与设置页仍保留「需要下载」状态与重试入口。
+- 用户在确认框里点「继续」时，`onContinue` 以 `skipEnvGuard = true` 重发同一次操作（**不自动续做**，见 [common.md](../common.md)）；
+- 确认框本身由 `App.vue` 内联渲染（`useEnvGate` 是模块级单例），本页只调 `guard()`；**取消下载 = 取消这次转视频**，界面上横幅与设置页仍保留「需要下载」状态与重试入口。

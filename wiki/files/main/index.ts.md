@@ -18,7 +18,7 @@
 - **预览协议宿主**：声明并实现自定义协议 `hgpreview`，让渲染层的预览 iframe 能读取 `userData\projects` 下的项目文件；dev 阶段渲染层来自 `http://localhost`，Chromium 会拦截 `file://` iframe（`Not allowed to load local resource`），因此必须走该协议。响应统一由 `rangeResponse()` 构造：**支持 `Range` 字节范围（206 / 416）**，响应体用 `fs.createReadStream` 流式返回，供预览页的媒体跳转（见 §3.3）。
 - **基础 IPC**：窗口控制（最小化 / 最大化切换 / 关闭）与剪贴板写入。
 - **业务域装配**：按固定顺序调用各业务模块的 `register(ctx)`，把窗口引用注入各域（供打开对话框时作为父窗口）。
-- 具体业务逻辑不在本文件实现，按域拆到 `src/main/` 下的 `hfEnv.ts`、`settings.ts`、`htmlAgent.ts`、`projects.ts`、`voice.ts`、`ttsAlign.ts`、`video.ts`、`whisper.ts`、`updater.ts`、`runtime.ts`。
+- 具体业务逻辑不在本文件实现，按域拆到 `src/main/` 下的 `hfEnv.ts`、`settings.ts`、`htmlAgent.ts`、`projects.ts`、`voice.ts`、`ttsAlign.ts`、`video.ts`、`whisper.ts`、`updater/`（目录，出口 `updater/index.ts`）、`runtime.ts`。
 
 ## 2. 导出与关键实现
 
@@ -340,7 +340,10 @@ whenReady
 
 - `src/preload/index.ts` 通过 `IPC.Window.Minimize` / `IPC.Window.ToggleMaximize` / `IPC.Window.MaximizedChange` / `IPC.App.CopyText` 与本文件通信；`legacyTools` 命名空间则对应本文件的 `IPC.Legacy.Status` / `IPC.Legacy.Resolve`。
 - 渲染层的 `src/renderer/src/composables/useLegacyData.ts`（挂载时问一次、回传选择）与 `src/renderer/src/components/LegacyDataDialog.vue`（应用内弹窗）是本文件 `legacy:*` 契约的唯一消费方。
-- `src/renderer/src/pages/HtmlGenPage/index.vue` 生成 `hgpreview://p/<encodeURIComponent(appState.currentName)>/<encodeURIComponent(relFile)>?v=<时间戳>` 形式的 iframe 地址；`src/renderer/index.html` 的 CSP 中 `frame-src file: hgpreview:` 放行该协议。
+- **`hgpreview://` 的两个消费方（都在渲染层）**：
+  - **预览 iframe**：`src/renderer/src/pages/HtmlGenPage/PreviewSection.vue` 的 `loadFrame()` 生成 `hgpreview://p/<encodeURIComponent(appState.currentName)>/<encodeURIComponent(relFile)>?v=<时间戳>` 形式的 iframe 地址（本轮随预览卡片从 `index.vue` 搬到该子组件）；`src/renderer/index.html` 的 CSP 中 `frame-src file: hgpreview:` 放行该协议。
+  - **素材缩略图**（本轮新增）：`src/renderer/src/pages/HtmlGenPage/MaterialsSection.vue` 的 `thumbUrl(file)` 拼 `hgpreview://p/<encodeURIComponent(appState.currentName)>/<encodeURIComponent(file)>`（`file` 是 `project.json` 里的相对引用 `images/xxx.png`），交给 `<img :src>`；因此 CSP 的 **`img-src` 也放行了 `hgpreview:`**。
+  - **整段 `encodeURIComponent` 也成立**：`/` 变成 `%2F` 后仍能定位，因为 §3.3 第 2 步是先 `split('/')` 再**逐段 `decodeURIComponent`** 再 `join('/')` 拼回相对路径。视频素材卡片只用 `▶` 字符占位、不抽帧，因此不产生任何媒体请求。
 - `src/main/projects.ts` 提供 `projectDir(name)`，是本文件协议处理器的路径基准；`src/main/settings.ts` 提供 `isPristineSettings()`，是迁移时 `settings.json` 特例的判据。**这两处调用都不构成环**（index 是装配器，位于依赖图顶端）。
 - 业务模块各自用 `app.getPath('userData')` 取数据根（如 `projects.projectsRoot()` / `whisper.modelsDir()` / `runtime.runtimeDir()`（`runtimeRoot()` 已随分包删除，各包根用 `runtime.packRoots()`） / `settings.settingsFile()`），本文件**不再**在任何位置改写 userData，因此「模块级快照 vs import 提升」在这一版里是**纯保险**问题（见 §5）。
 

@@ -72,7 +72,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/MarvisStudio/"
+        "url": "https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/"
       }
     ],
     "extraResources": [

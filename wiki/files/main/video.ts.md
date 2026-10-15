@@ -77,7 +77,7 @@
 `video:render` 只负责产出并返回 `outputVideo` 绝对路径，**渲染进程侧由两个页面分工**：
 
 - **发起方 `src/renderer/src/pages/HtmlGenPage/index.vue`**（「转视频」按钮，`onRenderVideo()`）：`res.ok` 后先写状态文案，再调用 `window.projectTools.saveVideo(appState.currentName, res.outputVideo)`（`project:save-video`）把产物回写 `project.json`，随后 `await refreshProject()` 让 `videoExists` / `videoPath` 生效，最后 toast 引导去「视频预览」页。它**不**自己播放视频。
-- **播放侧 `src/renderer/src/pages/VideoPreviewPage/index.vue`**（已重写为纯预览页）：进入页面时按 `appState.project.videoExists && videoPath` 决定是否把产物喂给 `<video class="hf-video" controls>`（`file:///` URL），并提供「在文件夹中显示」（`hfTools.showInFolder`）与「重新加载」；**该页不发起渲染**，也没有任何 iframe 预览分支。
+- **播放侧 `src/renderer/src/pages/VideoPreviewPage/index.vue`**（纯预览页）：**默认预览当前工作项目，也可在下拉里选另一个「有视频成品」的项目**（存在性用 `project:list` 的 `ProjectMeta.hasVideo` / `hasHtml`，路径用 `project:load` 的 `videoPath`；当前项目直接复用 `appState.project`，**没有新增 IPC 频道**），把成品喂给 `<video class="hf-video" controls>`（`file:///` URL），并提供「在文件夹中显示」（`hfTools.showInFolder`）与「重新加载」（**始终可用**：重读项目清单，所选项目被删 / 改名时回落到当前工作项目）。**切换下拉只换本页播放的成品，不改 `appState.currentName`**；**该页不发起渲染**，也没有任何 iframe 预览分支。
 
 ## 4. 依赖与协作
 
@@ -103,7 +103,7 @@
 | `src/main/index.ts` | `video.register(ctx)` 完成注册（依赖图注释：`hfEnv ← projects, voice, whisper, ttsAlign, video, runtime`） |
 | `src/preload/index.ts` | 暴露 `openHtml` / `renderVideo` / `showInFolder` / `onProgress`，分别转发上述频道 |
 | `src/renderer/src/pages/HtmlGenPage/index.vue` | **发起渲染**（「转视频」按钮，带质量 / 帧率档位）、成功后回写产物并刷新项目 |
-| `src/renderer/src/pages/VideoPreviewPage/index.vue` | 纯预览：展示 / 定位成品视频、在文件夹中显示 |
+| `src/renderer/src/pages/VideoPreviewPage/index.vue` | **可选项目的**纯预览：下拉选择要看的项目（默认当前工作项目，只列 `hasVideo` 的项目）、展示 / 定位成品视频、在文件夹中显示；**切换不改工作项目、也不发起渲染** |
 | `src/renderer/src/composables/useRenderProgress.ts` | 通过 `window.hfTools.onProgress` 解析 `video:progress` 文本 |
 
 ## 5. 注意事项与实现要点
