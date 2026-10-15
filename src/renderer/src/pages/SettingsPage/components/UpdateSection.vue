@@ -8,6 +8,7 @@
     <div class="hgen-actions">
       <button class="hf-btn hf-btn-primary" :disabled="updateBusy" @click="onCheckUpdate">检查更新</button>
       <button class="hf-btn" @click="openFeedDialog">自定义更新源</button>
+      <button class="hf-btn" title="看看各版本都改了什么（内容来自随安装包的 CHANGELOG.md）" @click="changelogVisible = true">查看更新日志</button>
       <button v-if="updateStage === 'available' || updateStage === 'skipped'" class="hf-btn" @click="onDownloadUpdate">下载更新</button>
       <button v-if="updateStage === 'downloading'" class="hf-btn" @click="onCancelUpdate">取消下载</button>
       <button v-if="updateStage === 'downloaded'" class="hf-btn hf-btn-primary" @click="onInstallUpdate">立即重启安装</button>
@@ -45,31 +46,39 @@
     <!-- 保存 / 重置的反馈独立成行：与检查更新共行会被随后的进度文案盖掉，看起来像「没保存」-->
     <div v-if="updaterStatus" class="hf-status" :class="updaterStatusClass">{{ updaterStatus }}</div>
 
-    <!-- 自定义更新源弹窗：保存 / 重置均即时落盘（settings.json 的 updater 段）-->
-    <div class="hf-modal-mask" v-show="feedDialogVisible" @click.self="closeFeedDialog">
-      <div class="hf-modal" style="width:min(520px,92vw)">
-        <div class="hf-modal-head">
-          <span class="hf-modal-title">自定义更新源</span>
-          <button class="hf-modal-close" title="关闭" @click="closeFeedDialog">×</button>
-        </div>
-        <div class="hf-modal-body">
-          <div class="hgen-row">
-            <label class="sel-label" style="flex:none;width:56px">更新源</label>
-            <input v-model="feedDraft" class="hgen-input" style="flex:1" placeholder="如 https://my-bucket.oss-cn-beijing.aliyuncs.com/shadowmill/" />
+    <!-- 自定义更新源弹窗：保存 / 重置均即时落盘（settings.json 的 updater 段）。
+         必须 Teleport 到 body —— `.card` 上有 backdrop-filter，它会让 position:fixed 相对**卡片**定位，
+         蒙层只盖住卡片、弹窗按卡片居中（卡片高于窗口或被滚动时弹窗就跑到窗口外）。
+         同一坑见 VoiceSection 的克隆音色弹窗与 ChangelogDialog -->
+    <Teleport to="body">
+      <div class="hf-modal-mask" v-show="feedDialogVisible" @click.self="closeFeedDialog">
+        <div class="hf-modal" style="width:min(520px,92vw)">
+          <div class="hf-modal-head">
+            <span class="hf-modal-title">自定义更新源</span>
+            <button class="hf-modal-close" title="关闭" @click="closeFeedDialog">×</button>
           </div>
-          <div class="hgen-row">
-            <label class="sel-label" style="flex:none;width:56px">启动检查</label>
-            <label class="hgen-check"><input v-model="autoCheckDraft" type="checkbox" /> 启动后静默检查一次更新</label>
+          <div class="hf-modal-body">
+            <div class="hgen-row">
+              <label class="sel-label" style="flex:none;width:56px">更新源</label>
+              <input v-model="feedDraft" class="hgen-input" style="flex:1" placeholder="如 https://my-bucket.oss-cn-beijing.aliyuncs.com/shadowmill/" />
+            </div>
+            <div class="hgen-row">
+              <label class="sel-label" style="flex:none;width:56px">启动检查</label>
+              <label class="hgen-check"><input v-model="autoCheckDraft" type="checkbox" /> 启动后静默检查一次更新</label>
+            </div>
+            <div class="hgen-tip" style="margin-bottom:0">留空即重置为应用内置的更新地址。地址需指向存放 <b>latest.yml</b> 的目录，并以 <b>/</b> 结尾。</div>
           </div>
-          <div class="hgen-tip" style="margin-bottom:0">留空即重置为应用内置的更新地址。地址需指向存放 <b>latest.yml</b> 的目录，并以 <b>/</b> 结尾。</div>
-        </div>
-        <div class="hf-modal-foot">
-          <button class="hf-btn" @click="onResetFeed">重置</button>
-          <button class="hf-btn" @click="closeFeedDialog">取消</button>
-          <button class="hf-btn hf-btn-primary" @click="onSaveFeed">保存</button>
+          <div class="hf-modal-foot">
+            <button class="hf-btn" @click="onResetFeed">重置</button>
+            <button class="hf-btn" @click="closeFeedDialog">取消</button>
+            <button class="hf-btn hf-btn-primary" @click="onSaveFeed">保存</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
+
+    <!-- 更新日志弹窗：数据来自随包的 CHANGELOG.md（update:changelog），打开即取一次、关掉即销毁 -->
+    <ChangelogDialog v-if="changelogVisible" @close="changelogVisible = false" />
   </div>
 </template>
 
@@ -85,6 +94,7 @@ import type { UpdateProgressPayload } from '@shared/types'
 import { useRuntime } from '@renderer/composables/useRuntime'
 import type { UpdateCheckReply } from '../types'
 import { updateStage } from '../helpers'
+import ChangelogDialog from './ChangelogDialog.vue'
 
 const updateVersion = ref('');
 // 待安装的目标版本（payload/回执里的 version）：只给「跳过版本 / 恢复提示版本」用，
@@ -109,6 +119,8 @@ const updaterStatusClass = ref('');
 const feedDialogVisible = ref(false);
 const feedDraft = ref('');
 const autoCheckDraft = ref(true);
+// 「更新日志」弹窗开关（内容与解析都在子组件里，这里只管显隐）
+const changelogVisible = ref(false);
 
 // ===== 运行环境（分包 ffmpeg / hyperframes；whisper 随安装包）=====
 // 模块级单例，外壳横幅与本组件读同一份（见 composables/useRuntime.ts、docs/runtime-pack-split.md）

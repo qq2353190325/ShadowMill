@@ -816,6 +816,10 @@ export interface PreloadApi {
     // 在文件管理器里定位 userData/updater.log（没有日志则打开 userData 目录）：
     // 更新失败时用户 / 维护者唯一的原始报错出口，不依赖 electron-updater 是否加载成功
     openLog(): Promise<IpcResult<{ path: string }>>
+    // 取随包 CHANGELOG.md 的原文（设置 → 应用更新「查看更新日志」）。
+    // 主进程只负责定位与读取（app.getAppPath()/CHANGELOG.md），
+    // 分块与行内排版全在渲染层 utils/changelog.ts——解析口径属于展示层的事
+    changelog(): Promise<IpcResult<{ text: string }>>
     onProgress(callback: (data: UpdateProgressPayload) => void): void
   }
   // 运行环境（分包）：ffmpeg / hyperframes 各自一个 7z、首次用到时下载；whisper 随安装包。

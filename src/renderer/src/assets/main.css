@@ -1597,6 +1597,10 @@ body {
 .hf-modal-body {
   padding: 18px;
   overflow: auto;
+  /* 必需：.hf-modal 是 column flex，子项默认 min-height:auto（=内容高度）⇒ 内容一长，body 拒绝收缩，
+     整个弹窗被撑到 max-height 且内容被 .hf-modal 的 overflow:hidden 裁掉（关闭按钮都跑到可视区外，
+     用户反馈「更新日志顶到头部去了」就是这么来的）。归零后 body 才会在自己内部滚动。 */
+  min-height: 0;
 }
 .hf-modal-foot {
   display: flex;
@@ -1605,6 +1609,94 @@ body {
   padding: 14px 18px;
   border-top: 1px solid rgba(0, 212, 255, 0.2);
 }
+
+/* ===== 更新日志弹窗（设置 → 应用更新 →「查看更新日志」）=====
+   内容来自随包的 CHANGELOG.md，界面只要三样：版本 / 时间 / 每条一行标题。
+   字号走设计规范刻度：版本行与条目标题 13px、时间与条数 12px、标签徽标 11px */
+.cl-ver {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.18);
+}
+.cl-list { padding: 2px 0; }
+/* 一行一条：标题长了自然换行（不截断——界面不给悬浮提示，截断就等于丢字） */
+.cl-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+.cl-item-title { min-width: 0; word-break: break-word; }
+.cl-date { flex: none; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+.cl-count { flex: none; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+.cl-tag {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid rgba(138, 155, 181, 0.5);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.cl-tag-ok { color: var(--color-success); border-color: rgba(0, 229, 160, 0.5); }
+.cl-tag-err { color: var(--color-danger); border-color: rgba(255, 77, 109, 0.5); }
+.cl-tag-warn { color: var(--color-warning); border-color: rgba(255, 176, 32, 0.5); }
+.cl-more { padding: 6px 0 2px; }
+/* 历史版本：整区默认折叠（否则 25 + 4 + 4 条又会把弹窗顶满），展开后每版一行、点开才列条目 */
+.cl-hist {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid rgba(0, 212, 255, 0.18);
+}
+.cl-hist-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+  background: rgba(0, 212, 255, 0.06);
+  border: 0;
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+}
+.cl-hist-head:hover { background: rgba(0, 212, 255, 0.12); }
+.cl-hist-body { padding-top: 6px; }
+.cl-hist-block {
+  margin-bottom: var(--space-2);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: var(--radius-btn);
+  overflow: hidden;
+}
+.cl-hist-ver {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.cl-hist-ver:hover { background: rgba(0, 212, 255, 0.08); }
+.cl-hist-block .cl-list { padding: 0 10px var(--space-2); }
+.cl-hist-name { flex: 1; min-width: 0; }
+.cl-caret { flex: none; width: 12px; color: var(--color-primary); }
 .tw-model {
   font-family: 'Consolas', 'Courier New', monospace;
   font-size: 13px;

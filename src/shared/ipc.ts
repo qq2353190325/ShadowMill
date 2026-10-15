@@ -26,6 +26,9 @@ export const IPC = {
     Status: 'update:status',
     // 定位 userData/updater.log（排障出口，不依赖 electron-updater 加载成功）
     OpenLog: 'update:open-log',
+    // 取随包 CHANGELOG.md 原文（设置 → 应用更新「查看更新日志」）：
+    // 主进程只读文件、不做解析——分块与排版是渲染层 utils/changelog.ts 的事
+    Changelog: 'update:changelog',
     Progress: 'update:progress'
   },
   // 设置（settings.js）

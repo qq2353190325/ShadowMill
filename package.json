@@ -38,6 +38,7 @@
       "out/**/*",
       "vendor/**/*",
       "README.md",
+      "CHANGELOG.md",
       "!node_modules/@vue/**/*",
       "!node_modules/@babel/**/*",
       "!node_modules/vue/**/*",

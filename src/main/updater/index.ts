@@ -33,7 +33,7 @@ import path from 'node:path'
 import { IPC } from '../../shared/ipc'
 import type { RegisterCtx } from '../../shared/types'
 import { getUpdaterSettings } from '../settings'
-import { flags, ensureUpdater, writeLog, payload, errText, logPath, appVersion, getUpdaterLoadError } from './base'
+import { flags, ensureUpdater, writeLog, payload, errText, logPath, appVersion, getUpdaterLoadError, readBundledChangelog } from './base'
 import { checkNow, downloadUpdate, cancelDownload } from './actions'
 import { installNow, finalizePendingUpdate, bindBusyTracking, isBusy, quitForUpdate } from './install'
 
@@ -65,6 +65,10 @@ function register(ctx: RegisterCtx): void {
       return { ok: false, message: '打开日志目录失败', detail: errText(e) }
     }
   })
+
+  // 更新日志：读随包的 CHANGELOG.md 原文交给渲染层分块展示。
+  // 同样刻意不进 ensureUpdater——它只是一次文件读取，与更新器是否加载得起来无关。
+  ipcMain.handle(IPC.Update.Changelog, () => readBundledChangelog())
 
   // 启动静默检查一次：延迟 3s 让窗口首屏先出来；autoCheck 关闭或非安装版（无 app-update.yml）则跳过
   setTimeout(() => {

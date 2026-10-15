@@ -180,6 +180,8 @@ const updateTools: PreloadApi['updateTools'] = {
   status: () => ipcRenderer.invoke(IPC.Update.Status),
   // 在文件管理器里定位 updater.log（更新失败时的排障出口）
   openLog: () => ipcRenderer.invoke(IPC.Update.OpenLog),
+  // 取随包 CHANGELOG.md 原文（设置页「查看更新日志」；分块与排版在渲染层）
+  changelog: () => ipcRenderer.invoke(IPC.Update.Changelog),
   // 单订阅：重复注册仅替换回调，避免页面切换叠加监听
   onProgress: (callback) => {
     _updateProgressCb = callback;

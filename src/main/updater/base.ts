@@ -94,6 +94,21 @@ export const bytesText = (n: number): string => {
   return (v / 1024 / 1024).toFixed(1) + ' MB'
 }
 
+// ===== 随包更新日志（设置页「查看更新日志」的数据源）=====
+// 路径基准与 hfEnv 读 vendor/gsap 同口径：app.getAppPath() 在 dev = 项目根、打包后 = app.asar 根，
+// 两种形态都命中（CHANGELOG.md 已列进 package.json 的 build.files，随包进 asar）。
+// 与 logPath / OpenLog 一样**刻意不依赖 electron-updater**：看日志与更新器能否加载无关。
+export const changelogPath = (): string => path.join(app.getAppPath(), 'CHANGELOG.md')
+export function readBundledChangelog(): { ok: true; text: string } | { ok: false; message: string; detail?: string } {
+  try {
+    const file = changelogPath()
+    if (!fs.existsSync(file)) return { ok: false, message: '没有找到更新日志文件', detail: file }
+    return { ok: true, text: fs.readFileSync(file, 'utf8') }
+  } catch (e) {
+    return { ok: false, message: '读取更新日志失败', detail: errText(e) }
+  }
+}
+
 // 把 electron-updater 的报错翻译成用户看得懂的话（HTTP 错误码优先）。
 // 判断顺序很重要：403 的报错文本里**必然包含请求 URL**（末尾就是 latest.yml），
 // 若先判 `latest\.yml` 就会把「权限被拒」误报成「文件没上传」，会把人带偏到错误方向。
