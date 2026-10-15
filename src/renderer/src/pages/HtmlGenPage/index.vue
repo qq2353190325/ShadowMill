@@ -17,6 +17,16 @@
           <HfSelect v-model="subSel" :groups="subSelGroups" title="按所选字幕逐条设计动画" />
         </div>
       </div>
+      <!-- 画布：**项目属性**（不是渲染档位，不进设置页那套"全局默认/项目覆盖"）。
+           它是生成前的版式前提：模型要按这块画布排版式，预览与成片也都用它，所以放在生成这一侧。 -->
+      <div class="hgen-block">
+        <div class="panel-title-sm">画布（成片尺寸）</div>
+        <div class="hgen-row" style="margin-bottom:0">
+          <label class="sel-label" style="flex:none;width:40px">画布</label>
+          <HfSelect v-model="canvas" :groups="canvasGroups" :disabled="rendering" @change="onCanvasChange" />
+        </div>
+        <div class="hgen-tip">{{ canvasHint }}</div>
+      </div>
       <!-- 项目素材库（图片 / 视频）：增删与勾选都在子组件里完成，落盘后刷新全局项目状态 -->
       <MaterialsSection />
       <div class="hgen-block">
@@ -92,7 +102,7 @@
 // 本页只留「生成/修改 + 渲染」这条主动作链：素材库在 MaterialsSection.vue、预览与背景音频在 PreviewSection.vue。
 // 拆分的理由是按「一个文件一件事」切：素材的增删勾选与本页的生成流程互不依赖，预览那套 iframe/seek/音频试听也自成一块。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { RenderFps, RenderQuality } from '@shared/types'
+import type { RenderCanvas, RenderFps, RenderQuality } from '@shared/types'
 import { appState, hasHtml, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { resetRenderProgress } from '@renderer/composables/useRenderProgress'
@@ -100,9 +110,12 @@ import { useEnvGate } from '@renderer/composables/useEnvGate'
 import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 import {
   FALLBACK_RENDER,
+  RENDER_CANVAS_OPTIONS,
   RENDER_FPS_OPTIONS,
   RENDER_QUALITY_OPTIONS,
+  canvasLabel,
   isRenderOverridden,
+  normalizeCanvas,
   renderOptionsText
 } from '@renderer/utils/render'
 import { effectiveRenderOptions, renderDefaults, saveProjectRenderOverride } from '@renderer/composables/useRenderOptions'
@@ -134,6 +147,34 @@ const subSelGroups = computed<HfSelectGroup[]>(() => [{
 const status = ref('');
 const statusClass = ref('');
 const thinkText = ref('');
+
+// ===== 画布（成片尺寸）——**项目属性，不是渲染档位** =====
+// 只在这一处选，同一个值决定三件事：① 生成提示词里给模型的版式尺寸（projects.ts 的【画布】块）
+// ② 预览 iframe 的画布（PreviewSection 直接读 appState.project.canvas）③ 渲染入口注入的 data-resolution。
+// 存 project.json 的 canvas（缺省 = 横屏 1920x1080）；没有"设置页默认 → 项目覆盖"那种层级。
+const canvas = ref<RenderCanvas>(normalizeCanvas(appState.project && appState.project.canvas));
+const canvasGroups = computed<HfSelectGroup[]>(() => [{
+  label: '',
+  options: RENDER_CANVAS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
+}]);
+const canvasHint = computed(() => '预览与成片都按「' + canvasLabel(canvas.value) + '」这块画布；'
+  + '版式是生成时按画布排的，所以换画布后请重新「生成 HTML」或「按需求修改」，让模型按新画布重排（只换画布不会自动重排已有页面）。');
+// 项目切换 / 刷新后同步显示值（脏数据落回默认横屏）
+function syncCanvas(): void {
+  canvas.value = normalizeCanvas(appState.project && appState.project.canvas);
+}
+async function onCanvasChange(): Promise<void> {
+  const res = await window.projectTools.setCanvas(appState.currentName, canvas.value);
+  if (!res || !res.ok) {
+    toast((res as { message?: string })?.message || '保存画布失败');
+    syncCanvas();
+    return;
+  }
+  await refreshProject();
+  syncCanvas();
+  previewRef.value?.reload();   // 预览画布尺寸变了：重载 iframe，缩放比按新画布重算
+}
+
 // 提示词占位文案随状态变：没 HTML 时讲"要什么样的页面"，已有 HTML 时讲"这次改什么"
 const promptPlaceholder = computed(() => (hasHtml.value
   ? '描述这次要改什么，例如：\n· 换成紫色霓虹配色，并把标题放大\n· 字幕出现得太快，节奏放慢一些'
@@ -231,7 +272,8 @@ function onModify(): void {
 }
 
 // ===== 转视频（整个视频环节就这一个按钮，成品到「视频预览」页看）=====
-// 成品 MP4 由主进程写到 userData/hf-projects/... 并回写当前项目，之后到「视频预览」页查看。
+// 成品 MP4 由主进程**就地**渲染到 <项目目录>/video/output.mp4，并把 videoPath 记成项目内相对路径，
+// 之后到「视频预览」页查看（不再有 hf-projects 那种渲染临时目录）。
 const rendering = ref(false);
 const qualityOptions = RENDER_QUALITY_OPTIONS;
 const fpsOptions = RENDER_FPS_OPTIONS;
@@ -299,21 +341,21 @@ async function onRenderVideo(skipEnvGuard = false): Promise<void> {
   if (agentRunning) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
   const htmlPath = appState.project && appState.project.htmlPath;
   if (!htmlPath || !(appState.project && appState.project.htmlExists)) { toast('还没有 HTML，请先「生成 HTML」'); return; }
-  const options = { quality: quality.value, fps: fps.value };
+  const options = { quality: quality.value, fps: fps.value, canvas: canvas.value };
   // 渲染要 ffmpeg + hyperframes 两个运行环境包（不随安装包）：缺则在确认框里问用户，
   // 用户在框里点「继续」时回到这里（skipEnvGuard=true），不再重复弹框
   if (!skipEnvGuard) {
     const g = await envGate.guard(['ffmpeg', 'hyperframes'], '转成视频', () => { void onRenderVideo(true); });
     if (!g.ok) return;
   }
-  status.value = '已提交渲染（' + renderOptionsText(options) + '，约 30 秒）...';
+  status.value = '已提交渲染（' + renderOptionsText(options) + ' · ' + canvasLabel(options.canvas) + '，约 30 秒）...';
   statusClass.value = '';
   rendering.value = true;
   try {
     const res = await window.hfTools.renderVideo(htmlPath, options);
     resetRenderProgress(); // 本地完成/失败文案覆盖全局 trace 残留
     if (res.ok) {
-      status.value = '视频已生成（' + renderOptionsText(options) + '）：' + res.outputVideo;
+      status.value = '视频已生成（' + renderOptionsText(options) + ' · ' + canvasLabel(options.canvas) + '）：' + res.outputVideo;
       statusClass.value = 'hf-ok';
       // 回写视频产物到当前项目（「视频预览」页据此自动加载）
       await window.projectTools.saveVideo(appState.currentName, res.outputVideo);
@@ -355,6 +397,7 @@ onMounted(() => {
   thinkText.value = '';
   resetRenderProgress();   // 清掉上一次渲染的 trace 残留（渲染中若再次进入本页，随后仍会被新 trace 覆盖）
   syncFromEffective();     // 渲染档位显示：项目覆盖 > 设置页全局默认
+  syncCanvas();            // 画布显示：项目属性（缺省横屏）
   // 生成/修改过程的实时状态与 AI 思考过程：本页（子组件）自己订阅，主进程为单订阅语义
   window.projectTools.onHtmlProgress((info) => {
     if (!info) return;

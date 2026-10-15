@@ -46,6 +46,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { renderProgress, resetRenderProgress } from '@renderer/composables/useRenderProgress'
+import { previewUrl } from '@renderer/utils/url'
 import StepBar from '@renderer/components/StepBar.vue'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 
@@ -61,8 +62,14 @@ const statusText = computed(() => renderProgress.text || localStatus.value);
 
 const tipText = computed(() => '视频由「HTML生成」页的「转视频」按钮（及那里的质量 / 帧率档位）渲染；渲染完成后回到本页即可预览最新成品。下拉里只列出已经有视频成品的项目，选它只换本页播放的内容，不会切换工作项目。');
 
-function fileUrl(p: string): string {
-  return 'file:///' + encodeURI(String(p).replace(/\\/g, '/'));
+// 成品路径 → 可播放的 URL：走应用自己的只读协议 hgpreview://（主进程 index.ts 注册，带 Range 支持与
+// 目录穿越防护），**不用 file://**：dev 下渲染页跑在 http://localhost，Chromium 会拒绝 http 页读 file://
+// 视频，视频元素拿不到解码器 ⇒ 全黑且连控件都不画（实测踩到）。打包版虽然允许 file://，统一一条协议更省心。
+// 成品现在记为项目内相对路径（video/output.mp4），所以从绝对路径反推最后两段当相对路径。
+// 拼装本身在 utils/url.ts（按段编码，与主进程逐段 decode 对齐）；bust=true 避免看到上一次的成品。
+function toHgPreviewUrl(projectName: string, absPath: string): string {
+  const parts = String(absPath || '').replace(/\\/g, '/').split('/');
+  return previewUrl(projectName, parts.slice(-2).join('/'), true);
 }
 
 function titleOf(name: string): string {
@@ -106,7 +113,7 @@ async function loadSelected(): Promise<void> {
   if (hasVideo && vp) {
     await nextTick();
     videoPath.value = vp;
-    videoSrc.value = fileUrl(vp);
+    videoSrc.value = toHgPreviewUrl(name, vp);
     videoVisible.value = true;
     localStatus.value = '已加载「' + titleOf(name) + '」的视频成品';
     statusClass.value = 'hf-ok';

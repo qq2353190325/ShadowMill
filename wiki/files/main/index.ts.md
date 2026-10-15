@@ -4,8 +4,8 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程入口（装配器，副作用型模块）
-- **规模**：494 行（2026-10 品牌改名事故修复后由 265 行增长；本轮把「原生三按钮对话框 + 1.5s 延迟」改为「主进程只提供 `legacy:*` 两个 handler、界面交给渲染层」后由 481 行缩短；**本轮又为 `hgpreview://` 加上 `rangeResponse()`（支持 `Range` 字节范围请求、响应体改流式）后由 465 行增至 494 行**，行数以工作区源码为准）
-- **对外导出**：无 `export`（模块加载即执行归属标记写入、协议特权声明与 IPC 监听；`app.whenReady()` 后完成装配并注册 `legacy:*` 两个 handler）；内部包含 `LEGACY_DIR_NAMES` / `OWN_DATA_ENTRIES` / `USER_DATA_DIR` / `DATA_MARKER` / `APP_ID` / `STARTUP_LOG` / `BOOT_AT` 等模块级常量、`type MergeStat`、模块级可变状态 `legacyScanned` / `legacyFound`，函数 `hasOurIdentity()` / `isOurs()` / `writeIdentity()` / `mergeTree()` / `pruneEmptyDirs()` / `migrateFrom()` / `findLegacyData()` / `legacyInfo()` / `resolveLegacy(action)` / `previewMime(p)` / `rangeResponse(full, request)` / `createWindow()` / `getWindow()` / `bootLog(stage)`，以及模块级 `let mainWindow`
+- **规模**：**同步本次 F12 改动时为 525 行**（2026-10 品牌改名事故修复后由 265 行增长；把「原生三按钮对话框 + 1.5s 延迟」改为「主进程只提供 `legacy:*` 两个 handler、界面交给渲染层」后由 481 行缩短；**为 `hgpreview://` 加上 `rangeResponse()`（支持 `Range` 字节范围请求、响应体改流式）后由 465 行增至 494 行**；**为 `hgpreview://` 增开 `tts/<相对路径>` 路由与 `TTS_PREVIEW_DIRS` 白名单后由 494 行增至 516 行**；**本轮在 `createWindow()` 里新增 dev 专属（`!app.isPackaged`）的 F12 开关 DevTools 后由 516 行增至 525 行**，行数一律以 `[IO.File]::ReadAllLines` 实测为准。**⚠ 时点**：定稿复核时该文件已涨到 **539 行起、复核期间仍在增长（最后一次实测 542 行）**——它同时还被另一轮并行改动改写（`hgpreview://` 路由解析抽成 `resolveHgPreviewPath()`、`src/shared/ipc.ts` 新增 `update:changelog` 等）。本文档只为 F12 这一段负责；**§3.3 已按随后的「`hgpreview` 路由收口」改动（`?tts=1` + `resolveHgPreviewPath()`）重写**，其余按当时状态写下的行号与频道数见 §5 末条的时点说明）
+- **对外导出**：无 `export`（模块加载即执行归属标记写入、协议特权声明与 IPC 监听；`app.whenReady()` 后完成装配并注册 `legacy:*` 两个 handler）；内部包含 `LEGACY_DIR_NAMES` / `OWN_DATA_ENTRIES` / `USER_DATA_DIR` / `DATA_MARKER` / `APP_ID` / `STARTUP_LOG` / `BOOT_AT` / **`TTS_PREVIEW_DIRS`** 等模块级常量、`type MergeStat`、模块级可变状态 `legacyScanned` / `legacyFound`，函数 `hasOurIdentity()` / `isOurs()` / `writeIdentity()` / `mergeTree()` / `pruneEmptyDirs()` / `migrateFrom()` / `findLegacyData()` / `legacyInfo()` / `resolveLegacy(action)` / `previewMime(p)` / `rangeResponse(full, request)` / `createWindow()` / `getWindow()` / `bootLog(stage)`，以及模块级 `let mainWindow`。**本轮新增的 dev 专属 F12 开关只是 `createWindow()` 体内的一段 `webContents.on('before-input-event', …)` 注册：没有新增任何模块级符号、没有新增导入，也没有新增 / 修改任何 IPC 频道。**
 
 ## 1. 作用与职责
 
@@ -13,9 +13,9 @@
 - **userData 位置保持 Electron 默认**：`const USER_DATA_DIR = app.getPath('userData')`，即 `%APPDATA%\<package.json 的 name>`（现为 `%APPDATA%\shadowmill`）。**刻意不做 `app.setPath('userData', …)`**——目录名继续跟随 `name`，保持 Electron 的默认语义；本文件不做任何位置钉死。
 - **归属证明（`isOurs`）**：`my-app` 这种名字太通用，`%APPDATA%` 下完全可能有别的应用也叫这个。所以扫到同名目录之后**必须先证明它是我们的**：① 目录里**任意一个点开头的标记文件（名字不限）**内容里的 `appId` 与 `APP_ID` 一致；② 否则看结构特征 `<目录>\projects\<项目名>\project.json` 是否存在（专为「标记机制上线之前」的历史目录准备，比如 `my-app`）。两条都不满足 ⇒ 不提示、不迁移（重名应用挡在这里）。**读取只按内容认、不猜文件名**（`hasOurIdentity()`）。见 §3.1②。
 - **历史数据目录：主进程只回答「有没有 / 是什么」并执行选择，不做任何界面展示**：品牌改名（`my-app` → `shadowmill`）会让 userData 目录名随之改变，老用户打开应用会看到「项目全没了」（数据其实还在 `%APPDATA%\my-app` 里）。本文件扫 `LEGACY_DIR_NAMES`，通过归属证明且**确有应用数据**时把结论缓存起来，经 `legacy:status` 交给渲染层；界面由渲染层的应用内弹窗 `LegacyDataDialog.vue`（沿用 `.hf-modal` 体系）负责，用户选完再把 `migrate` / `delete` / `later` 经 `legacy:resolve` 回传，由 `resolveLegacy()` 执行。**不做静默自动迁移**：静默挪动上 GB 的数据出问题极难追查，而弹窗本身就把「数据在哪、有多少、要怎么办」讲清楚了。见 §3.1。
-- **窗口与生命周期**：创建 `BrowserWindow`（1200×800，最小 800×600，`titleBarStyle: 'hidden'`，`backgroundColor: '#0B1220'`），处理 `activate` / `window-all-closed`。
+- **窗口与生命周期**：创建 `BrowserWindow`（1200×800，最小 800×600，`titleBarStyle: 'hidden'`，`backgroundColor: '#0B1220'`），处理 `activate` / `window-all-closed`；**dev 下（`!app.isPackaged`）额外注册 F12 开关 DevTools**（打包版不注册，用默认形态 `toggleDevTools()`，见 §3.4）。
 - **首屏时序打点**：`bootLog()` 把「模块加载 → app ready → 建窗 → 页面开始加载 → DOM ready → 加载完成 → 首帧」写进 `userData/startup.log`，用于排查首屏慢（每次启动几行，超 64KB 自动清空）；迁移/删除/「稍后再说」的结果也写同一文件。
-- **预览协议宿主**：声明并实现自定义协议 `hgpreview`，让渲染层的预览 iframe 能读取 `userData\projects` 下的项目文件；dev 阶段渲染层来自 `http://localhost`，Chromium 会拦截 `file://` iframe（`Not allowed to load local resource`），因此必须走该协议。响应统一由 `rangeResponse()` 构造：**支持 `Range` 字节范围（206 / 416）**，响应体用 `fs.createReadStream` 流式返回，供预览页的媒体跳转（见 §3.3）。
+- **预览协议宿主**：声明并实现自定义协议 `hgpreview`，让渲染层的**预览 iframe / 素材缩略图 / 成品视频 / 音频试听**能读取「项目目录内」与「userData 下白名单目录内」的文件；dev 阶段渲染层来自 `http://localhost`，Chromium 会拦截 `file://`（iframe 报 `Not allowed to load local resource`，`<audio src="file://…">` / `<video src="file://…">` 同样被拒），因此必须走该协议。处理器有**两条分支**：`p/<项目名>/<相对路径>`（`projects.projectDir(name)` 内）与 **`tts/<相对路径>?tts=1`（本轮新增，`app.getPath('userData')` 下、只允许顶层目录落在 `TTS_PREVIEW_DIRS = ['tts-output', 'voice']` 里，非白名单一律 403）**；路径解析已抽成 `resolveHgPreviewPath(rawUrl)`（见 §3.3）。响应统一由 `rangeResponse()` 构造：**支持 `Range` 字节范围（206 / 416）**，响应体用 `fs.createReadStream` 流式返回，供预览页与音频试听的媒体跳转（见 §3.3）。
 - **基础 IPC**：窗口控制（最小化 / 最大化切换 / 关闭）与剪贴板写入。
 - **业务域装配**：按固定顺序调用各业务模块的 `register(ctx)`，把窗口引用注入各域（供打开对话框时作为父窗口）。
 - 具体业务逻辑不在本文件实现，按域拆到 `src/main/` 下的 `hfEnv.ts`、`settings.ts`、`htmlAgent.ts`、`projects.ts`、`voice.ts`、`ttsAlign.ts`、`video.ts`、`whisper.ts`、`updater/`（目录，出口 `updater/index.ts`）、`runtime.ts`。
@@ -48,9 +48,10 @@
 | `rangeResponse(full, request)` | 函数 `(string, Request) => Response` | 预览协议的**统一响应构造器**：算 MIME / 体积 / 基础响应头（`Accept-Ranges: bytes` + `Cache-Control: no-store`），解析 `Range` 头并按范围返回 `206` / `416`，`HEAD` 只回头；响应体是 `fs.createReadStream` → `Readable.toWeb()` 的流。见 §3.3 的「Range 支持」 |
 | `mainWindow` | `BrowserWindow \| null` | 主窗口引用；`closed` 事件中置回 `null` |
 | `getWindow()` | 箭头函数 `() => BrowserWindow \| null` | 装配上下文 `RegisterCtx.getWindow` 的实现；各业务域的对话框用它取父窗口 |
+| `mainWindow.webContents.on('before-input-event', …)`（**本轮新增，dev 专属**） | `webContents` 事件监听（写在 `createWindow()` 内，**仅 `!app.isPackaged` 时注册**） | `input.type === 'keyDown' && input.key === 'F12'` ⇒ `mainWindow?.webContents.toggleDevTools()`（默认吸附在窗口右侧）；**首个参数是 Electron 的 `Event`，只有 `preventDefault` / `defaultPrevented`、没有 `sender`**，故用 `(_event, input)` 忽略它、按模块级 `mainWindow` 取窗口引用；见 §3.4 / §5 |
 | `BOOT_AT` | `number`（模块级常量） | 进程启动时刻（`Date.now() - process.uptime()*1000`，含 Electron 引导耗时），`bootLog` 的相对时间基准 |
 | `bootLog(stage)` | 函数 `(string) => void` | 往 `STARTUP_LOG` 追加一行 `ISO 时间 + 空格 + '+<距进程启动毫秒>ms ' + stage`；文件超 64KB 先删再写；整段 `try/catch` 静默失败 |
-| `createWindow()` | 函数 `() => void` | 清空应用菜单 + 创建窗口 + 装 dev/prod 加载分支 + 绑定窗口事件 + 首屏打点 |
+| `createWindow()` | 函数 `() => void` | 清空应用菜单 + 创建窗口 + 首屏打点 + 装 dev/prod 加载分支 + **dev 下（`!app.isPackaged`）注册 F12 开关 DevTools** + 绑定窗口事件（最大化状态同步 / 关闭清理）；见 §3.4 |
 | `IPC.Window.Minimize` | `ipcMain.on` | 频道 `'window:minimize'`，触发 `mainWindow.minimize()` |
 | `IPC.Window.ToggleMaximize` | `ipcMain.on` | 频道 `'window:toggle-maximize'`，已最大化则 `unmaximize()`，否则 `maximize()` |
 | `IPC.Window.Close` | `ipcMain.on` | 频道 `'window:close'`，触发 `mainWindow.close()` |
@@ -58,14 +59,16 @@
 | `IPC.App.CopyText` | `ipcMain.handle` | 频道 `'app:copy-text'`，`clipboard.writeText(String(text == null ? '' : text))` 后返回 `true` |
 | `IPC.Legacy.Status` | `ipcMain.handle`（在 `app.whenReady()` 内、`createWindow()` 之后注册） | 频道 `'legacy:status'`，`() => legacyInfo()`——渲染层挂载时问一次「有没有待处理的旧数据」 |
 | `IPC.Legacy.Resolve` | `ipcMain.handle`（同上） | 频道 `'legacy:resolve'`，`(_event, action?) => resolveLegacy(action)`——回传用户在弹窗里的选择并同步拿到执行结果 |
-| `protocol.registerSchemesAsPrivileged([...])` | 模块顶层调用 | 为 `hgpreview` 声明 `{ standard: true, secure: true, supportFetchAPI: true, stream: true }` |
-| `protocol.handle('hgpreview', handler)` | `app.whenReady()` 内调用 | 把 URL 路径映射到项目目录内文件（含目录穿越校验），命中后交给 `rangeResponse(full, request)` 构造响应 |
+| `protocol.registerSchemesAsPrivileged([...])` | 模块顶层调用 | 为 `hgpreview` 声明 `{ standard: true, secure: true, supportFetchAPI: true, stream: true }`；**紧随其后声明 `const TTS_PREVIEW_DIRS = ['tts-output', 'voice']`**——语音产物路由（`?tts=1`）允许读的 userData 子目录白名单（注释写明：`tts-output` = 语音合成结果与「生成记录」历史音频，`voice` = 逐句对齐产物） |
+| `resolveHgPreviewPath(rawUrl)` | 模块级函数（定义在 `protocol.handle` **之前**） | 把「路径段 → 允许读的绝对路径」整段从处理器里抽出来：返回 `{ full, why }`（`full` 空串 = 不允许读、`why` 进 403 日志）或 `null`；判定 `isTts = searchParams.get('tts') === '1' \|\| segs[0] === 'tts'`（**不看 host**），语音分支校验 `TTS_PREVIEW_DIRS` 白名单与穿越，项目分支**不剥 `p/`** |
+| `protocol.handle('hgpreview', handler)` | `app.whenReady()` 内调用 | 处理器本体只剩四步：`resolveHgPreviewPath(request.url)` → `null` 记 404 / `!full` 记 403（带 `why`）/ 文件不存在记 404 / 否则 `rangeResponse(hit.full, request)` |
 | `ctx: RegisterCtx` | 对象 `{ getWindow }` | 由 `src/shared/types.ts` 定义，仅含 `getWindow` 一个字段 |
 
 > **已作废的历史方案（文档与代码里都不再存在，勿再引用）**：`USER_DATA_DIR_NAME`、`app.setPath('userData', …)`、目录位置钉死、启动时「身份标记自动认领」（`readMarkerAppId()` / `adoptExistingData()`）、`README_NAME` / `README_TEXT`（`README-请勿删除.txt`），以及备份名 `.before-adopt.bak`。
 > 注意区分：`DATA_MARKER` / `APP_ID` / `writeIdentity()` **在**（本轮重新引入，用途变了，见 §3.1②）；被删掉的是旧方案里那套「按标记自动把老目录并过来」的启动逻辑。
 > **本轮又删掉的一层**：`promptLegacyData()`（原生 `dialog.showMessageBox` 三按钮对话框整段）、它的调用 `setTimeout(() => promptLegacyData(), 1500)`，以及 `electron` 的 `dialog` 导入与 `import type { MessageBoxOptions }`。因此**启动路径上已经没有任何与旧数据相关的延迟或原生对话框**；取而代之的是 §3.1④/⑤ 的 `legacyInfo()` / `resolveLegacy()` 与两个 `legacy:*` handler。
 > **同一轮里被替换掉的响应构造方式**：协议处理器原先的 `fs.readFileSync(full)` + 手写 `new Response(data, { headers: { Content-Type, Cache-Control } })`（整文件读进内存、不带 `Accept-Ranges`）已被 `rangeResponse(full, request)` 取代；协议路径解析、403 / 404 / 异常落盘逻辑未变。
+> **本轮（F12 开关 DevTools）没有作废任何既有东西**：它只是在 `createWindow()` 里多注册了一个 dev 专属的 `webContents` 监听；`Menu.setApplicationMenu(null)`、加载分支、打点、最大化状态同步、业务域 `register()` 顺序全部照旧。
 
 ## 3. 关键流程 / 算法
 
@@ -202,18 +205,26 @@ return legacyFound;
 
 ### 3.3 hgpreview 请求处理（`protocol.handle`）
 
-URL 形态：`hgpreview://p/<encodeURIComponent(项目名)>/<相对路径>`。因 `standard: true`，`p` 是 URL 的 host，**不进入 `pathname`**，因此 `pathname` 的第一段就是项目名。
+URL 形态（**两条路由**）：
 
-1. 定义内部 `log(line)`：以 `appendFileSync` 追加写 `userData/preview-protocol.log`，行格式 `ISO 时间 + 空格 + line`，整段包 `try/catch` 静默忽略失败。
-2. `new URL(request.url).pathname.split('/').filter(Boolean).map(decodeURIComponent)` → `segs`。
-3. `name = segs[0]`（项目名）、`rel = segs.slice(1).join('/')`（项目内相对路径）；任一为空则记 `404 <url>` 并返回 `404 Not Found`。
-4. `dir = projects.projectDir(name)`（项目目录绝对路径），`full = path.resolve(dir, rel)`。
-5. 目录穿越防护：若 `full !== dir` 且 `!full.startsWith(dir + path.sep)`，记 `403 <url>` 并返回 `403 Forbidden`。
-6. 存在性校验：`fs.existsSync(full)` 且 `fs.statSync(full).isFile()` 不满足则记 `404 <url> -> <full>` 并返回 `404 Not Found`。
-7. `return rangeResponse(full, request)`——响应构造统一交给它：MIME 由 `previewMime(full)` 算、按 `Range` 头返回 `200` / `206` / `416`、响应体是文件流（见下方「Range 支持」）。
-8. 任意异常落入 `catch`：记 `500 <url> <message>`，但**响应状态码为 400 `Bad Request`**（日志前缀与响应码不一致，属现有实现）。
+- `hgpreview://p/<encodeURIComponent(项目名)>/<逐段编码的相对路径>` —— **项目目录内**的文件；因 `standard: true`，`p` 是 URL 的 host、**不进入 `pathname`**，因此 `pathname` 的第一段就是项目名。
+- `hgpreview://tts/<逐段编码的相对路径>?tts=1`（**本轮新增**）—— **userData 下**的语音产物（`tts-output/` 的合成结果与生成记录、`voice/align-<时间戳>/…` 的逐句对齐产物）；host 位那个 `tts` 只作可读性，**路由判定靠 `?tts=1` 查询标记**。
 
-> 处理器自己的注释（第 434-437 行）写明三点：只允许读目标项目目录内的文件（防目录穿越）；`net.fetch(file://)` 在协议处理器内存在兼容性问题、易致预览空白，故自行构造 `Response`；**媒体文件（音轨 / 视频素材）走 `rangeResponse` 支持按字节范围取，预览跳转依赖它**；失败/异常落盘 `userData/preview-protocol.log`。
+> **✅ 已实测命中（历史注记保留）**：`ttsUrl()` 早期版本产出的是 `hgpreview://tts/<相对路径>`（没有 `?tts=1`），此时 `tts` 落在 **host 位**、`new URL(url).pathname` 里根本没有它（Node 实测 `new URL('hgpreview://tts/voice/align-1/raw/0000.wav').pathname === '/voice/align-1/raw/0000.wav'`）——处理器若按 `pathname` 首段判路由，就会把 `voice` 当项目名去 `projects.projectDir()` 找 ⇒ 404。**现版本**：渲染层追加 `?tts=1`、处理器按查询标记路由（`pathname` 首段为 `tts` 的旧设想写法也一并识别）。主进程侧已用**真实文件**对照验证：`?tts=1`（`tts-output/…wav`、`voice/align-*/raw/0000.wav`）与旧写法 `/tts/…` 都命中，白名单外（`runtime/…`）拒绝 `not-in-whitelist`、`..%2F` 拒绝 `traversal`，项目分支命中中文项目名的 `video/output.mp4`、项目穿越被拒；再按 `utils/url.ts` 的口径生成 URL 喂回解析函数，4/4 命中（合成结果 / 对齐片段 / 成品视频 / 预览副本），含 `#` 的文件名被正确编码成 `%23`。
+
+**路由解析抽成独立函数 `resolveHgPreviewPath(rawUrl)`**（定义在 `protocol.handle` 之前；处理器里只剩取结果、记日志、构造响应）：
+
+1. `u = new URL(rawUrl)`（包 `try/catch`，解析失败返回 `null`）；`segs = u.pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s))`（**按段解码**，与渲染层 `utils/url.ts` 的逐段 `encodeURIComponent` 严格对应）；`segs` 为空返回 `null`。
+2. `isTts = u.searchParams.get('tts') === '1' || segs[0] === 'tts'` —— **判定只看段与查询标记，不看 host**。
+3. **语音产物分支**：`rel = (segs[0] === 'tts' ? segs.slice(1) : segs).join('/')`；`cwd = app.getPath('userData')`、`top = rel.split('/')[0]`；`TTS_PREVIEW_DIRS.indexOf(top) < 0` ⇒ `{ full: '', why: 'not-in-whitelist:' + top }`；否则 `dir = path.join(cwd, top)`、`full = path.resolve(cwd, rel)`，穿越（`full !== dir && !full.startsWith(dir + path.sep)`）⇒ `why: 'traversal'`，通过 ⇒ `{ full, why: '' }`。
+4. **项目分支**：`name = segs[0]`、`rel = segs.slice(1).join('/')`，任一为空返回 `null`；`dir = projects.projectDir(name)`、`full = path.resolve(dir, rel)`；穿越 ⇒ `why: 'traversal:' + name`；通过 ⇒ `{ full, why: '' }`。**刻意不剥 `p/`**：`hgpreview://p/<项目名>/…` 里 `p` 在 host 位、`pathname` 首段就是项目名，剥了会把真项目名当路由标记吃掉（源码注释原话）。
+5. 处理器：`const hit = resolveHgPreviewPath(request.url)` → `!hit` 记 `404 <url>`；`!hit.full` 记 `403 <url>（<why>）`；`!fs.existsSync(hit.full) || !fs.statSync(hit.full).isFile()` 记 `404 <url> -> <full>`；否则 `return rangeResponse(hit.full, request)`。
+6. 定义内部 `log(line)`：以 `appendFileSync` 追加写 `userData/preview-protocol.log`，行格式 `ISO 时间 + 空格 + line`，整段包 `try/catch` 静默忽略失败。
+7. 任意异常落入 `catch`：记 `500 <url> <message>`，但**响应状态码为 400 `Bad Request`**（日志前缀与响应码不一致，属现有实现）。
+
+> **本节已随「`?tts=1` + `resolveHgPreviewPath()`」那次并行改动重写**（此前按只含 F12 改动的 525 行版本记录，并标过一条「`tts` 落在 host 位、`pathname` 取不到」的 ⚠——现在已实测命中，注记保留在上面）。
+>
+> 处理器自己的注释（当前第 **485-489** 行）写明三点：只允许读「目标项目目录内」或「白名单里的 userData 语音产物目录」的文件（防目录穿越）；`net.fetch(file://)` 在协议处理器内存在兼容性问题、易致预览空白，故自行构造 `Response`；**媒体文件（音轨 / 视频 / 音频）走 `rangeResponse` 支持按字节范围取，预览跳转依赖它**；失败/异常落盘 `userData/preview-protocol.log`。
 
 #### Range 支持（`rangeResponse(full, request)`）
 
@@ -275,12 +286,33 @@ function rangeResponse(full: string, request: Request): Response {
 
 ### 3.4 createWindow 装配流程
 
-1. `Menu.setApplicationMenu(null)`——彻底移除默认菜单栏（不出现 File/Edit/View）。
+> 一句话顺序（与源码自上而下一致）：**建窗 → 页面加载打点 → 加载 dev URL 或构建产物 → dev 下注册 F12 开关 DevTools → 最大化状态同步 → 关闭清理**。
+
+1. `Menu.setApplicationMenu(null)`——彻底移除默认菜单栏（不出现 File/Edit/View）。**这一步也是 F12 必须由主进程显式接管的原因**（见第 6 步）：菜单没了，Chromium 默认挂在菜单上的 F12 加速键就没人接。
 2. 创建 `BrowserWindow`：`width: 1200`、`height: 800`、`minWidth: 800`、`minHeight: 600`、`titleBarStyle: 'hidden'`、`autoHideMenuBar: true`、**`backgroundColor: '#0B1220'`**（与设计系统 `--bg-primary` 及 `index.html` 的启动画面同色，页面首帧之前不闪白）。
 3. `webPreferences`：`preload: path.join(__dirname, '../preload/index.js')`、`contextIsolation: true`、`nodeIntegration: false`——渲染层无 Node 能力，一切特权操作走 preload 暴露的 IPC（这也是剪贴板必须经主进程写入的原因）。
 4. 建窗后立即装首屏打点：`webContents` 的 `did-start-loading` / `dom-ready` / `did-finish-load` 与窗口的 `ready-to-show`（首帧）各写一行 `startup.log`。
 5. 加载分支：存在 `process.env['ELECTRON_RENDERER_URL']` 时 `loadURL(...)`（electron-vite dev + HMR）；否则 `loadFile(path.join(__dirname, '../renderer/index.html'))`（生产构建产物）。
-6. 绑定事件：`maximize` → 推送 `IPC.Window.MaximizedChange`（`true`）；`unmaximize` → 推送同一频道（`false`），供渲染层切换最大化/还原图标；`closed` → `mainWindow = null`。
+6. **dev 下注册 F12 开关 DevTools（本轮新增）**：`!app.isPackaged` 时才注册 `webContents.on('before-input-event', …)`；命中 `input.type === 'keyDown' && input.key === 'F12'` 就 `mainWindow?.webContents.toggleDevTools()`。位置在 `loadURL` / `loadFile` 分支**之后**、`maximize` 监听**之前**。判定依据是 `!app.isPackaged`——`npm run dev` 与「未打包直接跑」都生效，**打包安装版完全不注册**（终端用户用不到，也免误触）。DevTools 打开形态用默认的 `toggleDevTools()`（**吸附在窗口右侧**），**没有**用 `openDevTools({ mode: 'detach' })`。
+
+源码原文（**与 `src/main/index.ts` 第 426-433 行逐字一致，原样保留 2 空格缩进层级**，可整段贴回源码比对）：
+
+```ts
+  // dev 下 F12 开关 DevTools（默认吸附在窗口右侧）。打包版不注册：终端用户用不到，也免误触。
+  // 应用菜单已被 Menu.setApplicationMenu(null) 移除，所以这枚键在主进程里显式接管。
+  if (!app.isPackaged) {
+    mainWindow.webContents.on('before-input-event', (_event, input) => {
+      // 事件对象上没有 sender，按模块级窗口引用取（本应用只有这一个窗口，见 getWindow 的注释）
+      if (input.type === 'keyDown' && input.key === 'F12') mainWindow?.webContents.toggleDevTools()
+    })
+  }
+```
+
+- **为什么不用 `event.sender`**（API 注意点，与源码注释同口径）：`before-input-event` 的第一个参数是 Electron 的 `Event` 对象，**只有 `preventDefault` / `defaultPrevented`，没有 `sender`**——写 `event.sender` 会 `TS2339`。所以实现里写成 `(_event, input)` 忽略该参数，改按**模块级 `mainWindow`** 取窗口引用（本应用只有这一个窗口，理由见 `getWindow` 的注释）。
+- **与 IPC / 渲染层无关**：这枚键不经 preload、不经任何 IPC 频道，纯主进程行为；`src/shared/ipc.ts`、`src/preload/index.ts`、`src/renderer/**` 一行未动（**就本次 F12 改动而言**；工作区随后另有并行改动动了 `src/shared/ipc.ts` / `src/preload/index.ts`，见 §5 末条）。
+- **未验证**：本轮只跑过 `npm run typecheck`（退出码 0，三工程），**没有实际运行 `npm run dev`**，F12 的实际开关效果与「打包版按 F12 无反应」**都尚未运行时验证**。
+
+7. 绑定事件：`maximize` → 推送 `IPC.Window.MaximizedChange`（`true`）；`unmaximize` → 推送同一频道（`false`），供渲染层切换最大化/还原图标；`closed` → `mainWindow = null`。
 
 ### 3.5 模块求值顺序与 app.whenReady 装配顺序
 
@@ -302,7 +334,9 @@ whenReady
   ├─ bootLog('app ready')
   ├─ protocol.handle('hgpreview', ...)   // 协议处理器先就绪，预览才可用；命中后交给 rangeResponse()
   ├─ createWindow()                       // 窗口先建好，ctx.getWindow / 各域对话框父窗口才有值
-  │    └─ bootLog('window created') → loadFile/loadURL
+  │    ├─ bootLog('window created') → loadFile/loadURL
+  │    ├─ !app.isPackaged ⇒ webContents.on('before-input-event')：F12 → toggleDevTools()   // 本轮新增，打包版不注册
+  │    └─ maximize / unmaximize ⇒ 推送 IPC.Window.MaximizedChange；closed ⇒ mainWindow = null
   │         （异步阶段另打点：page load start → dom ready → page load finished → first paint）
   ├─ ipcMain.handle(IPC.Legacy.Status, () => legacyInfo())          // 只提供契约，不弹任何界面
   ├─ ipcMain.handle(IPC.Legacy.Resolve, (_e, action) => resolveLegacy(action))
@@ -327,11 +361,11 @@ whenReady
 
 | 来源 | 引入内容 |
 | --- | --- |
-| `electron` | `app`、`BrowserWindow`、`Menu`、`ipcMain`、`clipboard`、`protocol`（**本轮起不再有 `dialog`**） |
+| `electron` | `app`、`BrowserWindow`、`Menu`、`ipcMain`、`clipboard`、`protocol`（**本轮起不再有 `dialog`**）。`app` 另被本轮新增的 dev 判定用到（`if (!app.isPackaged)`）——**这是既有导入的复用，本轮没有新增任何导入** |
 | `node:path` | `path`（`join` / `resolve` / `dirname` / `basename` / `extname` / `sep`） |
 | `node:fs` | `fs`（`existsSync` / `statSync` / `readdirSync` / `readFileSync` / `writeFileSync` / `appendFileSync` / `mkdirSync` / `renameSync` / `copyFileSync` / `rmSync` / `rmdirSync` / **`createReadStream`（`rangeResponse` 的响应体）**） |
 | `node:stream` | `Readable`——新增导入（第 19 行），`rangeResponse()` 用 `Readable.toWeb(fs.createReadStream(...))` 把 Node 流转成 `Response` 的 `BodyInit` |
-| `../shared/ipc` | `IPC` 频道常量表（本轮用到新增的 `IPC.Legacy.Status` / `IPC.Legacy.Resolve`） |
+| `../shared/ipc` | `IPC` 频道常量表（用到 `IPC.Legacy.Status` / `IPC.Legacy.Resolve` / `IPC.Window.*` / `IPC.App.CopyText`；**本轮没有新增或修改任何频道**） |
 | `../shared/types` | 类型 `LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`、`RegisterCtx`（均为 `import type`；**本轮起不再有 `MessageBoxOptions`**） |
 | `./settings` | `import * as settings`——`migrateFrom()` 用 `settings.isPristineSettings(dst)` 判定「新 settings.json 是否仍是出厂状态」（见 §3.1⑥） |
 | `./projects`、`./voice`、`./ttsAlign`、`./video`、`./whisper`、`./updater`、`./runtime` | 各业务域模块，全部以 `import * as` 引入并调用其 `register(ctx)`；`projects.projectDir(name)` 另被 `hgpreview` 协议处理器使用 |
@@ -340,10 +374,14 @@ whenReady
 
 - `src/preload/index.ts` 通过 `IPC.Window.Minimize` / `IPC.Window.ToggleMaximize` / `IPC.Window.MaximizedChange` / `IPC.App.CopyText` 与本文件通信；`legacyTools` 命名空间则对应本文件的 `IPC.Legacy.Status` / `IPC.Legacy.Resolve`。
 - 渲染层的 `src/renderer/src/composables/useLegacyData.ts`（挂载时问一次、回传选择）与 `src/renderer/src/components/LegacyDataDialog.vue`（应用内弹窗）是本文件 `legacy:*` 契约的唯一消费方。
-- **`hgpreview://` 的两个消费方（都在渲染层）**：
-  - **预览 iframe**：`src/renderer/src/pages/HtmlGenPage/PreviewSection.vue` 的 `loadFrame()` 生成 `hgpreview://p/<encodeURIComponent(appState.currentName)>/<encodeURIComponent(relFile)>?v=<时间戳>` 形式的 iframe 地址（本轮随预览卡片从 `index.vue` 搬到该子组件）；`src/renderer/index.html` 的 CSP 中 `frame-src file: hgpreview:` 放行该协议。
-  - **素材缩略图**（本轮新增）：`src/renderer/src/pages/HtmlGenPage/MaterialsSection.vue` 的 `thumbUrl(file)` 拼 `hgpreview://p/<encodeURIComponent(appState.currentName)>/<encodeURIComponent(file)>`（`file` 是 `project.json` 里的相对引用 `images/xxx.png`），交给 `<img :src>`；因此 CSP 的 **`img-src` 也放行了 `hgpreview:`**。
-  - **整段 `encodeURIComponent` 也成立**：`/` 变成 `%2F` 后仍能定位，因为 §3.3 第 2 步是先 `split('/')` 再**逐段 `decodeURIComponent`** 再 `join('/')` 拼回相对路径。视频素材卡片只用 `▶` 字符占位、不抽帧，因此不产生任何媒体请求。
+- **本轮的 F12 开关没有任何协作方**：它不经过 preload、不经过 IPC，只在主进程内 `webContents` → `toggleDevTools()`，因此渲染层、preload、`shared/ipc.ts` 都不需要（也没有）任何配套改动。
+- **`hgpreview://` 的消费方（都在渲染层；URL 一律由 `src/renderer/src/utils/url.ts` 拼）**：
+  - **预览 iframe**：`src/renderer/src/pages/HtmlGenPage/PreviewSection.vue` 的 `loadFrame()` 调 `previewUrl(appState.currentName, relFile, true)` 得 `hgpreview://p/…?v=<时间戳>` 形式的 iframe 地址（随预览卡片从 `index.vue` 搬到该子组件；**拼装本轮起统一走 `utils/url.ts`**）；`src/renderer/index.html` 的 CSP 中 `frame-src file: hgpreview:` 放行该协议。
+  - **素材缩略图**：`src/renderer/src/pages/HtmlGenPage/MaterialsSection.vue` 的 `thumbUrl(file)` 调 `previewUrl(appState.currentName, file)`（`file` 是 `project.json` 里的相对引用 `images/xxx.png`），交给 `<img :src>`。
+  - **成品视频**：`src/renderer/src/pages/VideoPreviewPage/index.vue` 的 `toHgPreviewUrl()` 调 `previewUrl(项目名, parts.slice(-2).join('/'), true)`（成品记为 `video/output.mp4`），交给 `<video :src>`。
+  - **音频试听**（**本轮新增**）：**项目内**背景音频走 `previewUrl(项目名, res.audioFile, true)`（`PreviewSection.vue` 的 `setAudioPreview()`，参数是 `set-audio` 回执里的相对引用 `audio/xxx`）；**项目外**语音产物走 `utils/url.ts` 的 `ttsUrl()` → `hgpreview://tts/…?tts=1`（`TextTtsPage/SynthSection.vue` 的合成结果与已生成列表、`AlignSection.vue` 的整轨与逐句），交给 `<audio :src>`。
+  - 因此 CSP 的 **`img-src` / `frame-src` / `media-src` 三处都放行了 `hgpreview:`**（`media-src` 是成品视频与音频试听必需的，缺它媒体会被静默拦掉——视频全黑且连原生控件都不画）。
+  - **编码口径**：两条路由的解码都是「按 `/` 切段 → 逐段 `decodeURIComponent` → `join('/')` 拼回」，因此渲染层统一**逐段 `encodeURIComponent`、斜杠保持原样**（`utils/url.ts` 的 `encodeRelPath()`，项目名走整串编码），**不再整段编码、也不再在页面里手拼 URL**。视频素材卡片只用 `▶` 字符占位、不抽帧，因此不产生任何媒体请求。
 - `src/main/projects.ts` 提供 `projectDir(name)`，是本文件协议处理器的路径基准；`src/main/settings.ts` 提供 `isPristineSettings()`，是迁移时 `settings.json` 特例的判据。**这两处调用都不构成环**（index 是装配器，位于依赖图顶端）。
 - 业务模块各自用 `app.getPath('userData')` 取数据根（如 `projects.projectsRoot()` / `whisper.modelsDir()` / `runtime.runtimeDir()`（`runtimeRoot()` 已随分包删除，各包根用 `runtime.packRoots()`） / `settings.settingsFile()`），本文件**不再**在任何位置改写 userData，因此「模块级快照 vs import 提升」在这一版里是**纯保险**问题（见 §5）。
 
@@ -372,5 +410,7 @@ whenReady
 - **两种 IPC 语义不能混用**：窗口控制是 `ipcMain.on`（渲染层 `send`，单向、无返回值），剪贴板与 `legacy:*` 都是 `ipcMain.handle`（渲染层 `invoke`，返回 Promise）。`IPC.Window.MaximizedChange` 是主进程 → 渲染层的推送频道；`legacy:*` 没有主 → 渲染的推送，**完全由渲染层拉取**。
 - **`register(ctx)` 顺序有约束**：必须在 `createWindow()` 之后、且按 settings → projects → voice → ttsAlign → video → whisper → updater → runtime 注册，避免跨域依赖缺位（`runtime` 放最后只是保证它的 handler 先挂上：它现在**启动只做一次探测、不下载**，同步部分只有几个 `existsSync` / `statSync` 探测，是否下载由用户在界面上确认（`ffmpeg` 实测 42.6 MB、`hyperframes` 实测 103.1 MB，两包合计 145.7 MB））；`legacy:*` 两个 handler 也在这个位置注册，顺序上写在 `ctx` 之前。
 - **`window-all-closed` 要给更新安装让路**：`updater.quitForUpdate()` 为真时直接返回，否则 `app.quit()` 会与 electron-updater 调起的 NSIS 安装器抢退出流程（表现为「点了重启安装但没装上」）。
-- **窗口引用失效**：`closed` 后 `mainWindow = null`，所有 IPC 回调都先做空值判断，`maximize`/`unmaximize` 回调使用 `mainWindow?.` 可选链。`legacy:*` 两个 handler 不使用窗口引用（不弹原生框、不需要父窗口），因此**与窗口生命周期完全解耦**。
+- **窗口引用失效**：`closed` 后 `mainWindow = null`，所有 IPC 回调都先做空值判断，`maximize`/`unmaximize` 回调使用 `mainWindow?.` 可选链。`legacy:*` 两个 handler 不使用窗口引用（不弹原生框、不需要父窗口），因此**与窗口生命周期完全解耦**。**本轮新增的 F12 处理同理用 `mainWindow?.` 可选链**（`before-input-event` 回调可能在窗口销毁的瞬间才被派发）。
+- **dev 专属的 F12 开关 DevTools（本轮新增，写在 `createWindow()` 内，源码第 426-433 行）**：仅 `!app.isPackaged` 时注册 `mainWindow.webContents.on('before-input-event', …)`——`npm run dev` 与「未打包直接跑」生效，**打包安装版完全不注册**（终端用户用不到，也免误触）；打开形态是 `toggleDevTools()` 默认值（**吸附窗口右侧**），不是 `openDevTools({ mode: 'detach' })`。**为什么必须由主进程显式接管**：`createWindow()` 开头就 `Menu.setApplicationMenu(null)` 把应用菜单整个移除，Chromium 默认菜单上的 F12 加速键随之无人接管。**API 注意点**：`before-input-event` 的第一个参数是 Electron 的 `Event` 对象，**只有 `preventDefault` / `defaultPrevented`、没有 `sender`**——写 `event.sender` 会 `TS2339`；所以实现写成 `(_event, input)`，改按模块级 `mainWindow` 取窗口引用。**本次未新增 / 未修改任何 IPC 频道**（就这次 F12 改动而言，`src/shared/ipc.ts`、`src/preload/index.ts`、`src/renderer/**` 一行未动；后来那两处文件被另一轮并行改动改过，见 §5 末条），界面无任何变化。**未验证**：只跑过 `npm run typecheck`（退出码 0，三工程），**未运行 `npm run dev`**，F12 的实际开关效果与「打包版按 F12 无反应」均**尚未运行时验证**。
 - **输出布局**：主进程 `out/main/index.js`、preload `out/preload/index.js`、渲染层 `out/renderer/`；`__dirname` 相对定位依赖这一布局。
+- **⚠ 本文档的时点**：F12 那一段本身按 **525 行版本**记录（`[IO.File]::ReadAllLines` 实测，代码仍在 `createWindow()` 内、逐字一致），而 `src/main/index.ts` 随后被并行的「`hgpreview` 路由收口」改动改到 **542 行**（`hgpreview://` 路由解析抽成 `resolveHgPreviewPath()`、语音产物分支改用显式查询标记 `?tts=1`）——**§3.3 已按该版本重写**（见该节末的注记），本文档其余处若还写着 525 / 449-452 这类旧数字，以实测为准。同轮并行改动还包含 `src/shared/ipc.ts` 新增 `update:changelog`（`src/preload/index.ts` 随之 +2 行）与新增未跟踪文件 `src/renderer/src/utils/changelog.ts`、`src/renderer/src/pages/SettingsPage/components/ChangelogDialog.vue`；§4 的导入表与频道数需按那轮落定后的状态核对。

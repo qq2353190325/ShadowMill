@@ -2,7 +2,11 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: hgpreview: data:; frame-src file: hgpreview:; media-src 'self' file:; script-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:5173" />
+  <!-- CSP：hgpreview: 是应用自己的只读文件协议（主进程 index.ts 注册），三处都要放行 ——
+       img-src（素材缩略图）、frame-src（预览 iframe）、**media-src（视频成品 + 音频试听；缺它
+       <video>/<audio> 会被静默拦掉，表现为全黑/无声且连原生控件都不画）**。
+       渲染层已不再拼 file://（见 CHANGELOG #27），`file:` 只是留给"项目里存着旧绝对路径"的老数据兜底。 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: hgpreview: data:; frame-src file: hgpreview:; media-src 'self' file: hgpreview:; script-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:5173" />
   <title>%APP_NAME% %APP_NAME_EN%</title>
   <style>
     /* ===== 启动画面（boot splash）=====

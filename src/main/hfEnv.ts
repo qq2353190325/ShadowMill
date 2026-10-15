@@ -99,9 +99,13 @@ function resolveRoot(): string {
 
 // chrome-headless-shell 可执行：<hfRoot>\chrome\chrome-headless-shell\**\chrome-headless-shell.exe
 // （hfRoot 是 hyperframes 包解出来的目录，其下第一层就是 hyperframes/；目录层级随 hyperframes 版本
-//   变化，按文件名递归找；结果缓存，缺资源时返回 null）
+//   变化，按文件名递归找）
+// ⚠️ 只缓存**找到的**结果：找不到时返回 null 而**不写缓存**。原先把 null 也缓存了
+// （`if (cachedChrome !== undefined) return cachedChrome`），于是只要在运行环境包解包完成之前被问过一次
+// （启动探测 / 准备阶段都可能），就会把"没有"这个结论永久钉住 ⇒ 后续拿到的永远是 null，
+// 表现为渲染前量不到时间轴、`chrome=无`（2026-10 实测踩到：包明明在磁盘上）。
 function findChromeShell(hfRoot: string): string | null {
-  if (cachedChrome !== undefined) return cachedChrome;
+  if (cachedChrome) return cachedChrome;
   cachedChrome = null;
   try {
     const base = path.join(hfRoot, 'chrome', 'chrome-headless-shell');

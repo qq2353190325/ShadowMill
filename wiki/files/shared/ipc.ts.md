@@ -4,8 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量（含派生类型）
-- **规模**：133 行（本轮由 132 → 133：Project 分组多了一行小节注释，**频道总数不变、仍是 85**）
-- **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video / Runtime / **Legacy** 十个分组（共 **85** 个频道））、`IpcChannel`（频道字面量联合类型）
+- **规模**：138 行
+- **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video / Runtime / **Legacy** 十个分组（共 **87** 个频道））、`IpcChannel`（频道字面量联合类型）
 
 ## 1. 作用与职责
 
@@ -67,6 +67,7 @@
 | `Update.Version` | `update:version` | renderer → main，**`sendSync`（全工程唯一的同步频道）**，只回当前版本号字符串 |
 | `Update.Status` | `update:status` | renderer → main，`invoke`，取一次当前更新状态（`payload()` 快照，`stage` 经 `toStage()` 白名单收敛）；主进程状态常驻，设置页挂载时用它补齐「启动静默检查」那次失败（该事件早于页面订阅 `update:progress`） |
 | `Update.OpenLog` | `update:open-log` | renderer → main，`invoke`，定位 `userData/updater.log`（排障出口，**不依赖 electron-updater 是否加载成功**） |
+| `Update.Changelog` | `update:changelog` | renderer → main，`invoke`，取随包 `CHANGELOG.md` 的**原文**（`app.getAppPath()/CHANGELOG.md`）；主进程只定位 + 读文件，分块与行内排版在渲染层 `utils/changelog.ts`。与 `OpenLog` 一样**不依赖 electron-updater 是否加载成功** |
 | `Update.Progress` | `update:progress` | main → renderer，推送更新阶段 / 下载进度（`UpdateProgressPayload`，含 `message` / `detail`） |
 
 ### 2.5 Voice 分组（voice.js / ttsAlign.js）
@@ -112,7 +113,8 @@
 
 ### 2.7 Project 分组（projects.js / projects.ts）
 
-> 本组共 **25** 个频道。本轮素材库改造是 **3 换 3**：`PickVideo` / `SetVideo` / `ClearVideo` 下线，`PickMedia` / `AddMaterials` / `SaveMaterials` 上线，**组内计数与全库合计都不变**（全库仍是 85）。
+> 本组共 **26** 个频道。素材库改造是 **3 换 3**：`PickVideo` / `SetVideo` / `ClearVideo` 下线，`PickMedia` / `AddMaterials` / `SaveMaterials` 上线，**组内计数不变**（那次改造时全库合计 86）；此后 
+> `Update.Changelog`（上一批「更新日志弹窗」）与本次成片画布的 `Project.SetCanvas` 各净增 1 条 ⇒ 全库合计 **87**。
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
@@ -130,6 +132,7 @@
 | `Project.Delete` | `project:delete` | 删除项目 |
 | `Project.SaveVideo` | `project:save-video` | 把渲染产物视频路径写回项目（与「视频素材」无关） |
 | `Project.SetRender` | `project:set-render` | 写 / 清除项目级渲染档位覆盖（`render` 传 `null` 即回到跟随全局默认） |
+| `Project.SetCanvas` | `project:set-canvas` | 写**成片画布方向**（`landscape` \| `portrait` \| `square`）：它是**项目属性不是渲染档位**（不进 `settings.json`、没有全局默认那一层），白名单 `RENDER_CANVASES`、非法回 `画布取值非法`；值变化时把 `videoPath` 置空（旧成片尺寸不再匹配） |
 | `Project.PickAudio` | `project:pick-audio` | 选择项目音频 |
 | `Project.SetAudio` | `project:set-audio` | 写入项目音频 |
 | `Project.ClearAudio` | `project:clear-audio` | 清除项目音频 |
@@ -205,13 +208,13 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 ### 3.2 `as const` 与 `IpcChannel`
 
 - `export const IPC = { ... } as const` 使每个属性成为**只读的字面量类型**（如 `'window:minimize'` 而非 `string`），赋值给其他变量时不会意外放宽。
-- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video' | 'Runtime' | 'Legacy'` 十个键，取 `[keyof ...]` 后得到的是**十个分组对象类型**的并集，而不是 85 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
+- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video' | 'Runtime' | 'Legacy'` 十个键，取 `[keyof ...]` 后得到的是**十个分组对象类型**的并集，而不是 87 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
 
 ### 3.3 三种通道方向约定
 
 | 方向 | 通道举例 | 典型注册方式 |
 | --- | --- | --- |
-| renderer → main（请求-响应） | `settings:get`、`project:list`、**`project:pick-media`**、`voice:synth`、`update:open-log`、`legacy:status`、`legacy:resolve`、`app:copy-text` | 主进程 `ipcMain.handle`，preload `invoke` |
+| renderer → main（请求-响应） | `settings:get`、`project:list`、**`project:pick-media`**、`voice:synth`、`update:open-log`、**`update:changelog`**、`legacy:status`、`legacy:resolve`、`app:copy-text` | 主进程 `ipcMain.handle`，preload `invoke` |
 | renderer → main（单向） | `window:minimize`、`voice:align-cancel` | 主进程 `ipcMain.on`，preload `send` |
 | main → renderer（推送） | `window:maximized-change`、`video:progress`、`whisper:progress`、`voice:align-progress`、`project:html-progress`、`update:progress`、`runtime:progress` | 主进程 `win.webContents.send`，preload `on` |
 
@@ -232,12 +235,14 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 ## 5. 注意事项与实现要点
 
 - **禁止改动频道名字符串**：文件首行注释即写明"频道名与现行实现逐一对应，禁止改动"。改动会导致 `ipcMain.handle` 未命中，渲染层收到 `Error: No handler registered for 'xxx'`。
-- **素材库这一次是三处齐改的正面实例**：`shared/ipc.ts` 换 3 个常量 → `src/main/projects.ts` 换 3 个 handler → `src/preload/index.ts` 换 3 个桥接方法，并同步 `src/shared/types.ts` ⑨ 节 `PreloadApi.projectTools` 的签名（`pickVideo` / `setVideo` / `clearVideo` 出、`pickMedia` / `addMaterials` / `saveMaterials` 进）。**组内计数与全库合计都不变**（25 / 85）——「3 换 3」时不要顺手改动总数。
+- **素材库这一次是三处齐改的正面实例**：`shared/ipc.ts` 换 3 个常量 → `src/main/projects.ts` 换 3 个 handler → `src/preload/index.ts` 换 3 个桥接方法，并同步 `src/shared/types.ts` ⑨ 节 `PreloadApi.projectTools` 的签名（`pickVideo` / `setVideo` / `clearVideo` 出、`pickMedia` / `addMaterials` / `saveMaterials` 进）。**组内计数不变**（当时的 25 / 86）——「3 换 3」时不要顺手改动总数。**此后 Project 组新增 `SetCanvas`（25 → 26）、Update 组新增 `Changelog`（8 → 9）**，全库合计 **87**。
 - **命名不再完全对齐**：`Window.*` 用 `window:` 前缀、`Video.OpenHtml` 却用 `dialog:open-html` 前缀，属历史遗留，**不可"顺手统一"**，因为字符串就是协议本身。
 - **新增频道需三处齐改**：本文件加常量 → `src/main/*.ts` 注册 handler（载荷用 `shared/types.ts` 的 `*Payload` 标注）→ `src/preload/index.ts` 绑定方法，并在 `src/shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`src/preload/index.d.ts` 只做 `extends`，无需改动）。`legacy:status` / `legacy:resolve`、运行环境分包的 `Runtime.Cancel` 与 `Settings.PickRuntimePack` 都是这条流程的实例（其中 `app:open-external` 曾按同法加过，又在 `909526c` 按「摘除未经同意的按钮」整条三处一起删掉——**加与删都要走齐三处**）。
 - **往 `IpcFail` 加字段不必改 preload**：preload 只是 `ipcRenderer.invoke` 转发、原样返回主进程对象，因此 `IpcFail` 新增的 `needConfig` / `title` 与 preload 无关（改动只落在 `src/shared/types.ts` 的声明与主进程/渲染层的读写上）。
 - **`Update.OpenLog` 的位置与语义**（2026-10 新增）：它排在 `Status` 与 `Progress` 之间，值 `update:open-log`。主进程侧刻意**不经过** `ensureUpdater()`——更新失败时最常见的场景恰恰是 electron-updater 没加载起来，若把它挂在懒加载之后，最需要看日志的时候反而打不开日志。
 - **`Update.Status` 的位置与语义**（2026-10 新增）：它排在 `Version` 之后、`OpenLog` 之前，值 `update:status`，`ipcMain.handle(IPC.Update.Status, () => payload())`。存在的理由：启动静默检查发生在设置页订阅 `update:progress` 之前，没有这条通道渲染层只会看到 `idle`。主进程 `state` 常驻，设置页每次挂载都能拉到当前状态；它与 `OpenLog` 一样不进 `ensureUpdater()`。
+- **`Project.SetCanvas` 的位置与语义**（本次新增）：它排在 `SetRender` 之后、`PickAudio` 之前，值 `project:set-canvas`，`ipcMain.handle(IPC.Project.SetCanvas, …)`（`src/main/projects.ts`）。它是**成片画布方向**，属**项目属性而非渲染档位**——不写进 `settings.json`、没有「全局默认 → 项目覆盖」那套层级，只在「HTML生成」页生成侧的「画布」下拉里选一次，落进 `project.json` 的 `canvas`，并由同一个值决定生成提示词的版式尺寸、预览 iframe 的画布与渲染入口注入的 `<html data-resolution>`。白名单来自 `shared/constants.ts` 的 `RENDER_CANVASES`（`landscape` / `portrait` / `square`），非法值回 `{ ok:false, message:'画布取值非法' }`、缺项目名回 `缺少项目名`；值变化时把已有的 `videoPath` 置空（尺寸变了，旧成片不再代表当前产物）。
+- **`Update.Changelog` 的位置与语义**：它排在 `OpenLog` 之后、`Progress` 之前，值 `update:changelog`，`ipcMain.handle(IPC.Update.Changelog, () => readBundledChangelog())`（`readBundledChangelog()` 在 `src/main/updater/base.ts`）。主进程**只定位并读文件**（`path.join(app.getAppPath(), 'CHANGELOG.md')`，dev = 项目根、打包后 = asar 根，两种形态同一份路径逻辑），失败回 `{ ok: false, message, detail }`；**解析与排版一律在渲染层**（`src/renderer/src/utils/changelog.ts`）。与 `OpenLog` / `Status` 一样**刻意不进 `ensureUpdater()`**：看日志与更新器能否加载无关。消费方是设置页「应用更新」的「查看更新日志」按钮与其弹窗 `ChangelogDialog.vue`。
 - **分组名 ≠ 文件名**：`Settings` 对应 `settings.ts`，`Video` 对应 `video.ts`，`App` 分组实际由 `src/main/index.ts` 处理，`Voice` 分组横跨 `voice.ts` 与 `ttsAlign.ts`，**`Legacy` 分组也由 `src/main/index.ts` 处理**（与 `App` 同理）。
 - **`as const` 后不可写**：所有属性为只读，运行时尝试 `IPC.Window.Close = 'x'` 在严格模式下会抛错。
 - **`IpcChannel` 粒度提示**：如上文所述它是"分组对象"的并集，误当作"频道字符串联合"使用会得到过于宽泛的类型。

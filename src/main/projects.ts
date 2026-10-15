@@ -17,7 +17,7 @@ import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './htmlAgent'
 import { configTargetOf } from '../shared/errors'
-import { IMAGE_MATERIAL_EXTS, MAX_MATERIALS, VIDEO_MATERIAL_EXTS } from '../shared/constants'
+import { CANVAS_LABELS, CANVAS_SIZES, DEFAULT_CANVAS, IMAGE_MATERIAL_EXTS, MAX_MATERIALS, RENDER_CANVASES, VIDEO_MATERIAL_EXTS } from '../shared/constants'
 import * as hfEnv from './hfEnv'
 import * as runtime from './runtime'
 import { pickRenderOverride } from './settings'
@@ -37,9 +37,11 @@ import type {
   ProjectSaveMaterialsPayload,
   ProjectSaveSubtitlePayload,
   ProjectSetAudioPayload,
+  ProjectSetCanvasPayload,
   ProjectSetRenderPayload,
   ProjectSetVideoPayload,
   RegisterCtx,
+  RenderCanvas,
   RuntimePackName,
   Scene,
   SubtitleLine
@@ -86,6 +88,19 @@ function writeProject(proj: Project): Project {
   fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(proj, null, 2), 'utf8');
   return proj;
 }
+// ===== 视频成品路径：项目内相对路径 =====
+// 成品由「转视频」直接生成在 <项目目录>/video/output.mp4，project.json 里只记相对引用（video/output.mp4）。
+// 为什么不记绝对路径：① 项目要自包含、能整体搬走；② 绝对路径会因 userData 改名而失效——
+// 本仓库的老数据里就有指向旧目录 `…\my-app\projects\…` 的死路径（改名前的品牌）；③ 旧实现把成品放在
+// 渲染临时目录 `hf-projects\…`，那条路径随时会被清理，"有视频"的判定跟着一起塌。
+// 兼容旧值：老记录里可能是绝对路径（存在的就用它，可能是 hf-projects 的旧成品），否则按项目内相对路径解析。
+function resolveVideoAbs(name: string, videoPath: string): string {
+  const v = String(videoPath || '').trim()
+  if (!v) return ''
+  if (path.isAbsolute(v)) return fs.existsSync(v) ? v : ''
+  return path.join(projectDir(name), v)
+}
+
 function ensureProject(name: string): Project {
   const existing = readProject(name);
   if (existing) {
@@ -142,7 +157,7 @@ function scanProjects(): { name: string; title: string; hasSubtitle: boolean; ha
       title: p.title || '字幕动画',
       hasSubtitle: !!p.subtitle,
       hasHtml: !!(p.htmlPath && fs.existsSync(p.htmlPath)),
-      hasVideo: !!(p.videoPath && fs.existsSync(p.videoPath)),
+      hasVideo: !!resolveVideoAbs(p.name, p.videoPath),
       subtitleCount: p.subtitleCount || 0,
       updatedAt: p.updatedAt || ''
     });
@@ -554,6 +569,24 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
   return parts.join('');
 }
 
+// 画布块（生成/修改共用）：把项目选定的画布告诉模型，并要求它按这块画布排版式。
+// 为什么必须说：画布是**渲染时的实际视口尺寸**（HyperFrames composition 尺寸 = 成片尺寸），
+// 模型若按自己习惯的 1600x900 之类固定尺寸画，画布一变就会在四周留大片黑边（本项目的真实故障）。
+// 缺省画布 = DEFAULT_CANVAS（landscape），与老项目的原始观感一致。
+function buildCanvasBlock(proj: Project): string {
+  // project.json 可能被手改过：非白名单取值一律落回缺省画布，避免 CANVAS_SIZES 取不到而崩
+  const raw = proj && proj.canvas;
+  const canvas: RenderCanvas = raw && RENDER_CANVASES.indexOf(raw) >= 0 ? raw : DEFAULT_CANVAS;
+  const size = CANVAS_SIZES[canvas];
+  const label = CANVAS_LABELS[canvas] || canvas;
+  return '\n【画布】成片画布固定为 ' + label + '（' + size.width + '×' + size.height + ' 像素），渲染视口就等于这块画布。必须：' +
+    '① 在 <html> 标签上写死 data-resolution="' + canvas + '"；' +
+    '② 页面主舞台（承载全部内容的那层容器）尺寸严格等于 ' + size.width + '×' + size.height + '，写固定 px，' +
+    '不要用 vw / vh / 百分比自适应，也不要用 transform: scale 去缩放舞台；' +
+    '③ 内容排满整块画布（该铺满的铺满、该居中的居中），四周不要留大片空白；' +
+    '④ 所有元素的坐标、字号、间距都按这块画布设计。';
+}
+
 // 构造 Agent 用户提示（生成与修改共用；extra 置于最前——修改场景为「当前 HTML 源码」段）
 function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText: string; materials: ProjectMaterial[] }, extra: string[]): string {
   return buildAgentPrompt([
@@ -562,6 +595,13 @@ function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText
     buildContentBlock(proj.content),
     mats.subtitleText ? '\n【项目字幕】每行格式为 [开始-结束] 文本，时间为秒、可带小数（毫秒精度，如 17.920）：该条字幕必须在开始时间出现、在结束时间前完成淡出，严格按此窗口显示，不得挂到下一条开始；GSAP 时间轴直接用这些小数秒定位（如 tl.to(el,{...},17.920)）；仅 [开始] 无结束时间的行自行按语义安排节奏。\n' + mats.subtitleText : '',
     '\n【音轨】背景音轨由应用在渲染前自动注入（<audio id="myv-bgm">），请勿写入、修改或删除任何 <audio> 标签，也不要为音轨预留页面元素。',
+    buildCanvasBlock(proj),
+    // 成片时长声明：不给这个数，渲染器只能取「页面里最长媒体」当片长——素材常比动画长得多
+    // （实测：动画 45 秒 + 素材原声 225 秒 ⇒ 成片 3 分 45 秒、后 3 分钟全是黑帧）。
+    // 根节点写死这个属性，成片就与动画等长；写错/漏写时应用会自己量一次时间轴兜底（见 video.ts）。
+    '\n【成片时长】必须把**动画结束时间**写在根元素上：<html data-composition-duration="<秒数>">（可带小数，如 45.6）。' +
+      '这个值要等于你写的时间轴总长度（最后一条 tl.to 的位置 + 它的 duration，取最大），不是素材时长。' +
+      '漏写的话渲染器会拿最长素材当片长，成片尾部会出现大段静止画面。',
     buildMaterialBlock(mats.materials)
   ]);
 }
@@ -597,8 +637,13 @@ function register(ctx?: RegisterCtx): void {
   ipcMain.handle(IPC.Project.Load, (_event, name?: string) => {
     if (!name) return null;
     const proj = readProject(name) || ensureProject(name);
-    // 素材列表按当前盘上数据规范化后再交给渲染层（脏数据/越权路径在这里就被清掉，界面不必再校验一遍）
-    return { ...proj, materials: normalizeMaterials(proj.materials) };
+    // 素材列表按当前盘上数据规范化后再交给渲染层（脏数据/越权路径在这里就被清掉，界面不必再校验一遍）；
+    // videoPath 一并换算成**绝对路径**（视频预览页要拿它 play、要"在文件夹中显示"）。
+    return {
+      ...proj,
+      videoPath: resolveVideoAbs(name, proj.videoPath),
+      materials: normalizeMaterials(proj.materials)
+    };
   });
 
   // 保存字幕到当前项目
@@ -801,12 +846,18 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // 视频渲染完成后，把产物路径回写进项目（供链路状态条点亮“视频”节点）
+  // 存**项目内相对路径**（成品就生成在 <项目目录>/video/output.mp4，见 video.ts 的就地渲染）；
+  // 老调用方仍可能传绝对路径，落在项目目录内就换算成相对，项目外的才原样存（见 resolveVideoAbs 的说明）。
   ipcMain.handle(IPC.Project.SaveVideo, (_event, payload?: ProjectSetVideoPayload) => {
     const name = payload && payload.name;
     const videoPath = payload && payload.videoPath;
     if (!name || !videoPath) return { ok: false, message: '参数缺失' };
     const proj = ensureProject(name);
-    proj.videoPath = String(videoPath);
+    const dir = projectDir(name);
+    const abs = path.resolve(String(videoPath));
+    proj.videoPath = abs === dir || abs.startsWith(dir + path.sep)
+      ? path.relative(dir, abs).replace(/\\/g, '/')
+      : String(videoPath);
     writeProject(proj);
     return { ok: true, project: proj };
   });
@@ -820,6 +871,24 @@ function register(ctx?: RegisterCtx): void {
     const override = (payload && payload.render === null) ? {} : pickRenderOverride(payload && payload.render);
     if (Object.keys(override).length) proj.render = override;
     else delete proj.render;
+    writeProject(proj);
+    return { ok: true, project: proj };
+  });
+
+  // 成片画布方向（**项目属性，不是渲染档位**：不进 settings.json、没有全局默认那一层）。
+  // 取值白名单来自 shared/constants 的 RENDER_CANVASES（与 HyperFrames 的画布预设对齐）；非法/缺省一律忽略。
+  // 画布一变，已渲好的成片尺寸就不再匹配 ⇒ 与「HTML 改动」同样把 videoPath 置空（避免旧成片被当成当前产物）。
+  ipcMain.handle(IPC.Project.SetCanvas, (_event, payload?: ProjectSetCanvasPayload) => {
+    const name = payload && payload.name;
+    if (!name) return { ok: false, message: '缺少项目名' };
+    const canvas = payload && payload.canvas;
+    if (RENDER_CANVASES.indexOf(canvas as RenderCanvas) < 0) return { ok: false, message: '画布取值非法' };
+    const proj = ensureProject(name);
+    const next = canvas as RenderCanvas;
+    if (proj.canvas !== next) {
+      proj.canvas = next;
+      if (proj.videoPath) proj.videoPath = '';
+    }
     writeProject(proj);
     return { ok: true, project: proj };
   });

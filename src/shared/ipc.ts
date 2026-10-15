@@ -95,6 +95,8 @@ export const IPC = {
     Delete: 'project:delete',
     SaveVideo: 'project:save-video',
     SetRender: 'project:set-render',
+    // 成片画布方向（项目属性，不是渲染档位）：见 shared/constants.ts 的 RENDER_CANVASES
+    SetCanvas: 'project:set-canvas',
     PickAudio: 'project:pick-audio',
     SetAudio: 'project:set-audio',
     ClearAudio: 'project:clear-audio',

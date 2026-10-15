@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：环境探测 + GSAP 本地化辅助模块（无 IPC 注册、无业务依赖）
-- **规模**：339 行
+- **规模**：343 行（实测 `[IO.File]::ReadAllLines`）
 - **对外导出**：常量 `BUILTIN_RESOURCES`，函数 `refreshBuiltinResources`（兼容保留）、**`refreshPack`**、**`packReady`**、`findHyperframesCli`、`resolveNodePath`、`findNode`（返回 `{ cmd, env }` 而非纯路径）、`findFfmpegBin`、`isHyperframesComposition`、`findLocalGsap`、`hasGsapCdnRef`、`referencesLocalGsap`、`localizeGsapHtml`、`externalizeGsapHtml`、`copyGsapIntoProject`（共 15 个）
 
 ## 1. 作用与职责
@@ -15,7 +15,7 @@
 - **合规校验**：判断一段 HTML 是否为 HyperFrames 规范的 composition。
 - **GSAP 本地化（离线可用）**：定位随包携带的 `vendor/gsap/gsap.min.js`，把 HTML 里的 GSAP CDN 引用改写为项目内相对引用 `./gsap.min.js`，并按需把该文件复制进项目目录——让生成的 composition 在离线或 CDN 抖动时也能预览与渲染；复制失败（返回值 `false`）时由调用方退回 CDN 引用，保证「引用存在的文件」。
 - **导出外部化（反向）**：导出/下载的是**单个 HTML 文件**，同目录没有 `gsap.min.js`，故 `externalizeGsapHtml()` 把 `./gsap.min.js` 换回固定版本的 CDN 地址（`GSAP_CDN_PINNED`），让导出物脱离项目目录也能独立打开（联网即可）。
-- 本模块不注册任何 IPC，也不读写业务数据（`project.json`、字幕等一概不碰）；唯一的写盘行为是 GSAP 本地化的 `copyGsapIntoProject()`，它只把随包文件复制到调用方指定的目录。`BUILTIN_RESOURCES` 的字段是 **getter + 按包缓存**（`cachedPackRoots`，另有 `cachedChrome`；Node 探测另有 `cachedNode`），路径在首次访问时求值，之后复用缓存值，直到 `refreshPack(name, root?)` 按包清缓存（或 `refreshBuiltinResources()` 清全部）（详见 3.4 / 5）。
+- 本模块不注册任何 IPC，也不读写业务数据（`project.json`、字幕等一概不碰）；唯一的写盘行为是 GSAP 本地化的 `copyGsapIntoProject()`，它只把随包文件复制到调用方指定的目录。`BUILTIN_RESOURCES` 的字段是 **getter + 按包缓存**（`cachedPackRoots`，另有 `cachedChrome`；Node 探测另有 `cachedNode`），路径在首次访问时求值，之后复用缓存值，直到 `refreshPack(name, root?)` 按包清缓存（或 `refreshBuiltinResources()` 清全部）（详见 3.4 / 5）。**`cachedChrome` 是个例外：它只缓存「找到的」结果**（`if (cachedChrome) return cachedChrome;`），找不到时返回 `null` 但不写缓存——详见 3.1。
 
 ## 2. 导出与关键实现
 
@@ -47,7 +47,7 @@
 | `ffprobe` | `string` | 同上 + `/ffmpeg/bin/ffprobe.exe` |
 | `hfCli` | `string` | `resolvePackRoot('hyperframes')` + `/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs` |
 | `hivePlayer` | `string` | hyperframes 包根 + `/hyperframes/node_modules/hyperframes/dist/hyperframes-player.global.js` |
-| `chromeShell` | `string \| null` | 在 hyperframes 包根 + `/chrome/chrome-headless-shell` 子树中递归找出的 `chrome-headless-shell.exe`（该包未就绪时 `null`） |
+| `chromeShell` | `string \| null` | `findChromeShell(<hyperframes 包根>)` 的返回值：在包根 + `/chrome/chrome-headless-shell` 子树中递归找出的 `chrome-headless-shell.exe` 绝对路径（该包未就绪时 `null`）；getter 每次访问都会重新求值，但**只有找到的结果**会被缓存（见 3.1） |
 
 `resolvePackRoot(name)` 是分包后的核心（候选顺序）：① `<userData>/runtime/<包名>/`——目录内有 `ok.json` 才算完整（与 `runtime.ts` 先写 `ok.json` 再写记录的顺序一致）；② 旧版整体包目录（`current.json` + `ok.json` 的 `<id>` 目录，实现于 `legacyRoots()`）；③ `process.resourcesPath`（打包态）或项目根 `resources`（开发态，走 `devResourceRoot()`）。候选目录下必须存在与包名同名的子目录（`<候选>/ffmpeg` 或 `<候选>/hyperframes`）才算命中。命中结果按包写入 `cachedPackRoots`；解包完成或包切换时由 `runtime.ts` 调 `refreshPack(name, root?)` 失效。**这解释了为什么 `root` 不能再直接用 `process.resourcesPath`**：打包后 ffmpeg / hyperframes 各在 `userData/runtime/<包名>/` 下，安装目录里根本没有它们。
 
@@ -64,13 +64,15 @@
 
 ## 3. 关键流程 / 算法
 
-### 3.1 chrome-headless-shell 定位（首次访问 `chromeShell` 时执行）
+### 3.1 chrome-headless-shell 定位（`findChromeShell(hfRoot)`，访问 `chromeShell` 时执行）
 
-1. `hfRoot = resolvePackRoot('hyperframes')`（未就绪则 `chromeShell` 直接为 `null`）；`base = <hfRoot>/chrome/chrome-headless-shell`；`base` 不存在则 `chromeShell` 保持 `null`。
+1. `hfRoot = resolvePackRoot('hyperframes')`（未就绪则本函数根本不会被调用，`chromeShell` 直接为 `null`）；`base = <hfRoot>/chrome/chrome-headless-shell`（目录层级随 hyperframes 版本变化，故按文件名递归找）；`base` 不存在则结果保持 `null`。
 2. 用数组 `stack` 做栈式深度优先遍历：`stack.pop()` 取当前目录。
 3. 对 `fs.readdirSync(cur, { withFileTypes: true })` 的每个条目：目录则 `push(path.join(cur, e.name))`；文件名匹配 `/^chrome-headless-shell\.exe$/i` 则记录绝对路径并 `break` 内层循环。
-4. 整个遍历包在 `try/catch` 中，任何异常（如权限、竞态）都把 `chromeShell` 置为 `null`，不影响其余字段。
-5. 结果写入 `cachedChrome`（含「未找到 = `null`」这一结论），后续访问直接复用，直到 `refreshPack()` / `refreshBuiltinResources()` 把它置回 `undefined`。
+4. 整个遍历包在 `try/catch` 中，任何异常（如权限、竞态）都把结果置为 `null`，不影响其余字段。
+5. **缓存语义（本轮修正，务必别改回去）**：函数开头是 `if (cachedChrome) return cachedChrome;`——**只缓存找到的结果**；接着 `cachedChrome = null;` 先假定没有，遍历命中才赋绝对路径，最后 `return cachedChrome`。也就是说「没找到」返回 `null` 但**不写进缓存**，下次调用会重新在盘上找。
+   - **原先的写法是 `if (cachedChrome !== undefined) return cachedChrome;`，把 `null` 也一并缓存**。后果：只要在运行环境包解包完成之前被问过一次（启动探测、渲染前的准备阶段都可能问到），「没有」这个结论就被**永久钉住**，此后即使包已解到磁盘上也永远拿不到路径——表现为渲染前量不到时间轴、`video-duration.log` 里写 `chrome=无`（2026-10 实测踩到：包明明就在 `userData/runtime/hyperframes/` 下）。
+   - 失效通道不变：`refreshPack('hyperframes')` / `refreshPack(name)` / `refreshBuiltinResources()` 把 `cachedChrome` 置回 `undefined`；**但修正后即使没人调它们，找不到的结果也会自动重试**——这才是「解包完成后立刻可用」的保证（`runtime.ts` 的 `refreshPack()` 仍是主动失效的主要入口）。
 
 ### 3.2 `findHyperframesCli` 候选顺序
 
@@ -185,7 +187,7 @@ if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = h
 
 | 引用方 | 使用的导出 |
 | --- | --- |
-| `src/main/video.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`BUILTIN_RESOURCES.ffprobe`、`BUILTIN_RESOURCES.chromeShell`、`isHyperframesComposition`、`findHyperframesCli`、`findNode`（**返回值是 `{ cmd, env }`；`cmd` 交给 `spawn`，`env` 必须并入子进程环境**）、`findFfmpegBin`，以及 GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（作用于渲染工作目录里的 HTML 副本） |
+| `src/main/video.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`BUILTIN_RESOURCES.ffprobe`、`BUILTIN_RESOURCES.chromeShell`、`isHyperframesComposition`、`findHyperframesCli`、`findNode`（**返回值是 `{ cmd, env }`；`cmd` 交给 `spawn`，`env` 必须并入子进程环境**）、`findFfmpegBin`，以及 GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（就地渲染：本地化产物是**项目目录**里的 `gsap.min.js`，入口 HTML 在 `.render-tmp/` 里用 `../gsap.min.js` 引用它）。其中 `chromeShell` 的用法值得单独记一笔：它被赋给子进程环境的 `PRODUCER_HEADLESS_SHELL_PATH`，**渲染本身与「渲染前现场量 GSAP 时间轴」这两步共用同一个解析结果**（量测那步就是拿 `env.PRODUCER_HEADLESS_SHELL_PATH` 当 `chrome` 参数去跑 `--headless --dump-dom`）；因此这里拿到 `null` 时，量测会被跳过、日志写 `chrome=无`（见 3.1 与本文件末节的故障说明） |
 | `src/main/projects.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，使用 `BUILTIN_RESOURCES.ffmpeg`、`isHyperframesComposition`（HTML 生成/修改/保存侧的合规判断），GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject`（生成 / 修改 / 保存 / 预览四个写盘环节；其中**前三个用 `copyGsapIntoProject` 的返回值做「复制失败即退回 CDN」兜底**），以及 `externalizeGsapHtml`（兜底改写 + `project:download-html` 的导出改写） |
 | `src/main/ttsAlign.ts` | `BUILTIN_RESOURCES`（取 `ffmpeg` / `ffprobe`） |
 | `src/main/voice.ts` | `import { BUILTIN_RESOURCES } from './hfEnv'`：`voice:create` 创建克隆音色时取 `BUILTIN_RESOURCES.ffmpeg` / `BUILTIN_RESOURCES.ffprobe`，把本地参考音频裁成前 15 秒 / 24 kHz / 单声道 `pcm_s16le` wav（见 [voice.ts.md](./voice.ts.md) §4.1.1） |
@@ -209,6 +211,8 @@ if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = h
 - **`findNode` 的返回值必须成对使用**：只取 `cmd` 而丢掉 `env` 会让 `electron.exe` 以应用身份启动（渲染直接失败）。这是本模块唯一「返回值不只是路径」的函数，`video.ts` 用 `{ ...process.env, ...nodeRt.env }` 合并它。
 - **① 的复用依赖 `RunAsNode` 熔丝**：熔丝默认开启；一旦在 `build.electronFuses` 里关掉，探针（`-e`）失败并静默回落到 ② 系统 Node，不报错但那时必须重新提供 Node（见 3.4 的注）。探针刻意不用 `-v`，因为 `-v` 打印的是 Electron 版本（44 >= 22），会把「不可复用」误判成可用。
 - **探测失败一律返回 `null`，不抛出**：`chromeShell` 的遍历异常被 `catch` 吞掉，`where.exe` 分支同样被 `catch` 包住，`findNode` 的 ① 探针也包在 `try/catch` 里；调用方必须自行处理 `null` 并给出可读提示。
+- **`cachedChrome` 是「只缓存成功」的那一个**（2026-10 修正，别再退回旧写法）：模块里三个探测缓存语义**并不相同**——`cachedPackRoots` / `cachedNode` 把「确实没有」的结论也缓存下来（包根缓存空串、Node 缓存 `null`），靠 `refreshPack()` / `refreshBuiltinResources()` 失效；而 `cachedChrome` **只在找到时才写**，找不到返回 `null` 而不写缓存。原因：`chrome-headless-shell` 完全可能在「第一次被问到」之后才落到盘上（运行环境包是异步解包的），把 `null` 钉死会让渲染前的时间轴量测永久失效（症状是 `video-duration.log` 里 `chrome=无`、量不到时间轴、成片被最长媒体顶长）；而 Node 的探测要 `spawnSync` 一次 `electron.exe`（200~400ms、阻塞主进程），才需要「一次会话只探一次」的强缓存。
+- **`BUILTIN_RESOURCES.chromeShell` 的消费面是「渲染 + 渲染前量测」两处，共用一次解析**：`video.ts` 取一次 `hfEnv.BUILTIN_RESOURCES.chromeShell` 写进 `env.PRODUCER_HEADLESS_SHELL_PATH`，随后既交给 HyperFrames CLI 渲染（避免它去 `.cache` 重新下载 Chrome），也交给自己的 `measureTimelineDuration()` 跑无头浏览器量 GSAP 时间轴（`--virtual-time-budget=5000 --dump-dom`）。所以「这里返回 `null`」的后果有两个：CLI 侧可能重新下载 / 找不到浏览器，应用侧则完全量不到时间轴。
 - **可执行路径都是绝对路径**：源码注释强调“一律返回绝对路径”，以规避 `spawn('node')` 在部分环境下 ENOENT。
 - **DFS 不是纯递归**：`stack.pop()` 为后进先出，命中顺序取决于目录读取顺序；只要存在一个匹配的 `chrome-headless-shell.exe` 即可，不保证选中最外层或版本最新的那个。
 - **合规校验是启发式**：仅三个正则文本匹配，不解析 DOM、不校验 `__timelines` 的实际结构，也不校验 GSAP 是否真的被加载；因此可能出现“文本合规但渲染失败”的情况。

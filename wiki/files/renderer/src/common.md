@@ -1,12 +1,12 @@
 # 渲染层公共方法与工具（src/renderer/src/composables、utils、constants.ts、pages/index.ts）
 
-> 渲染层 15 个公共模块：全局状态、轻提示、渲染进度、运行环境状态、**运行环境确认框**、**配置类错误弹窗**、历史数据处置、渲染档位、**跨页导航意图**、语速、转义、时间格式化、档位选项、**渲染层常量**与页面注册表。
+> 渲染层 17 个公共模块：全局状态、轻提示、渲染进度、运行环境状态、**运行环境确认框**、**配置类错误弹窗**、历史数据处置、渲染档位、**跨页导航意图**、语速、转义、时间格式化、**路径 → URL**、**随包 CHANGELOG 的解析**、档位选项、**渲染层常量**与页面注册表。
 
 - **覆盖文件**（行数为源文件行数）
 
 | 文件 | 行数 | 作用 |
 | --- | --- | --- |
-| `src/renderer/src/composables/useAppStore.ts` | 107 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写（键名取 `constants.ts`） |
+| `src/renderer/src/composables/useAppStore.ts` | 112 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写（键名取 `constants.ts`）；`ProjectState` 含项目级渲染档位覆盖与**成片画布 `canvas`**（本次新增） |
 | `src/renderer/src/composables/useToast.ts` | 22 | 全局轻提示队列（自增 id + 2800ms 自动移除） |
 | `src/renderer/src/composables/useRenderProgress.ts` | 92 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行并生成中文进度文案（只上屏用户看得懂的阶段） |
 | `src/renderer/src/composables/useRuntime.ts` | 90 | 运行环境（**分包** ffmpeg / hyperframes，首次用到时下载）状态单例：`runtime:progress` 订阅 + `runtime:status` 首帧补齐，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()`；**交给 IPC 的包名数组必须走 `toRaw(list).slice()`**（Vue 响应式代理过不了结构化克隆，`invoke` 会抛 `DataCloneError` 且主进程 handler 不执行），`prepare()` 的非 ok 回执 / 抛错会写进 `runtime`（不再静默） |
@@ -15,14 +15,16 @@
 | `src/renderer/src/composables/useLegacyData.ts` | 60 | 旧版本数据（品牌/目录改名留下）提示：挂载时问一次 `legacy:status`，有结果就弹应用内弹窗，并把用户选择经 `legacy:resolve` 回传 |
 | `src/renderer/src/composables/useRenderOptions.ts` | 41 | 视频渲染档位：全局默认载入（`settings.json` 的 `render`）+ 生效档位 + 项目级覆盖写入 |
 | `src/renderer/src/composables/useNavIntent.ts` | 30 | 跨页面「导航意图」信号（模块级 `ref` 单例）：`requestSettingsSection()` 置位、目标页 `consumeSettingsSection()` 读取并复位；设置页 5 个分类的**唯一枚举来源**（`SETTINGS_SECTIONS`） |
-| `src/renderer/src/utils/render.ts` | 55 | 档位选项表与纯函数（规范化覆盖、解析生效档位、档位摘要文案） |
+| `src/renderer/src/utils/render.ts` | 81 | 档位选项表与纯函数（规范化覆盖、解析生效档位、档位摘要文案）+ **成片画布的选项表与规范化（`RENDER_CANVAS_OPTIONS` / `canvasLabel` / `canvasSize` / `normalizeCanvas`，本次新增）** |
 | `src/renderer/src/utils/rate.ts` | 21 | 语速控件共享逻辑：0.5~2.0 播放速率同步到输入框与音频元素 |
 | `src/renderer/src/utils/escape.ts` | 4 | 单函数 HTML 转义（`&`、`<`、`>`） |
 | `src/renderer/src/utils/time.ts` | 15 | 秒 → `分:秒` 与 `分:秒.毫秒` 两种时间轴格式化 |
+| `src/renderer/src/utils/url.ts` | 57 | 路径 → URL 拼装：`previewUrl()`（项目内相对路径 → `hgpreview://p/…`）与 `ttsUrl()`（项目外语音产物 → `hgpreview://tts/…?tts=1`，认不出白名单目录返回空串） |
+| `src/renderer/src/utils/changelog.ts` | 124 | 随包 `CHANGELOG.md` 原文的解析（**全部无状态纯函数**）：`parseChangelog()` 按 `## ` 切块、块内按**表头列名**映射条目（只抽「版本 / 时间 / 每条一行标题」），`pickDefaultBlock()` 选「最新一版」，`splitEntryTag()` / `tagKind()` 拆 `[标签]` 与配色档 |
 | `src/renderer/src/constants.ts` | 14 | 渲染层公共常量：`localStorage` 键名前缀 `STORAGE_PREFIX` + 两个持久化键（**前缀故意不跟随品牌名**，改前缀必须补迁移） |
 | `src/renderer/src/pages/index.ts` | 51 | 页面注册表 + `goPage` 导航（**刷新项目失败也照切页**并把原因 toast 出来；含强制重挂载序号），替代 `vue-router` |
 
-- **类型**：组合式函数（全局状态 / 提示 / 进度 / 运行环境状态与确认框 / 旧数据 / 档位 / 导航意图）+ 纯工具函数（档位选项、语速 / 转义 / 时间）+ 常量模块 + 页面注册表与导航函数。这些文件共同替代了旧版挂在 `window.App` 上的 `AppState`、`toast`、HF 进度监听、`rateClamp/applyRate/stepRate`、`escTxt`、时间格式化与 `pages/goPage`。
+- **类型**：组合式函数（全局状态 / 提示 / 进度 / 运行环境状态与确认框 / 旧数据 / 档位 / 导航意图）+ 纯工具函数（档位选项、语速 / 转义 / 时间 / 路径 → URL / 更新日志解析）+ 常量模块 + 页面注册表与导航函数。这些文件共同替代了旧版挂在 `window.App` 上的 `AppState`、`toast`、HF 进度监听、`rateClamp/applyRate/stepRate`、`escTxt`、时间格式化、`'file:///' + encodeURI(path)` 这套散在页面里的路径拼装与 `pages/goPage`。
 
 > **`localStorage` 键名与品牌文案各归一层**：键名（`'myapp.projectCtx'` / `'myapp.settingsSection'`）定义在 `src/renderer/src/constants.ts`，各消费处只 `import` 常量、不再写字面量；**前缀 `'myapp.'` 故意不跟随品牌名**（prod 下 `file://` 同源，键名就是用户数据的地址，改名会让老用户「上次项目 / 设置页分类」读不到），要改必须补「读旧键 → 写新键」的迁移。品牌文案（应用名 / 英文名 / 口号）则是三端共用的 `src/shared/constants.ts`，与本文件无关。详见 [constants.ts.md](./constants.ts.md)。
 
@@ -48,14 +50,15 @@
 | `ProjectState` | `title` | `string` | 项目标题（缺省时 `refreshProject` 回填 `'字幕动画'`） |
 | `ProjectState` | `subtitle` | `string` | 字幕文本（SRT 风格多行文本） |
 | `ProjectState` | `htmlPath` | `string` | 生成/修改得到的 HTML 绝对路径 |
-| `ProjectState` | `videoPath` | `string` | 渲染产出的视频路径 |
-| `ProjectState` | `audioFile` | `string` | 背景音频 / 生成语音路径 |
+| `ProjectState` | `videoPath` | `string` | 渲染产出的视频路径——**主进程 `project:load` 返回的绝对路径**（落盘时 `project.json` 存的是项目内相对路径 `video/output.mp4`，由主进程的 `resolveVideoAbs()` 换算后才交给渲染层）；视频预览页再把它经 `previewUrl()` 变成 `hgpreview://p/…` URL 播放 |
+| `ProjectState` | `audioFile` | `string` | 背景音频 / 生成语音路径（**项目内相对路径**，如 `audio/xxx.mp3`；「预览」卡片的背景音频试听把它交给 `previewUrl()`） |
 | `ProjectState` | `materials` | `ProjectMaterial[]` | **项目素材库**（图片 / 视频，结构见 `@shared/types` 的 `ProjectMaterial`：`id` / `kind` / `file` / `label` / `selected` / `addedAt`）；`refreshProject` 里写作 `materials: Array.isArray(loaded.materials) ? loaded.materials : []`——**旧的 `videoMaterial` 字段已从 `ProjectState` 删除**（`Project.videoMaterial` 在共享层退化为历史字段） |
 | `ProjectState` | `htmlExists` | `boolean` | HTML 是否真实存在（来自列表项 `hasHtml`，非详情字段） |
 | `ProjectState` | `videoExists` | `boolean` | 视频是否真实存在（来自列表项 `hasVideo`，非详情字段） |
 | `ProjectState` | `subtitleCount` | `number` | 字幕条数 |
 | `ProjectState` | `content` | `{ style: string; scenes: { id: string; narration: string; visual: string; durHint: string }[] }` | 内容脚本：全局风格 `style` + 场景数组，每个场景含 `id`、旁白 `narration`、画面 `visual`、时长提示 `durHint` |
 | `ProjectState` | `render` | `RenderOverride?`（可选） | 视频渲染档位的**项目级覆盖**（`{ quality?, fps? }`，字段缺省 = 跟随全局默认）；`refreshProject` 用 `pickRenderOverride(loaded.render)` 规范化后写入，脏数据/缺省归为空覆盖 |
+| `ProjectState` | `canvas` | `RenderCanvas`（**必填**，本次新增） | **成片画布方向（项目属性，不是渲染档位）**：缺省 = `DEFAULT_CANVAS`（横屏 1920×1080）；`refreshProject` 里写作 `canvas: normalizeCanvas(loaded.canvas)`——脏数据/缺省一律落回默认横屏（源码注释：预览与渲染都按它，必须是合法值）。生成提示词 / 预览画布 / 渲染注入三处共用它 |
 | `ProjectMeta` | `name` | `string` | 项目名 |
 | `ProjectMeta` | `title` | `string` | 项目标题 |
 | `ProjectMeta` | `hasSubtitle` | `boolean` | 是否有字幕 |
@@ -89,7 +92,7 @@
 2. 按 `currentName` 在 `myProjects` 中查找 `entry`；找不到则把 `currentName` 回退为 `myProjects[0].name`（无则 `'demo-project'`）并重新查找一次。
 3. 发起第二次 IPC：`await window.projectTools.load(appState.currentName)`。
 4. **空值守卫**：`if (!loaded) { appState.project = null; return }` —— 主进程只在项目名为空（`currentName === ''`）时返回 `null`（`project:load` 的类型即 `Promise<Project \| null>`）；历史实现在这里直接解引用 `null` 会抛运行时报错，现在显式兜底为「无当前项目」，由页面走空态。
-5. 组装 `appState.project`，缺省值一律显式兜底：`title || '字幕动画'`、`subtitle / htmlPath / videoPath / audioFile` 均为 `|| ''`、**`materials: Array.isArray(loaded.materials) ? loaded.materials : []`**、`htmlExists: !!(entry && entry.hasHtml)`、`videoExists: !!(entry && entry.hasVideo)`、`subtitleCount: loaded.subtitleCount || 0`、`content: loaded.content || { style: '', scenes: [] }`、`render: pickRenderOverride(loaded.render)`（渲染档位覆盖只保留合法字段，脏数据/缺省一律归为空覆盖 = 跟随全局默认）。
+5. 组装 `appState.project`，缺省值一律显式兜底：`title || '字幕动画'`、`subtitle / htmlPath / videoPath / audioFile` 均为 `|| ''`、**`materials: Array.isArray(loaded.materials) ? loaded.materials : []`**、`htmlExists: !!(entry && entry.hasHtml)`、`videoExists: !!(entry && entry.hasVideo)`、`subtitleCount: loaded.subtitleCount || 0`、`content: loaded.content || { style: '', scenes: [] }`、`render: pickRenderOverride(loaded.render)`（渲染档位覆盖只保留合法字段，脏数据/缺省一律归为空覆盖 = 跟随全局默认）、**`canvas: normalizeCanvas(loaded.canvas)`（本次新增：成片画布，脏数据/缺省一律落 `DEFAULT_CANVAS`）**。
 6. `htmlExists` / `videoExists` **不是**来自 `load` 的详情，而是来自第 2 步列表项 `entry`——产物存在性由主进程 `scanProjects()` 用文件系统检查得出。
 
 **`switchProject(name)`**：`appState.currentName = name` → `saveProjectCtx()` 立即持久化（即使随后刷新失败，下次启动仍记得用户选择）→ `await refreshProject()` 重新拉列表并加载详情。**单参数**（项目名）。
@@ -112,7 +115,7 @@
 
 **渲染端（`App.vue`）**：`const toasts = useToasts();`，模板为 `<TransitionGroup tag="div" name="toast" class="toast-host">` 内 `v-for="t in toasts" :key="t.id"` 的 `.toast-item`，文本 `{{ t.msg }}`。`:key="t.id"` 依赖自增 id 才能正确区分多条内容相同的提示（数组索引做 key 会导致过渡与列表复用错乱）；样式 `.toast-host` / `.toast-item` 由 `App.vue` 的 `<style scoped>` 提供（自旧版 `app.js` 的内联样式移植）。
 
-**使用方**：`App.vue`（`useToasts()` 取队列并渲染宿主）；其余均为调用 `toast()`——`components/NewProjectDialog.vue`（项目名为空、创建失败、创建成功）、`pages/ContentPage/index.vue`（保存成功/失败）、`pages/SubtitlePage/index.vue`（删除条目、复制、导出 SRT、保存、由脚本生成字幕）、`pages/HtmlGenPage/index.vue`（Agent 请求排队、生成/修改完成、下载 HTML、渲染档位改动与转视频）、`pages/HtmlGenPage/MaterialsSection.vue`（添加 / 移除 / 勾选素材的成功与失败提示）、`pages/HtmlGenPage/PreviewSection.vue`（背景音频选定与移除、语速、暂无预览）、`pages/TextTtsPage/SynthSection.vue`（试听、设为背景音频）、`pages/TextTtsPage/AlignSection.vue`（对齐合成忙、取消、试听失效、写回结果）、`pages/SubtitlePage/TranscribeSection.vue`（转录回填结果）、`pages/VideoPreviewPage/index.vue`（重新加载结果）。约定式写法：主进程返回 `res.ok === false` 时统一 `toast((res as { message?: string })?.message || '默认文案')`，并且取消类结果（`canceled`）通常**不**提示。（`AboutPage` 与 `VoiceSection` 不使用 toast。）
+**使用方**：`App.vue`（`useToasts()` 取队列并渲染宿主）；其余均为调用 `toast()`——`components/NewProjectDialog.vue`（项目名为空、创建失败、创建成功）、`pages/ContentPage/index.vue`（保存成功/失败）、`pages/SubtitlePage/index.vue`（删除条目、复制、导出 SRT、保存、由脚本生成字幕）、`pages/HtmlGenPage/index.vue`（Agent 请求排队、生成/修改完成、下载 HTML、渲染档位改动与转视频）、`pages/HtmlGenPage/MaterialsSection.vue`（添加 / 移除 / 勾选素材的成功与失败提示）、`pages/HtmlGenPage/PreviewSection.vue`（背景音频选定与移除、语速、暂无预览）、`pages/TextTtsPage/SynthSection.vue`（试听、设为背景音频）、`pages/TextTtsPage/AlignSection.vue`（对齐合成忙、取消、试听文件不在可预览目录、写回结果）、`pages/SubtitlePage/TranscribeSection.vue`（转录回填结果）、`pages/VideoPreviewPage/index.vue`（重新加载结果）。约定式写法：主进程返回 `res.ok === false` 时统一 `toast((res as { message?: string })?.message || '默认文案')`，并且取消类结果（`canceled`）通常**不**提示。（`AboutPage` 与 `VoiceSection` 不使用 toast。）
 
 **注意事项**：**模块级单例**使所有页面共享同一队列，因此同一时刻可能叠多条提示（宿主用固定定位 + `TransitionGroup` 依次排布）；**2800ms 是硬编码常量**，没有配置项，如需按类型区分时长需要先扩展 `ToastItem`；**无去重**，连续调用 `toast('保存成功')` 会得到两条独立计时、独立消失的提示；**计时器不随组件卸载取消**，定时器闭包只捕获 `id`，页面切换后仍会执行过滤，但过滤是幂等的（id 已不存在时结果不变）故不会出错；`id` 用普通变量而非响应式，因为它只作为 DOM key 使用、不需要参与响应式追踪；`useToasts()` 返回 `typeof toasts` 即 `Ref<ToastItem[]>`，调用方在模板中写 `v-for="t in toasts"` 时由 Vue 自动解包，若在脚本中使用需要 `.value`；**不适用于需要用户确认的消息**——本模块是“一闪而过”的轻提示，阻塞式确认应使用对话框类能力，而不是在此扩展。
 
@@ -331,7 +334,7 @@ configPrompt.open('尚未配置「…」的语音 API Key，请先到「设置 �
 
 **注意事项**：**取值范围恒为 `0.5 ~ 2.0`**，修改上限/下限必须同时改 `rateClamp` 内的两个字面量与输入框 `title` 提示文案；**非法值回退 1 而不是回退到上一次有效值**，因为函数是无状态的、拿不到历史值；**`el` 是必需参数且会被就地修改**，本模块的“输入框”是唯一数据载体，Vue 里配合 `:value="rateValue"`（单向绑定）+ `@input` 回写，而不是 `v-model`，以避免双向绑定与函数内写值互相打架；**`audio` 可空是刻意的**，用户可能还没选中音频文件就先调语速，此时传 `null` 只更新输入框和返回值，等音频就绪后再调用一次即可生效；**`stepRate` 的 `audio` 没有默认值**，必须显式传 `null` 或元素，这是类型签名层面的有意区分（防止忘记传播放器）；**只影响播放，不影响产物**——`playbackRate` 是纯粹的客户端播放属性，不改变音频数据，因此语速试验可以随意做，不会污染项目产物；**浮点精度**：`stepRate` 用 `Math.round(x * 100) / 100` 固定两位小数，`applyRate` 则**保留用户输入的全部精度**（如 `1.333`），只在超界时夹紧；**不做四舍五入到 0.1 网格**，手动输入 `1.05` 是允许的，界面上并不强制对齐到步长。
 
-## 7. 工具：utils/escape.ts 与 utils/time.ts
+## 7. 工具：utils/escape.ts、utils/time.ts、utils/url.ts 与 utils/changelog.ts
 
 ### 7.1 `utils/escape.ts` —— `escTxt`
 
@@ -390,6 +393,65 @@ configPrompt.open('尚未配置「…」的语音 API Key，请先到「设置 �
 
 **注意事项**：**`fmtTime` 与 `fmtTimeMs` 对同一入参可能给出不同分钟**——例如 `59.6` → `fmtTime` 得 `01:00`（四舍五入到 60 秒），`fmtTimeMs` 得 `00:59.600`（截断秒），这是刻意行为，不要在“概览”与“时间轴”之间互相复制粘贴结果；**负数一律归零**（`Math.max(0, ...)` 使 `-1.5` 显示为 `00:00.000` / `00:00`，不出现负号）；**`Number(sec) || 0` 会把 `0` 也走兜底分支**，但结果相同（0），因此无害，真正的意义是把 `NaN`、`undefined`、`''` 变成 0；**未做 `isFinite` 兜底**——`Number(sec) || 0` 不会拦下 `Infinity`（`Infinity || 0` 仍是 `Infinity`），此时 `fmtTime` 会得到类似 `"Infinity:NaN"` 的异常字符串，约定调用方只传有限的秒数（来自主进程的时长/偏移计算）；**毫秒固定 3 位**，不显示帧号、不做 `HH:MM:SS` 的小时段，超过一小时的时长表现为分钟继续累加（如 `125:30`）；**`fmtTimeMs` 依赖递归进位**——`1.9996` → `00:02.000`，`59.9999` → `01:00.000`，递归深度为 1 级（`s + 1` 必为整数，其小数部分为 0），无栈风险；**分钟段不设上限**，`padStart(2, '0')` 只在不足两位时补零，分钟超过 99 时自然变宽（配合 `JetBrains Mono` / `Consolas` 等宽字体下更明显）；**格式统一为 `MM:SS` / `MM:SS.mmm` 且用冒号分隔**——SRT 标准要求 `,` 分隔毫秒，本模块输出的是方括号包裹的展示/中间格式，最终落盘的 SRT 文本由 `helpers.ts` 组装，改动格式前需核对下游解析（`parseSrtText` / `parseSubtitleText`）。
 
+### 7.3 `utils/url.ts`（57 行，**本轮新增**）—— `previewUrl` / `ttsUrl`
+
+渲染层**唯一**的「文件路径 → 可播放 / 可展示 URL」拼装入口，两个导出函数，**不导出 `fileUrl`**（渲染层已没有活的 `file://` 引用，留一个「拼 file:// 的助手」只会诱导误用；主进程 `video.ts:77` 那处 `'file:///'` 与本文件无关，见下）。它收口的是同一件事以前**散在 7 个地方、用了三套写法**的历史：5 处音频试听写 `'file:///' + encodeURI(path)`；3 处 `hgpreview://` 里两处用整串 `encodeURIComponent(file)`（`/` 被编成 `%2F`）、一处用逐段编码。现在统一为「**逐段 `encodeURIComponent`、斜杠保持原样**」。
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `previewUrl(projectName, rel, bust = false)` | `(string, string, boolean?) => string` | 项目**内**相对路径 → `hgpreview://p/<encodeURIComponent(项目名)>/<逐段编码的相对路径>`；`bust` 为真时再附 `?v=<Date.now()>`（预览副本每次都会重写，不带时间戳会命中缓存看到旧的） |
+| `ttsUrl(absPath)` | `(string) => string` | 项目**外**的语音产物绝对路径 → `hgpreview://tts/<逐段编码的相对路径>?tts=1`；先从绝对路径里认出**白名单目录**（模块内常量 `TTS_DIRS = ['tts-output', 'voice']`），取该目录及其之后的相对路径再逐段编码；**认不出来返回空串**（例如用户在别处自定义了保存目录），调用方据此不给试听入口——**不猜**。**`?tts=1` 是路由标记、不是可有可无的参数**：主进程按 `new URL(url).pathname` 取段，而 host 位的 `tts`（`hgpreview://tts/…` 里的第一段）根本不进 `pathname`，早期版本因此会把 `voice` / `tts-output` 当成项目名去找项目目录 ⇒ 404；改用查询标记后判定与 host 无关（处理器同时兼容 `pathname` 首段为 `tts` 的旧写法） |
+| `encodeRelPath(rel)` | `(string) => string`（**私有，不导出**） | 反斜杠统一成 `/` → 按 `/` 切段 → 丢掉空段 → 逐段 `encodeURIComponent` → 用 `/` 重新连接；因此 `.` / `..` 这类段会被编码掉 |
+
+**为什么统一逐段编码**：主进程处理器是「按 `/` 切段 → 逐段 `decodeURIComponent` → `join('/')` 拼回」，只有「一段 URL 路径 ↔ 一段磁盘路径」的写法才与它一一对应。旧写法之一是把整条相对路径整串 `encodeURIComponent`（`/` 被编成 `%2F`）——对 `p/…` 路由而言「解成一段再 join 回斜杠」其实也能还原出正确路径，但它把对应关系交给了解码后的再拼接，且与语音产物路由（`?tts=1`，要按段取顶层目录做白名单判定）口径不一致，因此本轮统一为**逐段编码、斜杠保持原样**（源码注释也把它表述为「与处理器的口径严格对应」）。另外，无论哪种写法，`encodeURI` **都不编码 `#` 与 `?`**，路径里带这两个字符的文件名会被当成 fragment / query 而指向错文件——所以渲染层不再用 `encodeURI`。
+
+**`ttsUrl` 为什么从后往前扫白名单目录**：对齐产物是**多级**的（`voice/align-<时间戳>/raw/0000.wav`），只取最后两段会拼错；所以从路径尾部向前找到第一个等于白名单项的分量，取它及其之后的全部路径。`TTS_DIRS` **必须与 `main/index.ts` 的 `TTS_PREVIEW_DIRS` 一致**——那边才是真正的安全边界，这边只是渲染层用来把绝对路径换算成相对路径的前缀识别；**加一类新产物要两处齐改**。
+
+**调用方清单（已核对 import）**
+
+| 调用方 | 调用点 | 说明 |
+| --- | --- | --- |
+| `pages/HtmlGenPage/PreviewSection.vue` | `loadFrame()`：`previewUrl(appState.currentName, relFile, true)` | 预览 iframe 载入主进程生成的预览副本 `index.preview.html`；`bust=true` 附时间戳强制重新加载 |
+| 同上 | `setAudioPreview(relFile)`：`previewUrl(appState.currentName, relFile, true)` | 背景音频试听 `<audio>` 的 `src`。参数从**绝对路径**改为**项目内相对路径**；`afterAudioChange()` 的两处调用点改传 `res.audioFile`（主进程 `setAudio` 已把音频复制进项目 `audio/`） |
+| `pages/HtmlGenPage/MaterialsSection.vue` | `thumbUrl(file)`：`previewUrl(appState.currentName, file)` | 素材缩略图（素材文件本身不变，故不传 `bust`） |
+| `pages/VideoPreviewPage/index.vue` | `toHgPreviewUrl(projectName, absPath)`：`previewUrl(projectName, parts.slice(-2).join('/'), true)` | 成品视频 `<video>` 的 `src`；成品记为项目内相对路径 `video/output.mp4`，故从绝对路径取最后两段；`bust=true` 避免看到上一次的成品 |
+| `pages/TextTtsPage/SynthSection.vue` | `resultSrc.value = res.savePath ? ttsUrl(res.savePath) : ''`（合成完成）/ `genAudioSrc.value = ttsUrl(it.path)`（`updateGenSel()`） | 合成结果试听与「已生成音频」试听；产物落在白名单目录之外时 `ttsUrl` 返回空串 ⇒ 不显示试听行 |
+| `pages/TextTtsPage/AlignSection.vue` | `alignAudioSrc.value = ttsUrl(String(res.audioPath \|\| ''))`（对齐完成）/ `playSeg(path)` 里 `const url = ttsUrl(path)` | 对齐整轨试听与逐句试听（产物在 `userData/voice/align-<时间戳>/`）；`playSeg()` 拿到空串时 toast「这一句的试听文件不在可预览目录里」 |
+
+**与主进程协议的口径对应**（细见 [main/index.ts.md](../../main/index.ts.md) 的 hgpreview 一节）：协议在 `src/main/index.ts` 里用 `protocol.registerSchemesAsPrivileged` 声明（`standard` / `secure` / `supportFetchAPI` / `stream`）并 `protocol.handle('hgpreview', …)`，**路径 → 允许读的绝对路径**这一段由独立函数 `resolveHgPreviewPath(rawUrl)` 承担（返回 `{ full, why }` 或 `null`）：两条路由分别是 `hgpreview://p/<项目名>/<相对路径>`（`projects.projectDir(name)` 内的文件；`p` 在 host 位，**不剥 `p/`**）与 `hgpreview://tts/<相对路径>?tts=1`（`app.getPath('userData')` 下**只读白名单** `TTS_PREVIEW_DIRS = ['tts-output', 'voice']`，不在白名单 ⇒ `why = not-in-whitelist:<top>`、**403** 并写 `preview-protocol.log`；穿越 ⇒ `why = traversal`）；路由判定 `isTts = searchParams.get('tts') === '1' || segs[0] === 'tts'`（**不看 host**）。媒体（音频 / 视频）一律走 `rangeResponse()`（206 + `Content-Range` + `Accept-Ranges`）。
+
+**为什么以前 `'file:///'` 能用（背景，务必记住）**：旧版应用 `createWindow()` 用 `mainWindow.loadFile(...)`，**dev 与生产都是 `file://` 源**，所以 `'file:///' + encodeURI(path)` 这批写法（旧树里十余处，Vue 化时整段照搬）当时确实能用。`9615eaf`（electron-vite 重构）引入 `if (process.env['ELECTRON_RENDERER_URL']) loadURL(...) else loadFile(...)` 之后，**dev 渲染页变成 `http://localhost` 源**，Chromium 拒绝 http 页读 `file://`，这 5 处音频试听在 dev 下静默失效（打包版仍可用），而且 `AlignSection` 的兜底文案把它误报成「临时文件被清理」。相关条目：CHANGELOG #25 / #26 / #27。此外 `encodeURI` **不编码 `#` 与 `?`**，路径里带这两个字符的文件名会被当成 fragment / query 而指向错文件（逐段 `encodeURIComponent` 没有这个问题）。
+
+**唯一保留的 `file:///`**：`src/main/video.ts:77` 的 `const url = 'file:///' + probePath.replace(/\\/g, '/').replace(/ /g, '%20')`——它喂给 Chromium `--dump-dom` 量时间轴，**不在页面里、不受同源策略约束**，不是页面资源，因此保留（文档不要写成已删）。
+
+**注意事项**：**项目名走整串 `encodeURIComponent`、相对路径逐段编码**——项目名是单段不能逐段切，两处口径不同是刻意的；**`bust` 附的是 `Date.now()` 而非递增序号**，理论上同一毫秒内两次调用会得到同一个 URL（实际调用点之间隔着多次 IPC / 文件写入）；**`ttsUrl` 只认白名单目录名**，认不出就返回空串——「不给试听入口」比「猜一个 URL 然后被 403」体验更好，也是调用方必须判空串的原因；**`TTS_DIRS` 与 `TTS_PREVIEW_DIRS` 是两份字面量**（渲染层不 import 主进程模块），这是有意的重复，改一处必须改另一处；**本文件零依赖**（不碰 IPC、不碰 DOM、不读全局状态），也**没有 `fileUrl`**。
+
+### 7.4 `utils/changelog.ts`（124 行）—— 随包 CHANGELOG 的解析
+
+设置页「应用更新」的「查看更新日志」弹窗要把随安装包的 `CHANGELOG.md` 按版本分块展示。数据由主进程 `update:changelog` 提供（`src/main/updater/base.ts` 的 `readBundledChangelog()` **只定位 + 读原文**），**全部解析落在本文件**，且都是无状态纯函数（符合 `AGENTS.md` 规则 8 的「无状态纯函数放 `utils/`」）。**界面只要三样东西——版本 / 时间 / 每条一行标题**，所以解析器也只抽这三样：「影响范围」与「验证」两列不进界面（它们仍在 `CHANGELOG.md` 里，应用内不展示）。**为什么不引 markdown 渲染库**：读进来的是纯文本，唯一要做的是把行内记号（`**` / 反引号 / 链接）还原成可读文字（见内部 `plainText()`），也免得为一个只读弹窗多背一个依赖。
+
+**导出类型**
+
+| 名称 | 形态 | 说明 |
+| --- | --- | --- |
+| `ChangelogEntry` | `interface` | 一条记录：`no` / `date` / `tag` / `title`——前三个取自表格列（缺列留空串），`title` 是已去掉行内 markdown 记号的一行标题 |
+| `ChangelogBlock` | `interface` | 一个 `## ` 版本区块：`title`（标题原文）、`version`（用 `/\d+\.\d+\.\d+/` 从标题里抓的版本号，抓不到为空串——如「未发布（下一版本）」）、`date`（标题里的 `yyyy-mm-dd`，抓不到就回填该块最新那条的日期）、`entries`。**没有 `intro` / `outro`**：块内表格之外的说明行不解析 |
+
+**导出函数**
+
+| 名称 | 签名 | 说明 |
+| --- | --- | --- |
+| `parseChangelog` | `(text: string) => ChangelogBlock[]` | 按 `/^##\s+(.+)$/` 切块（标题同时用来抓版本号与日期）；块内 `\|` 开头的行按表格处理，**首格为 `#` 即表头**（`cols = cells`），其余行用 `cols.indexOf(列名)` 取值 ⇒ 5 列 / 4 列 / 3 列三套表格都能对齐。`\|---\|` 这类分隔行（`/^:?-{2,}:?$/`）跳过；单元格内的 `\|` 是**内容**不是列分隔符，先换成 `\u0001` 占位再按 `\|` 切分、切完换回。条目**只读「#」与「日期」两列**，再从「修改」列抽标签与标题；块日期回填（标题抓不到日期时用该块最新那条的日期）；最后 `filter()` 掉**没有条目的块**——文首「使用说明」不是发布内容 |
+| `pickDefaultBlock` | `(blocks: ChangelogBlock[], currentVersion: string) => number` | 哪一块是「最新一版」：先找 `version === currentVersion` 的那一块；找不到（或没传版本号）退化成**第一个有条目的块**，也就是文件里最上面的那一块（发版前的工作都记在「未发布（下一版本）」里，那个标题抓不到版本号） |
+| `splitEntryTag` | `(change: string) => { tag: string; text: string }` | 从「修改」列开头抠出 `[标签]`（`` /^`?\[([^\]\n]{1,10})\]`?\s*/ ``，允许被反引号包着）；抠不出来则 `tag` 为空串、整段原样返回——标签只影响徽标配色，不参与任何判断 |
+| `tagKind` | `(tag: string) => string` | 徽标配色档：`新增 → 'ok'`、`修复 → 'err'`、`优化 → 'warn'`、其余 `''`（与设计规范的语义色一一对应） |
+
+**文件内不导出的两个助手**：`plainText(s)` 把行内记号还原成纯文字（`[文字](地址)` 只留文字，`**粗体**` 与反引号去掉）；`entryTitle(change)` 取标题（先取第一段 `**…**`，没有粗体就取到第一个 `：` 之前，仍为空则整段——细节不截断，交给界面自然换行）。
+
+**调用方**：`pages/SettingsPage/components/ChangelogDialog.vue`（唯一消费方）——`onMounted` 里 `await window.updateTools.changelog()`，`parseChangelog(res.text)` 切块后用 `pickDefaultBlock(blocks, currentVersion)` 决定显示哪一块（当前版本号取自同步的 `window.updateTools.version()`）；模板用 `tagKind()` 决定 `[标签]` 徽标的配色，`tag` 与 `title` 直接当纯文本渲染（**没有 `v-html`**）。`ChangelogBlock` 只作 `blocks` 的 `ref` 类型。
+
+**注意事项**：**必须按表头列名取值**，不要按固定下标——这份日志的表格有 5 列 / 4 列 / 3 列三套；**单元格 `\|` 的占位符处理不能省**：日志正文里确实写过 `'image'\|'video'`，不换占位符就会被当成分隔符、其后各列全部串位；**本模块不产出 HTML**（没有 `formatChangelogText`、不做逃逸、不拼串），界面全模板纯文本渲染，因此也不存在逃逸问题；**本文件零依赖、零 IPC、零状态**（不 import 任何模块），取数据是组件的事。
+
 ## 8. 页面注册表与导航：pages/index.ts
 
 替代旧版 `window.App.pages` 与 `goPage`，用**注册表 + 单容器渲染**实现页面切换而不引入 `vue-router`：集中登记页面（把 8 个 `PageKey` 映射到对应的单文件组件，新增页面只需改这一处）、持有“当前页面组件”状态（`currentPage` 是 `<component :is>` 的绑定源）、提供导航函数 `goPage(key)`（菜单高亮 → 刷新项目上下文（**刷新失败也照切页**）→ 切换组件 → 递增 `pageNavKey` 强制重挂载）、维护重挂载序号（作为 `:key`，恢复旧版“每次导航都重建页面 DOM、重跑页面 init”的语义）。之所以不引入路由库，是因为这是单窗口固定菜单的桌面应用：没有 URL、没有前进后退、没有嵌套路由需求，注册表模式更轻且与「菜单 `data-page`」一一对应。
@@ -445,9 +507,9 @@ export async function goPage(key: PageKey): Promise<void> {
 
 ## 9. 视频渲染档位：composables/useRenderOptions.ts 与 utils/render.ts
 
-视频渲染的「质量 / 帧率」只有两项（`quality: draft | standard | high`、`fps: 24 | 30`），但要有三层优先级：**项目级覆盖（`project.json` 的 `render`）> 全局默认（`settings.json` 的 `render` 段）> 内置默认（`standard` / `30`）**，且覆盖里缺省的字段要跟随上一级而不是被默认值顶掉。这一对文件共同承担该能力：`utils/render.ts` 是无状态纯函数与选项表（可在主进程/渲染层两侧同构使用），`composables/useRenderOptions.ts` 是渲染层的有状态外壳（模块级 `reactive` 默认档位、读设置、写项目覆盖）。规范：依赖 Vue 响应式与 IPC 副作用的放 `composables/`，纯函数与常量表放 `utils/`（与 `agents.md` 规则 8 一致）。
+视频渲染的「质量 / 帧率」只有两项（`quality: draft | standard | high`、`fps: 24 | 30`），但要有三层优先级：**项目级覆盖（`project.json` 的 `render`）> 全局默认（`settings.json` 的 `render` 段）> 内置默认（`standard` / `30`）**，且覆盖里缺省的字段要跟随上一级而不是被默认值顶掉。这一对文件共同承担该能力：`utils/render.ts` 是无状态纯函数与选项表（可在主进程/渲染层两侧同构使用），`composables/useRenderOptions.ts` 是渲染层的有状态外壳（模块级 `reactive` 默认档位、读设置、写项目覆盖）。**注意 `utils/render.ts` 里还有一组与档位无关的东西**：成片画布（`RenderCanvas`）——它是**项目属性**、不走这套三层优先级（见 §9.1 末）。规范：依赖 Vue 响应式与 IPC 副作用的放 `composables/`，纯函数与常量表放 `utils/`（与 `agents.md` 规则 8 一致）。
 
-### 9.1 `utils/render.ts`（55 行）—— 选项表与纯函数
+### 9.1 `utils/render.ts`（81 行）—— 选项表、纯函数与成片画布
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
@@ -460,6 +522,17 @@ export async function goPage(key: PageKey): Promise<void> {
 | `isRenderOverridden(defaults, override?)` | `(RenderOptions, unknown?) => boolean` | 覆盖是否**真的**改变了生效档位（用于 UI 标注「本项目自定义档位」与显示「恢复默认档位」）；覆盖里给了值但因与默认值相同而不改变结果时返回 `false` |
 | `renderQualityLabel(quality)` | `(RenderQuality) => string` | 质量值 → 中文标签（找不到时回退原值字符串） |
 | `renderOptionsText(options)` | `(RenderOptions) => string` | 档位摘要文案，形如 `标准 · 30fps` |
+
+**成片画布（`RenderCanvas`，本次新增）—— 它不是渲染档位**：同一个文件里还有一组画布的选项表与规范化函数。画布是**项目属性**（`project.json` 的 `canvas`，缺省 `DEFAULT_CANVAS`），**不走**上面那套「项目覆盖 > 全局默认 > 内置默认」的层级——它只在「HTML生成」页的「画布」下拉里选一次，同一个值同时决定生成提示词的版式尺寸、预览 iframe 的画布与渲染入口注入的 `<html data-resolution>`。
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `RENDER_CANVAS_OPTIONS` | `{ value: RenderCanvas; label: string }[]` | 画布下拉选项：由 `RENDER_CANVASES` 映射而来，label = `CANVAS_LABELS[c] + '（' + CANVAS_SIZES[c].width + '×' + CANVAS_SIZES[c].height + '）'`，即「横屏 16:9（1920×1080）」。源码注释：明文全部取自 `shared/constants`，避免与提示词说法漂移 |
+| `canvasLabel(canvas)` | `(RenderCanvas) => string` | 画布中文标签（`CANVAS_LABELS[canvas]`，取不到时回退原值字符串） |
+| `canvasSize(canvas)` | `(RenderCanvas) => { width: number; height: number }` | 画布像素（= composition 尺寸 = 成片尺寸）：预览 iframe 的内联宽高与 `fitFrame()` 的缩放比都按它算；取不到时回落 `CANVAS_SIZES[DEFAULT_CANVAS]` |
+| `normalizeCanvas(raw)` | `(unknown) => RenderCanvas` | 项目里的画布值可能是脏数据（手改过 `project.json` / 更早的记录）：非法一律落回 `DEFAULT_CANVAS` |
+
+取值与尺寸**全部来自** `@shared/constants`（`RENDER_CANVASES` / `CANVAS_SIZES` / `CANVAS_LABELS` / `DEFAULT_CANVAS`，唯一真源，与 HyperFrames CLI 的画布预设对齐）——因此渲染层的下拉文案、主进程的生成提示词与渲染入口注入说的是同一套数。
 
 ### 9.2 `composables/useRenderOptions.ts`（41 行）—— 全局默认与项目覆盖
 
@@ -516,7 +589,7 @@ export async function goPage(key: PageKey): Promise<void> {
 | `window.legacyTools.status()` | 频道 `legacy:status`，问一次有没有待处理的旧数据（返回 `LegacyDataInfo \| null`） | `useLegacyData.initLegacyData()` |
 | `window.legacyTools.resolve(action)` | 频道 `legacy:resolve`，回传 `'migrate' \| 'delete' \| 'later'` | `useLegacyData.useLegacyData().resolve()` → `components/LegacyDataDialog.vue` |
 
-`renderProgress` 不调用 `hfTools.renderVideo()`——**发起渲染的是 `pages/HtmlGenPage/index.vue`**（这里的「转视频」按钮），`pages/VideoPreviewPage/index.vue` 只在渲染结束后读 `renderProgress.text` 展示；本模块只消费日志流。`pages/index.ts` **不直接**调用 preload API，而是通过 `useAppStore` 间接使用。`useToast.ts`、`useNavIntent.ts`、`rate.ts`、`escape.ts`、`time.ts`、`render.ts` 均为**零依赖**（`useToast` / `render.ts` 中前者依赖 Vue 的 `ref`、后者只依赖 `@shared/types` 的类型），不接触主进程；`useRenderOptions.ts` 则依赖 `window.settingsTools` / `window.projectTools` 与 `appState`；`useRuntime.ts` 依赖 `window.runtimeTools`（订阅进度 + 查状态 + `prepare` / `cancel`），`useEnvGate.ts` 依赖 `useRuntime`（读 `missing`）与同一个 `runtimeTools`（订阅进度 + `prepare` / `cancel`），`useLegacyData.ts` 依赖 `window.legacyTools`（问一次 + 回传选择），三者同样只经 preload 桥接触主进程。
+`renderProgress` 不调用 `hfTools.renderVideo()`——**发起渲染的是 `pages/HtmlGenPage/index.vue`**（这里的「转视频」按钮），`pages/VideoPreviewPage/index.vue` 只在渲染结束后读 `renderProgress.text` 展示；本模块只消费日志流。`pages/index.ts` **不直接**调用 preload API，而是通过 `useAppStore` 间接使用。`useToast.ts`、`useNavIntent.ts`、`rate.ts`、`escape.ts`、`time.ts`、`render.ts`、`url.ts` 均为**零依赖**（其中 `useToast` 依赖 Vue 的 `ref`；`render.ts` 只依赖 `@shared/types` 的类型与 `@shared/constants` 的常量——**后者是本次新增的 import**，均为编译期引入），不接触主进程；`useRenderOptions.ts` 则依赖 `window.settingsTools` / `window.projectTools` 与 `appState`；`useRuntime.ts` 依赖 `window.runtimeTools`（订阅进度 + 查状态 + `prepare` / `cancel`），`useEnvGate.ts` 依赖 `useRuntime`（读 `missing`）与同一个 `runtimeTools`（订阅进度 + `prepare` / `cancel`），`useLegacyData.ts` 依赖 `window.legacyTools`（问一次 + 回传选择），三者同样只经 preload 桥接触主进程。
 
 **谁用谁（被导入情况）**
 
@@ -528,8 +601,9 @@ export async function goPage(key: PageKey): Promise<void> {
 - `effectiveRenderOptions` / `saveProjectRenderOverride`：`pages/HtmlGenPage/index.vue`（`syncFromEffective()` 读、`onOptionChange()` / `onResetOptions()` 写）。**「视频预览」页不消费渲染档位**，只读 `renderProgress.text` 展示进度。
 - `saveRenderDefaults`：`pages/SettingsPage/components/RenderSection.vue`（「保存渲染默认档位」按钮）。
 - `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` / `FALLBACK_RENDER` / `renderOptionsText` / `renderQualityLabel`：`pages/SettingsPage/components/RenderSection.vue`（全局默认档位下拉与保存文案）、`pages/HtmlGenPage/index.vue`（档位下拉、`optionNote`、渲染状态文案）。
+- **成片画布四导出（本次新增）**：`RENDER_CANVAS_OPTIONS` / `canvasLabel` / `normalizeCanvas` → `pages/HtmlGenPage/index.vue`（画布下拉、`canvasHint`、渲染状态文案的画布标签、`syncCanvas()`）；`normalizeCanvas` / `canvasLabel` / `canvasSize` → `pages/HtmlGenPage/PreviewSection.vue`（只读画布行、iframe 内联宽高与 `framePadPct`、`fitFrame()` 的缩放比）、`composables/useAppStore.ts`（`refreshProject` 规范化 `loaded.canvas`）。
 - `pickRenderOverride`：`composables/useAppStore.ts`（`refreshProject` 规范化 `loaded.render`）、`composables/useRenderOptions.ts`（覆盖写入后回写 `appState.project.render`）。
-- `rateClamp` / `applyRate` / `stepRate`：见 §6「使用方」；`escTxt`：见 §7.1「调用方」；`fmtTime` / `fmtTimeMs`：见 §7.2「调用方」。
+- `rateClamp` / `applyRate` / `stepRate`：见 §6「使用方」；`escTxt`：见 §7.1「调用方」；`fmtTime` / `fmtTimeMs`：见 §7.2「调用方」；`previewUrl` / `ttsUrl`：见 §7.3「调用方清单」；`parseChangelog` / `pickDefaultBlock` / `splitEntryTag` / `tagKind`：见 §7.4「调用方」。
 - `pages` / `currentPage` / `pageNavKey` / `goPage`：`App.vue`（`currentPage`、`pageNavKey` 渲染容器；`goPage(item.key)` 绑定菜单点击；`watch(currentPage)` 做滚动复位；启动时**不**调 `goPage`（首页本就是初始页））、`components/StepBar.vue`（`goPage('content')`、`goPage('text-tts')`、`goPage('subtitle')`、`goPage('html-gen')`、`goPage('video-preview')`、`onCreated()` / `onSelect()` 里的 `goPage(props.page)` 回跳）、`pages/HomePage/index.vue`（流程图节点 `goPage(n.page)`；项目卡片 `openMy()` → `goPage('html-gen')`）、`pages/TextTtsPage/VoiceSection.vue`（`goSettingsVoice()` 先 `requestSettingsSection('voice')` 再 `goPage('settings')` 跳「API Key 设置」，卡内 `requireCfg()` 未配 Key 时同路径；原 `pages/SoundCopyPage/index.vue`）、`pages/SettingsPage/index.vue` + `pages/SettingsPage/helpers.ts`（消费端：`index.vue` 的 `<script setup>` 先调 `applySectionIntent()`、再调 `watchSectionIntent()`，两者都定义在 `helpers.ts` 里）、`pages/TextTtsPage/SynthSection.vue`（`goSettingsVoice()` = `requestSettingsSection('voice')` + `goPage('settings')`；**原「管理音色」按钮与 `goPage('text-tts')` 跨页请求已删除**）、`pages/SubtitlePage/TranscribeSection.vue`（`goPage('settings')`）、`pages/TextTtsPage/helpers.ts`（`goPage('settings')`）。
 
 - `initRuntime` / `useRuntime`（`runtime` / `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` / `prepare` / `cancel`）：`App.vue`（`onMounted` 调 `initRuntime()`；横幅用 `busy` / `failed` / `hasMissing` / `runtime.message` / `percent` / `prepare` / `cancel`）、`pages/SettingsPage/components/UpdateSection.vue`（运行环境一行三态 + 「下载运行环境」/「取消下载」/「从本地文件安装…」）。
@@ -549,11 +623,13 @@ export async function goPage(key: PageKey): Promise<void> {
 - **`pageNavKey` 递增的代价**：每次导航都销毁重建页面实例，页面内部状态（表单草稿、预览滚动位置等）不保留。
 - **持久化键集中在 `constants.ts`，且 `'myapp.'` 前缀不可漂移**：`STORAGE_KEY_PROJECT_CTX` / `STORAGE_KEY_SETTINGS_SECTION` 都由 `STORAGE_PREFIX = 'myapp.'` 派生（**故意不跟随品牌名**：生产环境 `file://` 同源，键名就是用户数据的地址，改名会让「上次项目 / 设置页分类」读不到，要改必须补「读旧键 → 写新键」迁移）。消费处一律 `import` 常量，不再出现裸字面量；品牌文案则是另一层的 `@shared/constants`，两者不要混。
 - **存在性判定必须走列表项**：`htmlExists` / `videoExists` 来自 `projectTools.list()` 的 `hasHtml` / `hasVideo`（主进程文件系统检查），`projectTools.load()` 不返回这两项。
-- **`composables` 与 `utils` 的分界（与 `AGENTS.md` 规则 8 一致，当前成立）**：`composables/` 放依赖 Vue 响应式 API 或有状态、带副作用（IPC 订阅、`localStorage`）的复用逻辑，文件名以 `use` 开头（`useAppStore.ts` / `useToast.ts` / `useRenderProgress.ts` / `useRuntime.ts` / `useEnvGate.ts` / `useConfigPrompt.ts` / `useLegacyData.ts` / `useRenderOptions.ts` / `useNavIntent.ts`，九者都有模块级单例状态）；`utils/` 放无状态纯函数（`escape.ts` / `time.ts` / `rate.ts` / `render.ts`，其中 `rate.ts` 只读写传入的 DOM 元素、`render.ts` 只有常量表与纯函数，均不持有状态）。跨目录引用这些模块一律走 `@renderer/*` 别名。
+- **`composables` 与 `utils` 的分界（与 `AGENTS.md` 规则 8 一致，当前成立）**：`composables/` 放依赖 Vue 响应式 API 或有状态、带副作用（IPC 订阅、`localStorage`）的复用逻辑，文件名以 `use` 开头（`useAppStore.ts` / `useToast.ts` / `useRenderProgress.ts` / `useRuntime.ts` / `useEnvGate.ts` / `useConfigPrompt.ts` / `useLegacyData.ts` / `useRenderOptions.ts` / `useNavIntent.ts`，九者都有模块级单例状态）；`utils/` 放无状态纯函数（`escape.ts` / `time.ts` / `rate.ts` / `render.ts` / `url.ts` / `changelog.ts`，其中 `rate.ts` 只读写传入的 DOM 元素、`render.ts` 只有常量表与纯函数、`url.ts` 只有两个纯字符串函数、`changelog.ts` 只有解析与排版纯函数，均不持有状态）。跨目录引用这些模块一律走 `@renderer/*` 别名。
 - **渲染档位三层优先级只有一处实现**：`项目覆盖 > 全局默认 > 内置默认`，缺省字段逐级继承；渲染层用 `utils/render.ts` 的 `resolveRenderOptions()` / `pickRenderOverride()`，主进程用 `settings.ts` 里同名的白名单实现，两边取值必须同步修改（`draft/standard/high` 与 `24/30`）。
+- **成片画布刻意不走那套层级（本次新增）**：`RenderCanvas` 是**项目属性**（`ProjectState.canvas` 必填、缺省落 `DEFAULT_CANVAS`），没有「全局默认 → 项目覆盖」可继承——所有消费点都从 `shared/constants.ts` 取同一组取值与尺寸。**不要把它并进 `pickRenderOverride` / `resolveRenderOptions`**：一个是「这个项目长什么样」（画布、成片尺寸），一个是「怎么编码」（质量、帧率）。
 - **渲染动作的唯一入口是「HTML生成」页**：`hfTools.renderVideo()` 只在 `pages/HtmlGenPage/index.vue` 的 `onRenderVideo()` 里发起，因此「渲染进度由谁展示」「产物谁回写项目」都以此为准——产物回写只在该页调 `projectTools.saveVideo()`；「视频预览」页只读结果、不发起渲染。
 - **`ProjectMeta` 只在共享层定义一处**：`useAppStore.ts` 用 `import type { ProjectMeta } from '@shared/types'` + `export type { ProjectMeta }` 引入并再导出（`project:list` 的条目结构因此与主进程同源）；而 `ProjectState` 仍是渲染层自己的视图模型（含 `htmlExists` / `videoExists` 这类由列表项推导出来的字段），不要与主进程结构混用。
 - **转义与格式化只在必要时使用**：`escTxt()` 仅用于手工拼 HTML 字符串（`v-html`、动态 `title`），`{{ }}` 插值不要重复转义；`fmtTime`（概览）与 `fmtTimeMs`（时间轴）结果可能不同分钟，不可互换。
+- **路径 → URL 只经 `utils/url.ts`**：渲染层不再出现 `'file:///' + encodeURI(...)`，项目内资源走 `previewUrl()`（`hgpreview://p/…`）、项目外语音产物走 `ttsUrl()`（`hgpreview://tts/…?tts=1`，**`?tts=1` 是路由标记、不要省**）；`ttsUrl()` 返回空串时**不要**自己兜一个路径，应隐藏试听入口（空串 = 该文件不在主进程白名单内，拼出来只会被 403）。新增可预览产物的目录时，`utils/url.ts` 的 `TTS_DIRS` 与 `main/index.ts` 的 `TTS_PREVIEW_DIRS` 必须同时加。
 - **旧数据的弹窗显隐由 composable 单例决定，不由 `App.vue` 传参**：`<LegacyDataDialog />` 无 props / 无 emits，`visible` / `busy` / `info` 都是 `useLegacyData.ts` 的模块级 ref。想改显隐语义（例如加「本次不再提示」）要改 composable，而不是在 `App.vue` 里加 `v-if`。
 - **`initRuntime()` / `initEnvGate()` / `initLegacyData()` 都只在 `App.vue` 的 `onMounted` 调用一次**：它们都有 `bound` 幂等标志，属于「全局副作用登记」，页面级组件不要重复调用。
 - **`useRuntime()` 暴露状态与两个动作**（`runtime` / `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` / `prepare` / `cancel`）：`retry` 与 `sizeText` 随「已就绪不再展示、重试统一走 `prepare()`」而删除；界面若要显示就绪体积 / 文件数，应从 `runtime` 载荷自己派生，不要重新引进已删字段。

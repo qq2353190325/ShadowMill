@@ -1,6 +1,6 @@
 # 03 · 目录架构：`src/preload/`（桥接层）
 
-> 预加载脚本是渲染层通往系统的**唯一门面**：它把 **85** 个 IPC 频道收敛成 11 个命名空间的方法，并用「单订阅」语义转发 6 路进度推送。渲染层永远不直接接触 `ipcRenderer`。
+> 预加载脚本是渲染层通往系统的**唯一门面**：它把 **87** 个 IPC 频道收敛成 11 个命名空间的方法，并用「单订阅」语义转发 6 路进度推送。渲染层永远不直接接触 `ipcRenderer`。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 文件 | 行数 | 角色 | 是否进运行时 |
 |---|---|---|---|
-| [index.ts](./files/preload/index.ts.md) | 229 | `contextBridge` 暴露 11 个命名空间 + 6 路进度通道的单订阅转发；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
+| [index.ts](./files/preload/index.ts.md) | 236 | `contextBridge` 暴露 11 个命名空间 + 6 路进度通道的单订阅转发；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
 | [index.d.ts](./files/preload/index.d.ts.md) | 11 | 只做 `interface Window extends PreloadApi {}`，把共享层契约挂到全局 `Window` | 否（仅类型，被 `tsconfig.web.json` include，为渲染层提供智能提示） |
 
 ---
@@ -28,12 +28,12 @@
 | `electronAPI` | — | 无（纯数据） | `platform`、`versions{node,chrome,electron}` |
 | `appTools` | 1 | `app:copy-text` | 剪贴板写入（sandbox 下渲染层无 `clipboard` 模块） |
 | `windowControls` | 4 | `window:*` | 最小化 / 最大化切换 / 关闭 / 最大化状态订阅 |
-| `hfTools` | 4 | `dialog:open-html`、`video:*` | HTML 选择（`openHtml`，**当前无渲染层调用方**）、转视频、在文件夹中显示、渲染进度订阅 |
+| `hfTools` | 4 | `dialog:open-html`、`video:*` | HTML 选择（`openHtml`，**当前无渲染层调用方**）、转视频（`renderVideo(htmlPath, options?)`，`options` = 渲染档位 `quality?` / `fps?` + **项目属性 `canvas?`**）、在文件夹中显示、渲染进度订阅 |
 | `settingsTools` | 6 | `settings:*` | 读取 / 保存自定义模型 / 保存渲染档位 / 保存更新设置 / 连接测试 / **运行环境「从本地文件安装…」（`pickRuntimePack`）** |
 | `voiceTools` | 19 | `voice:*` | 音色管理、文字生音频、字幕配音对齐（含 `synthAligned` / `cancelAlign` / `onAlignProgress`）；**新增 `deleteCloudVoice`（删云端克隆音色）** |
 | `whisperTools` | 12 | `whisper:*` | 模型状态 / 下载 / 删除 / 设为当前 / 自定义模型增删改 / 打开目录 / 选音频 / 项目音频 / 转录 / 进度订阅 |
-| `projectTools` | 25 | `project:*` | 项目化流水线全量能力 + `onHtmlProgress` |
-| `updateTools` | 7 | `update:*` | 检查更新 / 下载 / 取消 / 重启安装 / **状态查询（`status`，取一次主进程常驻的更新状态）** / **打开日志** / 版本号（同步）+ 进度订阅 |
+| `projectTools` | 26 | `project:*` | 项目化流水线全量能力 + `setCanvas(name, canvas)`（成片画布方向，项目属性、白名单校验在主进程）+ `onHtmlProgress` |
+| `updateTools` | 8 | `update:*` | 检查更新 / 下载 / 取消 / 重启安装 / **状态查询（`status`，取一次主进程常驻的更新状态）** / **打开日志** / **更新日志原文（`changelog`）** / 版本号（同步）+ 进度订阅 |
 | `runtimeTools` | 4 | `runtime:*` | 运行环境（分包 ffmpeg / hyperframes）：状态查询 / 主动准备（`prepare(packs?)`）/ **取消（`cancel`）** / 进度订阅 |
 | `legacyTools` | 2 | `legacy:*` | 旧版本数据：状态查询 / 回传选择（`migrate` \| `delete` \| `later`）；**无进度订阅**——旧数据是否存在由渲染层主动问一次，主进程不推送、不弹界面 |
 
@@ -74,7 +74,7 @@ type IpcResult<T = unknown> = ({ ok: true; message?: string } & T) | IpcFail
 
   `message` 为**可选**，因为 `voice:pick-dir` 的用户取消分支只回 `{ ok: false, canceled: true }`；成功分支的业务字段是**平铺**的（没有 `data` 包装，也没有旧版 `OkResult` 的 `[key: string]: any` 索引签名），成功分支的 `message` 同样可选（取消、幂等复用等场景给一句话回执）。`detail` 同为可选，是给排障用的技术详情（原始报错 / HTTP 状态 / 请求地址），由 UI 折叠展示——目前主要用在 `update:*` 一族与 `updateTools.openLog()` 的失败分支上。`needPacks` 是运行环境分包带进来的可选字段：缺包时主进程回 `{ ok:false, needPacks: ['ffmpeg', …] }`，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），`VideoRenderResult` 的失败分支另有同名字段。`needConfig` / `title` 是 2026-10 新增的**配置类**字段：主进程 `friendlyError()` 判出「去设置页改配置就能解决」时回 `needConfig: 'model' | 'voice'`（余额 / 欠费**不在其中**，走内嵌状态行），渲染层据此弹只有 `[去设置]` / `[取消]` 的弹窗（`useConfigPrompt`，见 [04-目录架构-src-renderer](./04-目录架构-src-renderer.md)）。**preload 只是 `ipcRenderer.invoke` 原样转发，这两个字段不需要 preload 任何改动**。
 - 该文件被 `tsconfig.web.json` 的 `include` 显式引入（`src/preload/index.d.ts`），这是渲染层获得 IPC 类型的唯一途径；`tsconfig.node.json` 则包含 `src/preload/index.ts` 本体，两侧共同保证契约不漂移。
-- 少数接口不遵循 `IpcResult`：`projectTools.list()` 返回数组、`projectTools.load()` 返回项目对象或 `null`、`pickAudio()` 返回 `string | null`、**`pickMedia(kind)` 返回 `string[]`（项目素材库选文件，取消时为空数组；本轮取代已删除的 `pickVideo()`）**、`settingsTools.get()` 直接返回 `AppSettings`、`hfTools.renderVideo()` 返回 `VideoRenderResult` —— 这些是历史契约，改动会同时影响渲染层多处调用。
+- 少数接口不遵循 `IpcResult`：`projectTools.list()` 返回数组、`projectTools.load()` 返回项目对象或 `null`、`pickAudio()` 返回 `string | null`、**`pickMedia(kind)` 返回 `string[]`（项目素材库选文件，取消时为空数组；本轮取代已删除的 `pickVideo()`）**、`settingsTools.get()` 直接返回 `AppSettings`、`hfTools.renderVideo()` 返回 `VideoRenderResult`（载荷 = `{ htmlPath, quality?, fps?, canvas? }`，`htmlPath` 由第一参数给，故 `PreloadApi` 里写成 `Omit<VideoRenderPayload, 'htmlPath'>`）—— 这些是历史契约，改动会同时影响渲染层多处调用。
 - 另有 **1 个同步方法**：`updateTools.version()` 走 `ipcRenderer.sendSync('update:version')`，同步返回版本号字符串（设置页首屏要立刻显示，不愿等一轮异步渲染）。这是全层唯一的同步 IPC，除它之外一律异步。
 
 ---

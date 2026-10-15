@@ -2,19 +2,19 @@
 
 > 应用自更新：`electron-updater` + electron-builder 的 generic provider（自建 HTTP 静态服务器）。**一个模块、四个文件**：同名目录 + `index.ts` 统一出口，对外接口与拆分前逐字相同。
 
-- **覆盖文件**：`updater/index.ts`（104 行）、`updater/base.ts`（270 行）、`updater/actions.ts`（139 行）、`updater/install.ts`（134 行）——行数为工作区实测（`[IO.File]::ReadAllLines`）
+- **覆盖文件**：`updater/index.ts`（108 行）、`updater/base.ts`（285 行）、`updater/actions.ts`（139 行）、`updater/install.ts`（134 行）——行数为工作区实测（`[IO.File]::ReadAllLines`）
 - **所在目录**：src/main/updater/
 - **类型**：业务域模块（`register(ctx)` 装配模式，全工程唯一使用**同步 IPC** 的模块）；拆分为「同名目录 + `index.ts` 统一出口」（形态与依赖方向属工程约定，见根 `AGENTS.md` 关键约定 9）
 - **对外导出**（全部由 `index.ts` 再导出，与拆分前同名）：`register`、`checkNow`、`downloadUpdate`、`cancelDownload`、`installNow`、`isBusy`、`quitForUpdate`、`updaterLoadError`（**取值函数** `() => string`，不再是字符串）
-- **IPC 域**：`update:check` / `update:download` / `update:cancel` / `update:install` / `update:status` / `update:open-log`（6 个 `handle`）、`update:version`（`on` + `event.returnValue`）、`update:progress`（推送）
+- **IPC 域**：`update:check` / `update:download` / `update:cancel` / `update:install` / `update:status` / `update:open-log` / `update:changelog`（7 个 `handle`）、`update:version`（`on` + `event.returnValue`）、`update:progress`（推送）
 - **调用方零改动**：`src/main/index.ts` 仍是 `import * as updater from './updater'`（目录索引解析到 `./updater/index.ts`），只用 `updater.register(ctx)` 与 `updater.quitForUpdate()`；preload 与渲染层完全不感知这次拆分
 
 ## 1. 四个文件的分工与依赖方向
 
 | 文件 | 行数 | 职责 | 该文件的关键名字 |
 | --- | --- | --- | --- |
-| `index.ts` | 104 | **统一出口**：`register(ctx)` 装配 7 个 `update:*` 频道 + 3 秒启动静默检查 + 5 秒迟到清缓存；把各子文件的具名导出原样再导出；文件头保留全部设计约定（①～⑦） | `register`、`register()` 内的 `Update.OpenLog` handler、`export { getUpdaterLoadError as updaterLoadError }` |
-| `base.ts` | 270 | **底座 / 依赖最上游**：运行态单例（`updater` 句柄 + `flags` + `state`）、日志与小工具（`writeLog` / `logPath` / `msg` / `errText` / `bytesText` / `appVersion`）、`humanError()` 文案映射与 `setError()`、进度 `payload()` / `send()`、electron-updater 的 6 个事件绑定 `bindEvents()`、懒加载 `ensureUpdater()` | `updater`、`getUpdaterLoadError`、`flags`、`state`、`appVersion`、`logPath`、`writeLog`、`msg`、`errText`、`bytesText`、`HumanError`、`humanError`、`setError`、`ensureUpdater`、`payload`、`send`、`bindEvents`、`UpdaterLike` / `UpdaterProgressLike` / `UpdaterInfoLike` |
+| `index.ts` | 108 | **统一出口**：`register(ctx)` 装配 8 个 `update:*` 频道 + 3 秒启动静默检查 + 5 秒迟到清缓存；把各子文件的具名导出原样再导出；文件头保留全部设计约定（①～⑦） | `register`、`register()` 内的 `Update.OpenLog` handler、`register()` 内的 `Update.Changelog` handler、`export { getUpdaterLoadError as updaterLoadError }` |
+| `base.ts` | 285 | **底座 / 依赖最上游**：运行态单例（`updater` 句柄 + `flags` + `state`）、日志与小工具（`writeLog` / `logPath` / `msg` / `errText` / `bytesText` / `appVersion`）、**随包更新日志的定位与读取**（`changelogPath()` / `readBundledChangelog()`）、`humanError()` 文案映射与 `setError()`、进度 `payload()` / `send()`、electron-updater 的 6 个事件绑定 `bindEvents()`、懒加载 `ensureUpdater()` | `updater`、`getUpdaterLoadError`、`flags`、`state`、`appVersion`、`logPath`、`writeLog`、`msg`、`errText`、`bytesText`、**`changelogPath`、`readBundledChangelog`**、`HumanError`、`humanError`、`setError`、`ensureUpdater`、`payload`、`send`、`bindEvents`、`UpdaterLike` / `UpdaterProgressLike` / `UpdaterInfoLike` |
 | `actions.ts` | 139 | **对外动作**：`notReady()`、更新源覆盖 `applyFeedUrl()`（**私有**）、`checkNow()`、`downloadUpdate()`、`cancelDownload()`（含两条「无事件不许报成功」的守卫） | `notReady`、`checkNow`、`downloadUpdate`、`cancelDownload`、`isBusy`（本文件也有一份，当前无调用方，见 §5） |
 | `install.ts` | 134 | **退出安装 / 缓存清理 / 忙碌推导**：`updaterCacheDir()`（私有）、`installMarkerPath()`（私有）、`finalizePendingUpdate()`、`installNow()`、`bindBusyTracking()`、`quitForUpdate()` | `finalizePendingUpdate`、`installNow`、`bindBusyTracking`、`isBusy`、`quitForUpdate` |
 
@@ -25,7 +25,7 @@ index.ts  ──→  install.ts  ──→  actions.ts  ──→  base.ts
 （出口）        （安装/清理）     （对外动作）      （状态/日志/事件，不 import 同目录任何模块）
 ```
 
-- `index.ts` 从 `./base` 取 `flags` / `ensureUpdater` / `writeLog` / `payload` / `errText` / `logPath` / `appVersion` / `getUpdaterLoadError`，从 `./actions` 取三个动作，从 `./install` 取 `installNow` / `finalizePendingUpdate` / `bindBusyTracking` / `isBusy` / `quitForUpdate`。
+- `index.ts` 从 `./base` 取 `flags` / `ensureUpdater` / `writeLog` / `payload` / `errText` / `logPath` / `appVersion` / `getUpdaterLoadError` / `readBundledChangelog`，从 `./actions` 取三个动作，从 `./install` 取 `installNow` / `finalizePendingUpdate` / `bindBusyTracking` / `isBusy` / `quitForUpdate`。
 - `install.ts` 从 `./base` 取状态与小工具、从 `./actions` 取 `notReady`。
 - `actions.ts` 只 import `./base` 与 `../settings`（**不 import `./install`**）。
 - `base.ts` **一行同目录 import 都没有**——它是 `flags` / `state` / `updater` / `updaterLoadError` 的唯一宿主，所以四个文件之间不会互相 import 成环。
@@ -34,7 +34,7 @@ index.ts  ──→  install.ts  ──→  actions.ts  ──→  base.ts
 
 | 名称 | 定义在 | 类型 | 说明 |
 | --- | --- | --- | --- |
-| `register(ctx)` | `index.ts` | `(ctx: RegisterCtx) => void` | 记下 `flags.getWindow`、调 `bindBusyTracking()`、注册 7 个 `update:*` 频道、安排 3 秒启动静默检查与 5 秒迟到清缓存。**刻意不加载 electron-updater** |
+| `register(ctx)` | `index.ts` | `(ctx: RegisterCtx) => void` | 记下 `flags.getWindow`、调 `bindBusyTracking()`、注册 8 个 `update:*` 频道、安排 3 秒启动静默检查与 5 秒迟到清缓存。**刻意不加载 electron-updater** |
 | `checkNow(trigger)` | `actions.ts` | `(trigger: 'manual' \| 'startup') => Promise<结果>` | 真实发起一次检查；`trigger` 只进日志。五个返回分支（available / skipped / error / none / **静默放弃**）都带 `message` + `detail` |
 | `downloadUpdate()` | `actions.ts` | `() => Promise<结果>` | 下载安装包（未处于 `available` / `skipped` 时拒绝）；失败分支与**静默放弃**分支都带 `message` + `detail` |
 | `cancelDownload()` | `actions.ts` | `() => 结果` | 调 `autoUpdater.cancelDownload()` 并回到 `available` 态；异常时回 `{ ok: false, message: '取消下载失败，请重试', detail: '取消失败：…' }` |
@@ -54,6 +54,7 @@ index.ts  ──→  install.ts  ──→  actions.ts  ──→  base.ts
 | `update:version` | `ipcMain.on` | **同步**：`event.returnValue = appVersion()`，设置页首屏立刻显示，不必再等一轮 async 渲染（全工程唯一的同步 IPC） |
 | `update:status` | `ipcMain.handle` | `payload()`——主进程状态常驻，设置页挂载时补一次；**不进 `ensureUpdater()`** |
 | `update:open-log` | `ipcMain.handle` | `logPath()` → 有日志 `shell.showItemInFolder(p)`、没有则 `shell.openPath(app.getPath('userData'))`；返回 `{ ok: true, path }`，异常回 `{ ok: false, message: '打开日志目录失败', detail: errText(e) }`。**刻意不进 `ensureUpdater()`** |
+| `update:changelog` | `ipcMain.handle` | `readBundledChangelog()`（`base.ts`）——读 `app.getAppPath()/CHANGELOG.md` 的**原文**交渲染层；失败回 `{ ok: false, message, detail }`（`没有找到更新日志文件` + 文件路径 / `读取更新日志失败` + 原始异常）。**只定位与读取、不做任何解析**，同样**刻意不进 `ensureUpdater()`** |
 | `update:progress` | 由 `base.send()` 推送 | 主 → 渲染：阶段 / 版本 / 下载进度 / `message` / `detail` |
 
 `register()` 末尾另有两个定时器：
@@ -77,6 +78,7 @@ index.ts  ──→  install.ts  ──→  actions.ts  ──→  base.ts
 - `appVersion()`：`app.getVersion()`，抛错回空串。
 - 日志：`logPath()` = `userData/updater.log`（与 `preview-protocol.log` 同思路）；`writeLog(line)` 追加 `ISO 时间 + 空格 + line`，**写失败静默**（日志失败不影响更新流程）。
 - 小工具：`msg(e)`（取 `e.message`，否则 `String(e)`）、`errText(e)`（同上，语义为「原始报错文本」）、`bytesText(n)`（小于 1024 回 `<n> B`；小于 1 MB 回一位小数 `KB`；否则回一位小数 `MB`）。
+- **随包更新日志**：`changelogPath()` = `path.join(app.getAppPath(), 'CHANGELOG.md')`（dev = 项目根、打包后 = `app.asar` 根，两种形态命中同一份路径逻辑，与 `hfEnv` 读 `vendor/gsap` 同口径）；`readBundledChangelog()` 做存在性检查后 `readFileSync(file, 'utf8')`，返回 `{ ok: true, text }`；文件不存在回 `{ ok: false, message: '没有找到更新日志文件', detail: file }`，读取抛错回 `{ ok: false, message: '读取更新日志失败', detail: errText(e) }`。**只读原文、不解析**（分块与行内排版在渲染层 `@renderer/utils/changelog.ts`），与 `logPath()` / `update:open-log` 一样**刻意不依赖 electron-updater**。
 - `payload()`：把常驻 `state` 收成一份 `UpdateProgressPayload`（`stage` 经 `toStage()`、`currentVersion` 为空时回落 `appVersion()`、`bytesPerSecond` 取自 `state.bps`）；`update:progress` 推送与 `update:status` 取用**共用同一个出口**。
 - `send(extra?)`：`flags.getWindow()` 取窗口，`win && !win.isDestroyed()` 时 `webContents.send(IPC.Update.Progress, payload())`（抛错忽略）；给 `extra` 时顺带写一行日志。
 - `bindEvents(u)`：**只在 `ensureUpdater()` 首次加载成功时绑一次**，共 6 个事件——`checking-for-update`（`checking` + `正在检查更新…`）、`update-available`（按 `skippedVersion` 命中与否落 `skipped` / `available`）、`update-not-available`（`none`）、`download-progress`（`downloading` + 百分比与字节数）、`update-downloaded`（`downloaded`）、`error`（`setError()`）。每次回调末尾都 `send()`（`update-available` / `update-downloaded` / `error` 另带一行日志）。
@@ -184,7 +186,22 @@ renderer「打开日志目录」→ updateTools.openLog() → update:open-log
 
 它存在的原因与**出现时机**：`message` 只说人话（不含 `latest.yml` / 存储桶 / 请求 URL），真正的处置线索全在日志里。入口**只在更新确实出错时出现**——设置页用 `updateLogVisible = updateStage === 'error' || updateStatusClass === 'hf-error'` 控制它的 `v-if`：没出错时把用户送进日志目录没有意义（他看不懂日志），只会以为哪里坏了；出错时它是拿到原始报错的唯一出口。**启动静默检查的失败同样能看见**：那次失败发生在设置页订阅 `update:progress` 之前，页面 `onMounted` 在订阅之后用 `updateTools.status()` 补一次主进程状态（`stage` 非 `idle` 才套用），把 `error` 阶段连同这个入口一起带出来。它不依赖 electron-updater 能否加载，也不依赖任何更新状态——这两条理由不变。
 
-### 3.5 状态文案（主进程单点产出）
+### 3.5 查看更新日志（`update:changelog`，`index.ts` 内的 handler）
+
+```
+renderer「查看更新日志」→ updateTools.changelog() → update:changelog
+  └─ handler（不调用 ensureUpdater）
+       ├─ file = base.changelogPath()      → app.getAppPath()/CHANGELOG.md
+       ├─ 文件不存在 → { ok: false, message: '没有找到更新日志文件', detail: file }
+       ├─ 读取抛错   → { ok: false, message: '读取更新日志失败', detail: errText(e) }
+       └─ 读到了     → { ok: true, text }   UTF-8 原文，一个字符都不改
+```
+
+它存在的理由：应用内原先没有「这个版本改了什么」的入口，更新日志只存在于仓库里。**主进程只做「定位 + 读取」**——分块（按 `## ` 切块、块内按**表头列名**映射条目，因为这份日志的表格有 5 列 / 4 列 / 3 列三套）、挑出「最新一版」、把行内 markdown 记号还原成纯文字，全部属于展示层，落在渲染层纯函数 `src/renderer/src/utils/changelog.ts`；界面是设置页「应用更新」第一排动作按钮里的「查看更新日志」与其弹窗 `ChangelogDialog.vue`（`v-if` 挂载即取一次、关掉即销毁）。弹窗**只显示最新一版**：一行「版本 / 时间」+ 每条一行「`[标签]` 标题」，**最多先 10 条**（`ENTRY_LIMIT`，超出给「展开全部 N 条」按钮），旧版收进「历史版本（N）」折叠区；**全模板纯文本渲染，没有 `v-html`**，解析器也不产出 HTML。
+
+能读到内容的前提是 `CHANGELOG.md` 随包进 asar——`package.json` 的 `build.files` 里列了 `"CHANGELOG.md"`（与 `"README.md"` 并列），于是 `app.getAppPath()` 在 dev 与打包版都命中它。与 `update:open-log` / `update:status` 同理，这条 handler **刻意不进 `ensureUpdater()`**：看日志与 electron-updater 能否加载无关。
+
+### 3.6 状态文案（主进程单点产出）
 
 `state.message` 只在 `base.bindEvents()` 的事件回调与各动作入口里写，渲染层直接渲染、不再拼串（2026-10 起）：
 
@@ -209,6 +226,7 @@ renderer「打开日志目录」→ updateTools.openLog() → update:open-log
 | `quitAndInstall` 抛错 | `install.ts` | `error` | `启动安装程序失败，请重新下载安装包后手动安装`（detail：`quitAndInstall 失败：…`） |
 | 模块未加载（`notReady()`） | `actions.ts` | — | `更新模块不可用，请重新安装应用`（detail：`updaterLoadError \|\| 'electron-updater 未加载'`） |
 | `update:open-log` handler 抛错 | `index.ts` | — | `打开日志目录失败`（detail：原始异常） |
+| `update:changelog` handler 读不到文件 / 读失败 | `base.ts` | — | `没有找到更新日志文件`（detail：期望的文件绝对路径）/ `读取更新日志失败`（detail：原始异常）——这两条由 `readBundledChangelog()` 直接产出，展示在 `ChangelogDialog.vue` 的状态行里 |
 
 ## 4. 依赖与协作
 
@@ -216,7 +234,7 @@ renderer「打开日志目录」→ updateTools.openLog() → update:open-log
 
 | 文件 | import 自 | 引入内容 |
 | --- | --- | --- |
-| `index.ts` | `./base` | `flags`、`ensureUpdater`、`writeLog`、`payload`、`errText`、`logPath`、`appVersion`、`getUpdaterLoadError` |
+| `index.ts` | `./base` | `flags`、`ensureUpdater`、`writeLog`、`payload`、`errText`、`logPath`、`appVersion`、`getUpdaterLoadError`、`readBundledChangelog` |
 | `index.ts` | `./actions` | `checkNow`、`downloadUpdate`、`cancelDownload` |
 | `index.ts` | `./install` | `installNow`、`finalizePendingUpdate`、`bindBusyTracking`、`isBusy`、`quitForUpdate` |
 | `actions.ts` | `./base` | `state`、`flags`、`ensureUpdater`、`getUpdaterLoadError`、`appVersion`、`writeLog`、`msg`、`setError`、`humanError`、`send`、`errText`、类型 `UpdaterLike` |
@@ -228,7 +246,7 @@ renderer「打开日志目录」→ updateTools.openLog() → update:open-log
 | 来源 | 引入内容 | 所在文件 |
 | --- | --- | --- |
 | `electron` | `app`、`ipcMain`、`shell`（`shell` 仅供 `update:open-log` 使用） | `index.ts`；`app` / `ipcMain` / `dialog` 由 `install.ts` 使用；`app` 由 `actions.ts` 使用 |
-| `node:path` / `node:fs` / `node:os` | 日志落盘与追加写、`open-log` 前的 `existsSync` 判定、**dev 判定 `process.cwd()/dev-app-update.yml` 是否存在**（`register()` 的启动分支与 `ensureUpdater()` 各判一次）、缓存目录与标记文件的路径拼装（`os.homedir()` 供 `updaterCacheDir()`） | `index.ts` / `base.ts` / `install.ts` |
+| `node:path` / `node:fs` / `node:os` | 日志落盘与追加写、`open-log` 前的 `existsSync` 判定、**随包 `CHANGELOG.md` 的定位与读取**（`base.changelogPath()` / `base.readBundledChangelog()`）、**dev 判定 `process.cwd()/dev-app-update.yml` 是否存在**（`register()` 的启动分支与 `ensureUpdater()` 各判一次）、缓存目录与标记文件的路径拼装（`os.homedir()` 供 `updaterCacheDir()`） | `index.ts` / `base.ts` / `install.ts` |
 | `../shared/ipc` | `IPC`（含 `IPC.Update` 组） | `index.ts`（频道装配与 `send()` 的推送频道）、`base.ts`、`install.ts`（4 路进度通道名） |
 | `../shared/types` | `RegisterCtx`、`UpdateCheckResult`、`UpdateProgressPayload`、`UpdateStage` | `index.ts` / `actions.ts` / `base.ts` |
 | `../settings` | `getUpdaterSettings`、`saveUpdaterSettings` | `actions.ts`（读写更新设置）、`base.ts`（`update-available` 分支读 `skippedVersion`）、`index.ts`（启动静默检查读 `autoCheck`） |
@@ -240,8 +258,8 @@ renderer「打开日志目录」→ updateTools.openLog() → update:open-log
 | --- | --- |
 | `src/main/index.ts` | `import * as updater from './updater'`（目录索引 → `./updater/index.ts`）；`updater.register(ctx)`；`window-all-closed` 用 `updater.quitForUpdate()` 避让安装器 |
 | `src/main/settings.ts` | 提供 `getUpdaterSettings()` / `saveUpdaterSettings()` 与 `settings:save-updater` |
-| `src/preload/index.ts` | `updateTools` 命名空间（7 个方法 + 进度订阅）：`version` / `check` / `download` / `cancel` / `install` / `status` / `openLog` / `onProgress` |
-| `src/renderer/src/pages/SettingsPage/components/UpdateSection.vue` | 「应用更新」区块：版本显示（`updateVersion` = 当前版本）/ 检查 / 下载 / 取消 / 重启安装 / 更新源设置 / 跳过版本（`updateNewVersion` = 待安装的目标版本，写入 `skippedVersion`）/ 「查看详情 · 收起详情」详情折叠 / 「打开日志目录」（**仅 `updateLogVisible` 时出现**）/ 挂载时用 `updateTools.status()` 补齐主进程状态 |
+| `src/preload/index.ts` | `updateTools` 命名空间（8 个方法 + 进度订阅）：`version` / `check` / `download` / `cancel` / `install` / `status` / `openLog` / **`changelog`** / `onProgress` |
+| `src/renderer/src/pages/SettingsPage/components/UpdateSection.vue` | 「应用更新」区块：版本显示（`updateVersion` = 当前版本）/ 检查 / 下载 / 取消 / 重启安装 / 更新源设置 / **「查看更新日志」（`changelogVisible`，打开子组件 `ChangelogDialog.vue`，数据来自 `update:changelog`）** / 跳过版本（`updateNewVersion` = 待安装的目标版本，写入 `skippedVersion`）/ 「查看详情 · 收起详情」详情折叠 / 「打开日志目录」（**仅 `updateLogVisible` 时出现**）/ 挂载时用 `updateTools.status()` 补齐主进程状态 |
 
 ## 5. 注意事项与实现要点
 
@@ -256,7 +274,7 @@ renderer「打开日志目录」→ updateTools.openLog() → update:open-log
 ### 5.2 其余实现要点
 
 - **`electron-updater` 是运行时 `require`，不是 `import`**：它是 CJS 包（`main: out/main.js`，无 ESM 具名导出），`import { autoUpdater }` 会失败。整段 `require` 包在 `try` 里（在 `base.ensureUpdater()` 内），失败只记 `updaterLoadError`，**不会让主进程启动崩掉**。
-- **懒加载是首屏优化的一部分**（2026-10 加入）：原先顶层 `require('electron-updater')` 会在**建窗之前**付出它的模块图加载成本（实测 ~70ms，冷启动 / 杀软扫描时更久），直接推迟首屏。现在 `register()` 完全不碰它，`ensureUpdater()` 在首次真正要用时才加载并完成一次 `bindEvents`；`autoCheck=false` 的用户更是整个会话都不会加载它。**注意**：`ensureUpdater()` 有 `updater.loadTried` 一次性标志，失败后不会反复重试（避免每次都卡在坏依赖上）。**`update:open-log` 与 `update:status` 是例外**——两者都不进 `ensureUpdater()`：前者在依赖加载失败时最需要（见 §3.4），后者只是把常驻的 `state` 读出来，与 electron-updater 能否加载无关。
+- **懒加载是首屏优化的一部分**（2026-10 加入）：原先顶层 `require('electron-updater')` 会在**建窗之前**付出它的模块图加载成本（实测 ~70ms，冷启动 / 杀软扫描时更久），直接推迟首屏。现在 `register()` 完全不碰它，`ensureUpdater()` 在首次真正要用时才加载并完成一次 `bindEvents`；`autoCheck=false` 的用户更是整个会话都不会加载它。**注意**：`ensureUpdater()` 有 `updater.loadTried` 一次性标志，失败后不会反复重试（避免每次都卡在坏依赖上）。**`update:open-log` / `update:status` / `update:changelog` 是例外**——三者都不进 `ensureUpdater()`：前者在依赖加载失败时最需要（见 §3.4），`status` 只是把常驻的 `state` 读出来，`changelog` 只读一次随包文件，都与 electron-updater 能否加载无关。
 - **`forceDevUpdateConfig` 只在 `base.ensureUpdater()` 里打开（2026-10 调整）**：`!app.isPackaged && fs.existsSync(path.join(process.cwd(), 'dev-app-update.yml'))` 成立时，用 `try { (autoUpdater as any).forceDevUpdateConfig = true } catch {}` 打开它。**理由**：手动检查与启动静默检查必须走同一条路——原先只有 `register()` 的启动分支会打开这个开关，于是「dev 里项目根放了 `dev-app-update.yml`、点『检查更新』却没反应」，而 3 秒后的静默检查反而能通。启动分支里那段重复的赋值**已删除**，只留一句注释指向 `ensureUpdater()`；启动分支的提前 return（dev 且无该文件 ⇒ 写日志 `startup check skipped: dev 环境未提供 dev-app-update.yml` 并跳过）保持不变。该文件名已进 `.gitignore`，**故 `npm run dev` 默认就是「不检查」**——这正是下面那条守卫要在界面上说清楚的事。
 - **「有事件才算成功」的两条守卫（设计约定 ⑦，2026-10 加入）**：`actions.checkNow()` 在 `await u.checkForUpdates()` 之后、`if (state.stage === 'available')` 之前判 `state.stage === 'checking'`；`actions.downloadUpdate()` 在 `try/catch` 之后、`return { ok: true, version }` 之前判 `state.stage === 'downloading' && !state.downloaded`。两者都落 `error`、成对写 `message` / `detail`、写一行 `check declined` / `download declined` 日志并返回 `ok: false`。**依据**：electron-updater 在 `!isUpdaterActive()` 时 `checkForUpdates()` 直接 `return Promise.resolve(null)` 且不发任何事件（`isUpdaterActive()` = `app.isPackaged || forceDevUpdateConfig`）；已有检查在飞时它复用旧 Promise、同样不发新事件。`downloadUpdate()` 的正常路径则必然在 resolve 之前发 `update-downloaded`（其 `executeDownload` 里 `await taskOptions.done(...)`），所以「resolve 了却既无进度也无 downloaded 标记」等价于全程无事件。没有这两条守卫时，主进程自己写下的「正在检查更新…」/「正在下载更新…」会被当作终态送到界面，卡片永远停在那一句。
 - **依赖由 electron-builder 自动收集**（2026-10 修正）：`build.files` 里**不再**有 `"!node_modules/**/*"` 与逐包白名单，`electron-updater` 及其传递依赖（`builder-util-runtime`、`debug`、`ms`、`sax`、`js-yaml`、`semver`、`fs-extra`、`lazy-val`、`lodash.*`、`tiny-typed-emitter` 等）由打包器按 `dependencies` 闭包自动纳入。
@@ -290,7 +308,7 @@ renderer「打开日志目录」→ updateTools.openLog() → update:open-log
   | `app-update\.yml` / `ENOENT` | 当前版本不支持自动更新，请到应用官网下载最新版本 | `本机缺少更新配置（app-update.yml），当前可能不是安装版。` + tail |
   | 兜底 | 更新失败，请稍后重试 | `原始报错：` + first（**不带**请求地址） |
 
-  > 上表之外还有两条**不由 `humanError()` 产出**的 `error` 文案（两条沉默守卫，逐字见 §3.5）：`开发环境不检查更新` / `检查更新失败，请稍后重试`、`下载没有开始，请稍后重试`。它们没有原始异常可抠，`detail` 是手写的固定句子。
+  > 上表之外还有两条**不由 `humanError()` 产出**的 `error` 文案（两条沉默守卫，逐字见 §3.6）：`开发环境不检查更新` / `检查更新失败，请稍后重试`、`下载没有开始，请稍后重试`。它们没有原始异常可抠，`detail` 是手写的固定句子。
 - **动作接口的失败分支也成对回带**：`checkNow()` 的 5 个返回分支、`downloadUpdate()` 的失败与静默放弃分支、`cancelDownload()` / `installNow()` 的异常分支都带 `message` + `detail`；`notReady()` 同样是双字段。
 - **日志**：所有动作与事件写 `userData/updater.log`（与 `preview-protocol.log` 同思路），路径由 `base.logPath()` 单点产出、`base.writeLog()` 与 `index.ts` 的 `update:open-log` handler 共用；排查「检查更新失败」先看它，界面上则点「打开日志目录」。动作入口的行有 `check start trigger=` / `check declined trigger=` / `download start` / `download declined` / `cancel` / `quitAndInstall`，事件行有 `update-available <version>` / `update-downloaded <version>` / `error <原文>`，安装收尾另有 `install marker 版本 …` / `安装成功（…），已清理下载缓存 pending/ 共 N 项`。
 

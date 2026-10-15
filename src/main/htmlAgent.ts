@@ -19,6 +19,8 @@ const HTML_AGENT_SYSTEM = [
   '   - 时间轴一律用 gsap.timeline({ paused: true }) 创建（起播由渲染器与预览控制负责，不要自动播放）；',
   '   - 时间轴登记到「以 composition id 为键的对象」上，而不是数组：',
   '     window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;（键必须与 data-composition-id 完全一致）',
+  '   - 画布（成片尺寸）以用户消息里【画布】给出的尺寸为准：在 <html> 上写死 data-resolution="landscape|portrait|square"，',
+  '     并把主舞台容器做成该尺寸的固定 px 版式（不要用 vw / vh / 百分比自适应、不要 transform: scale 缩放舞台），内容排满整块画布；',
   '3. 视觉风格：深空科技 / Cyber UI（深色背景 #0B1220、电子蓝 #00D4FF 辉光、玻璃拟态、霓虹渐变）。',
   '4. 若用户提供了字幕，按字幕条目逐条依次播放入场动画。',
   '5. 字幕时间轴必须严格按提供的起止时间执行：每条字幕在其开始时间出现、结束时间前完成淡出，禁止把上一条字幕显示到下一条开始；时间为秒、可带小数（毫秒精度），GSAP 时间轴直接按这些小数秒定位，不要四舍五入或自行重排；无结束时间的行自行按语义安排节奏。',

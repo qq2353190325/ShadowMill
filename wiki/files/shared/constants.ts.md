@@ -1,11 +1,11 @@
 # src/shared/constants.ts
 
-> 应用级公共常量：品牌文案（中文名 / 英文名 / 口号）+ 出网请求 User-Agent + **项目素材的类型白名单与合计上限**的唯一来源
+> 应用级公共常量：品牌文案（中文名 / 英文名 / 口号）+ 出网请求 User-Agent + **项目素材的类型白名单与合计上限** + **成片画布的取值与尺寸（`RenderCanvas`）**的唯一来源
 
 - **所在目录**：`src/shared/`
-- **类型**：共享常量（纯字面量，无 import、无副作用）
-- **规模**：41 行（本轮由 30 → 41：新增「项目素材」一节 3 个常量）
-- **对外导出**：`APP_NAME`、`APP_NAME_EN`、`APP_SLOGAN`、`APP_SLOGAN_SHORT`、`APP_USER_AGENT`（5 个字符串常量）+ `MAX_MATERIALS`、`IMAGE_MATERIAL_EXTS`、`VIDEO_MATERIAL_EXTS`（**本轮新增的 3 个素材常量**）
+- **类型**：共享常量（纯字面量，零副作用；顶部只有一处 `import type { RenderCanvas } from './types'`，纯类型导入不产生运行时代码）
+- **规模**：70 行（30 → 41 是新增「项目素材」一节 3 个常量；41 → 70 是新增「成片画布」一节 4 个常量）
+- **对外导出**：`APP_NAME`、`APP_NAME_EN`、`APP_SLOGAN`、`APP_SLOGAN_SHORT`、`APP_USER_AGENT`（5 个字符串常量）+ `MAX_MATERIALS`、`IMAGE_MATERIAL_EXTS`、`VIDEO_MATERIAL_EXTS`（3 个素材常量）+ `RENDER_CANVASES`、`CANVAS_SIZES`、`CANVAS_LABELS`、`DEFAULT_CANVAS`（**本次新增的 4 个画布常量**）
 
 ## 1. 作用与职责
 
@@ -13,15 +13,17 @@
 
 它存在的理由（源码头部注释写明）：品牌文案原先散落在 `src/renderer/index.html` 的窗口标题与启动画面、`App.vue` 标题栏、`HomePage` 首页、`whisper.ts` 的 User-Agent 等处，「改一处漏一处」，而且散落的字符串没有任何编译期提示。现在各处一律 `import` 本文件，改品牌名只需要动清单上的少数几处。
 
-**「项目素材」一节（本轮新增）复用同一思路**：素材的类型白名单与合计上限原先只可能写死在主进程 handler 里，现在集中在本文件，**主进程用它做准入与截断，渲染层用同一份常量做展示**（`n / 20` 计数与「支持哪些格式」的提示行），两端不会各写一套而悄悄漂移。
+**「成片画布」一节（本次新增）复用同一思路**：画布的取值与像素必须三端一致（主进程往渲染入口注入 `<html data-resolution>`、主进程写生成提示词、渲染层的下拉选项与预览 iframe），所以集中在本文件当**尺寸唯一真源**——取值与尺寸要与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 对齐（本项目只暴露 1080 三档），改尺寸时若与 CLI 对不上，成片会退回 CLI 自己的兜底 `portrait`。
+
+**「项目素材」一节复用同一思路**：素材的类型白名单与合计上限原先只可能写死在主进程 handler 里，现在集中在本文件，**主进程用它做准入与截断，渲染层用同一份常量做展示**（`n / 20` 计数与「支持哪些格式」的提示行），两端不会各写一套而悄悄漂移。
 
 与 `ipc.ts` / `types.ts` 的定位差别：
 
 | 文件 | 内容 | 是否属于「IPC 契约」 |
 |---|---|---|
-| `ipc.ts` | 85 个 IPC 频道名字符串（10 组） | 是（禁止改动） |
+| `ipc.ts` | 87 个 IPC 频道名字符串（10 组） | 是（禁止改动） |
 | `types.ts` | 跨进程载荷类型 | 是（线上字段格式禁止改动） |
-| `constants.ts` | 品牌文案、请求标识、**素材白名单与上限** | **否**——改它不影响任何频道名或载荷格式；但**素材常量会同时约束主进程校验与界面提示**，改动等于改产品规则 |
+| `constants.ts` | 品牌文案、请求标识、**成片画布取值与尺寸**、**素材白名单与上限** | **否**——改它不影响任何频道名或载荷格式；但**素材常量会同时约束主进程校验与界面提示**、**画布常量会同时约束生成提示词 / 预览画布 / 渲染入口**，改动等于改产品规则 |
 
 ## 2. 导出常量
 
@@ -35,6 +37,10 @@
 | `MAX_MATERIALS` | `20` | `number` | **项目素材合计上限**（图片 + 视频一起算）：主进程 `project:add-materials` 据此跳过超限文件、`normalizeMaterials()` 据此截断；渲染层 `MaterialsSection.vue` 用它显示 `n / 20` 与上限提示 |
 | `IMAGE_MATERIAL_EXTS` | `['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg']` | `string[]` | 图片素材白名单：`project:pick-media` 据此给文件框过滤（`kind === 'image'` 时还开 `multiSelections`）、`materialKindOf()` 据此判 `'image'`、渲染层据此显示支持格式 |
 | `VIDEO_MATERIAL_EXTS` | `['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi']` | `string[]` | 视频素材白名单：同上（视频为单选），`materialKindOf()` 据此判 `'video'` |
+| `RENDER_CANVASES` | `['landscape', 'portrait', 'square']` | `RenderCanvas[]` | **成片画布三档**：主进程 `video.ts` / `projects.ts` 的白名单、渲染层 `utils/render.ts` 的下拉选项来源；类型 `RenderCanvas` 定义在 `types.ts` |
+| `CANVAS_SIZES` | `landscape: { width: 1920, height: 1080 }`、`portrait: { width: 1080, height: 1920 }`、`square: { width: 1080, height: 1080 }` | `Record<RenderCanvas, { width: number; height: number }>` | 每个画布的实际像素（= composition 尺寸 = 成片尺寸）：渲染入口留痕、生成提示词、预览 iframe 的内联宽高与缩放比都按它算 |
+| `CANVAS_LABELS` | `landscape: '横屏 16:9'`、`portrait: '竖屏 9:16'`、`square: '方形 1:1'` | `Record<RenderCanvas, string>` | 画布的界面 / 提示词文案：放这里而不是各处自己拼，否则「界面选的」与「告诉模型的」会对不上 |
+| `DEFAULT_CANVAS` | `'landscape'` | `RenderCanvas` | 项目没设 `canvas` 时用的画布：主进程白名单校验失败、渲染层 `normalizeCanvas()` 遇到脏数据都落到它 |
 
 ### 2.1 「项目素材」三个常量的取值理由（源码注释逐字）
 
@@ -57,7 +63,43 @@ export const VIDEO_MATERIAL_EXTS = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'];
 2. **`svg` 是刻意的**：矢量图做图标 / 装饰最省体积，且不涉及解码器；扩展名比对**大小写不敏感**（`materialKindOf()` 先 `toLowerCase()`）。
 3. **视频白名单与旧的单个视频素材完全一致**：素材库改造没有扩大视频格式范围，`project:pick-media` 的视频分支过滤项就是这份数组。
 
-### 2.2 品牌常量的推导关系
+### 2.2 「成片画布」四个常量的取值理由（源码注释逐字）
+
+```ts
+// ===== 成片画布（HyperFrames 的画布预设，**尺寸唯一真源**）=====
+// 取值与尺寸必须与 HyperFrames CLI 的 CANVAS_DIMENSIONS 对齐（resources/hyperframes/.../dist/cli.js：
+//   landscape 1920x1080 / portrait 1080x1920 / square 1080x1080，另有 4k 三档——本项目只暴露 1080 三档）。
+// 为什么放在 shared：三个消费点必须用同一组数——
+//   ① 主进程往渲染入口注入 <html data-resolution="…">（src/main/video.ts）
+//   ② 主进程把它写进生成提示词，让模型按同一块画布排版式（src/main/projects.ts）
+//   ③ 渲染层选项表与预览 iframe 的画布尺寸（renderer/utils/render.ts、HtmlGenPage/PreviewSection.vue）
+// 改这里的尺寸/取值时，CLI 那边若对不上，成片会退回 CLI 自己的兜底 portrait（见 video.ts 的注释）。
+export const RENDER_CANVASES: RenderCanvas[] = ['landscape', 'portrait', 'square'];
+// 每个画布的实际像素（= composition 尺寸 = 成片尺寸；CLI 不传 --resolution 时输出就是它本身）
+export const CANVAS_SIZES: Record<RenderCanvas, { width: number; height: number }> = {
+  landscape: { width: 1920, height: 1080 },
+  portrait: { width: 1080, height: 1920 },
+  square: { width: 1080, height: 1080 }
+};
+// 画布的界面/提示词文案（中文简写）。放这里而不是各处自己拼：提示词（主进程）与下拉选项（渲染层）
+// 必须说同一句话，否则「界面选的」和「告诉模型的」会对不上。
+export const CANVAS_LABELS: Record<RenderCanvas, string> = {
+  landscape: '横屏 16:9',
+  portrait: '竖屏 9:16',
+  square: '方形 1:1'
+};
+// 项目没设 canvas 时用的画布。选 landscape 的理由：应用内预览画布历来是 16:9、首页也写着「1080P 导出」，
+// 老项目因此保持原有观感；此前「成片莫名变竖屏」正是因为没有这个确定值（CLI 兜底 portrait）。
+export const DEFAULT_CANVAS: RenderCanvas = 'landscape';
+```
+
+三条推论：
+
+1. **取值的真源在 CLI**：三档名字不是应用自己发明的，而是 HyperFrames `CANVAS_DIMENSIONS` 的键（另有 `landscape-4k` / `portrait-4k` / `square-4k` 三档未暴露）；`data-resolution` 只接受这几个值之一，写别的等于没写。
+2. **它是项目属性、不是渲染档位**：与 `AppSettings.render`（全局默认）和 `Project.render`（项目覆盖）那套层级无关——画布只有一处选择点（「HTML生成」页生成侧的「画布」下拉），存 `project.json` 的 `canvas`，缺省由 `DEFAULT_CANVAS` 兜底。
+3. **一个值管三处**：生成提示词里给模型的版式尺寸、预览 iframe 的画布、渲染入口注入的 `<html data-resolution>` 都读同一个值，所以「预览看到的画布」与「成片尺寸」必然一致。
+
+### 2.3 品牌常量的推导关系
 
 - `APP_USER_AGENT` 是**派生常量**（`APP_NAME_EN + '/1.0'`），不是独立字面量：改英文名时它自动跟随，不需要单独维护。版本片段 `'/1.0'` 是硬编码字面量，与 `package.json` 的 `version`（应用版本号）**无关**。
 - `APP_SLOGAN_SHORT` 是 `APP_SLOGAN` 的**独立子串**（去掉「一站式」），源码用两个常量分别表达「首页宽位」与「启动画面窄位」两种排版需求，而不是运行时 `slice()`。
@@ -94,19 +136,21 @@ export const VIDEO_MATERIAL_EXTS = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'];
 
 | 方向 | 对象 | 说明 |
 |---|---|---|
-| 依赖 | 无 | 零 import、零副作用，是纯常量模块 |
+| 依赖 | `src/shared/types.ts`（仅 `import type { RenderCanvas }`） | 零运行时 import、零副作用，是纯常量模块 |
 | 被 import | `src/main/whisper.ts` | `APP_USER_AGENT` → `httpGetFollow()` 的请求头 |
 | 被 import | `src/renderer/src/App.vue` | `APP_NAME` → 标题栏文案 |
 | 被 import | `src/renderer/src/pages/HomePage/index.vue` | `APP_NAME` / `APP_NAME_EN` → `brandTag`；`APP_SLOGAN` → `<h1>` |
 | 被 import | `src/main/projects.ts` | **`IMAGE_MATERIAL_EXTS` / `MAX_MATERIALS` / `VIDEO_MATERIAL_EXTS`**（本轮新增）：`materialKindOf()` 判类型、`materialExtsText()` 拼提示、`normalizeMaterials()` 截断、`project:pick-media` 给文件框过滤、`project:add-materials` 判上限 |
-| 被 import | `src/renderer/src/pages/HtmlGenPage/MaterialsSection.vue` | **`IMAGE_MATERIAL_EXTS` / `MAX_MATERIALS` / `VIDEO_MATERIAL_EXTS`**（本轮新增）：`n / {{ MAX_MATERIALS }}` 计数、`extText` 支持格式提示、上限 `title` |
+| 被 import | `src/renderer/src/pages/HtmlGenPage/MaterialsSection.vue` | **`IMAGE_MATERIAL_EXTS` / `MAX_MATERIALS` / `VIDEO_MATERIAL_EXTS`**：`n / {{ MAX_MATERIALS }}` 计数、`extText` 支持格式提示、上限 `title` |
+| 被 import | `src/main/video.ts` | **`CANVAS_SIZES` / `DEFAULT_CANVAS` / `RENDER_CANVASES`**（本次新增）：画布白名单校验、把 `data-resolution` 写进渲染入口、把「成片画布 = …」写进 `userData/video-duration.log` |
+| 被 import | `src/renderer/src/utils/render.ts` | **`CANVAS_LABELS` / `CANVAS_SIZES` / `DEFAULT_CANVAS` / `RENDER_CANVASES`**（本次新增）：再导出为 `RENDER_CANVAS_OPTIONS` / `canvasLabel()` / `canvasSize()` / `normalizeCanvas()` 给页面用 |
 | 被 import | `electron.vite.config.ts` | `APP_NAME` / `APP_NAME_EN` / `APP_SLOGAN_SHORT` → `brandHtmlPlugin()` 与 `checkBrandConsistency()` |
 | 被 include | `tsconfig.node.json` / `tsconfig.web.json` | 两份子工程都 `include: src/shared/**/*.ts`，故 main / preload / 渲染层三端都能引用 |
-| 别名 | `@shared/*` → `src/shared` | 在 `electron.vite.config.ts` 与 `tsconfig.web.json` 两处声明，新增别名需同步；渲染层引用写法为 `import { APP_NAME } from '@shared/constants'`（素材常量同理：`import { IMAGE_MATERIAL_EXTS, MAX_MATERIALS, VIDEO_MATERIAL_EXTS } from '@shared/constants'`） |
+| 别名 | `@shared/*` → `src/shared` | 在 `electron.vite.config.ts` 与 `tsconfig.web.json` 两处声明，新增别名需同步；渲染层引用写法为 `import { APP_NAME } from '@shared/constants'`（素材常量同理：`import { IMAGE_MATERIAL_EXTS, MAX_MATERIALS, VIDEO_MATERIAL_EXTS } from '@shared/constants'`；画布常量：`import { CANVAS_LABELS, CANVAS_SIZES, DEFAULT_CANVAS, RENDER_CANVASES } from '@shared/constants'`） |
 
 ## 6. 注意事项与实现要点
 
-- **不是 IPC 契约**：`ipc.ts` / `types.ts` 的「禁止改动」约束不适用于本文件——改品牌名不需要动任何频道名或载荷格式。但**素材常量改的是产品规则**：`MAX_MATERIALS` 一改，主进程的准入 / 截断与界面的 `n / 20` 会同时变，提示词长度与生成质量也随之变。
+- **不是 IPC 契约**：`ipc.ts` / `types.ts` 的「禁止改动」约束不适用于本文件——改品牌名不需要动任何频道名或载荷格式。但**素材常量改的是产品规则**：`MAX_MATERIALS` 一改，主进程的准入 / 截断与界面的 `n / 20` 会同时变，提示词长度与生成质量也随之变。**画布常量同理且更硬**：`CANVAS_SIZES` 必须与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 保持一致，改错等于成片尺寸错（CLI 读不到合法 `data-resolution` 时兜底 `portrait`）。
 - **上限只有一个来源**：不要在渲染层或主进程另写 `20`；渲染层只做展示（超限按钮不禁用，交给主进程回报跳过数），真正的截断发生在 `normalizeMaterials()` 与 `project:add-materials`。
 - **零运行时开销**：常量被各端打包器内联，main / preload / renderer 各自持有副本，不存在跨进程共享对象。
 - **不要在 shared 放业务逻辑**：本层任何**函数实现**都会同时进入 main 与 preload 两个 bundle（`ipc.ts` 文档中的同一约束），因此这里只放字面量与常量派生（`materialKindOf()` 这类判断留在 `src/main/projects.ts`）。

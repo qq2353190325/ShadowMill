@@ -11,10 +11,12 @@ import type {
   AlignProgressPayload,
   HtmlProgressPayload,
   PreloadApi,
+  RenderCanvas,
   RenderOverride,
   RuntimePackName,
   RuntimeProgressPayload,
   UpdateProgressPayload,
+  VideoRenderPayload,
   WhisperProgressPayload
 } from '../shared/types'
 
@@ -48,8 +50,9 @@ contextBridge.exposeInMainWorld('windowControls', windowControls);
 // 预览 & HyperFrames 转视频 API
 const hfTools: PreloadApi['hfTools'] = {
   openHtml: (): Promise<string | null> => ipcRenderer.invoke(IPC.Video.OpenHtml),
-  // 渲染档位（质量 / 帧率）随载荷下发；缺省项不下发，由主进程交给 CLI 默认（standard / 30）
-  renderVideo: (htmlPath: string, options?: RenderOverride) => ipcRenderer.invoke(IPC.Video.Render, Object.assign({ htmlPath }, options || {})),
+  // 渲染档位（质量 / 帧率）与成片画布（项目属性）随载荷一起下发；
+  // 档位缺省项不下发（由主进程交给 CLI 默认 standard / 30），画布缺省则由主进程落 DEFAULT_CANVAS
+  renderVideo: (htmlPath: string, options?: Omit<VideoRenderPayload, 'htmlPath'>) => ipcRenderer.invoke(IPC.Video.Render, Object.assign({ htmlPath }, options || {})),
   showInFolder: (filePath: string): Promise<void> => ipcRenderer.invoke(IPC.Video.ShowInFolder, filePath),
   onProgress: (callback: (data: { text: string }) => void): void => {
     ipcRenderer.on(IPC.Video.Progress, (_event, data: { text: string }) => callback(data));
@@ -157,6 +160,8 @@ const projectTools: PreloadApi['projectTools'] = {
   saveVideo: (name: string, videoPath: string) => ipcRenderer.invoke(IPC.Project.SaveVideo, { name, videoPath }),
   // 渲染档位的项目级覆盖（render 传 null 清除覆盖、回到跟随全局默认）
   setRender: (name: string, render: RenderOverride | null) => ipcRenderer.invoke(IPC.Project.SetRender, { name, render }),
+  // 成片画布方向（项目属性）：白名单校验在主进程（RENDER_CANVASES）
+  setCanvas: (name: string, canvas: RenderCanvas) => ipcRenderer.invoke(IPC.Project.SetCanvas, { name, canvas }),
   // HTML 生成/修改过程进度（单订阅：重复注册仅替换回调，避免页面切换叠加监听）
   onHtmlProgress: (callback) => {
     _htmlProgressCb = callback;

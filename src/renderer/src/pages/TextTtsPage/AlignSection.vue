@@ -71,6 +71,7 @@ import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import { escTxt } from '@renderer/utils/escape'
 import { useEnvGate } from '@renderer/composables/useEnvGate'
 import { fmtTime, fmtTimeMs } from '@renderer/utils/time'
+import { ttsUrl } from '@renderer/utils/url'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import { activeProviderLabel, activeTtsTab, firstVoiceId, loadVoices, refreshVoiceKeyState, requireCfg, voiceGroups, voiceKeyReady, voiceModelOf } from './helpers'
 
@@ -228,7 +229,8 @@ async function startAlign(skipEnvGuard = false): Promise<void> {
     });
     if (res && res.ok) {
       alignResult.value = res as unknown as AlignResult;
-      alignAudioSrc.value = 'file:///' + encodeURI(String(res.audioPath).replace(/\\/g, '/'));
+      // 整轨试听走 hgpreview://tts/…（对齐产物在 userData/voice/align-*/，见 utils/url.ts）
+      alignAudioSrc.value = ttsUrl(String(res.audioPath || ''));
       showAlignBar({ text: '对齐完成：' + ((res as unknown as AlignResult).details || []).length + ' 句', kind: 'done' }, false);
       setStatus(res.message || '对齐完成', 'hf-ok');
     } else if (res && res.canceled) {
@@ -266,8 +268,12 @@ function onCancel(): void {
 function playSeg(path: string): void {
   const el = segAudioEl.value;
   if (!el) return;
-  el.src = 'file:///' + encodeURI(String(path || '').replace(/\\/g, '/'));
-  el.play().catch(() => toast('该句试听文件已失效（临时目录被清理），可试听整轨'));
+  const url = ttsUrl(path);   // 对齐产物在 userData/voice/align-*/ 下，走 hgpreview://tts/…
+  if (!url) { toast('这一句的试听文件不在可预览目录里'); return; }
+  el.src = url;
+  // 失败原因别只报"文件失效"：dev 下以前是 http 页读 file:// 被 Chromium 拒（现已改走协议），
+  // 现在真正常见的是对齐任务目录已被下一次对齐清理掉。
+  el.play().catch(() => toast('这一句试听失败：对齐任务目录可能已被清理，可试听整轨'));
 }
 
 function onOpenDir(): void {

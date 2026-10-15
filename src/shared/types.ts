@@ -141,6 +141,18 @@ export interface RenderOptions {
 // 项目级覆盖：字段可缺省，缺省项跟随全局默认（settings.json 的 render）
 export type RenderOverride = Partial<RenderOptions>
 
+// ===== 成片画布方向（**项目属性，不是渲染档位**）=====
+// 取值与尺寸见 shared/constants.ts（RENDER_CANVASES / CANVAS_SIZES / DEFAULT_CANVAS），
+// 与 HyperFrames CLI 的 CANVAS_DIMENSIONS 对齐；本项目只暴露 1080 三档。
+// 为什么它不是渲染档位：项目覆盖 / 全局默认那套层级（RenderOverride）是给「质量 / 帧率」的，
+// 而画布是**这个项目长什么样**——只在一处选（「HTML生成」页的「画布」下拉，生成/修改前定），
+// 落进 project.json 的 canvas，并且同一个值同时决定三件事：
+//   ① 生成提示词里给模型的版式尺寸（projects.ts 的 buildMaterialPrompt）
+//   ② 预览 iframe 的画布（pages/HtmlGenPage/PreviewSection.vue）
+//   ③ 渲染入口注入的 <html data-resolution>（main/video.ts）
+// 因此「预览看到的画布」与「成片画布」必然是同一个尺寸。
+export type RenderCanvas = 'landscape' | 'portrait' | 'square'
+
 export interface AppSettings {
   customModel: CustomModelConfig
   // 语音服务（按厂家）：唯一写入源
@@ -568,6 +580,9 @@ export interface Project {
   content: ContentScript
   // 视频渲染档位的项目级覆盖：字段缺省即跟随全局默认（settings.json 的 render）
   render?: RenderOverride
+  // 成片画布方向（项目属性）：缺省 = DEFAULT_CANVAS（landscape 1920x1080）。
+  // 由 project:set-canvas 写入；生成提示词 / 预览画布 / 渲染入口三处都读它（见 RenderCanvas 的说明）。
+  canvas?: RenderCanvas
   createdAt: string
   updatedAt?: string
 }
@@ -643,6 +658,11 @@ export interface ProjectSetRenderPayload {
   name?: string
   render?: RenderOverride | null
 }
+// project:set-canvas 载荷：成片画布方向（项目属性）；非法/缺省一律忽略，不写进项目
+export interface ProjectSetCanvasPayload {
+  name?: string
+  canvas?: RenderCanvas
+}
 export interface ProjectSetAudioResult {
   audioFile: string
   // 设置/移除背景音频时，若 index.html 里的注入音轨被同步改写则为 true（渲染层据此刷新预览）
@@ -710,9 +730,13 @@ export interface ProjectHtmlResult {
 // ============================================================
 // ⑦ 预览 / HyperFrames 转视频（video.ts）
 // ============================================================
-// 渲染档位随载荷下发（渲染层已把「项目覆盖 > 全局默认」合并成有效值）；缺省则不传参数、走 CLI 默认
+// 渲染档位随载荷下发（渲染层已把「项目覆盖 > 全局默认」合并成有效值）；缺省则不传参数、走 CLI 默认。
+// canvas 不属「渲染档位」而是**项目属性**（见 RenderCanvas 的说明）：渲染层把当前项目的画布值一并传下来，
+// video.ts 据此往渲染入口注入 <html data-resolution>；缺省/非法则按 DEFAULT_CANVAS（landscape）注入——
+// 必须有个确定值，否则 HyperFrames 在「页面没声明画布」时兜底 portrait（1080x1920 竖屏）。
 export interface VideoRenderPayload extends RenderOverride {
   htmlPath?: string
+  canvas?: RenderCanvas
 }
 // 渲染结果：失败分支的 compatible=false 表示 HTML 未通过 HyperFrames 合规校验；
 // needPacks 非空表示本机缺运行环境包（界面据此弹下载确认框，见 docs/runtime-pack-split.md §5.2）
@@ -785,7 +809,8 @@ export interface PreloadApi {
   hfTools: {
     openHtml(): Promise<string | null>
     // options 为渲染档位（质量 / 帧率）；缺省项不下发，由主进程交给 CLI 默认（standard / 30）
-    renderVideo(htmlPath: string, options?: RenderOverride): Promise<VideoRenderResult>
+    // 档位与画布一起下发（htmlPath 由本方法第一参数给，故此处用 Omit 排除它）
+    renderVideo(htmlPath: string, options?: Omit<VideoRenderPayload, 'htmlPath'>): Promise<VideoRenderResult>
     showInFolder(filePath: string): Promise<void>
     onProgress(callback: (data: VideoProgressPayload) => void): void
   }
@@ -904,6 +929,8 @@ export interface PreloadApi {
     saveVideo(name: string, videoPath: string): Promise<IpcResult<ProjectSaveResult>>
     // 渲染档位的项目级覆盖；render 传 null 清除覆盖、回到跟随全局默认
     setRender(name: string, render: RenderOverride | null): Promise<IpcResult<ProjectSaveResult>>
+    // 成片画布方向（项目属性，不是渲染档位）：非法值由主进程忽略
+    setCanvas(name: string, canvas: RenderCanvas): Promise<IpcResult<ProjectSaveResult>>
     onHtmlProgress(callback: (data: HtmlProgressPayload) => void): void
   }
 }

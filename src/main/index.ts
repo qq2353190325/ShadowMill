@@ -47,7 +47,7 @@ import * as runtime from './runtime'
 const LEGACY_DIR_NAMES = ['my-app'];
 // 值得提示/迁移的应用自有条目（白名单）。**不列** Chromium 的 profile 目录
 // （Cache / Code Cache / GPUCache / Local State / Network / IndexedDB …）：那是浏览器缓存，
-// 跨目录搬没有意义；也不列 hf-projects（渲染临时目录，几百 MB 且可随时重新生成）。
+// 跨目录搬没有意义。（历史上还有一个 `hf-projects` 渲染临时目录，改成就地渲染后已不再产生。）
 // 以后新增应用自有条目时记得加进来。
 const OWN_DATA_ENTRIES = ['projects', 'whisper', 'voice', 'tts-output', 'html-agent', 'settings.json'];
 const USER_DATA_DIR = app.getPath('userData'); // %APPDATA%\<package.json 的 name>
@@ -303,10 +303,16 @@ bootLog('main module loaded');
 // ===== 预览文件协议 hgpreview://p/<encodeURIComponent(项目名)>/<相对路径> =====
 // dev 下渲染层来自 http://localhost，Chromium 会拦截 file:// iframe（Not allowed to load local resource），
 // 故 HTML 预览统一走本协议：主进程把 URL 路径映射回 userData\projects 下对应项目目录内文件。
+// 另有 `hgpreview://tts/<相对路径>` 一条路由，服务**项目外**的语音产物（见处理器的注释与 TTS_PREVIEW_DIRS）。
 // 须在 app ready 前声明特权（standard 保证相对路径解析、secure 对齐 file:// 的安全上下文行为）。
 protocol.registerSchemesAsPrivileged([
   { scheme: 'hgpreview', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
 ])
+
+// `hgpreview://tts/...` 允许读的 userData 子目录（白名单，只增不改语义）：
+//   tts-output —— 语音合成结果与「生成记录」列表里的历史音频
+//   voice      —— 逐句对齐的产物（voice/align-<时间戳>/xxx_aligned_*.wav 与 raw/*.wav）
+const TTS_PREVIEW_DIRS = ['tts-output', 'voice']
 
 // 预览协议用 MIME 表（直接读字节构造 Response 时必须显式给出，缺省 octet-stream 会被 Chromium 严格 MIME 检查拦下脚本）
 function previewMime(p: string): string {
@@ -417,6 +423,15 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
+  // dev 下 F12 开关 DevTools（默认吸附在窗口右侧）。打包版不注册：终端用户用不到，也免误触。
+  // 应用菜单已被 Menu.setApplicationMenu(null) 移除，所以这枚键在主进程里显式接管。
+  if (!app.isPackaged) {
+    mainWindow.webContents.on('before-input-event', (_event, input) => {
+      // 事件对象上没有 sender，按模块级窗口引用取（本应用只有这一个窗口，见 getWindow 的注释）
+      if (input.type === 'keyDown' && input.key === 'F12') mainWindow?.webContents.toggleDevTools()
+    })
+  }
+
   // 同步最大化状态给渲染层（用于切换 最大化/还原 图标）
   mainWindow.on('maximize', () => {
     mainWindow?.webContents.send(IPC.Window.MaximizedChange, true)
@@ -429,11 +444,48 @@ function createWindow(): void {
   })
 }
 
+// hgpreview 的路由解析：把「一段路径」翻译成「一个允许读的绝对路径」，不允许就返回 null。
+// 抽成独立函数的两个原因：① 处理器里那段 try/catch 已经很挤；② 路由判定必须**只看 pathname 的段序**，
+//    而 `hgpreview://tts/...` 那种写法里 `tts` 落在 **host 位**（`new URL(url).pathname` 里根本没有它），
+//    拿 host 当段判会静默走错分支 ⇒ 这里改成显式查询标记 `?tts=1`，并保留 `p/tts/...` 旧写法兼容。
+function resolveHgPreviewPath(rawUrl: string): { full: string; why: string } | null {
+  let u: URL;
+  try { u = new URL(rawUrl); } catch (e) { return null; }
+  const segs = u.pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
+  if (!segs.length) return null;
+
+  // `?tts=1` 是渲染层现用的写法；`/tts/...` 是当初设想的写法（`tts` 落在 host 位时 pathname 首段也是它），
+  // 留着兼容：两种都识别，免得将来有人手写 URL 时掉进项目分支找不着文件。
+  const isTts = u.searchParams.get('tts') === '1' || segs[0] === 'tts';
+  if (isTts) {
+    // 语音产物：`<userData 子目录>/<相对路径>`（对齐产物是多级的：voice/align-*/raw/*.wav）
+    const rel = (segs[0] === 'tts' ? segs.slice(1) : segs).join('/');
+    const cwd = app.getPath('userData');
+    const top = rel.split('/')[0];
+    if (TTS_PREVIEW_DIRS.indexOf(top) < 0) return { full: '', why: 'not-in-whitelist:' + top };
+    const dir = path.join(cwd, top);
+    const full = path.resolve(cwd, rel);
+    if (full !== dir && !full.startsWith(dir + path.sep)) return { full: '', why: 'traversal' };
+    return { full, why: '' };
+  }
+
+  // 项目文件：`/<项目名>/<相对路径>`。注意渲染层实际用的是 `hgpreview://p/<项目名>/…`，
+  // 那时 `p` 在 **host 位**、pathname 首段就是**项目名**——所以这里不再"剥 p/"，否则会把真实项目名当路由标记吃掉。
+  const name = segs[0];
+  const rel = segs.slice(1).join('/');
+  if (!name || !rel) return null;
+  const dir = projects.projectDir(name);
+  const full = path.resolve(dir, rel);
+  if (full !== dir && !full.startsWith(dir + path.sep)) return { full: '', why: 'traversal:' + name };
+  return { full, why: '' };
+}
+
 app.whenReady().then(() => {
   bootLog('app ready')
-  // hgpreview 协议处理：仅允许读取目标项目目录内的文件（防目录穿越），供预览 iframe 与页面内相对素材引用。
+  // hgpreview 协议处理：仅允许读取「目标项目目录内」或「白名单里的 userData 语音产物目录」的文件，
+  // 供预览 iframe、页面内相对素材引用、音频试听共用。路由解析见 resolveHgPreviewPath()。
   // 直接读文件字节构造 Response（net.fetch(file://) 在协议处理器内存在兼容性问题，易致预览空白）；
-  // 媒体文件（音轨 / 视频素材）走 rangeResponse 支持按字节范围取，见其注释（预览跳转依赖它）；
+  // 媒体文件（音轨 / 视频 / 音频）走 rangeResponse 支持按字节范围取，见其注释（预览跳转依赖它）；
   // 失败/异常落盘 userData/preview-protocol.log，便于预览异常时排查。
   protocol.handle('hgpreview', (request) => {
     const log = (line: string): void => {
@@ -442,15 +494,11 @@ app.whenReady().then(() => {
       } catch (e) { /* ignore */ }
     };
     try {
-      const segs = new URL(request.url).pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
-      const name = segs[0];
-      const rel = segs.slice(1).join('/');
-      if (!name || !rel) { log('404 ' + request.url); return new Response('Not Found', { status: 404 }); }
-      const dir = projects.projectDir(name);
-      const full = path.resolve(dir, rel);
-      if (full !== dir && !full.startsWith(dir + path.sep)) { log('403 ' + request.url); return new Response('Forbidden', { status: 403 }); }
-      if (!fs.existsSync(full) || !fs.statSync(full).isFile()) { log('404 ' + request.url + ' -> ' + full); return new Response('Not Found', { status: 404 }); }
-      return rangeResponse(full, request);
+      const hit = resolveHgPreviewPath(request.url);
+      if (!hit) { log('404 ' + request.url); return new Response('Not Found', { status: 404 }); }
+      if (!hit.full) { log('403 ' + request.url + '（' + hit.why + '）'); return new Response('Forbidden', { status: 403 }); }
+      if (!fs.existsSync(hit.full) || !fs.statSync(hit.full).isFile()) { log('404 ' + request.url + ' -> ' + hit.full); return new Response('Not Found', { status: 404 }); }
+      return rangeResponse(hit.full, request);
     } catch (e) {
       log('500 ' + request.url + ' ' + String((e as Error) && (e as Error).message ? (e as Error).message : e));
       return new Response('Bad Request', { status: 400 });

@@ -253,11 +253,11 @@
 
 - **`.hf-sel-menu` 的字号必须显式声明，不能指望继承**：弹层是 `<Teleport to="body">`，DOM 直接挂到 `body` 下，**继承不到** `.hf-sel` 上的 `font-size: 13px`。`assets/main.css` 的 `html, body` 现在给了全局基准 **14px**，因此漏写时弹层会按 14px 渲染，仍比触发器（13px）大一档。按规范「Teleport 到 `body` 的弹层要在弹层根节点显式写字号」，这句不能省。
 - **一般规律**：**Teleport 出去的 DOM 不只是丢 scoped 属性，也丢祖先的继承样式**——字号、颜色、行高、字体族这类靠继承生效的属性，都必须在弹层自己的选择器上重新声明。
-- **Teleport 使用者不止 `HfSelect`**（本轮核对更正）：`HfSelect.vue` 的弹层（`components/HfSelect.vue`）之外，`pages/TextTtsPage/VoiceSection.vue` 另有 **2 处** `<Teleport to="body">`（「创建克隆音色」与「删除云端音色确认」两个弹窗，复用 `.hf-modal` 类）。其中「创建克隆音色」弹窗里的模型下拉就依赖 `.hf-sel-menu` 的 `z-index: 9500` 盖住 `.hf-modal-mask` 的 `9000`。将来新增 Teleport 弹层时，要照上面两条（显式字号 + z-index 关系）各检查一遍。
+- **Teleport 使用者不止 `HfSelect`**（本轮核对更正）：`HfSelect.vue` 的弹层（`components/HfSelect.vue`）之外，`pages/TextTtsPage/VoiceSection.vue` 有 **2 处**（「创建克隆音色」与「删除云端音色确认」两个弹窗），`pages/SettingsPage/components/` 下另有 **2 处**（`UpdateSection.vue` 的「自定义更新源」、`ChangelogDialog.vue` 的更新日志弹窗），全部复用 `.hf-modal` 类 ⇒ **渲染层合计 5 处**。**其中只有 `HfSelect` 是为避开祖先的 `overflow: hidden` 而挂，另外 4 处弹窗都是因为 `.card` 的 `backdrop-filter` 会捕获 `position: fixed`**（理由见 `assets.md` §6）。「创建克隆音色」弹窗里的模型下拉就依赖 `.hf-sel-menu` 的 `z-index: 9500` 盖住 `.hf-modal-mask` 的 `9000`。将来新增 Teleport 弹层时，要照上面两条（显式字号 + z-index 关系）各检查一遍。
 
 ### 5.10 调用点清单
 
-组件未做全局注册，每个使用方都显式 `import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'`（部分还引入 `type HfSelectOption`）。全仓 `*.vue` 核对结果（**共 11 个文件、20 个实例**）：
+组件未做全局注册，每个使用方都显式 `import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'`（部分还引入 `type HfSelectOption`）。全仓 `*.vue` 核对结果（**共 11 个文件、21 个实例**）：
 
 | 文件 | 使用处（绑定模型） | 实例数 |
 | --- | --- | --- |
@@ -265,16 +265,17 @@
 | `pages/SettingsPage/components/ModelSection.vue` | `baseUrl`（Base URL 预设）、`modelId`（模型预设） | 2 |
 | `pages/SettingsPage/components/VoiceSection.vue` | `vProvider`（厂家下拉，带 `@change`） | 1 |
 | `pages/SettingsPage/components/RenderSection.vue` | `rQuality`（渲染质量）、`rFps`（渲染帧率） | 2 |
-| `pages/HtmlGenPage/index.vue` | `subSel`（字幕逐条设计动画）、`quality` / `fps`（转视频弹窗里的渲染档位，带 `:disabled="rendering"` 与 `@change`） | **3** |
+| `pages/HtmlGenPage/index.vue` | `subSel`（字幕逐条设计动画）、**`canvas`（画布 / 成片尺寸，带 `:disabled="rendering"` 与 `@change="onCanvasChange"`——本次新增）**、`quality` / `fps`（转视频弹窗里的渲染档位，带 `:disabled="rendering"` 与 `@change`） | **4** |
 | **`pages/HtmlGenPage/PreviewSection.vue`** | **`audioPick`（背景音频，带 `@change`）——本轮随预览卡片从 `index.vue` 搬来** | **1** |
 | `pages/SubtitlePage/TranscribeSection.vue` | `lang`（识别语言） | 1 |
 | `pages/TextTtsPage/SynthSection.vue` | `voiceId`、`saveTo`（带 `@change`）、`genSelIdx`（带 `empty-text`） | 3 |
 | `pages/TextTtsPage/AlignSection.vue` | `subSrc`（带 `@change`）、`voiceId` | 2 |
 | `pages/TextTtsPage/VoiceSection.vue` | `vcModel`（带 `@change`）、`mapVoice`（带 `ref`）、`mapModel` | 3 |
 | **`pages/VideoPreviewPage/index.vue`** | **`selectedName`（「预览项目」，带 `@change`）——本轮新增** | **1** |
-| **合计** | | **20** |
+| **合计** | | **21** |
 
-- **本轮的两处结构性变化**：① `HtmlGenPage/index.vue` 由 5 处减到 3 处（`videoSel` 视频素材随单视频素材一起删除、`audioPick` 移到同目录子组件 `PreviewSection.vue`）；② `VideoPreviewPage/index.vue` 新增 1 处「预览项目」。**实例总数仍是 20（文件数由 10 增到 11）**——「20 个调用点」这个数字依旧成立，但分布变了，改 `HfSelect` 时不要按旧清单核对。
+- **成片画布这一次新增 1 处调用点（本次改动）**：`pages/HtmlGenPage/index.vue` 的「画布」下拉（`canvas`）⇒ 该文件由 3 处增到 4 处、**全库 21 个实例 / 11 个文件**（文件数不变）。它与其他下拉无结构差异：`groups` 由 `RENDER_CANVAS_OPTIONS` 包成单组 computed。
+- **素材库那一轮的两处结构性变化**：① `HtmlGenPage/index.vue` 由 5 处减到 3 处（`videoSel` 视频素材随单视频素材一起删除、`audioPick` 移到同目录子组件 `PreviewSection.vue`）；② `VideoPreviewPage/index.vue` 新增 1 处「预览项目」。**那一轮实例总数仍是 20（文件数由 10 增到 11）**——分布变了，改 `HfSelect` 时不要按旧清单核对；**加上本次画布下拉后全库是 21 个实例**（见上一条）。
 - 各调用方的 `groups` 均由 `computed`（或常量）构造为 `{ label, options: [{ value, label }] }`；`TextTtsPage/SynthSection.vue` 与 `AlignSection.vue` 的 `:groups="voiceGroups"` 也一样合规——`helpers.ts` 的 `VoiceOption` 直接以 `value` 为音色键（刻意与 `HfSelectOption` 同名），因此**可以直接透传**、无需中间映射。
 
 ## 6. `LegacyDataDialog.vue`
@@ -371,7 +372,7 @@
 - **下拉值即项目名**：`selValue.get`、选项 `:value="mp.name"`、`onSelect(name)` 三处一致。
 - **HfSelect 的 `@change` 参数是字符串**：签名 `(value: string) => void`，不是 DOM Event；且**只在用户选中不同选项时**触发。
 - **菜单必须 `Teleport` + `fixed`**：`.card` 与 `.hf-modal` 都有 `overflow: hidden`；`z-index: 9500` 是为了盖住 `.hf-modal-mask`（9000）。改动这两点会同时破坏所有 **20 个调用点**（**11 个文件**）在卡片/弹窗内的表现。
-- **弹层字号必须自己声明，不能指望继承**：`.hf-sel-menu` 上的 `font-size: 13px` 不能删（理由见 5.9）。改这一处字号即对全部 20 个调用点生效。**Teleport 出去的 DOM 不只是丢 scoped 属性，也丢祖先的继承样式**。渲染层用 `Teleport` 的地方共 3 处：`components/HfSelect.vue` 1 处 + `pages/TextTtsPage/VoiceSection.vue` 2 处（两个弹窗）。
+- **弹层字号必须自己声明，不能指望继承**：`.hf-sel-menu` 上的 `font-size: 13px` 不能删（理由见 5.9）。改这一处字号即对全部 20 个调用点生效。**Teleport 出去的 DOM 不只是丢 scoped 属性，也丢祖先的继承样式**。渲染层用 `Teleport` 的地方共 **5 处**：`components/HfSelect.vue` 1 处 + `pages/TextTtsPage/VoiceSection.vue` 2 处 + `pages/SettingsPage/components/UpdateSection.vue` 1 处（「自定义更新源」）+ `pages/SettingsPage/components/ChangelogDialog.vue` 1 处。
 - **全局监听成对注册**：`document` 的 `mousedown`（capture）与 `window` 的 `scroll`（capture）/ `resize` 打开时挂、关闭时摘，`onBeforeUnmount` 再兜底摘一次。
 - **`activeIndex` 是扁平下标**：分组只影响渲染，不影响键盘顺序；分组 `:key="g.label"` 用 label，现有调用方至多一个 `label: ''` 的匿名组。
 - **切换后重进当前页**：`onSelect` 与 `onCreated` 都以 `goPage(props.page)` 收尾。

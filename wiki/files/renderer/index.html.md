@@ -35,11 +35,11 @@
 
 ### 2.1 CSP 指令逐条对照
 
-原始策略为（**本轮 `img-src` 新增 `hgpreview:`**）：
+原始策略为（`hgpreview:` 已在 `img-src` / `frame-src` / `media-src` 三处放行）：
 
 ```
 default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: hgpreview: data:;
-frame-src file: hgpreview:; media-src 'self' file:; script-src 'self' 'unsafe-inline';
+frame-src file: hgpreview:; media-src 'self' file: hgpreview:; script-src 'self' 'unsafe-inline';
 connect-src 'self' ws://localhost:5173
 ```
 
@@ -49,7 +49,7 @@ connect-src 'self' ws://localhost:5173
 | `style-src` | `'self' 'unsafe-inline'` | 允许同源样式表与**内联样式**。Vue SFC 的 `<style scoped>` 在运行时会以 `<style>` 标签注入，组件上也大量使用行内 `style`（如 StepBar 的 `width:210px`），故必须放开 `'unsafe-inline'`；启动画面的内联 `<style>` 同样依赖它 |
 | `img-src` | `'self' file: hgpreview: data:` | 图片允许同源、本地 `file:`、**`hgpreview:` 应用内协议**与 `data:`（占位图/内联图）。`file:` 是必需的：本地素材与试听图直接来自磁盘路径；**`hgpreview:` 是本轮为「HTML生成页」的素材缩略图新放行的**——`MaterialsSection.vue` 的 `thumbUrl()` 把图片素材拼成 `hgpreview://p/<项目名>/<相对路径>` 交给 `<img :src>`，dev 态 http 页面下 `file://` 会被 Chromium 拦截，因此缩略图与预览 iframe 走同一条自定义协议（见 2.4） |
 | `frame-src` | `file: hgpreview:` | 限定 iframe 可加载的源。`file:` 用于生产环境（`loadFile` 后同属 file 源）直接内嵌本地 HTML；`hgpreview:` 是主进程注册的预览专用协议，用于 dev 下绕过 Chromium 对 `http://localhost` 页面加载 `file://` iframe 的拦截 |
-| `media-src` | `'self' file:` | 音视频只允许同源与本地文件，禁止网络流媒体（配音试听、视频预览均为本地文件）。**素材库不涉及媒体请求**：视频卡片刻意不抽帧，只用 `▶` 字符标记（见 2.4） |
+| `media-src` | `'self' file: hgpreview:` | 音视频只允许同源、本地 `file:` 与**应用内协议 `hgpreview:`**，禁止网络流媒体。**`hgpreview:` 是成品视频与音频试听必需的**：`<video>` 走 `hgpreview://p/…`（视频预览页），`<audio>` 走 `hgpreview://p/…`（项目内背景音频试听）与 `hgpreview://tts/…?tts=1`（项目外语音产物试听），均见 2.4；缺它的表现是**媒体被静默拦掉**（视频全黑且连原生控件都不画、音频无声）。**素材库不涉及媒体请求**：视频卡片刻意不抽帧，只用 `▶` 字符标记（见 2.4） |
 | `script-src` | `'self' 'unsafe-inline'` | 允许同源脚本与内联脚本。dev 下 Vite 会注入内联模块脚本/HMR 引导代码；生产构建产物为 `'self'` 的本地 JS |
 | `connect-src` | `'self' ws://localhost:5173` | XHR/fetch/WebSocket 目标。`ws://localhost:5173` 专为开发期 HMR 的 WebSocket 通道预留 |
 
@@ -85,17 +85,20 @@ HTML 是**静态标记、无法 `import` TS 常量**，而启动画面必须在�
 
 **收尾**：`src/renderer/src/main.ts` 在 `mount()` 之后加 `.boot-done`（`opacity: 0` + `pointer-events: none`，0.28s 过渡），300ms 后 `remove()` 掉节点。
 
-### 2.4 `hgpreview:` 的两个用途（都与 CSS 里的一条指令对应）
+### 2.4 `hgpreview:` 的四个用途（都与 CSP 里的一条指令对应）
 
 | 用途 | 消费方 | 形态 | 对应 CSP 指令 |
 | --- | --- | --- | --- |
-| 预览 iframe | `HtmlGenPage/PreviewSection.vue` 的 `loadFrame()` | `hgpreview://p/<encodeURIComponent(项目名)>/<encodeURIComponent(relFile)>?v=<时间戳>`（`relFile` 取 `previewPath` 的文件名，兜底 `index.preview.html`） | `frame-src hgpreview:` |
-| **素材缩略图**（本轮新增） | `HtmlGenPage/MaterialsSection.vue` 的 `thumbUrl(file)` | `hgpreview://p/<encodeURIComponent(项目名)>/<encodeURIComponent(file)>`，`file` 是 `project.json` 里的项目内相对引用（`images/xxx.png`）；**整段做一次 `encodeURIComponent` 也成立**——主进程处理器按 `/` 切段后逐段 decode 再拼回相对路径，因此 `/` 变成 `%2F` 不影响定位 | `img-src hgpreview:` |
+| 预览 iframe | `HtmlGenPage/PreviewSection.vue` 的 `loadFrame()` | `previewUrl(项目名, relFile, true)` → `hgpreview://p/<encodeURIComponent(项目名)>/<逐段编码的 relFile>?v=<时间戳>`（`relFile` 取 `previewPath` 的文件名，兜底 `index.preview.html`） | `frame-src hgpreview:` |
+| 素材缩略图 | `HtmlGenPage/MaterialsSection.vue` 的 `thumbUrl(file)` | `previewUrl(项目名, file)`（`file` 是 `project.json` 里的项目内相对引用 `images/xxx.png`），交给 `<img :src>` | `img-src hgpreview:` |
+| 成品视频 | `VideoPreviewPage/index.vue` 的 `toHgPreviewUrl()` | `previewUrl(项目名, 'video/output.mp4', true)`（从 `project:load` 给的绝对路径反推最后两段），交给 `<video :src>` | `media-src hgpreview:` |
+| 音频试听 | `HtmlGenPage/PreviewSection.vue` 的 `setAudioPreview()`（**项目内**背景音频）；`TextTtsPage/SynthSection.vue` / `AlignSection.vue` 的 `ttsUrl()`（**项目外**语音产物） | 前者 `previewUrl(项目名, res.audioFile, true)` → `hgpreview://p/…`；后者 `hgpreview://tts/<逐段编码的相对路径>?tts=1`（**`?tts=1` 是路由标记**：host 位的 `tts` 不进 `pathname`，主进程改按查询标记路由；只放行 `tts-output` / `voice` 白名单，认不出时 `ttsUrl()` 返回空串 ⇒ 不给试听入口），交给 `<audio :src>` | `media-src hgpreview:` |
 
-其余两点：
+其余三点：
 
-- **视频素材不抽帧**：卡片用 `<span class="mat-play">▶</span>` 占位（源码注释：抽帧要额外依赖，收益不抵成本），因此**不产生任何媒体请求**，`media-src` 不需要为素材库放行新源。
-- **协议本体在主进程**：`hgpreview` 由 `src/main/index.ts` 注册（`projects.projectDir(name)` 定位根目录 + 越权校验，见 [main/index.ts.md](../main/index.ts.md)）。本文件只负责「允许页面用它」。
+- **URL 拼装只有一处**：`src/renderer/src/utils/url.ts` 的 `previewUrl()` / `ttsUrl()`（**逐段 `encodeURIComponent`、斜杠保持原样**，项目名整串编码，与主进程处理器「按段 `decodeURIComponent`」严格对应）。此前散在各页面里的 `'hgpreview://p/' + encodeURIComponent(...)` 内联拼装已全部收口——**不要照着旧写法手拼 URL**。
+- **视频素材不抽帧**：卡片用 `<span class="mat-play">▶</span>` 占位（源码注释：抽帧要额外依赖，收益不抵成本），因此**素材库不产生任何媒体请求**。
+- **协议本体在主进程**：`hgpreview` 由 `src/main/index.ts` 注册，**两条路由**——`p/<项目名>/<相对路径>`（`projects.projectDir(name)` 定位根目录 + 越权校验）与 `tts/<相对路径>?tts=1`（userData 下 `TTS_PREVIEW_DIRS = ['tts-output','voice']` 白名单，非白名单 403）；路径解析由 `resolveHgPreviewPath(rawUrl)` 承担，判定按「段 + 查询标记」、不看 host（见 [main/index.ts.md](../main/index.ts.md) §3.3）。本文件只负责「允许页面用它」。
 
 ## 3. 关键流程
 
@@ -114,7 +117,7 @@ HTML 是**静态标记、无法 `import` TS 常量**，而启动画面必须在�
 | 协作 | `src/renderer/src/main.ts` | 挂载后加 `.boot-done` 并在 300ms 后移除 `#boot-splash`（本条是启动画面的收尾契约） |
 | 协作 | `src/main/index.ts` | 该文件的 `backgroundColor: '#0B1220'` 与启动画面同色，保证「窗口 → 画面」之间不闪白 |
 | 协作 | `src/shared/constants.ts` | 三个占位符的值来源（`APP_NAME` / `APP_NAME_EN` / `APP_SLOGAN_SHORT`），经 `brandHtmlPlugin()` 注入 |
-| 契约 | `hgpreview:` 协议 | `frame-src`（预览 iframe）与 **`img-src`（素材缩略图）** 中的自定义协议由 `src/main/index.ts` 注册并在应用 ready 后 `protocol.handle`；两个消费方见 2.4 |
+| 契约 | `hgpreview:` 协议 | `frame-src`（预览 iframe）、`img-src`（素材缩略图）与 **`media-src`（成品视频 + 音频试听）** 中的自定义协议由 `src/main/index.ts` 注册并在应用 ready 后 `protocol.handle`（**两条路由**：`p/<项目名>/…` 与 `tts/<相对路径>` 白名单）；四个消费方见 2.4 |
 | 无依赖 | 无第三方 CDN | CSP 未放开任何外部源，所有依赖必须打进产物 |
 
 ## 5. 注意事项与实现要点
@@ -123,7 +126,8 @@ HTML 是**静态标记、无法 `import` TS 常量**，而启动画面必须在�
 - **启动画面的注释块必须保持单块闭合**：head 内 `<style>` 的注释 `/* … */` 一旦被提前闭合，后面那几行说明文字就会变成**无效 CSS 文本**；CSS 错误恢复会把它连同紧随其后的规则一起丢掉，表现是 `#boot-splash` 整条规则失效（启动画面裸奔、闪白）。改这段注释时确认只有一处 `*/`，且位于全部说明文字之后。
 - **CSP 是安全边界，不是装饰**：窗口使用 `contextIsolation: true` + `nodeIntegration: false`，渲染层只能通过 preload 暴露的命名空间访问主进程能力；CSP 进一步限制资源来源。新增外链资源（CDN 字体、在线图床）必须先改这里，否则会被静默拦截。
 - **`'unsafe-inline'` 的必要性**：Vue 运行时注入的 `<style>`、组件行内 style 与启动画面的内联样式都依赖它。移除会导致整个界面丢样式。
-- **`img-src` 必须同时含 `file:` 与 `hgpreview:`**：`file:` 服务磁盘路径的图片，`hgpreview:` 服务**项目内素材缩略图**（`MaterialsSection.vue` 的 `<img :src="thumbUrl(m.file)">`）；缺 `hgpreview:` 的表现是「素材卡片缩略图位置空白但控制台只有一条 CSP 拦截、页面不报错」。`media-src` 仍只需 `'self' file:`——视频卡片不抽帧、不请求媒体。
+- **`img-src` / `frame-src` / `media-src` 都要含 `hgpreview:`**：`img-src` 服务素材缩略图（`MaterialsSection.vue` 的 `<img :src="thumbUrl(m.file)">`），`frame-src` 服务预览 iframe，**`media-src` 服务成品视频（`VideoPreviewPage` 的 `<video>`）与音频试听（`PreviewSection` 的背景音频、`SynthSection` / `AlignSection` 的语音产物）**；缺 `hgpreview:` 的表现都是**该元素静默不工作**——缩略图位置空白、视频全黑且连原生控件都不画、音频静默不出声（控制台只有一条 CSP 拦截、页面不报错）。
+- **`file:` 只是老数据兜底，渲染层已不再拼 `file://`**：源码 CSP 注释（第 5-8 行）已改成「渲染层已不再拼 file://（见 CHANGELOG #27），`file:` 只是留给『项目里存着旧绝对路径』的老数据兜底」——即 5 处音频试听改走 `hgpreview://`（项目内背景音频 → `hgpreview://p/…`、项目外语音产物 → `hgpreview://tts/…?tts=1`）之后，`file:` 不再服务任何**现役**代码路径，只防老项目里残留的绝对路径打不开。唯一保留的 `file:///` 拼接在主进程 `src/main/video.ts:77`（不属页面资源）。
 - **端口写死的风险与兜底**：`ws://localhost:5173` 与 `electron.vite.config.ts` 中固定的 `127.0.0.1:5173`/`strictPort: true` 相配套——端口被占用时 Vite 直接报错而不是静默换端口，避免 Electron 仍指向 5173 导致白屏。
 - **挂载点不可改名**：`#app` 必须与 `main.ts` 的 `mount('#app')` 逐字一致。
 - **启动画面不要挪进 `#app`**：`mount('#app')` 会清空 `#app` 的子节点，放进去就等于「靠 Vue 来删除自己」，无法做淡出收尾（现在由 `main.ts` 主动加 `.boot-done` 再 `remove()`）。它的样式也必须自包含——`main.css` 在 Vue 挂载时才随 JS 注入，指望 CSS 变量会先渲染出一片无色背景。

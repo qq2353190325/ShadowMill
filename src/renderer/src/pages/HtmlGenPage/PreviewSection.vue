@@ -24,8 +24,15 @@
       <pre ref="thinkPreEl" style="margin:0;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;font-size:12px;line-height:1.7;color:rgba(255,255,255,.82)">{{ thinkText }}</pre>
     </div>
     <div class="empty-hint" v-show="emptyVisible">{{ emptyText }}</div>
-    <div ref="frameWrapEl" class="hgen-frame-wrap" v-show="frameVisible">
-      <iframe ref="frameEl" :src="frameSrc" class="hgen-frame" sandbox="allow-scripts allow-same-origin" @load="onFrameLoad"></iframe>
+    <!-- 画布（只读）：预览 iframe 的视口就是这块画布，成片尺寸与它一致。
+         选择入口在「HTML · Agent」卡片的「画布」处（它是项目属性，只在那一处选） -->
+    <div class="hgen-row" style="margin-bottom:8px">
+      <span class="sel-label" style="flex:none;width:auto">画布</span>
+      <span class="hf-file" style="flex:none;max-width:260px" title="预览与成片都按这块画布">{{ canvasText }}</span>
+      <span class="hgen-tip" style="margin:0">在「HTML · Agent」卡片的「画布」里选择（版式在生成时按它排）</span>
+    </div>
+    <div ref="frameWrapEl" class="hgen-frame-wrap" v-show="frameVisible" :style="{ paddingBottom: framePadPct }">
+      <iframe ref="frameEl" :src="frameSrc" class="hgen-frame" sandbox="allow-scripts allow-same-origin" :style="{ width: canvasBox.width + 'px', height: canvasBox.height + 'px' }" @load="onFrameLoad"></iframe>
     </div>
     <div class="hg-prev-ctl" v-show="ctlVisible">
       <button class="hf-btn" title="暂停 / 继续播放动画" style="padding:4px 14px;font-size:12px" @click="onPrevToggle">{{ prevToggleText }}</button>
@@ -54,11 +61,14 @@
 // 契约：status / statusClass / thinkText / rendering 由父页传入（生成与渲染两套状态都归父页写，
 //       因为发起生成与渲染的按钮都在父页）；defineExpose({ reload }) 供父页在 Agent 成功或
 //       项目状态变化后重新载入预览（原 index.vue 里的 syncPreview()）。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { RenderCanvas } from '@shared/types'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { escTxt } from '@renderer/utils/escape'
 import { applyRate, stepRate } from '@renderer/utils/rate'
+import { canvasLabel, canvasSize, normalizeCanvas } from '@renderer/utils/render'
+import { previewUrl } from '@renderer/utils/url'
 import { renderProgress } from '@renderer/composables/useRenderProgress'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 
@@ -168,14 +178,24 @@ function onPrevMessage(ev: MessageEvent): void {
     prevPlaying.value = false; // 自然播完：进度停满，按钮回「播放」（点击即从头重播）
   }
 }
-// 预览画布：iframe 内部恒为 1920x1080 视口，按容器宽度等比缩放，完整装入预览窗口
+// 预览画布：iframe **内部视口就是项目选定的画布尺寸**（= 渲染时 HyperFrames 的 composition 尺寸），
+// 外层容器按画布宽高比留位、iframe 按容器宽度等比缩放 ⇒ 预览里看到的版式就是成片里的版式。
+// 画布是项目属性（appState.project.canvas，缺省横屏 1920x1080），选择入口在「HTML · Agent」卡片。
+const canvas = computed<RenderCanvas>(() => normalizeCanvas(appState.project && appState.project.canvas));
+const canvasBox = computed(() => canvasSize(canvas.value));
+const canvasText = computed(() => canvasLabel(canvas.value) + '（' + canvasBox.value.width + '×' + canvasBox.value.height + '）');
+// 容器留位比例：padding-bottom = 高/宽（16:9 → 56.25%）
+const framePadPct = computed(() => ((canvasBox.value.height / canvasBox.value.width) * 100).toFixed(4) + '%');
 function fitFrame(): void {
   const wrap = frameWrapEl.value;
   const frame = frameEl.value;
   if (wrap && frame) {
-    frame.style.transform = 'scale(' + (wrap.clientWidth / 1920) + ')';
+    frame.style.transform = 'scale(' + (wrap.clientWidth / canvasBox.value.width) + ')';
   }
 }
+// 画布变了（用户在「HTML · Agent」卡片里改）：容器比例与 iframe 尺寸随 computed 自动更新，
+// 缩放比要重算一次（fitFrame 读容器宽度）。等 DOM 更新后再算，否则量到的还是旧布局。
+watch(canvas, () => { void nextTick(fitFrame); });
 function onFrameLoad(): void {
   // 每次载入完成（含重新播放的 reload）：重置进度与按钮状态，并按容器宽度重新缩放画布。
   // 这里刻意**不**主动起播——预览默认静止在第 0 帧，播放交给用户（「播放」按钮 / 拖动进度条）。
@@ -214,9 +234,9 @@ async function loadFrame(): Promise<void> {
     emptyText.value = (res as { message?: string })?.message || '预览副本生成失败';
     return;
   }
-  // 走 hgpreview:// 协议（dev http 页下 file:// iframe 会被 Chromium 拦截）；?v= 时间戳强制重新加载
+  // 走 hgpreview:// 协议（dev http 页下 file:// iframe 会被 Chromium 拦截）；bust=true 附时间戳强制重新加载
   const relFile = String(res.previewPath).split(/[\\/]/).pop() || 'index.preview.html';
-  frameSrc.value = 'hgpreview://p/' + encodeURIComponent(appState.currentName) + '/' + encodeURIComponent(relFile) + '?v=' + Date.now();
+  frameSrc.value = previewUrl(appState.currentName, relFile, true);
   frameVisible.value = true;
   emptyVisible.value = false;
 }
@@ -239,9 +259,10 @@ const audioEl = ref<HTMLAudioElement | null>(null);
 const audioSrc = ref('');
 const audioPreviewVisible = ref(false);
 
-function setAudioPreview(absPath: string): void {
-  if (absPath) {
-    audioSrc.value = 'file:///' + encodeURI(String(absPath).replace(/\\/g, '/'));
+// 背景音频试听：走 hgpreview://（dev 下 http 页读不了 file://，见 CHANGELOG #25）+ 时间戳避免缓存
+function setAudioPreview(relFile: string): void {
+  if (relFile) {
+    audioSrc.value = previewUrl(appState.currentName, relFile, true);
     audioPreviewVisible.value = true;
   } else {
     audioSrc.value = '';
@@ -251,9 +272,10 @@ function setAudioPreview(absPath: string): void {
 
 // 设 / 换 / 移除背景音频的统一收尾：刷新项目 → 更新试听源 → 重新加载预览
 // （主进程在 setAudio / clearAudio 里同步改写了 index.html 的音轨，必须重载 iframe 才听得到）
-async function afterAudioChange(tip: string, absPath: string): Promise<void> {
+// relFile 是**项目内相对路径**（audio/xxx）：主进程 setAudio 已把音频复制进项目目录。
+async function afterAudioChange(tip: string, relFile: string): Promise<void> {
   await refreshProject();
-  setAudioPreview(absPath);
+  setAudioPreview(relFile);
   await loadFrame();
   toast(tip);
 }
@@ -263,7 +285,7 @@ async function onPickAudioFile(): Promise<void> {
   if (!picked) return;
   const res = await window.projectTools.setAudio(appState.currentName, picked);
   if (!res || !res.ok) { toast((res as { message?: string })?.message || '设置音频失败'); return; }
-  await afterAudioChange('已设为背景音频：' + res.audioFile, picked);
+  await afterAudioChange('已设为背景音频：' + res.audioFile, res.audioFile || '');
 }
 
 // 从「已生成音频」里选一份设为背景音频（选中即生效，用完把下拉复位）
@@ -274,7 +296,7 @@ async function onAudioPick(): Promise<void> {
   if (!it) return;
   const res = await window.projectTools.setAudio(appState.currentName, it.path);
   if (!res || !res.ok) { toast((res as { message?: string })?.message || '设置背景音频失败'); return; }
-  await afterAudioChange('已设为背景音频：' + res.audioFile, it.path);
+  await afterAudioChange('已设为背景音频：' + res.audioFile, res.audioFile || '');
 }
 
 async function onRemoveAudio(): Promise<void> {

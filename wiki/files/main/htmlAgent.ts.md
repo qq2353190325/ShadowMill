@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块
-- **规模**：273 行
+- **规模**：275 行
 - **对外导出**：`HTML_AGENT_SYSTEM`、`extractHtmlFromReply`、`chatWithCustomModel`，以及类型 `AgentProgress`、`AgentOpts`
 
 ## 1. 作用与职责
@@ -52,7 +52,7 @@
 | 序号 | 约束要点 |
 |------|----------|
 | 1 | 直接输出完整 HTML 文档，以 `<!DOCTYPE html>` 开头，含 `<head>` 与 `<body>` |
-| 2 | 满足 HyperFrames composition 规范（与 **HyperFrames 官方文档 / 官方示例**对齐——此处「示例」指上游 HyperFrames 的样例）：① 动画根容器带 `data-composition-id`（如 `<div data-composition-id="main">`）；② 用 `<script src="./gsap.min.js"></script>` 引入 GSAP——该文件由应用随项目提供，**禁止改用任何 CDN 地址**，也不再钉版本号；③ 时间轴一律 `gsap.timeline({ paused: true })` 创建（起播由渲染器与预览控制负责，不自动播放）；④ 时间轴登记到**以 composition id 为键的对象**上：`window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;`，键必须与 `data-composition-id` 完全一致，**不要写成数组** |
+| 2 | 满足 HyperFrames composition 规范（与 **HyperFrames 官方文档 / 官方示例**对齐——此处「示例」指上游 HyperFrames 的样例）：① 动画根容器带 `data-composition-id`（如 `<div data-composition-id="main">`）；② 用 `<script src="./gsap.min.js"></script>` 引入 GSAP——该文件由应用随项目提供，**禁止改用任何 CDN 地址**，也不再钉版本号；③ 时间轴一律 `gsap.timeline({ paused: true })` 创建（起播由渲染器与预览控制负责，不自动播放）；④ 时间轴登记到**以 composition id 为键的对象**上：`window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;`，键必须与 `data-composition-id` 完全一致，**不要写成数组**；⑤ **画布（成片尺寸）以用户消息里【画布】给出的尺寸为准**：在 `<html>` 上写死 `data-resolution="landscape\|portrait\|square"`，并把主舞台容器做成该尺寸的**固定 px** 版式（不要用 `vw` / `vh` / 百分比自适应、不要 `transform: scale` 缩放舞台），内容排满整块画布 |
 | 3 | 视觉风格：深空科技 / Cyber UI（`#0B1220` 深色背景、`#00D4FF` 电子蓝辉光、玻璃拟态、霓虹渐变） |
 | 4 | 若用户提供字幕，按字幕条目逐条依次播放入场动画 |
 | 5 | 字幕时间轴严格按提供的起止时间执行；秒可带小数，GSAP 直接按小数秒定位，禁止四舍五入或重排；无结束时间的行自行安排节奏 |
@@ -147,6 +147,7 @@
 - **`stream_options: { include_usage: true }`**：两条路径都显式开启，末块才会回传 prompt/completion/reasoning token 统计。
 - **本模块不写项目文件**：返回值仍是原始 `content`，HTML 落盘、GSAP 本地化（`localizeGsapHtml` / `copyGsapIntoProject`）、HyperFrames 合规检查（`isHyperframesComposition`）与项目状态更新都在 `projects.ts` 完成。
 - **提示词第 2 条是与 HyperFrames 官方文档对齐的「生成契约」**：本地引用 `./gsap.min.js`（无 CDN、无版本号）、`gsap.timeline({ paused: true })`、`window.__timelines` 为「以 composition id 为键的对象」（键 = `data-composition-id`）。但合规校验 `hfEnv.isHyperframesComposition()` 仍只做三个文本特征的正则匹配，**不校验 `__timelines` 究竟是数组还是对象**——因此历史生成物（数组形态）依旧判为合规，预览控制脚本 `HG_PREVIEW_CTRL` 对「对象 / 数组 / 缺失」三种形态都做了兼容。
+- **画布要求是「提示词 + 应用兜底」两道**（本次新增）：提示词第 2 条第 ⑤ 点要求模型自己写死 `data-resolution` 与固定 px 主舞台，但**不能只靠它**——渲染入口还会由 `src/main/video.ts` 的 `applyCanvasDeclaration()` 再写一次 `data-resolution`（CLI 的画布解析链里它优先级最高，压过页面自己的声明），因为 HyperFrames CLI 在页面**没声明画布时兜底 `portrait`**（成片变 1080×1920 竖屏、宽屏版式被裁掉两侧并留大片黑边）。同理，`projects.ts` 的生成提示词里也有独立的【画布】块，两处说法都取 `shared/constants.ts` 的 `CANVAS_LABELS` / `CANVAS_SIZES`，不会各说一套。
 - **提示词不保证模型照做**：模型仍可能输出 CDN 引用或数组形态。CDN 引用由 `projects.ts` 在写盘前用 `localizeGsapHtml()` 兜底改写；数组形态则靠预览控制脚本的三态枚举与渲染侧的 HyperFrames 运行时兼容，提示词本身不做校验。
 - **配置类失败不升档重试**：`cfgErr` 在进入档位循环**之前**就抛出（未启用 / 配置不完整）；循环内一旦本档失败也是 `throw new Error(attemptErr)` 直接结束。`needConfig` 只是随 attempt 记录带出的分类标记，不参与「是否重试」的判定（升档只看截断 / 空输出）。
 - **`needConfig` 由 `shared/errors` 单点判定**：`friendlyError()` 判出「去设置页改配置就能解决」才给 `needConfig`（本模块只会产出 `'model'`）；**余额 / 欠费刻意不给**——去设置修不了余额，文案直接说明去厂家控制台充值，因此模型链路只会为配置类弹「去设置」。

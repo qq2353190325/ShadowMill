@@ -2,7 +2,7 @@
 
 > 设置页：**一个页面目录 = 一个 66 行外壳 + 5 个区块组件**。外壳 `index.vue` 只负责「显示哪一类」——左侧 5 类平级导航（`v-for` 渲染 `SETTINGS_NAV_ITEMS`）+ 右侧挂载当前分类（`whisper` 走独立的 `.card.hgen-panel` 分支，其余分类走 `<component :is="SECTION_COMPONENTS[activeSection]">`）+ 分类记忆 + 跨页导航意图消费；页面正文按分类分布在 `components/` 下，各区块自带状态与 IPC 调用（卡片外壳：`model` / `voice` / `render` / `update` 四类自带，`WhisperSection` 由外壳提供）。**挂载即读配置**：切换分类 = 卸载旧区块、挂载新区块，各区块的配置读取都在自己的 `onMounted` 里，未选中的分类不跑 IPC。
 
-- **覆盖文件**（9 个）：
+- **覆盖文件**（10 个）：
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
@@ -14,10 +14,11 @@
 | `src/renderer/src/pages/SettingsPage/components/VoiceSection.vue` | 85 | 「语音服务」区块（按厂家：厂家下拉 + API Key） |
 | `src/renderer/src/pages/SettingsPage/components/RenderSection.vue` | 74 | 「渲染档位」区块：视频渲染默认档位（质量 / 帧率） |
 | `src/renderer/src/pages/SettingsPage/components/WhisperSection.vue` | 274 | 「语音识别模型」区块（whisper.cpp：模型网格、下载 / 删除 / 设为当前、自定义模型登记、状态与进度条；**卡片外壳 / 标题 / 长说明由外壳 `index.vue` 提供**） |
-| `src/renderer/src/pages/SettingsPage/components/UpdateSection.vue` | 385 | 「应用更新」区块（版本 / 检查 / 下载 / 安装 / 更新源弹窗）+ 运行环境一行三态 + 本地导入 |
+| `src/renderer/src/pages/SettingsPage/components/UpdateSection.vue` | 397 | 「应用更新」区块（版本 / 检查 / 下载 / 安装 / 更新源弹窗（整块 `Teleport` 到 `<body>`）/ 查看更新日志）+ 运行环境一行三态 + 本地导入 |
+| `src/renderer/src/pages/SettingsPage/components/ChangelogDialog.vue` | 145 | 「更新日志」弹窗（`UpdateSection` 的子组件，蒙层 `Teleport` 到 `<body>`）：取一次随包 `CHANGELOG.md` 原文，**只显示最新一版**（版本 / 时间一行 + 每条一行「`[标签]` 标题」，最多先 10 条），旧版进「历史版本（N）」折叠区 |
 
-- **类型**：6 个 SFC（外壳 1 + 区块 5，均 `<script setup lang="ts">`）+ 3 个普通 `.ts`（类型出口 / 常量 / 助手）
-- **对外导出**：SFC 全部为默认导出组件，**无 props、无 emit**（外壳用 `<component :is>` 挂载区块，不传 props、不监听事件；区块状态全部内部维护，唯一跨组件共享的是 `helpers.ts` 的两个模块级 ref）；`constants.ts` 导出 `CUSTOM_VALUE` / `SETTINGS_SECTION_KEY` / `interface SettingsNavItem` / `SETTINGS_NAV_ITEMS` / `SETTINGS_SECTION_KEYS`；`helpers.ts` 导出 `activeSection` / `persistActiveSection` / `applySection` / `applySectionIntent` / `watchSectionIntent` / `updateStage`；`types.ts` 只做类型转出
+- **类型**：7 个 SFC（外壳 1 + 区块 5 + 弹窗子组件 1，均 `<script setup lang="ts">`）+ 3 个普通 `.ts`（类型出口 / 常量 / 助手）
+- **对外导出**：SFC 全部为默认导出组件。**外壳不向区块传 props、不监听区块事件**（外壳用 `<component :is>` 挂载区块，区块状态全部内部维护，唯一跨组件共享的是 `helpers.ts` 的两个模块级 ref）；页面内唯一的组件间事件是 `ChangelogDialog` 的 `close`（`UpdateSection` → `ChangelogDialog`，见 §7.3）；`constants.ts` 导出 `CUSTOM_VALUE` / `SETTINGS_SECTION_KEY` / `interface SettingsNavItem` / `SETTINGS_NAV_ITEMS` / `SETTINGS_SECTION_KEYS`；`helpers.ts` 导出 `activeSection` / `persistActiveSection` / `applySection` / `applySectionIntent` / `watchSectionIntent` / `updateStage`；`types.ts` 只做类型转出
 - **持久化**：配置写入本机 `userData/settings.json`（表单式「读 → 改 → 保存」，读的人变成「当前挂载的那个区块」）；**左侧分类的记忆**（`'model'` / `'voice'` / `'render'` / `'whisper'` / `'update'` 五类）另存在渲染层 `localStorage`，键名取 `@renderer/constants` 的 `STORAGE_KEY_SETTINGS_SECTION`（值 `'myapp.settingsSection'`，在 `constants.ts` 里落到页面级 `SETTINGS_SECTION_KEY`），读写都在 `helpers.ts`，**不跟随品牌改名**（见 §5.17、§5.18）
 
 ## 1. 结构总览
@@ -30,7 +31,7 @@
 | `voice` | 语音服务 | `components/VoiceSection.vue` | 85 | 语音服务（按厂家配置）：厂家下拉 + API Key（placeholder 来自厂家）+ 「保存该厂家配置」。**只有 API Key**：模型与音色由厂家目录固定，没有「厂家默认模型」这类全局设置（见 §5.4） |
 | `render` | 渲染档位 | `components/RenderSection.vue` | 74 | 视频渲染默认档位：质量 / 帧率下拉 + 保存渲染默认档位 + 状态条 + 当前质量说明 |
 | `whisper` | 语音识别模型 | `components/WhisperSection.vue`（挂载点在 `index.vue` 的 `.card.hgen-panel` 分支里） | 274 | 语音识别模型（whisper.cpp 字幕转录）：模型网格、下载 / 删除 / 设为当前、自定义模型登记、状态与进度条（**卡片外壳 / 标题 / 长说明由外壳 `index.vue` 提供**，见 §4.4、§5.28） |
-| `update` | 应用更新 | `components/UpdateSection.vue` | 385 | 应用更新（**卡片内渲染顺序见 §4.5**）：当前版本 + 更新动作按钮排（检查更新 / 自定义更新源（弹窗）/ 下载更新 / 取消下载 / 立即重启安装）+ 状态条 + **详情按钮排（查看详情 · 收起详情 / 仅更新出错时才出现的「打开日志目录」，`updateLogVisible`）** + 详情折叠块 + **跳过版本 / 恢复提示版本（独立成行，排在运行环境之前）** + 运行环境一行（三态 + 本地导入）+ 保存 / 重置反馈行 |
+| `update` | 应用更新 | `components/UpdateSection.vue` | 397 | 应用更新（**卡片内渲染顺序见 §4.5**）：当前版本 + 更新动作按钮排（检查更新 / 自定义更新源（弹窗）/ **查看更新日志（弹窗 §4.6）** / 下载更新 / 取消下载 / 立即重启安装）+ 状态条 + **详情按钮排（查看详情 · 收起详情 / 仅更新出错时才出现的「打开日志目录」，`updateLogVisible`）** + 详情折叠块 + **跳过版本 / 恢复提示版本（独立成行，排在运行环境之前）** + 运行环境一行（三态 + 本地导入）+ 保存 / 重置反馈行 |
 
 各分类的用途：`model` 开启后「HTML 生成 / 修改」页改用该模型；`voice` 的配置供「音色管理」「文字生音频」使用；`render` 是「HTML生成」页「转视频」的全局默认档位（项目级覆盖优先于它）；`update` 是应用自更新的唯一入口（检查 / 下载 / 重启安装，全部状态由 `update:progress` 通道驱动；**文案由主进程单点产出，区块只渲染 `message`、把 `detail` 收进可折叠的详情块**）；`whisper` 供字幕页「从音频生成字幕」本机离线识别（不消耗 API 额度）。
 
@@ -285,7 +286,7 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 | `usedBytes` | `storeTip` 经 `fmtBytes` 显示 |
 | `langs`、`currentModelId` | 主进程同样返回，但 `WhisperStatusView` 未声明、界面未使用（`refreshWm` 用 `s as unknown as WhisperStatusView` 断言赋值） |
 
-### 4.5 `UpdateSection.vue`（385 行）——「应用更新」（含运行环境 + 更新源弹窗）
+### 4.5 `UpdateSection.vue`（397 行）——「应用更新」（含运行环境 + 更新源 / 更新日志弹窗）
 
 `updateStage` 不在这个文件里，而在 `../helpers`（模块级 ref）——左侧导航项「应用更新」的红点要读同一个值（源码注释与 §3.3）。其余更新状态全部留在这个文件里。全部更新状态由主进程 `update:progress` 通道驱动：这里只是订阅方 + 触发方（检查 / 下载 / 重启安装）。**文案不在这一层拼**：`available` / `skipped` / `none` / `error` 的句子统一由主进程 `updater/`（`base.ts` 的 `bindEvents()` 与 `actions.ts` 的动作入口）产出（早前渲染层也拼一套，与事件推送的文案互相覆盖，同一状态两句话在打架）。这里只渲染 `message`，并把 `detail`（排障详情）收进可折叠的「查看详情」。
 
@@ -294,14 +295,15 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 | 区块 | 关键点 |
 |------|--------|
 | 当前版本行 | `.sel-label`「当前版本」+ `.hf-file` 显示 `{{ updateVersion \|\| '—' }}`——**只显示当前版本**；待安装的目标版本另有 `updateNewVersion`（见 §4.5.2 与 §5.26） |
-| `.hgen-actions`（更新动作按钮排） | `检查更新`（主按钮，`:disabled="updateBusy"`）、`自定义更新源`（→ `openFeedDialog`）、`下载更新`（仅 `available` / `skipped`）、`取消下载`（仅 `downloading`）、`立即重启安装`（仅 `downloaded`，主按钮） |
+| `.hgen-actions`（更新动作按钮排） | `检查更新`（主按钮，`:disabled="updateBusy"`）、`自定义更新源`（→ `openFeedDialog`）、**`查看更新日志`（`title="看看各版本都改了什么（内容来自随安装包的 CHANGELOG.md）"`，点击置 `changelogVisible = true`——它常驻，与下面按状态出现的下载 / 取消 / 安装按钮不同）**、`下载更新`（仅 `available` / `skipped`）、`取消下载`（仅 `downloading`）、`立即重启安装`（仅 `downloaded`，主按钮） |
 | `.hf-status`（状态行） | `{{ updateMessage }}`（检查 / 下载进度，`:class="updateStatusClass"`），文案来自主进程 |
 | 详情按钮行 | **按需出现**的 `.hgen-actions`（`style="margin-top:0"`，`v-if="updateDetail \|\| updateLogVisible"`）：`查看详情 / 收起详情` 按钮**仅当 `updateDetail` 非空时渲染**（`v-if="updateDetail"`，文案 `showUpdateDetail ? '收起详情' : '查看详情'`，点击切换 `showUpdateDetail`）；`打开日志目录` 按钮**仅当 `updateLogVisible` 为真时渲染**（`v-if="updateLogVisible"`，→ `onOpenUpdateLog`），而 `const updateLogVisible = computed(() => updateStage.value === 'error' \|\| updateStatusClass.value === 'hf-error')`。之所以不再常驻：**没出错时把用户送进日志目录没有意义**（他看到的是自己读不懂的文件，只会以为哪里坏了），只在更新确实出错（检查 / 下载 / 安装失败）时才露出排障入口。启动静默检查的失败也不会因此看不见——本区块 `onMounted` 在订阅 `update:progress` 之后用 `window.updateTools.status()` 补齐一次主进程状态（`stage` 非 `idle` 才套用），把 `error` 阶段连同这个入口一起带出来 |
 | 详情块 | `<div v-if="updateDetail && showUpdateDetail" class="hf-detail">{{ updateDetail }}</div>`：等宽字体 + `white-space: pre-wrap` + `user-select: text`，默认折叠（类样式见 [assets.md](../assets.md)） |
 | 跳过版本行 | **独立成行的 `.hgen-actions`（`style="margin-top:8px"`，不并入上面的更新动作按钮排）**，且**排在详情块之后、「运行环境（分包）」状态行之前**（源码注释：它俩是「应用更新」的分支动作，必须排在运行环境那几行之前，掉到「下载运行环境」下面会被读成运行环境的操作，用户反馈过）：`available` 态显示「跳过版本 {{ updateNewVersion }}」；`skipped` 态显示「恢复提示版本 {{ updateNewVersion }}」——**用的是目标版本**（`update:progress` 载荷 / 检查回执的 `version`），不是当前版本；两个按钮都走 `onSkipVersion` |
 | 运行环境状态行 | `v-if="runtimeBusy \|\| runtimeFailed \|\| runtimeHasMissing"` 的 `.hf-status`（`:class="runtimeStatusClass"`、`{{ runtimeStatusText }}`）：**不再无条件渲染、也不再显示「运行环境已就绪（体积）」**——就绪是常态，不占位；`runtimeStatusText` 三支（`runtimeBusy` → 主进程 `message` 或 `正在准备运行环境…`；`runtimeFailed` → 主进程 `message` 或 `运行环境准备失败`；`runtimeHasMissing` → `'运行环境需要下载：' + runtimeMissingText`），其余为空串；`runtimeStatusClass` 只在 `runtimeFailed` 时给 `hf-error`；同排 `.hgen-actions`（`v-if="runtimeFailed \|\| runtimeHasMissing"`、`style="margin-top:0"`）给「下载运行环境 / 重试」（`runtimeHasMissing` 时为「下载运行环境」，否则「重试」；`onPrepareRuntime`，`:disabled="runtimeBusy"`）、`runtimeCancellable` 时「取消下载」（`cancelRuntime`）、`runtimeMissing.length` 时「从本地文件安装…」（`onPickLocalPack`）；其下是 `runtimeNotice` 反馈行（`v-if`）。数据来自 `useRuntime()` 解构的 `{ runtime, busy, failed, hasMissing, cancelable, missing, missingText, prepare, cancel }`（`ready` / `sizeText` 已删，见 §6），显隐口径与外壳 `App.vue` 的 `runtimeVisible = busy \|\| failed \|\| hasMissing` 一致 |
 | `.hf-status`（反馈行） | `v-if="updaterStatus"`、`:class="updaterStatusClass"`、`{{ updaterStatus }}`（保存 / 重置 / 打开日志失败的反馈）——**仍在运行环境一行之后、卡片最末**，且**必须与状态行分两行**：共行会被随后的进度文案盖掉，表现为「点了保存没反应」（源码注释：保存 / 重置的反馈独立成行） |
-| **自定义更新源弹窗** | 沿用 `.hf-modal-mask` / `.hf-modal` 组件类（同 `HtmlGenPage` 的渲染档位弹窗，宽度 `min(520px,92vw)`）；含更新源输入 `v-model="feedDraft"`、启动检查 `v-model="autoCheckDraft"`、说明 `留空即重置为应用内置的更新地址。地址需指向存放 latest.yml 的目录，并以 / 结尾。`；底部 `重置` / `取消` / `保存` 三个按钮；`.hf-modal-mask` 上 `@click.self="closeFeedDialog"` |
+| **自定义更新源弹窗** | 沿用 `.hf-modal-mask` / `.hf-modal` 组件类（同 `HtmlGenPage` 的渲染档位弹窗，宽度 `min(520px,92vw)`）；含更新源输入 `v-model="feedDraft"`、启动检查 `v-model="autoCheckDraft"`、说明 `留空即重置为应用内置的更新地址。地址需指向存放 latest.yml 的目录，并以 / 结尾。`；底部 `重置` / `取消` / `保存` 三个按钮；`.hf-modal-mask` 上 `@click.self="closeFeedDialog"`。**整块包在 `<Teleport to="body">` 里**，`v-show="feedDialogVisible"` 仍在蒙层这个子节点上（关闭只是 `display:none`，弹窗 DOM 不销毁）：本区块挂在 `.card` 内，而 `.card` 带 `backdrop-filter`，它会让后代的 `position: fixed` 相对**卡片**而不是视口解析 ⇒ 蒙层只盖住卡片、弹窗按卡片居中，卡片高于窗口或被滚动时弹窗就跑到窗口外（与 §4.6 的 `ChangelogDialog` 同一个坑，模板里另有 3 行注释说明） |
+| **更新日志弹窗** | 模板末尾的 `<ChangelogDialog v-if="changelogVisible" @close="changelogVisible = false" />`——**由 `v-if` 控制挂载**（打开即取一次数据、关掉即销毁），内容与解析全在子组件里，本区块只管显隐（见 §4.6） |
 
 #### 4.5.2 状态
 
@@ -318,6 +320,7 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 | `updaterStatus` / `updaterStatusClass` | `ref('')` | 保存 / 重置 / 打开日志的反馈文案与样式类（独立于 `updateMessage` 那行，避免互相覆盖） |
 | `feedDialogVisible` | `ref(false)` | 自定义更新源弹窗可见性 |
 | `feedDraft` / `autoCheckDraft` | `ref('')` / `ref(true)` | 弹窗内**编辑中的副本**：只有点「保存」才写回 `feedUrl` / `autoCheck` 并落盘，取消不影响已存值 |
+| `changelogVisible` | `ref(false)` | 「更新日志」弹窗的显隐开关——它同时是 `<ChangelogDialog>` 的 `v-if` 条件（内容与解析都在子组件里，本区块只管显隐，见 §4.6） |
 | `runtimeNotice` | `ref('')` | 「从本地文件安装…」的即时反馈（导入成功 / 失败），与主进程推来的状态分开显示 |
 
 运行环境相关的派生值（`runtimeState` / `runtimeBusy` / `runtimeFailed` / `runtimeHasMissing` / `runtimeCancellable` / `runtimeMissing` / `runtimeMissingText` / `prepareRuntime` / `cancelRuntime`）与 `runtimeStatusText` / `runtimeStatusClass` 都由 `useRuntime()` 解构或就地 `computed`（见 §4.5.1 与 §6）。
@@ -349,6 +352,46 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 - **应用更新（文案单点产出 + 详情折叠）**：状态**全部由主进程 `update:progress` 推送驱动**，本区块不做轮询，也**不自己拼文案**。所有触发动作都只是 `invoke` 一发，结果与进度都从同一路推送回来。
 
 > **为什么渲染层不再拼串**：`available` / `skipped` / `none` / `error` 的句子统一由主进程 `updater/` 产出（单点产出：`base.ts` 的 `bindEvents()` 写状态文案，`actions.ts` 写两条「无事件」守卫文案），渲染层只渲染 `message`、把 `detail` 收进「查看详情」。早前渲染层也自己拼一套（如「发现新版本 X，点『下载更新』获取安装包」），与事件推送的文案**两处各写一套、互相覆盖**，同一状态会出现两句话打架。
+
+### 4.6 `ChangelogDialog.vue`（145 行）——「更新日志」弹窗
+
+`UpdateSection.vue` 的子组件，用 `v-if="changelogVisible"` 挂载的**纯展示弹窗**：打开即取一次数据、关掉即销毁（不会留下陈旧内容）。数据来自 `update:changelog`（主进程 `updater/base.ts` 的 `readBundledChangelog()` 只定位 + 读随安装包的 `CHANGELOG.md` 原文），**分块全在 `@renderer/utils/changelog` 的纯函数里**（见 [common.md §7.4](../common.md)），本组件负责「取一次 + **只显示最新一版** + 旧版折叠」，**模板全纯文本渲染、没有 `v-html`**。
+
+**契约**：**无 props**；`defineEmits<{ (e: 'close'): void }>()`——关闭统一通知父组件（父组件写 `@close="changelogVisible = false"`）。`×` 按钮、底部「关闭」按钮与 `.hf-modal-mask` 的 `@click.self` 都 `emit('close')`。弹窗宽度是内联的 `min(720px,92vw)`，其余结构复用 `.hf-modal-mask` / `.hf-modal` / `.hf-modal-head` / `.hf-modal-title` / `.hf-modal-close` / `.hf-modal-body` / `.hf-modal-foot` 与 `.hf-btn`、`.hf-status` / `.hf-error` / `.hf-detail` 这套既有类（`main.css` 另为 `.hf-modal-body` 补了 `min-height: 0`，见 [assets.md](../assets.md)）。
+
+**蒙层 `Teleport` 到 `<body>`**：本组件挂在 `.card` 内部，而 `.card` 带 `backdrop-filter`——**它会让后代的 `position: fixed` 相对卡片而不是视口解析**，弹窗于是被卡片框住、顶部跑到窗口外（模板首行与脚本头都留了这个注释；配音页 `VoiceSection.vue` 的克隆音色弹窗是同一个坑）。字号全部显式写在 `.cl-*` / `.hf-modal-*` 上，因此不受挂载点（`<body>`）影响。
+
+**模板三态**（`loading` → `errorText` →「最新一版 + 历史版本」）：
+
+| 区块 | 关键点 |
+|------|--------|
+| 加载态 | `v-if="loading"` 的 `.hf-status`「正在读取更新日志…」（`loading` 初值 `true`，在 `finally` 里置 `false`） |
+| 失败态 | `v-else-if="errorText"`：`.hf-status.hf-error` 显示 `errorText`，其下 `v-if="errorDetail"` 的 `.hf-detail` 显示 `errorDetail`（主进程的 `message` / `detail` 两层原样呈现）；解析出 0 个块时也落这一态（`errorText` 置 `更新日志里还没有记录`） |
+| 最新一版抬头 | `.cl-ver`：`版本：{{ mainLabel }}`（`main.version \|\| main.title`）+ `.cl-date` `时间：{{ mainDate \|\| '—' }}`——**只显示 `pickDefaultBlock()` 选中的那一版** |
+| 最新一版条目 | `.cl-list` 下 `v-for="e in shownEntries"`（`:key="e.no + '-' + e.date"`）的 `.cl-item`：`e.tag` 非空时 `.cl-tag`（`:class="tagClass(e.tag)"`）+ `.cl-item-title`（`e.title`）。`shownEntries` = `showAll ? 全部 : slice(0, ENTRY_LIMIT)`，**`ENTRY_LIMIT = 10`** |
+| 展开全部 | `v-if="main && main.entries.length > ENTRY_LIMIT"` 的 `.cl-more`：一个 `.hf-btn` 切 `showAll`，文案 `showAll ? '只看最近 10 条' : '展开全部 N 条'`（N = `main.entries.length`） |
+| 历史版本折叠区 | `v-if="history.length"` 的 `.cl-hist`：`.cl-hist-head` 是整行 `button`（`.cl-caret` 给 `▾` / `▸` + `.cl-hist-name`「历史版本（`history.length`）」），**默认整区折叠**（`historyOpen` 初值 `false`）；`.cl-hist-body` 用 `v-show="historyOpen"` |
+| 历史版本单版行 | 每个 `b` 一个 `.cl-hist-block`，行本身是 `button.cl-hist-ver`（`.cl-caret` + `.cl-hist-name`「版本：`b.version \|\| b.title`」+ `.cl-date`「时间：`b.date \|\| '—'`」+ `.cl-count`「`b.entries.length` 条」）；点它才 `v-show="isHistOpen(b.title)"` 列出该版条目（`.cl-list` 内同样的 `.cl-item`） |
+| 底部 | `.hf-modal-foot` 里一个「关闭」`.hf-btn` |
+
+`.cl-*` 一组样式在 `assets/main.css`（见 [assets.md](../assets.md)）。
+
+**脚本**
+
+| 名称 | 说明 |
+|------|------|
+| `blocks` / `currentVersion` | `ref<ChangelogBlock[]>([])` / `ref('')`（当前版本号，`onMounted` 用同步的 `window.updateTools.version()` 取，抛错则留空串） |
+| `loading` / `errorText` / `errorDetail` | `ref(true)` / `ref('')` / `ref('')` |
+| `showAll` / `historyOpen` / `histOpen` | `ref(false)` / `ref(false)` / `ref<string[]>([])`——依次是「最新一版是否展开全部」、「历史版本整区是否展开」、「历史版本里已展开的那些块（**按标题记**）」 |
+| `mainIndex` | `computed(() => pickDefaultBlock(blocks, currentVersion))`：哪一版是「最新一版」（与当前版本号同名的那块，否则第一个有条目的块） |
+| `main` / `history` | `computed`：选中的那一块（没有则 `null`）；`history` = 其余**有条目的**块（`filter((b, i) => i !== mainIndex && b.entries.length > 0)`） |
+| `mainLabel` / `mainDate` / `shownEntries` | `computed`：版本标签（`version \|\| title`）、时间、以及受 `ENTRY_LIMIT` 与 `showAll` 约束的条目列表 |
+| `tagClass(tag)` | `tagKind(tag)` 非空时拼 `'cl-tag-' + kind`，否则空串（决定 `.cl-tag-ok` / `-err` / `-warn`） |
+| `isHistOpen(title)` / `toggleHist(title)` | 判断 / 翻转 `histOpen` 里的标题（在则 `splice` 移除，不在则 `push`） |
+| `onKey(e)` | `Escape` → `emit('close')`；`onMounted` 注册、`onBeforeUnmount` 注销（成对，项目既有惯例） |
+| `onMounted(async)` | ① 注册 ESC 监听；② `window.updateTools.version()`（同步）取当前版本号；③ `await window.updateTools.changelog()`——非 `ok` 时把 `res.message` / `res.detail` 写进 `errorText` / `errorDetail` 并返回；`ok` 时 `parseChangelog(res.text \|\| '')`，**一个块都没有**则置 `errorText = '更新日志里还没有记录'`；④ `catch` 统一落「读取更新日志失败」+ 异常文本；⑤ `finally` 置 `loading = false` |
+
+**注意事项**：**取数只在 `onMounted` 发生一次**，父组件用 `v-if` 控制挂载 ⇒ 每次打开都是新实例、每次关闭都销毁，不存在「关掉再打开看到旧内容」；**无 props、也没有内部显隐状态**，显隐完全由父组件的 `changelogVisible` 决定；**没有 `v-html`、也没有 HTML 转义**——解析器只把行内 markdown 记号还原成纯文字，`e.tag` / `e.title` 直接插值，因此不存在逃逸问题；**折叠用 `v-show` 而非 `v-if`**（历史版本区与其单版行都如此），块头始终可见、只切块体显隐；**最新一版先显示 10 条**——这份日志的「未发布」块会一直累积，不限制就又把弹窗顶满。
 
 ## 5. 注意事项与实现要点
 
@@ -430,6 +473,9 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 | `UpdateSection.vue` | `@renderer/composables/useRuntime` | `useRuntime` | 运行环境状态行与「下载运行环境 / 重试」「取消下载」「从本地文件安装…」 |
 | `UpdateSection.vue` | `../types` | `type UpdateCheckReply` | `updateTools.check()` 回执的类型标注 |
 | `UpdateSection.vue` | `../helpers` | `updateStage` | 跨组件共享状态（导航红点共用） |
+| `UpdateSection.vue` | `./ChangelogDialog.vue` | `ChangelogDialog`（默认） | 「查看更新日志」按钮打开的更新日志弹窗（`v-if="changelogVisible"`） |
+| `ChangelogDialog.vue` | `vue` | `computed`、`onBeforeUnmount`、`onMounted`、`ref` | 派生「最新一版 / 历史版本 / 显示的条目」、挂载即取一次数据、ESC 监听的成对注册与注销 |
+| `ChangelogDialog.vue` | `@renderer/utils/changelog` | `parseChangelog`、`pickDefaultBlock`、`tagKind`、`type ChangelogBlock` | 随包 `CHANGELOG.md` 原文的分块、最新一版选取、`[标签]` 配色档（标签的拆分在解析器内部随条目一起产出） |
 
 **本页不引入 `useToast`**：提示全部走各区块自己的状态行（`status` / `vStatus` / `rStatus` / `updateMessage` / `updaterStatus` / whisper 的 `status`）；`WhisperSection` 不 import 任何组件或 composable，也不接收 / 抛出事件。`sizeMB`、`speed`、`localBytes`、`barPercent`、`barText` 未转义（由该组件生成或来自主进程数值）。
 
@@ -450,6 +496,7 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 | `window.updateTools.install()` | `update:install` | UpdateSection | 退出并运行安装器；本机有任务在跑时返回 `ok: false` + 提示 |
 | `window.updateTools.status()` | `update:status` | UpdateSection | 取一次主进程当前更新状态（`Promise<UpdateProgressPayload>`）：主进程 `state` 常驻，用于 `onMounted` 补齐「启动静默检查」那次失败（该事件早于本区块订阅 `update:progress`） |
 | `window.updateTools.openLog()` | `update:open-log` | UpdateSection | 在文件管理器里定位 `userData/updater.log`（无日志则打开 `userData` 目录）；只在本区块判断更新出错（`updateLogVisible`）时才有按钮；失败时消息写在 `updaterStatus` 那行 |
+| `window.updateTools.changelog()` | `update:changelog` | **ChangelogDialog** | 取随包 `CHANGELOG.md` 的**原文**（`Promise<IpcResult<{ text: string }>>`）；主进程只定位 + 读取，分块在渲染层 `@renderer/utils/changelog`（见 §4.6） |
 | `window.updateTools.onProgress(cb)` | `update:progress` | UpdateSection | 更新状态与下载进度订阅（单订阅），载荷含 `message` / `detail` |
 | `window.voiceTools.listModels()` | `voice:list-models` | VoiceSection | 取**厂家目录 `providers`**（本区块只用 `providers`；异常被 `.catch()` 吞掉） |
 | `window.voiceTools.saveConfig({ provider, config })` | `voice:save-config` | VoiceSection | preload **直接透传**该载荷（不再包 `{ voiceTTS }`） |
@@ -468,4 +515,5 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 
 - **外壳 ↔ 区块**：**不传 props、不监听事件**——`model` / `voice` / `render` / `update` 由外壳用 `<component :is>` 挂载，`whisper` 由外壳的 `.card.hgen-panel` 分支（里面直接写 `<WhisperSection />`）挂载；「显示哪一类」由外壳决定，「这一类里显示什么」全归区块（whisper 的卡片外壳、标题与说明归外壳）。
 - **区块 ↔ 区块**：互不引用；要共享的只有 `helpers.ts` 的两个模块级 ref（`activeSection` 供导航高亮 / 点击，`updateStage` 供「应用更新」红点与更新阶段判断）。
+- **区块 ↔ 页面内子组件**：只有 `UpdateSection` → `ChangelogDialog` 这一处——**无 props、只有 `close` 一个 emit**，父组件用 `v-if="changelogVisible"` 控制挂载（打开即取一次、关掉即销毁）。
 - **区块 ↔ 共享层**：各区块直接从 `@renderer/*` 取公共能力（`HfSelect` / `MODEL_PROVIDERS` / 渲染档位工具 / `useRenderOptions` / `useRuntime`），页面级相对路径（`../constants` / `../types` / `../helpers`）只用于本页内部。

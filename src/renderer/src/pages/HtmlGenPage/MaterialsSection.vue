@@ -72,6 +72,7 @@ import { IMAGE_MATERIAL_EXTS, MAX_MATERIALS, VIDEO_MATERIAL_EXTS } from '@shared
 import type { ProjectMaterial, ProjectMaterialKind } from '@shared/types'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
+import { previewUrl } from '@renderer/utils/url'
 
 // 一轮写操作未结束时禁用全部按钮：避免并发「读-改-写」把列表互相冲掉
 const busy = ref(false);
@@ -80,10 +81,9 @@ const images = computed(() => mats.value.filter((m) => m.kind === 'image'));
 const videos = computed(() => mats.value.filter((m) => m.kind === 'video'));
 const extText = IMAGE_MATERIAL_EXTS.join('/') + ' 与 ' + VIDEO_MATERIAL_EXTS.join('/');
 
-// 缩略图走 hgpreview:// 协议（只允许读项目目录内的文件）：整段 file 做一次 encodeURIComponent 也成立——
-// 主进程按 '/' 切段后逐段 decode 再拼回相对路径（见 main/index.ts 的 hgpreview 处理器）。
+// 缩略图走 hgpreview:// 协议（只允许读项目目录内的文件），拼装统一走 utils/url.ts
 function thumbUrl(file: string): string {
-  return 'hgpreview://p/' + encodeURIComponent(appState.currentName) + '/' + encodeURIComponent(file);
+  return previewUrl(appState.currentName, file);
 }
 
 // 交给 IPC 的必须是**普通对象**：mats 来自 reactive 单例，元素是 Proxy，直接传会在结构化克隆时抛

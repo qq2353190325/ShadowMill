@@ -11,11 +11,11 @@
 | # | 文档 | 内容 | 适合谁 |
 |---|---|---|---|
 | 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构、`src/` 完整目录树、构建与打包、运行时数据目录、全局约定 | 第一次接触项目的人 |
-| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（85 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
+| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（87 个频道总表）**、以「项目」为中心的数据流、四条关键业务链路、主进程依赖图、安全边界 | 想理解整体设计的人 |
 | 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程（17 个 `.ts` 源文件 = 13 个顶层文件 + `updater/` 目录 4 个文件）的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
 | 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：11 个命名空间、6 路进度通道的「单订阅」语义、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
 | 4 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) | Vue 渲染层：启动链路、无 router 的注册表导航、状态与通信约定、组件分层、页面↔主进程域对照、样式策略 | 改界面 / 加页面 |
-| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（10 组 **85** 个）、跨进程载荷类型、**错误文案映射（`errors.ts`）**、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
+| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（10 组 **87** 个）、跨进程载荷类型、**错误文案映射（`errors.ts`）**、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
 | 6 | [06-目录架构-src-agent](./06-目录架构-src-agent.md) | 独立实验脚本：为什么不进构建图、5 个工具、工作区防护、运行方式 | 想跑 Agent 样例 |
 | 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，`files/` 下共 **44** 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue` 与 `LegacyDataDialog.vue` 四个组件，`main/updater.md` 一篇覆盖 `src/main/updater/` 下的 `index.ts` / `base.ts` / `actions.ts` / `install.ts` 四个文件） | 需要具体实现细节时查阅 |
 
@@ -47,7 +47,7 @@
 | `src/main/video.ts` | [main/video.ts.md](./files/main/video.ts.md) |
 | `src/main/whisper.ts` | [main/whisper.ts.md](./files/main/whisper.ts.md) |
 | `src/main/vad.ts` | [main/vad.ts.md](./files/main/vad.ts.md) |
-| `src/main/updater/`（`index.ts` 104 行 / `base.ts` 270 行 / `actions.ts` 139 行 / `install.ts` 134 行，目录级一篇） | [main/updater.md](./files/main/updater.md) |
+| `src/main/updater/`（`index.ts` 108 行 / `base.ts` 285 行 / `actions.ts` 139 行 / `install.ts` 134 行，目录级一篇） | [main/updater.md](./files/main/updater.md) |
 | `src/main/runtime.ts` | [main/runtime.ts.md](./files/main/runtime.ts.md) |
 
 ### 3.2 `src/preload/` 与 `src/shared/`（6 篇）
@@ -59,7 +59,7 @@
 | `src/shared/ipc.ts` | [shared/ipc.ts.md](./files/shared/ipc.ts.md) |
 | `src/shared/types.ts` | [shared/types.ts.md](./files/shared/types.ts.md) |
 | `src/shared/errors.ts`（全应用错误文案映射：`friendlyError` / `configTargetOf` / `configTitle`） | [shared/errors.ts.md](./files/shared/errors.ts.md) |
-| `src/shared/constants.ts`（应用级公共常量：品牌文案与请求标识） | [shared/constants.ts.md](./files/shared/constants.ts.md) |
+| `src/shared/constants.ts`（应用级公共常量：品牌文案、请求标识与**成片画布尺寸**） | [shared/constants.ts.md](./files/shared/constants.ts.md) |
 
 ### 3.3 `src/renderer/`（渲染层，16 篇）
 
@@ -72,7 +72,7 @@
 | `src/App.vue`（外壳） | [renderer/src/App.vue.md](./files/renderer/src/App.vue.md) |
 | `src/assets/`（设计系统：`main.css`） | [renderer/src/assets.md](./files/renderer/src/assets.md) |
 | `src/components/`（通用组件：`StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue`、`LegacyDataDialog.vue`） | [renderer/src/components.md](./files/renderer/src/components.md) |
-| **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress,useRuntime,useEnvGate,useConfigPrompt,useLegacyData,useNavIntent,useRenderOptions}.ts`、`src/utils/{escape,rate,time,render}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
+| **公共方法与工具**：`src/composables/{useAppStore,useToast,useRenderProgress,useRuntime,useEnvGate,useConfigPrompt,useLegacyData,useNavIntent,useRenderOptions}.ts`、`src/utils/{escape,rate,time,render,url}.ts`、`src/pages/index.ts` | [renderer/src/common.md](./files/renderer/src/common.md) |
 | `src/pages/HomePage/index.vue` | [renderer/src/pages/HomePage.md](./files/renderer/src/pages/HomePage.md) |
 | `src/pages/AboutPage/index.vue` | [renderer/src/pages/AboutPage.md](./files/renderer/src/pages/AboutPage.md) |
 | `src/pages/ContentPage/index.vue` | [renderer/src/pages/ContentPage.md](./files/renderer/src/pages/ContentPage.md) |

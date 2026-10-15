@@ -7,10 +7,10 @@
 | 文件（相对 `src/renderer/src/pages/`） | 行数 | 作用 |
 | --- | --- | --- |
 | `TextTtsPage/index.vue` | 37 | 页面外壳：`StepBar` + 三个 Tab，`v-show` 挂载三张卡（**共用 helpers 的 `activeTtsTab`**；切 Tab 只有本页 Tab 按钮一个入口） |
-| `TextTtsPage/SynthSection.vue` | 373 | 「文字生音频（TTS 合成）」卡：音色/模型（**未配 Key 时禁用**）、保存位置三选一、合成、结果与已生成音频复用（**切回本 Tab 自动重拉音色**） |
-| `TextTtsPage/AlignSection.vue` | 313 | 「字幕配音（逐句对齐）」卡：逐句 TTS + 音频/时间轴双向对齐，结果写回项目（音色行同样受 Key 门控、切回本 Tab 自动重拉音色） |
-| `TextTtsPage/VoiceSection.vue` | 520 | 「音色管理」卡组：创建克隆音色（弹窗，目标模型受 Key 门控；**Qwen-Audio-TTS 系列本地文件 / 公网 URL 二选一，填了 URL 以 URL 为准**；弹窗说明只剩 `qwen-audio-3.0-tts-flash` 一条，并提醒审核期间合成会失败）/ 我的音色列表（**4 列、不显示音色 ID、行尾「删云端」动作**、切回本 Tab 自动重拉；**音色审核状态非 `OK` 时在第 3 列追加「（审核中 / 审核未通过）」**）/ 音色映射管理（**系统音色的合成模型固定不可改**；原独立页 `SoundCopyPage/index.vue` 已下线，并入本页第三个 Tab） |
-| `TextTtsPage/helpers.ts` | 177 | 模块级共享助手：**三卡共用的当前 Tab `activeTtsTab`**、**配置形状的唯一读取入口**（`readActiveCfg`）、**Key 就绪状态**（`voiceKeyReady` / `activeProviderLabel` / `refreshVoiceKeyState`）、音色加载、模型解析、共享 `ref`（切 Tab 信号已删除，见 §1） |
+| `TextTtsPage/SynthSection.vue` | 379 | 「文字生音频（TTS 合成）」卡：音色/模型（**未配 Key 时禁用**）、保存位置三选一、合成、结果与已生成音频复用（**切回本 Tab 自动重拉音色**；两处试听源都经 `ttsUrl()` 走 `hgpreview://tts/…?tts=1`） |
+| `TextTtsPage/AlignSection.vue` | 339 | 「字幕配音（逐句对齐）」卡：逐句 TTS + 音频/时间轴双向对齐，结果写回项目（音色行同样受 Key 门控、切回本 Tab 自动重拉音色；整轨与逐句试听源经 `ttsUrl()`） |
+| `TextTtsPage/VoiceSection.vue` | 526 | 「音色管理」卡组：创建克隆音色（弹窗，目标模型受 Key 门控；**Qwen-Audio-TTS 系列本地文件 / 公网 URL 二选一，填了 URL 以 URL 为准**；弹窗说明只剩 `qwen-audio-3.0-tts-flash` 一条，并提醒审核期间合成会失败）/ 我的音色列表（**4 列、不显示音色 ID、行尾「删云端」动作**、切回本 Tab 自动重拉；**音色审核状态非 `OK` 时在第 3 列追加「（审核中 / 审核未通过）」**）/ 音色映射管理（**系统音色的合成模型固定不可改**；原独立页 `SoundCopyPage/index.vue` 已下线，并入本页第三个 Tab） |
+| `TextTtsPage/helpers.ts` | 182 | 模块级共享助手：**三卡共用的当前 Tab `activeTtsTab`**、**配置形状的唯一读取入口**（`readActiveCfg`）、**Key 就绪状态**（`voiceKeyReady` / `activeProviderLabel` / `refreshVoiceKeyState`）、音色加载、模型解析、共享 `ref`（切 Tab 信号已删除，见 §1） |
 
 - **类型**：页面组件（Vue 3 `<script setup lang="ts">` SFC）+ 页面子组件（3 个 SFC）+ 模块级 TS 助手（`<script setup>` 之外的原生模块，无组件）
 - **对外导出**：
@@ -70,14 +70,14 @@
 | `saveTo` / `lastSaveTo` | `Ref<string>` | 保存位置选择值（`proj:<name>` / `custom` / `out`）与上一次有效选择（取消选目录时回退用） |
 | `saveToGroups` | `ComputedRef<HfSelectGroup[]>` | 「保存到」下拉数据：单组（`label: ''`），选项 = 各项目 `proj:<name>` + `custom` + `out`，`custom` 的 label 随 `cfgSaveDir` 显示「已选/未选择」 |
 | `synthBusy` | `Ref<boolean>` | 合成中标记，控制主按钮 `disabled` |
-| `resultPath` / `resultSrc` | `Ref<string>` | 最近一次合成的保存路径与 `file:///` URL |
+| `resultPath` / `resultSrc` | `Ref<string>` | 最近一次合成的保存路径与**试听 URL**——`resultSrc = res.savePath ? ttsUrl(res.savePath) : ''`（`hgpreview://tts/…?tts=1`；产物不在白名单目录时为空串） |
 | `resultAudioEl` / `resultRateEl` | `Ref<HTMLAudioElement \| null>` / `Ref<HTMLInputElement \| null>` | 结果试听 `<audio>` 与语速输入框元素 |
 | `resultRateValue` | `Ref<string>` | 结果语速显示值，初值 `'1'` |
 | `genAudios` | `Ref<GenAudioItem[]>` | 已生成音频列表（`listGenerated` 的 `items`） |
 | `genSelIdx` / `genInfo` | `Ref<string>` | 下拉选中项（字符串下标）与选中项完整路径 |
 | `genSetDisabled` / `genOpenDisabled` | `Ref<boolean>` | 「设为背景音频」/「打开目录」禁用态，初值均 `true` |
 | `genPlayRowVisible` | `Ref<boolean>` | 试听行显隐 |
-| `genAudioEl` / `genAudioSrc` / `genRateEl` / `genRateValue` | `Ref` | 列表试听元素、预览 URL、语速输入框与语速值（初值 `'1'`） |
+| `genAudioEl` / `genAudioSrc` / `genRateEl` / `genRateValue` | `Ref` | 列表试听元素、试听 URL（`ttsUrl(it.path)` → `hgpreview://tts/…?tts=1`，认不出白名单目录时为空串）、语速输入框与语速值（初值 `'1'`） |
 | `genSelectGroups` | `ComputedRef<HfSelectGroup[]>` | 按 `it.group` 分组（空值归 `'其他'`）供 HfSelect 使用，`Map` 聚合后输出 `{ label, options }[]`；option 的 `value` 仍是**全局下标字符串** `String(i)`、`label` 为 `it.name` |
 | `GenAudioItem`（局部 `interface`） | `{ path: string; name: string; group: string; size: number; mtime: number }` | 列表项结构 |
 
@@ -91,15 +91,15 @@
 | 结果语速 | `applyRate` / `stepRate` 的返回值写回 `resultRateValue`；`−` / `+` 步长固定 0.05 |
 | 已生成列表分组 | `genSelectGroups` 用 `Map` 按 `it.group`（空 → `'其他'`）聚合，`option` 的 `value` 为 `String(i)`、`label` 为 `it.name` |
 | `fillGenAudios(silent)` | `listGenerated()` 失败时仅在 `silent === false` 报错；空列表清空 `genSelIdx` / `genInfo` / `genAudioSrc`、禁用两按钮并隐藏试听行（下拉由 HfSelect 的 `empty-text` 兜底），非空则调 `updateGenSel()` 选中首项 |
-| 试听行 | `onGenPlay` 对同一个 `<audio>` 做 play/pause 切换，`play().catch` 提示「音频试听失败（可能文件已被移动）」 |
+| 试听行 | `onGenPlay` 对同一个 `<audio>` 做 play/pause 切换，`play().catch` 提示「音频试听失败（可能文件已被移动）」；`genAudioSrc` 为空串（产物不在可预览目录）时先被空源守卫拦下，toast「请先选择已生成音频」 |
 
 **关键流程**：
 
 1. **初始化**：`fillSaveTo()` → 异步 `requireCfg(setStatus)`（失败即整体跳过）→ 再 `fillSaveTo()`（配置已刷新 `cfgSaveDir`）→ `loadVoices(setStatus)` → `voiceId = firstVoiceId()` → `fillGenAudios(true)` 静默拉列表。
 2. **保存位置三选一**：HfSelect 选中 `custom` 且 `cfgSaveDir` 为空才 `pickDir()`；`canceled` / 非 `ok` / 无 `dir` 一律回退 `lastSaveTo`（避免出现"选了自定义但无目录"的空档行；这是**程序化赋值**，不会再次触发 `@change`）；成功则 `setCfgSaveDir(r.dir)` + `saveConfig({ saveDir })`（保存失败仅提示"目录已选但保存设置失败"）。`fillSaveTo` 默认优先级：已持久化自定义目录 → `custom`；否则有项目 → `proj:<当前项目>`（内置项目或无 `currentName` 时取 `appState.myProjects[0].name`）；无项目 → `out`；算出的值不在选项内也兜底 `out`。
-3. **合成**：`requireCfg` → 校验 `text.trim()`（"请输入合成文本"）与 `voiceId`（"请先选择（或创建）音色"）→ `parseSaveTo()` 为 `none` 时报"请选择保存位置"→ `voiceModelOf(v)` 取绑定模型 → `synthBusy = true`，状态「正在按所选音色（模型名或'默认模型'）合成并下载语音…」→ 调 `synth` → 成功时按 `res.savedTo`（`'project'` / `'output'` / 其它）生成"已保存到…"文案，置 `ttsResultShown = true`、`resultPath = res.savePath || ''`、有路径时 `resultSrc = 'file:///' + encodeURI(path.replace(/\\/g, '/'))`，再 `fillGenAudios(true)`；失败显示 `res.message` 或"合成失败"；`finally` 复位 `synthBusy`。
+3. **合成**：`requireCfg` → 校验 `text.trim()`（"请输入合成文本"）与 `voiceId`（"请先选择（或创建）音色"）→ `parseSaveTo()` 为 `none` 时报"请选择保存位置"→ `voiceModelOf(v)` 取绑定模型 → `synthBusy = true`，状态「正在按所选音色（模型名或'默认模型'）合成并下载语音…」→ 调 `synth` → 成功时按 `res.savedTo`（`'project'` / `'output'` / 其它）生成"已保存到…"文案，置 `ttsResultShown = true`、`resultPath = res.savePath || ''`、**`resultSrc.value = res.savePath ? ttsUrl(res.savePath) : ''`**（源是 `hgpreview://tts/…?tts=1` 而不是 `file://`；落在白名单目录之外时为空串 ⇒ 不显示试听行），再 `fillGenAudios(true)`；失败显示 `res.message` 或"合成失败"；`finally` 复位 `synthBusy`。
 4. **结果试听**：语速输入或 `−`/`+`（步长 0.05）经 `applyRate` / `stepRate` 解析失败回退 1、钳制 0.5~2.0，写回 `el.value` 与 `audio.playbackRate`，返回值同步到 `resultRateValue`——**仅改播放速率，不改磁盘音频**。
-5. **已生成音频复用**：`genSelectGroups` 分组展示 → `updateGenSel` 写路径与预览 URL → 「试听」对同一 `<audio>` 做 play/pause 切换（失败提示"可能文件已被移动"）→ 「设为背景音频」内置项目直接拒绝，否则 `setAudio(appState.currentName, it.path)` → `refreshProject()` → `toast('已设为当前项目背景音频：' + res.audioFile)`。
+5. **已生成音频复用**：`genSelectGroups` 分组展示 → `updateGenSel` 写路径与试听 URL（`genAudioSrc = ttsUrl(it.path)`）→ 「试听」对同一 `<audio>` 做 play/pause 切换（失败提示"可能文件已被移动"）→ 「设为背景音频」内置项目直接拒绝，否则 `setAudio(appState.currentName, it.path)` → `refreshProject()` → `toast('已设为当前项目背景音频：' + res.audioFile)`。
 
 **调用的 preload**：`voiceTools.pickDir()`、`voiceTools.saveConfig({ saveDir })`、`voiceTools.getSaveDir({ projectName, saveDir, defaultOut })`、`voiceTools.synth(...)`、`voiceTools.listGenerated()`；`projectTools.openFolderOf(...)`、`projectTools.setAudio(...)`。
 
@@ -133,16 +133,16 @@
 | `barVisible` / `barIndeterminate` / `barPercent` / `barText` / `barState` | `Ref` | 进度条可见性、不确定态、百分比、文案、状态类（`done` / `error` / 空） |
 | `alignBusy` | `Ref<boolean>` | 任务进行中标志 |
 | `alignResult` | `Ref<AlignResult \| null>` | 对齐结果 |
-| `alignAudioEl` / `alignAudioSrc` | `Ref` | 整轨音频元素与 `file:///` 地址 |
-| `segAudioEl` | `Ref<HTMLAudioElement \| null>` | 单句试听播放器 |
+| `alignAudioEl` / `alignAudioSrc` | `Ref` | 整轨音频元素与试听 URL——`ttsUrl(String(res.audioPath \|\| ''))`（对齐产物在 `userData/voice/align-<时间戳>/`，走 `hgpreview://tts/…?tts=1`；不再是 `file://`） |
+| `segAudioEl` | `Ref<HTMLAudioElement \| null>` | 单句试听播放器（`playSeg(path)` 里同样经 `ttsUrl()`） |
 | `details` | `ComputedRef<AlignDetail[]>` | `alignResult.details` 或 `[]` |
 | `summary` | `ComputedRef<string>` | `共 N 句 · 总时长 分:秒 · 加速 N 句 · 顺延 N 句 · …`，末段按 `res.mode` 区分「字幕时间已按配音重排」/「音频已按字幕时间摆放」 |
 
-**函数**：`setStatus(text, kind)`；`countSubtitleLines(text)`（按行分割、trim、滤空行计数）；`syncSubCount()`（`__current__` 显示「共 N 行」，行数取自 `appState.project.subtitle`，否则置空）；`getAlignSubtitleText()`（`__current__` 用 `appState.project.subtitle`，为空提示「当前项目没有字幕，请先到「字幕生成」页生成或填写」；其它来源 `window.projectTools.load(v)` 读 `res.subtitle`，为空提示「项目「v」没有字幕」）；`onRefreshVoice()`；**`goSettingsVoice()`（`requestSettingsSection('voice')` + `goPage('settings')`，供未配 Key 时那个「API Key 设置」按钮）**；`showAlignBar(info, indeterminate, percent?)`（`kind` 为 `done` / `error` 时置 `barState`，`percent` 非数字时 `done` / `error` 填 100、否则 0）；`hideAlignBar()`；`resetAlignUi()`；`startAlign()`；`onCancel()`；`playSeg(path)`；`onOpenDir()`；`writeAlign()`；`onMounted`（**首句 `void refreshVoiceKeyState()`**）。
+**函数**：`setStatus(text, kind)`；`countSubtitleLines(text)`（按行分割、trim、滤空行计数）；`syncSubCount()`（`__current__` 显示「共 N 行」，行数取自 `appState.project.subtitle`，否则置空）；`getAlignSubtitleText()`（`__current__` 用 `appState.project.subtitle`，为空提示「当前项目没有字幕，请先到「字幕生成」页生成或填写」；其它来源 `window.projectTools.load(v)` 读 `res.subtitle`，为空提示「项目「v」没有字幕」）；`onRefreshVoice()`；**`goSettingsVoice()`（`requestSettingsSection('voice')` + `goPage('settings')`，供未配 Key 时那个「API Key 设置」按钮）**；`showAlignBar(info, indeterminate, percent?)`（`kind` 为 `done` / `error` 时置 `barState`，`percent` 非数字时 `done` / `error` 填 100、否则 0）；`hideAlignBar()`；`resetAlignUi()`；`startAlign()`；`onCancel()`；**`playSeg(path)`**（`const url = ttsUrl(path)`；**空串时 toast「这一句的试听文件不在可预览目录里」并直接返回**，否则写 `el.src` 后 `el.play()`，失败 toast「这一句试听失败：对齐任务目录可能已被清理，可试听整轨」）；`onOpenDir()`；`writeAlign()`；`onMounted`（**首句 `void refreshVoiceKeyState()`**）。
 
 **`synthAligned` 载荷**：`{ projectName: appState.currentName, subtitleText: sub.text, voice: v, voiceModel, mode, gapSec }`，其中 `gapSec = Number(gap.value)`、`voiceModel = voiceModelOf(v)`。
 
-**`startAlign` 流程**：`alignBusy` 为真 → `toast('对齐合成进行中，请稍候')` 返回；`requireCfg` 未通过返回；`getAlignSubtitleText()` 失败则 `setStatus(message, 'hf-error')`；`voiceId` 为空提示「请先选择（或创建）音色」；然后置 `alignBusy = true`、`resetAlignUi()`、`hideAlignBar()`、状态「正在提交逐句合成任务…」，再调用 `synthAligned`。结果分支：`res.ok` → 写 `alignResult`、`alignAudioSrc = 'file:///' + encodeURI(audioPath 反斜杠转正斜杠)`、进度条「对齐完成：N 句」（`done`）、状态 `res.message || '对齐完成'`（`hf-ok`）；`res.canceled` → `hideAlignBar()` + 状态与 toast 用 `res.message || '已取消'`（**不算错误**）；其它失败 → 进度条错误文案 + 状态 `hf-error` + toast；`catch` 同样把异常消息写进进度条与状态；`finally` 复位 `alignBusy`。
+**`startAlign` 流程**：`alignBusy` 为真 → `toast('对齐合成进行中，请稍候')` 返回；`requireCfg` 未通过返回；`getAlignSubtitleText()` 失败则 `setStatus(message, 'hf-error')`；`voiceId` 为空提示「请先选择（或创建）音色」；然后置 `alignBusy = true`、`resetAlignUi()`、`hideAlignBar()`、状态「正在提交逐句合成任务…」，再调用 `synthAligned`。结果分支：`res.ok` → 写 `alignResult`、**`alignAudioSrc.value = ttsUrl(String(res.audioPath || ''))`**（整轨试听走 `hgpreview://tts/…?tts=1`，见 `utils/url.ts`）、进度条「对齐完成：N 句」（`done`）、状态 `res.message || '对齐完成'`（`hf-ok`）；`res.canceled` → `hideAlignBar()` + 状态与 toast 用 `res.message || '已取消'`（**不算错误**）；其它失败 → 进度条错误文案 + 状态 `hf-error` + toast；`catch` 同样把异常消息写进进度条与状态；`finally` 复位 `alignBusy`。
 
 **进度阶段**（`voiceTools.onAlignProgress` 回调 `p`，字段 `stage` / `percent` / `message`）：
 
@@ -289,14 +289,14 @@
 | 文件 | import 清单 |
 | --- | --- |
 | `TextTtsPage/index.vue` | `vue`：`onMounted`、`ref`（**无 `watch`**）；`./helpers`：`ttsResultShown`；`@renderer/components/StepBar.vue`；`./SynthSection.vue`；`./AlignSection.vue`；`./VoiceSection.vue` |
-| `TextTtsPage/SynthSection.vue` | `vue`：`computed`、`onMounted`、`ref`、**`watch`**；`@renderer/composables/useAppStore`：`appState`、`refreshProject`（**不再导入 `activeMenu`**）；`@renderer/composables/useToast`：`toast`；`@renderer/utils/rate`：`applyRate`、`stepRate`；`@renderer/pages`：`goPage`（`goSettingsVoice()` 里用）；`@renderer/composables/useNavIntent`：`requestSettingsSection`；`@renderer/components/HfSelect.vue`：默认导出 + 类型 `HfSelectGroup`、`HfSelectOption`；`./helpers`：**13 个成员**（含 `activeTtsTab`） |
-| `TextTtsPage/AlignSection.vue` | `vue`：`computed`、`onMounted`、`ref`、**`watch`**；`@renderer/composables/useAppStore`：`appState`、`refreshProject`；`@renderer/composables/useToast`：`toast`；`@renderer/utils/escape`：`escTxt`；`@renderer/utils/time`：`fmtTime`、`fmtTimeMs`；`@renderer/pages`：`goPage`；`@renderer/composables/useNavIntent`：`requestSettingsSection`；`@renderer/components/HfSelect.vue`：默认导出 + 类型 `HfSelectGroup`；`./helpers`：**9 个成员**（含 `activeTtsTab`） |
+| `TextTtsPage/SynthSection.vue` | `vue`：`computed`、`onMounted`、`ref`、**`watch`**；`@renderer/composables/useAppStore`：`appState`、`refreshProject`（**不再导入 `activeMenu`**）；`@renderer/composables/useToast`：`toast`；`@renderer/utils/rate`：`applyRate`、`stepRate`；**`@renderer/utils/url`：`ttsUrl`**；`@renderer/pages`：`goPage`（`goSettingsVoice()` 里用）；`@renderer/composables/useNavIntent`：`requestSettingsSection`；`@renderer/components/HfSelect.vue`：默认导出 + 类型 `HfSelectGroup`、`HfSelectOption`；`./helpers`：**13 个成员**（含 `activeTtsTab`） |
+| `TextTtsPage/AlignSection.vue` | `vue`：`computed`、`onMounted`、`ref`、**`watch`**；`@renderer/composables/useAppStore`：`appState`、`refreshProject`；`@renderer/composables/useToast`：`toast`；`@renderer/utils/escape`：`escTxt`；`@renderer/utils/time`：`fmtTime`、`fmtTimeMs`；**`@renderer/utils/url`：`ttsUrl`**；`@renderer/pages`：`goPage`；`@renderer/composables/useNavIntent`：`requestSettingsSection`；`@renderer/components/HfSelect.vue`：默认导出 + 类型 `HfSelectGroup`；`./helpers`：**9 个成员**（含 `activeTtsTab`） |
 | `TextTtsPage/VoiceSection.vue` | `vue`：`computed`、`onMounted`、`ref`、**`watch`**；`@renderer/pages`：`goPage`；`@renderer/utils/escape`：`escTxt`；`@renderer/composables/useToast`：`toast`（删云端成功后提示）；`@renderer/composables/useNavIntent`：`requestSettingsSection`；`@renderer/components/HfSelect.vue`：默认导出 + 类型 `HfSelectGroup`；`./helpers`：**5 个**（`activeTtsTab`、`activeProviderLabel`、`readActiveCfg`、`refreshVoiceKeyState`、`voiceKeyReady`） |
 | `TextTtsPage/helpers.ts` | `vue`：`ref`；`@renderer/pages`：`goPage`（用于跳 `'settings'`） |
 
 - **`appState` 用到的字段**：`myProjects`、`currentName`、`project.subtitle` / `project.subtitleCount` / `project.content.scenes`。`SynthSection` **不再读 `activeMenu`**（那是 `onManageVoice` 专用的判断，随按钮一起删除）；`VoiceSection` 不读 `appState`（只依赖 `goPage`、`voiceTools` 与 `./helpers` 的 Key 状态成员）。
 - **上游**：`pages/index.ts` 的页面注册表（key `'text-tts'`）与 `@renderer/components/StepBar.vue`（`PageKey` 序列含该页，内部 `goPage(props.page)` 刷新当前页；原 `'sound-copy'` 键与「配音」节点的 `isPage('sound-copy')` 判定均已删除）；`StepBar` 的 props 为 `defineProps<{ page: PageKey }>()`。
-- **下游（本组使用的 composables / utils / 组件 / 页面）**：`@renderer/composables/useAppStore`、`@renderer/composables/useToast`、`@renderer/utils/rate`、`@renderer/utils/escape`、`@renderer/utils/time`、`pages/index.ts` 的 `goPage`、`@renderer/components/HfSelect.vue`（合成卡 3 个、对齐卡 2 个、音色管理卡组 3 个下拉）；跨页跳转目标只剩 `'settings'`（API Key 设置）与 `'text-tts'` 自身。
+- **下游（本组使用的 composables / utils / 组件 / 页面）**：`@renderer/composables/useAppStore`、`@renderer/composables/useToast`、`@renderer/utils/rate`、`@renderer/utils/escape`、`@renderer/utils/time`、**`@renderer/utils/url`（`ttsUrl`）**、`pages/index.ts` 的 `goPage`、`@renderer/components/HfSelect.vue`（合成卡 3 个、对齐卡 2 个、音色管理卡组 3 个下拉）；跨页跳转目标只剩 `'settings'`（API Key 设置）与 `'text-tts'` 自身。
 - **调用的 preload 方法汇总**：
 
 | 命名空间.方法 | 调用方 | 参数 / 用途 |
@@ -313,10 +313,10 @@
 | `voiceTools.pickDir()` | `SynthSection` | 无参，选自定义保存目录 |
 | `voiceTools.saveConfig({ saveDir })` | `SynthSection` | 持久化（`r.dir`）或清除（`''`）自定义目录 |
 | `voiceTools.getSaveDir({ projectName, saveDir, defaultOut })` | `SynthSection` | 解析最终保存目录 |
-| `voiceTools.synth(t, v, projectName, saveDir, voiceModel, audioName, isOutput)` | `SynthSection` | 7 个位置参数，合成并保存 |
-| `voiceTools.listGenerated()` | `SynthSection` | 拉取已生成音频 `res.items` |
+| `voiceTools.synth(t, v, projectName, saveDir, voiceModel, audioName, isOutput)` | `SynthSection` | 7 个位置参数，合成并保存；回执 `savePath` 交给 `ttsUrl()` 产出试听源 |
+| `voiceTools.listGenerated()` | `SynthSection` | 拉取已生成音频 `res.items`（每条的 `path` 交给 `ttsUrl()`） |
 | `voiceTools.onAlignProgress(cb)` | `AlignSection` | 订阅进度（`stage` / `percent` / `message`），preload 单订阅 |
-| `voiceTools.synthAligned({ projectName, subtitleText, voice, voiceModel, mode, gapSec })` | `AlignSection` | 提交逐句对齐合成 |
+| `voiceTools.synthAligned({ projectName, subtitleText, voice, voiceModel, mode, gapSec })` | `AlignSection` | 提交逐句对齐合成；回执 `audioPath`（绝对路径）交给 `ttsUrl()` |
 | `voiceTools.cancelAlign()` | `AlignSection` | 取消任务 |
 | `projectTools.openFolderOf(dirOrFile)` | `SynthSection` / `AlignSection` | 打开保存目录 / 结果目录 / 音频所在目录 |
 | `projectTools.setAudio(name, audioPath)` | `SynthSection` / `AlignSection` | 设为当前项目背景音频 |
@@ -342,13 +342,13 @@
 10. **禁用态只跟「选中的已生成音频是否存在」走**：`updateGenSel` 找不到条目就把 `genSetDisabled` / `genOpenDisabled` 置 `true`，命中则置 `false`；`onGenSetBg` 内还有一次 `if (!it)` 拦截（双保险），`AlignSection` 的 `startAlign` / `writeAlign` 同样只做配置与前置条件校验，不做项目形态判定。
 11. **`genSelIdx` 是字符串下标**：HfSelect option 的 `value` 为 `String(i)`（全局数组下标），读取统一 `Number(genSelIdx.value)`；`updateGenSel` 找不到条目会清空信息并重新禁用按钮。
 12. **两个 `<audio>` 元素各自独立**：结果卡与列表卡分别是 `resultAudioEl` / `genAudioEl`，各自维护语速值；语速步长固定 0.05，范围 0.5~2.0，非法或空值回退 1x，只改播放速率不改磁盘文件。
-13. **`file:///` URL 拼接**：四处统一用 `'file:///' + encodeURI(String(path).replace(/\\/g, '/'))` 处理 Windows 反斜杠；路径为空时结果卡也不显示音频。
+13. **试听源本轮从 `file://` 改为 `hgpreview://tts/…?tts=1`（三处导出一致）**：合成结果（`resultSrc = res.savePath ? ttsUrl(res.savePath) : ''`）、已生成音频（`genAudioSrc = ttsUrl(it.path)`）、对齐整轨与逐句（`ttsUrl(res.audioPath)` / `playSeg()` 里的 `ttsUrl(path)`）全部经 `@renderer/utils/url` 的 `ttsUrl()`——它从绝对路径里认出白名单目录（`tts-output` / `voice`）后拼 `hgpreview://tts/<逐段编码的相对路径>?tts=1`；**认不出白名单目录（用户自定义保存目录）就返回空串，据此不显示试听入口**（不猜）。**背景（为什么以前能用）**：旧版 `createWindow()` 用 `mainWindow.loadFile(...)`，**dev 与生产都是 `file://` 源**，所以 `'file:///' + encodeURI(path)` 当时确实成立；`9615eaf`（electron-vite 重构）引入 dev 走 `loadURL(ELECTRON_RENDERER_URL)` 之后，**dev 渲染页变成 `http://localhost` 源**，Chromium 拒绝 http 页读 `file://`，这些试听在 dev 下静默失效（打包版仍可用），还被误报成「临时文件被清理」（CHANGELOG #25 / #26 / #27）。另外 `encodeURI` 不编码 `#` / `?`，路径带这两个字符的文件名会被当成 fragment / query 而指向错文件——逐段 `encodeURIComponent` 没有这个问题。
 14. **`onAlignProgress` 是单订阅**：preload 只保留一个回调，重复注册等于替换，不会叠加；切页后旧页回调不再触发。
 15. **对齐取消是「当前句完成后停止」**：主进程返回 `{ ok: false, canceled: true, message: '已取消（已完成 i/N 句）' }`，本卡走 `res.canceled` 分支、不显示为错误；`onCancel` 仅设状态为「正在取消（当前句完成后停止）…」。
 16. **`assemble` 用不确定态**，`done` / `error` 由 `showAlignBar` 固定填满 100%。
 17. **「句间停顿（秒）」是兜底值而非固定值**：仅当字幕原有间隔放不下本句音频、或字幕无时间线（估时）时生效，且输入行只在 `audio-driven` 模式显示。
 18. **写入项目的结束时间来自实测音频**（该句音频起点 + 实测时长），不是字幕原结束时间、也不是下一句起始时间，以保证与成片音轨一致；写回是"先字幕后音频"的两步操作，失败即中止且不回滚。
-19. **单句试听依赖临时目录**：`segPath` 指向对齐任务的 `seg` 子目录，任务目录被清理后播放失败会 toast「该句试听文件已失效（临时目录被清理），可试听整轨」。
+19. **单句试听的两条失败路径要分开看**：`playSeg(path)` 先把 `segPath` 交给 `ttsUrl()`——**空串**（文件不在 `tts-output` / `voice` 白名单内）走「这一句的试听文件不在可预览目录里」并直接返回；有 URL 但 `el.play()` 失败则提示「这一句试听失败：对齐任务目录可能已被清理，可试听整轨」（dev 下「http 页读不了 file://」这条旧原因已随本轮改动消失，现在最常见的真实原因是对齐任务目录被下一次对齐清理）。
 20. **回调签名统一**：`(text: string, kind: string) => void`，两卡的 `setStatus` 恰好同签名可直接传入 `requireCfg` / `loadVoices`；`kind` 约定为 `''`（进行中）、`'hf-ok'`（成功）、`'hf-error'`（失败）。`VoiceSection` 不使用该签名（自带 `requireCfg` 与三个独立状态对）。
 21. **回退路径不抛异常**：helpers 内所有 IPC 都带 `.catch(() => ...)` 安全值，音色加载失败不中断页面，仅在下拉里出现 `voiceId === ''` 的占位项。`VoiceSection` 的三个 `Promise.all` 成员同样各自 `.catch(fail)` 成 `{ ok: false, message }`：系统音色这一路失败按空列表继续，克隆音色 / 本地映射两路失败则把状态行置为 `hf-error` 并写明是哪一路失败（见第 32 条）。
 22. **分组顺序固定**：系统音色（内置）在前、自定义音色（我的克隆）在后；`firstVoiceId()` 只检查每组第一个选项，若它 `voiceId` 为空才跳到下一组。`mapGroups` 同序且过滤空组。
@@ -356,7 +356,7 @@
 24. **`activeTtsTab` 是三值字符串字面量联合**（`'synth' | 'align' | 'voice'`，定义在 `helpers.ts`、**父页与三卡共用**），Tab 按钮的 `data-tab` 仅作样式/调试锚点；新增 Tab 必须同时处理类型联合、`v-show` 条件与**各卡的 `watch(activeTtsTab)` 分支**——**不再需要任何「外部触发切 Tab」的信号分支**。
 25. **切 Tab 自动刷新各卡列表**：三卡是 `v-show` 切换、组件不重挂载，音色下拉原本只在页面挂载或点「刷新」时拉一次，于是「在音色管理里新建音色 → 切回文字生音频」看不到新音色。现在三卡都 `watch(activeTtsTab)`，轮到自己时重拉：`SynthSection` 在 `t === 'synth'` 时先 `await refreshVoiceKeyState()`（用户可能刚在设置页存完 Key）→ **`!voiceKeyReady` 直接 return** → `await loadVoices(setStatus)` → 若当前 `voiceId` 已不在新列表里则回落到 `firstVoiceId()`；`AlignSection` 同款（条件 `t === 'align'`）；`VoiceSection` 在 `t === 'voice'` 时 `void refreshVoiceKeyState()` + `void loadAll(true)`（静默重拉系统音色 + 云端克隆音色 + 本地映射）。
 26. **`onLoadNarration` 空旁白**处理：报错文案为「当前项目无内容脚本（或场景无旁白），请先到「内容脚本」页编写」，成功则提示「已载入 N 段旁白（每场景一段、空行分隔），可继续手动编辑」。
-27. **`onGenPlay` 空源守卫**：`genAudioEl` 或 `genAudioSrc` 为空时 toast「请先选择已生成音频」，不改变试听行显隐。
+27. **`onGenPlay` 空源守卫**：`genAudioEl` 或 `genAudioSrc` 为空时 toast「请先选择已生成音频」，不改变试听行显隐（`genAudioSrc` 为空正是「产物不在可预览目录」的表现）。
 28. **云端音色名必须是 ASCII，上限统一 10 位**：创建时提交的是 `genAsciiName(vcName)`（默认 `max = CLONE_PREFIX_MAX = 10`）——只保留 `[A-Za-z0-9_]`，中文名被剔空时用 `myvoice` + 时间戳后 8 位兜底，**截断到 10 位**（与主进程 `CLONE_PREFIX_MAX = 10` 一致，超长会被主进程以「音色名称需 1~10 个字符…」拒绝）；中文名只通过 `saveProfile` 作为本地显示名；因此「显示名称」同名多次创建会得到不同的云端 `voice` id。**原 `cloneNameMax(audioSeries)`（audio 10 / 其余 16）已删除。**
 29. **本地文件行常显，URL 行只在 `qwen-audio-*` 时出现**：`applyInputMode` 用 `/^qwen-audio-.*-tts/i` 判定——选 `qwen-audio-3.0-tts-flash` 时显示 URL 输入行（label「或音频 URL」），**本地文件行始终在**；目录里已经没有别的 clone 模型可选项（vc 系列与那条 clone 的 `qwen3-tts-flash` 都已删除），所以非 audio 模型只会来自「映射管理」的历史绑定。两者都填时 `onCreate` 用 `remote = urlMode ? vcUrl.trim() : ''`、`source = remote || audioPath` ——**URL 优先**。主进程 `isAudioTtsModel()` 用**同一正则**作「能不能作复刻目标模型」的唯一判据：为假时 `voice:create` 直接返回「模型「<id>」不支持音色复刻…」；为真时走 `enrollModel`（`voice-enrollment`）+ `input.url`（本地文件会被裁成 15 秒 wav 并转 data URI），**不再有 `audio.data` / 16 位名称 / 10 MB 守卫等 vc 分支**。`vcModel` 初值取**当前厂家**的克隆模型（`role: 'clone'` 的第一个，无厂家目录时回落 `qwen-audio-3.0-tts-flash`）。
 30. **映射是本地概念**：`saveProfile` / `deleteProfile` 只改本机 `settings.json`（`profiles` 由主进程整体返回并**整体覆盖**本地缓存），`onClearMap` 不删除云端克隆音色（提示文案已说明）；`syncMapForm` 对未映射项清空显示名、预填默认模型。

@@ -2,7 +2,12 @@
 // 档位只有两项（普通用户）：质量 quality（draft|standard|high）、帧率 fps（24|30）。
 // 优先级约定：项目级覆盖 > 全局默认（settings.json 的 render）> 内置默认（standard / 30）；
 // 覆盖里缺省的字段跟随上一级，不被默认值顶掉。
-import type { RenderFps, RenderOptions, RenderOverride, RenderQuality } from '@shared/types'
+//
+// 另外这里放**成片画布**（RenderCanvas）：它**不是渲染档位**、不走上面那套层级——它是项目属性
+// （project.json 的 canvas，只在「HTML生成」页的「画布」下拉里选），缺省即 DEFAULT_CANVAS。
+// 取值与尺寸取自 @shared/constants（唯一真源，与 HyperFrames CLI 的画布预设对齐）。
+import { CANVAS_LABELS, CANVAS_SIZES, DEFAULT_CANVAS, RENDER_CANVASES } from '@shared/constants'
+import type { RenderCanvas, RenderFps, RenderOptions, RenderOverride, RenderQuality } from '@shared/types'
 
 // 质量三档：draft 编码最快但文字边缘可能有压缩痕迹，只适合「快速看结构」
 export const RENDER_QUALITY_OPTIONS: { value: RenderQuality; label: string; hint: string }[] = [
@@ -52,4 +57,25 @@ export function renderQualityLabel(quality: RenderQuality): string {
 // 档位摘要文案，如「标准 · 30fps」
 export function renderOptionsText(options: RenderOptions): string {
   return renderQualityLabel(options.quality) + ' · ' + options.fps + 'fps';
+}
+
+// ===== 成片画布（项目属性，不是渲染档位）=====
+// 下拉选项：值 + 「横屏 16:9（1920×1080）」这样的文案（明文都取自 shared/constants，避免与提示词说法漂移）
+export const RENDER_CANVAS_OPTIONS: { value: RenderCanvas; label: string }[] = RENDER_CANVASES.map((c) => ({
+  value: c,
+  label: CANVAS_LABELS[c] + '（' + CANVAS_SIZES[c].width + '×' + CANVAS_SIZES[c].height + '）'
+}))
+
+export function canvasLabel(canvas: RenderCanvas): string {
+  return CANVAS_LABELS[canvas] || String(canvas)
+}
+
+// 画布像素（= composition 尺寸 = 成片尺寸）：预览 iframe 与缩放比都按它算
+export function canvasSize(canvas: RenderCanvas): { width: number; height: number } {
+  return CANVAS_SIZES[canvas] || CANVAS_SIZES[DEFAULT_CANVAS]
+}
+
+// 项目里的画布值可能是脏数据（手改过 project.json / 更早的记录）：非法一律落回 DEFAULT_CANVAS
+export function normalizeCanvas(raw: unknown): RenderCanvas {
+  return RENDER_CANVASES.indexOf(raw as RenderCanvas) >= 0 ? raw as RenderCanvas : DEFAULT_CANVAS
 }

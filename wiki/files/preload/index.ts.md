@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
-- **规模**：229 行（本轮**行数不变**：`projectTools` 里 3 个方法换成 3 个方法，净增 0 行）
+- **规模**：236 行
 - **对外导出**：本文件不产生模块导出；其作用是把 11 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、`updateTools`、`runtimeTools`、`legacyTools`
 - **类型契约**：11 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
@@ -31,15 +31,17 @@ import type {
   AlignProgressPayload,
   HtmlProgressPayload,
   PreloadApi,
+  RenderCanvas,
   RenderOverride,
   RuntimePackName,
   RuntimeProgressPayload,
   UpdateProgressPayload,
+  VideoRenderPayload,
   WhisperProgressPayload
 } from '../shared/types'
 ```
 
-（以上为 `src/preload/index.ts` 第 10–19 行的逐字内容，**共 8 个类型**；下面两行是示意——真实实现里每个命名空间都写成「契约标注 + 字面量对象」再 `contextBridge.exposeInMainWorld`。）
+（以上为 `src/preload/index.ts` 第 10–21 行的逐字内容，**共 10 个类型**——本次新增 `RenderCanvas` 与 `VideoRenderPayload`；下面两行是示意——真实实现里每个命名空间都写成「契约标注 + 字面量对象」再 `contextBridge.exposeInMainWorld`。）
 
 ```ts
 const hfTools: PreloadApi['hfTools'] = { /* 方法实现 */ };
@@ -67,7 +69,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `windowControls` | `close` | `window:close` | `send` 单向，关闭窗口 |
 | `windowControls` | `onMaximizedChange` | `window:maximized-change` | 监听主进程回推的最大化状态，回调参数 `isMaximized: boolean` |
 | `hfTools` | `openHtml` | `dialog:open-html` | 选择 HTML 文件，返回 `Promise<string \| null>`；**保留但渲染层当前无调用方** |
-| `hfTools` | `renderVideo` | `video:render` | 传 `{ htmlPath, ...档位 }`（`quality` / `fps` 可缺省），HyperFrames 转视频 |
+| `hfTools` | `renderVideo` | `video:render` | 传 `{ htmlPath, ...options }`，实现是 `ipcRenderer.invoke(IPC.Video.Render, Object.assign({ htmlPath }, options \|\| {}))`，即载荷形如 `{ htmlPath, quality?, fps?, canvas? }`：档位（质量 / 帧率）缺省项**不下发**（交给 CLI 默认 standard / 30），而 `canvas`（**成片画布方向，项目属性**）缺省时由主进程落 `DEFAULT_CANVAS`。签名本次由 `options?: RenderOverride` 改为 `options?: Omit<VideoRenderPayload, 'htmlPath'>`（`htmlPath` 已由第一参数给，故排除） |
 | `hfTools` | `showInFolder` | `video:show-in-folder` | 在文件管理器中定位产物 |
 | `hfTools` | `onProgress` | `video:progress` | 渲染进度订阅，数据形如 `{ text }` |
 | `settingsTools` | `get` | `settings:get` | 读取 `AppSettings` |
@@ -131,6 +133,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `projectTools` | `delete` | `project:delete` | 参数为裸字符串 `name` |
 | `projectTools` | `saveVideo` | `project:save-video` | `{ name, videoPath }`（渲染产物回写，与「视频素材」无关） |
 | `projectTools` | `setRender` | `project:set-render` | `{ name, render }`；`render` 传 `null` 清除项目级档位覆盖 |
+| `projectTools` | **`setCanvas`** | **`project:set-canvas`** | **成片画布方向（项目属性，不是渲染档位）**。签名 `setCanvas(name: string, canvas: RenderCanvas)`，实现 `ipcRenderer.invoke(IPC.Project.SetCanvas, { name, canvas })`；白名单校验在主进程（`RENDER_CANVASES`），非法值由主进程忽略并回 `画布取值非法` |
 | `projectTools` | `onHtmlProgress` | `project:html-progress` | HTML 生成/修改进度订阅（单订阅） |
 | `updateTools` | `version` | `update:version` | **同步**返回当前版本号字符串（`sendSync`），供设置页首屏显示 |
 | `updateTools` | `check` | `update:check` | 检查更新，返回 `{ ok: true, state: 'none' \| 'available' \| 'skipped', version, currentVersion, message, detail? }`（失败分支为 `{ ok: false, message, detail? }`） |
@@ -139,6 +142,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `updateTools` | `install` | `update:install` | 退出并运行安装器（本机有转录 / 渲染 / 配音任务时拒绝） |
 | `updateTools` | `status` | `update:status` | 取一次主进程当前更新状态（`invoke`）：返回 `UpdateProgressPayload`（`stage` 经 `toStage()` 白名单收敛）。主进程状态常驻、跨设置页挂载持续存在；设置页挂载时用它补齐「启动静默检查」那次失败——该事件发生在页面订阅 `update:progress` 之前 |
 | `updateTools` | `openLog` | `update:open-log` | 在文件管理器里定位 `userData/updater.log`（没有日志则打开 `userData` 目录），返回 `IpcResult<{ path }>`；**更新失败时的排障出口，不依赖 electron-updater 是否加载成功** |
+| `updateTools` | `changelog` | `update:changelog` | 取随包 `CHANGELOG.md` 的**原文**（`ipcRenderer.invoke(IPC.Update.Changelog)`，无载荷），返回 `IpcResult<{ text: string }>`；**主进程只负责定位与读取文件**（`app.getAppPath()/CHANGELOG.md`），分块与行内排版在渲染层 `@renderer/utils/changelog` |
 | `updateTools` | `onProgress` | `update:progress` | 更新阶段 / 下载进度订阅（单订阅） |
 | `runtimeTools` | `status` | `runtime:status` | renderer → main，`invoke`；查询运行环境（分包 ffmpeg / hyperframes）状态 |
 | `runtimeTools` | `prepare` | `runtime:prepare` | renderer → main，`invoke`；主动准备指定包（载荷 `packs?: RuntimePackName[]`，省略 = 全部）。**载荷必须是普通数组**（渲染层用 `toRaw(list).slice()`）：`invoke` 的参数要过结构化克隆，Vue 响应式 `Proxy` 会直接抛 `DataCloneError`，主进程 handler 不会执行 |
@@ -147,7 +151,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `legacyTools` | `status` | `legacy:status` | renderer → main，`invoke`，无载荷；返回 `LegacyDataInfo \| null`（有没有待处理的旧数据目录 / 里面有什么） |
 | `legacyTools` | `resolve` | `legacy:resolve` | renderer → main，`invoke`；**只把 `action` 字符串透传**（`resolve(action)` → `ipcRenderer.invoke(IPC.Legacy.Resolve, action)`），返回 `LegacyResolveResult` |
 
-### 2.3 本轮 `projectTools` 的增删（3 换 3，方法数仍是 25）
+### 2.3 `projectTools` 的增删（素材库那次 3 换 3，方法数当时仍是 25；本次新增 `setCanvas` ⇒ 26）
 
 **被删除的三行**（原文已从 `src/preload/index.ts` 移除，此处按 git 历史逐字保留以便对照）：
 
@@ -168,6 +172,7 @@ saveMaterials: (name: string, materials) => ipcRenderer.invoke(IPC.Project.SaveM
 - 三个旧方法对应的 `project:pick-video` / `project:set-video` / `project:clear-video` 频道已在 `src/shared/ipc.ts` 与 `src/main/projects.ts` 中一并删除（**三处齐改**）；`PreloadApi['projectTools']` 的签名同步换过，因此本文件少写一个都会编译不过。
 - 参数类型由契约给出（`kind: ProjectMaterialKind`、`materials: ProjectMaterial[]`），实现里只做「组装载荷 + invoke」。
 - `pickMedia` 是**少数不返回 `IpcResult` 的方法**（返回裸 `string[]`），与 `projectTools.load()` / `pickAudio()` 同类。
+- **本次新增的 `setCanvas`**（与上面 3 换 3 无关，只加不减）：`setCanvas: (name: string, canvas: RenderCanvas) => ipcRenderer.invoke(IPC.Project.SetCanvas, { name, canvas })`，位置在 `setRender` 之后、`onHtmlProgress` 之前，上方注释写明「成片画布方向（项目属性）：白名单校验在主进程（`RENDER_CANVASES`）」。它与 `hfTools.renderVideo` 载荷里的 `canvas` 是不同的路径：前者把画布**存进项目**（`project.json` 的 `canvas`），后者把当前画布**带给渲染器**。
 
 ## 3. 关键流程或结构
 
@@ -175,7 +180,7 @@ saveMaterials: (name: string, materials) => ipcRenderer.invoke(IPC.Project.SaveM
 
 | 形态 | 用法 | 代表频道 |
 | --- | --- | --- |
-| 请求-响应 | `ipcRenderer.invoke(channel, payload)` | `settings:get`、`project:list`、**`project:pick-media`**、`update:open-log` |
+| 请求-响应 | `ipcRenderer.invoke(channel, payload)` | `settings:get`、`project:list`、**`project:pick-media`**、`update:open-log`、**`update:changelog`** |
 | 单向通知 | `ipcRenderer.send(channel)` | `window:minimize`、`voice:align-cancel` |
 | 同步取值 | `ipcRenderer.sendSync(channel)` | `update:version`（全工程唯一的同步频道，只回版本号字符串） |
 | 主进程推送 | `ipcRenderer.on(channel, handler)` | `window:maximized-change`、`video:progress`、`update:progress`、`runtime:progress` |
@@ -211,7 +216,7 @@ saveMaterials: (name: string, materials) => ipcRenderer.invoke(IPC.Project.SaveM
 | --- | --- | --- |
 | 依赖 | `electron` | 仅使用 `contextBridge` 与 `ipcRenderer` |
 | 依赖 | `../shared/ipc` | 引入 `IPC` 常量对象，所有频道名均取自此处，不写字面量 |
-| 依赖（仅类型） | `../shared/types` | `PreloadApi`（11 个对象的契约类型）、`AlignProgressPayload`、`HtmlProgressPayload`、`RenderOverride`、`RuntimeProgressPayload`、`UpdateProgressPayload`、`WhisperProgressPayload`（进度回调载荷） |
+| 依赖（仅类型） | `../shared/types` | `PreloadApi`（11 个对象的契约类型）、`AlignProgressPayload`、`HtmlProgressPayload`、**`RenderCanvas`**、`RenderOverride`、`RuntimeProgressPayload`、`UpdateProgressPayload`、**`VideoRenderPayload`**、`WhisperProgressPayload`（进度回调载荷） |
 | 被构建使用 | `electron.vite.config.ts` → `preload` 段 | 打包为 out/preload 产物，由主进程 `webPreferences.preload` 加载 |
 | 被消费 | 渲染层全部页面 | 契约由 `src/shared/types.ts` ⑨ 节的 `PreloadApi` 定义、经 `src/preload/index.d.ts` 挂到 `window`，`window.*` 调用遍布 `src/renderer/src/pages/`、`src/renderer/src/composables/`、`src/renderer/src/App.vue` |
 | 对端实现 | `src/main/*.ts` | `ipcMain.handle` / `ipcMain.on` 的注册方，频道名与本文件逐一对应（素材三件套在 `src/main/projects.ts` 的 `register()` 里） |
@@ -220,7 +225,7 @@ saveMaterials: (name: string, materials) => ipcRenderer.invoke(IPC.Project.SaveM
 
 - **频道名不得硬编码**：本文件所有频道都通过 `IPC.Xxx.Yyy` 取用，禁止改成字符串字面量，否则与 `src/main/*.ts` 的注册方脱钩。
 - **方法名与参数顺序是对外契约**：唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi` —— 本文件的 11 个对象都以 `PreloadApi['<命名空间>']` 标注（实现侧被校验），渲染层经 `index.d.ts` 的 `interface Window extends PreloadApi {}` 拿到同一份签名；改契约请改共享层，不要在任一侧另行声明。
-- **`send` 与 `invoke` 不可混用**：`windowControls` 的三个窗口操作和 `voiceTools.cancelAlign` 是 `send`（无返回值），`updateTools.version` 是 `sendSync`（同步有返回值，主进程用 `ipcMain.on` + `event.returnValue`），其余基本是 `invoke`（含 `updateTools.openLog`）。
+- **`send` 与 `invoke` 不可混用**：`windowControls` 的三个窗口操作和 `voiceTools.cancelAlign` 是 `send`（无返回值），`updateTools.version` 是 `sendSync`（同步有返回值，主进程用 `ipcMain.on` + `event.returnValue`），其余基本是 `invoke`（含 `updateTools.openLog` 与 `updateTools.changelog`）。
 - **payload 透传**：`whisperTools.addModel/updateModel/removeModel/transcribe` 与 `voiceTools.synthAligned` 原样透传对象载荷，不在 preload 做字段校验，字段合法性由主进程负责；`voiceTools.synth` / `create` 则把位置参数组装成共享层定义的载荷对象后 `invoke`。
 - **`generateHtml` / `modifyHtml` 的对象展开**：使用 `{ name, prompt, ...(materials || {}) }`，因此 `materials` 的键会与 `name` / `prompt` 平铺在同一层，`materials` 中不要出现同名键。`materials` 现为 `ProjectHtmlMaterials`（`subtitleProject` / `materialIds`），`audioPath` 与 `videoPath` 都已删除；对应的 `ProjectAgentPayload` 因此也不再携带音频选择。
 - **素材三件套的载荷必须是普通对象 / 数组**：`invoke` 的参数要过**结构化克隆**，Vue 响应式 `Proxy` 会直接抛 `DataCloneError`（主进程 handler 根本不会执行）。因此 `HtmlGenPage/MaterialsSection.vue` 在调 `saveMaterials` 前用 `plainList()` 把 `appState.project.materials` 的元素铺平成普通对象；`addMaterials` 传的是 `pickMedia` 返回的普通字符串数组。**新增写素材的代码不要直接把 reactive 列表传进来**。

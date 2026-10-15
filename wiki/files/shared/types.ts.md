@@ -4,8 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：905 行
-- **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 3 个（`IpcFail`、`IpcResult`、**`ConfigTarget`**）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境（**分包**）4 个（`RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 **（本轮新增 `ProjectMaterialKind` / `ProjectMaterial` / 三个素材载荷与 `ProjectMaterialsResult`）** ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个；另有 ① 节 `IpcFail.needPacks`（缺哪个运行环境包）与 `IpcFail.needConfig` / `title`（配置类错误）、⑨ 节 `settingsTools.pickRuntimePack` 等成员
+- **规模**：936 行
+- **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 3 个（`IpcFail`、`IpcResult`、**`ConfigTarget`**）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位 `RenderQuality` / `RenderFps` / `RenderOptions` / `RenderOverride` 与**成片画布 `RenderCanvas`**）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境（**分包**）4 个（`RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 **（素材库那次新增 `ProjectMaterialKind` / `ProjectMaterial` / 三个素材载荷与 `ProjectMaterialsResult`；本次新增 `ProjectSetCanvasPayload`）** ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`——**本次新增 `canvas?`**、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个；另有 ① 节 `IpcFail.needPacks`（缺哪个运行环境包）与 `IpcFail.needConfig` / `title`（配置类错误）、⑨ 节 `settingsTools.pickRuntimePack` 等成员
 
 ## 1. 作用与职责
 
@@ -85,6 +85,7 @@
 | `RenderFps` | `type` | 渲染帧率字面量联合：`24 \| 30` |
 | `RenderOptions` | `interface` | **完整**渲染档位 `{ quality: RenderQuality; fps: RenderFps }`（`settings.json` 的 `render` 段与生效档位都用它） |
 | `RenderOverride` | `type` | `Partial<RenderOptions>`——**项目级覆盖**：字段可缺省，缺省项跟随全局默认 |
+| `RenderCanvas` | `type` | **成片画布方向（本次新增）**：`'landscape' \| 'portrait' \| 'square'`。源码注释明确它是**项目属性、不是渲染档位**——不走「项目覆盖 > 全局默认」那套层级，只在一处选（「HTML生成」页生成侧的「画布」下拉，生成 / 修改前定），落进 `project.json` 的 `canvas`，且同一个值同时决定三件事：① 生成提示词里给模型的版式尺寸（`projects.ts` 的 `【画布】` 块）② 预览 iframe 的画布（`pages/HtmlGenPage/PreviewSection.vue`）③ 渲染入口注入的 `<html data-resolution>`（`main/video.ts`）；因此「预览看到的画布」与「成片画布」必然是同一个尺寸。取值与尺寸的真源是 `shared/constants.ts`（`RENDER_CANVASES` / `CANVAS_SIZES` / `CANVAS_LABELS` / `DEFAULT_CANVAS`），与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 对齐（本项目只暴露 1080 三档） |
 | `SettingsSaveRenderPayload` | `interface` | `settings:save-render` 线上载荷：`{ render?: RenderOverride }`（只更新 `render` 段，不动 `customModel`） |
 
 | 归属 | 字段 | 类型 | 说明 |
@@ -281,6 +282,7 @@
 | `ProjectAgentPayload` | `interface` | `extends ProjectHtmlMaterials` + `name` / `prompt`（`generateHtml` / `modifyHtml` 线上载荷） |
 | `ProjectHtmlResult` | `interface` | `{ htmlPath, compatible, message? }` |
 | `ProjectSetRenderPayload` | `interface` | `project:set-render` 线上载荷：`{ name?: string; render?: RenderOverride \| null }`——`render` 传 `null`（或字段全非法）表示清除项目覆盖、回到跟随全局默认 |
+| `ProjectSetCanvasPayload` | `interface` | **`project:set-canvas` 线上载荷（本次新增）**：`{ name?: string; canvas?: RenderCanvas }`——成片画布方向（项目属性）。源码注释口径是「**非法 / 缺省一律忽略，不写进项目**」；handler 侧缺项目名回 `缺少项目名`、白名单（`RENDER_CANVASES`）外回 `画布取值非法` |
 
 > **已删除**（本轮）：`ProjectSetVideoResult`（原 `{ videoFile, abs }`）——它描述的「导入视频素材并回带项目内绝对路径」语义随单视频素材一起下线，素材三件套改由 `ProjectMaterialsResult` 描述回执。
 
@@ -288,12 +290,13 @@
 | --- | --- | --- | --- |
 | `Project` | `name` / `title` / `subtitle` | `string` | 项目名、标题、字幕文本 |
 | `Project` | `subtitleCount` | 可选 `number` | 字幕条数 |
-| `Project` | `htmlPath` / `videoPath` | `string` | 产物路径（**绝对路径**；空串表示未生成或已失效，HTML 变更后 `videoPath` 会被置空） |
+| `Project` | `htmlPath` / `videoPath` | `string` | 产物路径。`htmlPath` 是**绝对路径**；`videoPath` 是**项目内相对路径**（形如 `video/output.mp4`——成品就地渲染在项目里，落盘用相对引用以便项目整体搬走，见 [projects.ts.md](../main/projects.ts.md) §3.8；主进程 `project:load` 交给渲染层前会用 `resolveVideoAbs()` 换算成绝对路径，兼容读老记录里的绝对路径）。空串表示未生成或已失效，HTML 变更后 `videoPath` 会被置空 |
 | `Project` | `materials` | 可选 `ProjectMaterial[]` | **项目素材库**（图片 + 视频，多素材）：由 `project:add-materials` / `project:save-materials` 维护 |
 | `Project` | `videoMaterial` | 可选 `string` | **历史字段**（源码注释逐字）：「历史字段（素材多视频化之前的那「一个视频素材」）：本轮起**不再写入**、素材列表也不读它。保留声明只为不改动被暂时隐藏入口的 project:extract-video-audio handler（它仍按此字段定位视频）。」 |
 | `Project` | `audioFile` | `string` | 背景音频 / 生成语音相对引用（`audio/xxx`，空串表示无）；也是主进程注入 HTML 音轨（`<audio id="myv-bgm">`）的唯一来源 |
 | `Project` | `content` | `ContentScript` | 内容脚本 |
 | `Project` | `render` | 可选 `RenderOverride` | 视频渲染档位的**项目级覆盖**（字段缺省即跟随全局默认；`render` 为空覆盖时该字段被删除） |
+| `Project` | `canvas` | 可选 `RenderCanvas` | **成片画布方向（本次新增，项目属性）**：缺省 = `DEFAULT_CANVAS`（`landscape` 1920×1080）；由 `project:set-canvas` 写入，生成提示词 / 预览画布 / 渲染入口三处都读它（与 `render` 那套档位层级无关） |
 | `Project` | `createdAt` / `updatedAt` | `string` / 可选 `string` | 创建与更新时间（ISO 字符串） |
 | `ProjectMaterial` | `id` | `string` | 素材 id（主进程 `newMaterialId()` 生成）：勾选、移除都按它定位，**与文件名解耦**（同名文件重复导入也不会串） |
 | `ProjectMaterial` | `kind` | `ProjectMaterialKind` | `'image'` / `'video'`——决定落盘目录（`images/` / `video/`）与提示词分块 |
@@ -316,7 +319,7 @@
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `VideoRenderPayload` | `interface` | `extends RenderOverride`，即 `{ htmlPath?: string; quality?: RenderQuality; fps?: RenderFps }`——档位字段缺省/非法时主进程不拼对应 CLI 参数 |
+| `VideoRenderPayload` | `interface` | `extends RenderOverride`，即 `{ htmlPath?: string; quality?: RenderQuality; fps?: RenderFps; canvas?: RenderCanvas }`——档位字段缺省/非法时主进程不拼对应 CLI 参数；**`canvas` 不是档位而是项目属性**（本次新增）：渲染层把当前项目的画布值一并传下来，`video.ts` 据此往渲染入口注入 `<html data-resolution>`，缺省 / 非法则落 `DEFAULT_CANVAS`（必须有个确定值，否则 HyperFrames 在「页面没声明画布」时兜底 `portrait`） |
 | `VideoRenderResult` | `type` | 渲染结果联合：成功 `{ ok: true; outputVideo: string; projectDir: string }`，失败 `{ ok: false; message: string; compatible?: boolean; needPacks?: RuntimePackName[] }` |
 
 > ⑦ 节只有上面两个类型：渲染载荷与渲染结果。渲染进度载荷 `VideoProgressPayload` 归 ⑧ 节（进度推送）。
@@ -356,12 +359,12 @@
 | `electronAPI` | 2 | `platform`、`versions` | 非方法属性：`string` 与 `{ node; chrome; electron }` |
 | `appTools` | 1 | `copyText` | `Promise<boolean>`（不走 `IpcResult`）；**`openExternal` 曾与它并列，已按用户要求整条摘除**（连同 `app:open-external` 频道与主进程 `shell.openExternal` handler），详见 `src/shared/errors.ts` §6 |
 | `windowControls` | 4 | `minimize`、`toggleMaximize`、`close`、`onMaximizedChange` | 前三者 `void`（`send` 单向）；`onMaximizedChange(cb: (isMaximized: boolean) => void)` |
-| `hfTools` | 4 | `openHtml`、`renderVideo`、`showInFolder`、`onProgress` | `openHtml` → `Promise<string \| null>`（**保留但渲染层当前无调用方**）；`renderVideo` → `Promise<VideoRenderResult>`；`showInFolder` → `Promise<void>`；`onProgress(cb: (data: VideoProgressPayload) => void)` |
+| `hfTools` | 4 | `openHtml`、`renderVideo`、`showInFolder`、`onProgress` | `openHtml` → `Promise<string \| null>`（**保留但渲染层当前无调用方**）；`renderVideo(htmlPath, options?: Omit<VideoRenderPayload, 'htmlPath'>)` → `Promise<VideoRenderResult>`（第二参本次由 `RenderOverride` 改为 `Omit<VideoRenderPayload, 'htmlPath'>`，这样 `canvas?` 能与 `quality?` / `fps?` 一起下发；`htmlPath` 已由第一参数给，故用 `Omit` 排除）；`showInFolder` → `Promise<void>`；`onProgress(cb: (data: VideoProgressPayload) => void)` |
 | `settingsTools` | 6 | `get`、`save`、`saveRender`、`saveUpdater`、`test`、**`pickRuntimePack`** | `get` → `Promise<AppSettings>`（**不经 `ok` 包裹**）；`save(customModel)` / `saveRender(render)` / `saveUpdater(updater)` → `Promise<IpcResult<SettingsSaveResult>>`（preload 分别包装为 `{ customModel }` / `{ render }` / `{ updater }`）；`test(customModel)` → `Promise<IpcResult>`（失败分支可能带 `detail` / `needConfig`，见 §2.1）；`pickRuntimePack()` → `Promise<IpcResult<{ pack?: RuntimePackName }>>`（弹文件框选 `ffmpeg.7z` / `hyperframes.7z`，导入 `userData/runtime/local-import/`；取消时 `{ ok:false, canceled:true }`，导入成功后由调用方接着 `runtimeTools.prepare()`） |
 | `voiceTools` | 19 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、**`deleteCloudVoice`**、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` | 见下 |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` | 见下 |
-| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、**`pickMedia`、`addMaterials`、`saveMaterials`**、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress` | 见下（**本轮 3 换 3，成员数仍是 25**） |
-| `updateTools` | 8 | `version`、`check`、`download`、`cancel`、`install`、**`status`**、`openLog`、`onProgress` | 见下 |
+| `projectTools` | 26 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、**`pickMedia`、`addMaterials`、`saveMaterials`**、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、**`setCanvas`**、`onHtmlProgress` | 见下（素材库那次是 **3 换 3**、成员数当时仍是 25；本次新增 `setCanvas` ⇒ 26） |
+| `updateTools` | 9 | `version`、`check`、`download`、`cancel`、`install`、**`status`**、`openLog`、**`changelog`**、`onProgress` | 见下 |
 | `runtimeTools` | 4 | `status`、`prepare`、**`cancel`**、`onProgress` | `status()` → `Promise<RuntimeProgressPayload>`；`prepare(packs?: RuntimePackName[])` → `Promise<IpcResult>`（省略 `packs` = 全部缺的包；忙碌期重复调用返回 `{ ok:false, message }`）；`cancel()` → `Promise<IpcResult>`（中断下载 / 解包并清半成品，成功后 `message` 为「已取消下载」）；`onProgress(cb: (data: RuntimeProgressPayload) => void)`（单订阅） |
 | `legacyTools` | 2 | `status`、`resolve` | `status()` → `Promise<LegacyDataInfo \| null>`；`resolve(action: LegacyResolveAction)` → `Promise<LegacyResolveResult>`（preload 只把 `action` 字符串透传，见 §2.3.3） |
 
@@ -400,6 +403,7 @@
 | `install()` | `Promise<IpcResult>`（未下载完成或本机有长任务时失败分支带 `message`） |
 | `status()` | `Promise<UpdateProgressPayload>`（取一次主进程当前更新状态；主进程 `state` 常驻、跨设置页挂载持续存在，用于补齐「启动静默检查」那次失败——它发生在页面订阅 `update:progress` 之前） |
 | `openLog()` | `Promise<IpcResult<{ path: string }>>`（在文件管理器里定位 `userData/updater.log`，没有日志则打开 `userData` 目录；**不依赖 electron-updater 是否加载成功**） |
+| `changelog()` | `Promise<IpcResult<{ text: string }>>`（取随包 `CHANGELOG.md` 的**原文**：主进程只负责定位与读取 `app.getAppPath()/CHANGELOG.md`，**分块与行内排版全在渲染层** `@renderer/utils/changelog.ts`；提供方是设置页「应用更新」的「查看更新日志」按钮与 `ChangelogDialog.vue`） |
 | `onProgress(cb: (data: UpdateProgressPayload) => void)` | `void`（单订阅） |
 
 `whisperTools` / `projectTools` 的返回类型要点：
@@ -415,7 +419,7 @@
 | `whisperTools` | `transcribe(payload: WhisperTranscribePayload)` | `Promise<IpcResult<WhisperTranscribeResult>>` |
 | `whisperTools` | `onProgress(cb)` | `void`，回调 `(data: WhisperProgressPayload) => void`（单订阅） |
 | `projectTools` | `list()` | `Promise<ProjectMeta[]>`（**不走 `IpcResult`**） |
-| `projectTools` | `create` / `saveSubtitle` / `saveContent` / `saveVideo` / `setRender` | `Promise<IpcResult<ProjectSaveResult>>`（`setRender(name, render \| null)` 传 `null` 即清除项目级渲染档位覆盖） |
+| `projectTools` | `create` / `saveSubtitle` / `saveContent` / `saveVideo` / `setRender` / **`setCanvas`** | `Promise<IpcResult<ProjectSaveResult>>`（`setRender(name, render \| null)` 传 `null` 即清除项目级渲染档位覆盖；**`setCanvas(name, canvas)`** 写成片画布方向——白名单校验在主进程，值变化时主进程会把已有的 `videoPath` 置空） |
 | `projectTools` | `load(name)` | `Promise<Project \| null>`（**不走 `IpcResult`**；项目名为空时主进程返回 `null`，见 §5；非空时返回的 `materials` 已由主进程规范化） |
 | `projectTools` | `generateHtml` / `modifyHtml(name, prompt, materials?: ProjectHtmlMaterials)` | `Promise<IpcResult<ProjectHtmlResult>>`（失败分支可能带 `needConfig` / `title`：配置类错误由主进程 `projects.ts` 用 `configTargetOf()` 补分类；`materials` 里带的是 `materialIds` 不是路径） |
 | `projectTools` | `downloadHtml` / `exportSrt` | `Promise<IpcResult<ProjectDownloadResult>>` |
@@ -485,17 +489,17 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | --- | --- | --- |
 | 依赖（仅类型） | `electron` | 仅引入 `BrowserWindow` 类型（`ConfigTarget` 定义在本文件内，不需要额外 import） |
 | 被 import | `src/main/settings.ts` | `AppSettings`、`CustomModelConfig`、`RegisterCtx`、`VoiceProfile`、`VoiceProviderConfig`、`VoiceSettings`、`VoiceTTSConfig`（旧结构，迁移来源）、`WhisperCustomModel` |
-| 被 import（+ 再导出） | `src/main/projects.ts` | `RegisterCtx`、`ProjectAgentPayload`、`ProjectExportSrtPayload`、`ProjectNamePayload`、`ProjectSaveContentPayload`、`ProjectSaveHtmlPayload`、`ProjectSaveSubtitlePayload`、`ProjectSetAudioPayload`、`ProjectSetVideoPayload`、**`ProjectMaterial`、`ProjectMaterialKind`、`ProjectAddMaterialsPayload`、`ProjectPickMediaPayload`、`ProjectSaveMaterialsPayload`**；并 `export type { ContentScript, Project, Scene, SubtitleLine }` 再导出四个项目结构 |
-| 被 import（仅类型） | `src/renderer/src/composables/useAppStore.ts` | `ProjectMaterial`（`ProjectState.materials` 的元素类型）、`ProjectMeta`（并 `export type { ProjectMeta }` 再导出） |
+| 被 import（+ 再导出） | `src/main/projects.ts` | `RegisterCtx`、`ProjectAgentPayload`、`ProjectExportSrtPayload`、`ProjectNamePayload`、`ProjectSaveContentPayload`、`ProjectSaveHtmlPayload`、`ProjectSaveSubtitlePayload`、`ProjectSetAudioPayload`、`ProjectSetVideoPayload`、**`ProjectMaterial`、`ProjectMaterialKind`、`ProjectAddMaterialsPayload`、`ProjectPickMediaPayload`、`ProjectSaveMaterialsPayload`**、**`ProjectSetCanvasPayload`、`RenderCanvas`**（本次新增）；并 `export type { ContentScript, Project, Scene, SubtitleLine }` 再导出四个项目结构 |
+| 被 import（仅类型） | `src/renderer/src/composables/useAppStore.ts` | `ProjectMaterial`（`ProjectState.materials` 的元素类型）、**`RenderCanvas`**（本次新增：`ProjectState.canvas` 的类型）、`ProjectMeta`（并 `export type { ProjectMeta }` 再导出） |
 | 被 import | `src/main/index.ts` | `RegisterCtx`、`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`（后三者服务于 `legacy:status` / `legacy:resolve`） |
 | 被 import | `src/main/whisper.ts` | `RegisterCtx`、`WhisperCustomModel` 与全部 `Whisper*Payload`（含 `WhisperProgressPayload`） |
 | 被 import | `src/main/voice.ts` | `RegisterCtx`、**`ConfigTarget`**（`voiceNoKeyFail()` 的返回类型）、`SystemVoice`、`VoiceModel`、`VoiceProviderView`、`VoiceSettings`、`VoiceProfile`、`VoiceCreatePayload`、`VoiceProfileKeyPayload`、`VoiceProfilePayload`、`VoiceSaveConfigPayload`、`VoiceSaveDirPayload`、`VoiceSynthPayload` |
 | 被 import | `src/main/ttsAlign.ts` | `RegisterCtx`、`AlignProgressPayload`（取代原本地 `AlignProgressInfo`）、`VoiceAlignPayload` |
-| 被 import | `src/main/video.ts` | `RegisterCtx`、`VideoRenderPayload`、`VideoRenderResult`（取代原本地声明的 `RenderPayload` / `RenderResult`） |
+| 被 import | `src/main/video.ts` | `RegisterCtx`、**`RenderCanvas`**（本次新增：`applyCanvasDeclaration()` / `prepareEntry()` 的画布入参）、`VideoRenderPayload`、`VideoRenderResult`（取代原本地声明的 `RenderPayload` / `RenderResult`） |
 | 被 import | `src/main/runtime.ts` | `RegisterCtx`、`IpcResult`、`RuntimePackName`、`RuntimePackState`、`RuntimeProgressPayload`（③.6 节） |
 | 被 import | `src/main/htmlAgent.ts` | `HtmlAgentProgress`（以 `export type AgentProgress = HtmlAgentProgress` 对外保留 `AgentProgress` 名）+ **`ConfigTarget`**（每次尝试的 `attemptCfg` 字段类型） |
 | 被 import | `src/main/systemVoices.ts` | `SystemVoice` |
-| 被 import（仅类型） | `src/preload/index.ts` | `PreloadApi`、`AlignProgressPayload`、`HtmlProgressPayload`、`RenderOverride`、`RuntimePackName`、`RuntimeProgressPayload`、`UpdateProgressPayload`、`WhisperProgressPayload` |
+| 被 import（仅类型） | `src/preload/index.ts` | `PreloadApi`、`AlignProgressPayload`、`HtmlProgressPayload`、**`RenderCanvas`**、`RenderOverride`、`RuntimePackName`、`RuntimeProgressPayload`、`UpdateProgressPayload`、**`VideoRenderPayload`**、`WhisperProgressPayload`（后两个本次新增：`hfTools.renderVideo` 的第二参写成 `Omit<VideoRenderPayload, 'htmlPath'>`、`setCanvas` 的形参用 `RenderCanvas`） |
 | 被 import（仅类型） | `src/preload/index.d.ts` | `PreloadApi`，供 `declare global Window` 使用 |
 | 被 import（仅类型） | `src/renderer/src/pages/HtmlGenPage/MaterialsSection.vue` | `ProjectMaterial`、`ProjectMaterialKind`（素材卡片与 `onAdd(kind)` 的类型） |
 | 被 import（仅类型） | `src/renderer/src/composables/useConfigPrompt.ts` | **`ConfigTarget`**（`useConfigPrompt()` 的 `target` ref 与 `open()` / `fromResult()` 的形参类型） |
@@ -508,6 +512,7 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 - **本轮素材接口的契约形状（`ProjectMaterial` 一族）**：`Project` 只新增**可选**字段 `materials`（老项目读回来 `undefined`，由主进程 `normalizeMaterials` 归为 `[]`），因此**不构成破坏性变更**；`ProjectHtmlMaterials.videoPath` 被 `materialIds?: string[]` 取代——它只被 `project:generate-html` / `project:modify-html` 两个频道消费，且渲染层与主进程同步改完，所以可以直接替换字段名。
 - **`ProjectMaterial.file` 是相对引用、`label` 是原始文件名**：前者必须落在本项目 `images/` / `video/` 下（跨进程契约 + 越权防护），后者只作展示与给模型读的说明；两者不要互相替代。
 - **`ProjectSaveMaterialsPayload.materials` 刻意是 `unknown`**：渲染层提交的是完整列表，主进程必须自己规范化后才能信任它（防脏数据与越权路径），写成 `ProjectMaterial[]` 会给人「已经校验过」的错觉。
+- **成片画布 `RenderCanvas` 是「项目属性」而不是「渲染档位」**（本次新增）：它**不参与** `RenderOverride` 的「项目级覆盖 > 全局默认」合并，也没有全局默认那一层，读写走独立的 `Project.canvas?` 与 `project:set-canvas`。这么做的理由：HyperFrames CLI 在页面没声明画布时**兜底 `portrait`**（成片变 1080×1920 竖屏，宽屏版式被裁掉两侧、上下留大片黑边——本项目实测故障），所以画布必须由项目给出一个**确定值**，并同时喂给生成提示词、预览 iframe 与渲染入口注入的 `<html data-resolution>`。`VideoRenderPayload.canvas?` 与 `quality?` / `fps?` 同路下发但语义不同：前者决定画布 / 成片尺寸，后者决定编码质量与帧率。
 - **`Project.videoMaterial` 是历史字段**：本轮起不再写入、素材列表也不读它；仅被暂时隐藏入口的 `project:extract-video-audio` handler 使用。**不要在新代码里读它**。
 - **`IpcFail.message` 是可选字段**：`voice:pick-dir` 的用户取消分支只回 `{ ok: false, canceled: true }`，因此读取 `message` 的代码要容忍 `undefined`（渲染层约定式写法 `(res as { message?: string })?.message || '默认文案'`）。
 - **`IpcFail.detail` 是「可选的技术详情」**：与 `message` 分工明确 —— `message` 说人话（用户能做什么）、`detail` 给排障（原始报错 / HTTP 状态 / 请求 URL），UI 用「查看详情」折叠展示。它同样是可选的，取消分支与部分简单失败分支不带它。

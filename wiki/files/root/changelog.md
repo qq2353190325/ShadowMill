@@ -10,6 +10,8 @@
 
 - 本文件是**本工程唯一的变更记录**：任何改动都要落在它里面，**不要另建第二份**（`README.md` 的「当前进度」只是给使用者的概览，不是变更记录）。
 - 一个版本一个区块，每个条目 = **一次修改**：发布时只看本文件就能知道这一版改了什么。
+- **它同时随安装包分发、被应用内界面直接读取**：`package.json` 的 `build.files` 里列了 `"CHANGELOG.md"`（与 `"README.md"` 并列），因此它进了 `app.asar`；「设置 → 应用更新 → **查看更新日志**」按钮打开的弹窗就是它——主进程 `src/main/updater/base.ts` 的 `changelogPath()` 取 `path.join(app.getAppPath(), 'CHANGELOG.md')`（dev = 项目根、打包后 = `app.asar` 根），经 `update:changelog` 把**原文**交给渲染层，分块与标题的纯文本化在 `src/renderer/src/utils/changelog.ts`（**只抽「版本 / 时间 / 每条一行标题」三样，不产出 HTML**）。
+- **因此本文件的写法会直接影响界面呈现**（不是纯文本存档）：`## ` 标题即一个版本块，**界面只显示「最新一版」**——与当前 `package.json` 的 `version` 同名的那块，取不到则退化成文件里最上面那块（发版前的工作都记在「未发布（下一版本）」里，它抓不到版本号）；其余版本收进默认折叠的「历史版本（N）」区。块内表格必须以 `#` 为首格的表头行开头（解析器按**表头列名**取值，故 `# / 日期 / 修改 / 影响范围 / 验证` 之外的列数也能容错）；**没有条目的块会被整个丢掉**（文首「使用说明」不进界面）。「修改」列开头的 `[标签]` 会渲染成 11px 彩色徽标（`新增` / `修复` / `优化` 分别取数据绿 / 警报红 / 信号橙）。每条只渲染**一行标题**——取「修改」列第一段 `**…**`，没有粗体则取到第一个 `：` 之前，**「影响范围」与「验证」两列不显示**；最新一版最多先列 10 条，其余点「展开全部 N 条」（详细口径见 [renderer/src/common.md](../renderer/src/common.md) §7.4 与 [renderer/src/pages/SettingsPage.md](../renderer/src/pages/SettingsPage.md) §4.6）。
 - 写入规则（先看后写 / 改完必记 / 改两次算完整版 / 版本号只有一处 / 粒度）的正文在根目录 [`agents.md`](../../../agents.md) 第三节「更新日志（CHANGELOG.md）」与第五节关键约定的第 3、4 条。
 
 ## 2. 结构
@@ -93,7 +95,9 @@
 
 | 关联文件 | 关系 |
 | --- | --- |
-| `package.json` | 区块标题里的版本号与它的 `version` 字段一致；发版只改这一处；`npm version patch --no-git-tag-version` 升的也是它 |
+| `package.json` | 区块标题里的版本号与它的 `version` 字段一致；发版只改这一处；`npm version patch --no-git-tag-version` 升的也是它。它的 `build.files` 里列了 `"CHANGELOG.md"` ⇒ 本文件随包进 `app.asar`（用户拿到的安装包里就有它，应用内可直接查看） |
+| `src/main/updater/base.ts` / `src/main/updater/index.ts` | 读取方：`changelogPath()` 用 `app.getAppPath()` 定位本文件、`readBundledChangelog()` 读 UTF-8 原文，经 `update:changelog` handler 交渲染层。**主进程只读取、不解析**，因此改本文件的排版不会影响主进程 |
+| `src/renderer/src/utils/changelog.ts` | 解析方：`parseChangelog()` 按 `## ` 切块、块内**按表头列名**映射条目，**只抽「版本 / 时间 / 每条一行标题」三样**（「影响范围」「验证」两列不进界面）；`pickDefaultBlock()` 选最新一版，`splitEntryTag()` / `tagKind()` 拆 `[标签]` 与配色档。**不产出任何 HTML**（界面全模板纯文本渲染）。本文件里出现新语法（如新的标记符号）时，这份解析器要一起看 |
 | [`agents.md`](../../../agents.md) | 第三节「更新日志（CHANGELOG.md）」是本文件写入规则的正文；第五节关键约定 3、4 把「改前先看、改完必记」定为硬约定 |
 | `README.md` | 面向使用者的说明文档（功能 / 实现 / 流程 / 进度），开头引用区与「六、当前进度 → 已完成」指向本文件；内容不重复转述 |
 | `REFACTOR_PLAN.md` | 重构计划与实施记录，属项目级说明文档；不等同于变更记录 |

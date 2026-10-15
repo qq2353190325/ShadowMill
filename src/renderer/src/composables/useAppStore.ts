@@ -2,9 +2,9 @@
 // 模块级 reactive 单例；localStorage 键名见 @renderer/constants（STORAGE_KEY_PROJECT_CTX，
 // 结构不变，prod file:// 同源，上下文自动延续）。
 import { computed, reactive, ref } from 'vue'
-import type { ProjectMaterial, ProjectMeta, RenderOverride } from '@shared/types'
+import type { ProjectMaterial, ProjectMeta, RenderCanvas, RenderOverride } from '@shared/types'
 import { STORAGE_KEY_PROJECT_CTX } from '@renderer/constants'
-import { pickRenderOverride } from '@renderer/utils/render'
+import { normalizeCanvas, pickRenderOverride } from '@renderer/utils/render'
 
 // ===== 页面键（与菜单 data-page 一致）======
 // 视频环节的页面键是 video-preview（页名「视频预览」）：转视频动作已并入「HTML生成」页，本页只做预览。
@@ -27,6 +27,8 @@ export interface ProjectState {
   content: { style: string; scenes: { id: string; narration: string; visual: string; durHint: string }[] }
   // 视频渲染档位的项目级覆盖（字段缺省 = 跟随全局默认；见 composables/useRenderOptions.ts）
   render?: RenderOverride
+  // 成片画布方向（项目属性，缺省 = DEFAULT_CANVAS 横屏）：生成提示词 / 预览画布 / 渲染注入三处共用
+  canvas: RenderCanvas
 }
 // project:list 的条目结构来自跨进程契约（shared/types.ts），此处只做再导出，避免两处漂移
 export type { ProjectMeta };
@@ -97,7 +99,9 @@ export async function refreshProject(): Promise<void> {
     subtitleCount: loaded.subtitleCount || 0,
     content: loaded.content || { style: '', scenes: [] },
     // 渲染档位覆盖：只保留合法字段，脏数据/缺省一律归为空覆盖（= 跟随全局默认）
-    render: pickRenderOverride(loaded.render)
+    render: pickRenderOverride(loaded.render),
+    // 成片画布：脏数据/缺省一律落 DEFAULT_CANVAS（预览与渲染都按它，必须是合法值）
+    canvas: normalizeCanvas(loaded.canvas)
   };
 }
 

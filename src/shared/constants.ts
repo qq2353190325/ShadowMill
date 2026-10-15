@@ -14,6 +14,8 @@
 // 见 src/renderer/src/constants.ts。
 // 版本号不在本文件：一律运行时取 app.getVersion()（设置页经 window.updateTools.version() 拿）。
 
+import type { RenderCanvas } from './types';
+
 // ===== 应用标识（品牌文案唯一来源）=====
 // 中文显示名：标题栏、启动画面、首页角标
 export const APP_NAME = '影坊';
@@ -39,3 +41,30 @@ export const IMAGE_MATERIAL_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'];
 
 // 视频素材白名单（与原来的单个视频素材一致）
 export const VIDEO_MATERIAL_EXTS = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'];
+
+// ===== 成片画布（HyperFrames 的画布预设，**尺寸唯一真源**）=====
+// 取值与尺寸必须与 HyperFrames CLI 的 CANVAS_DIMENSIONS 对齐（resources/hyperframes/.../dist/cli.js：
+//   landscape 1920x1080 / portrait 1080x1920 / square 1080x1080，另有 4k 三档——本项目只暴露 1080 三档）。
+// 为什么放在 shared：三个消费点必须用同一组数——
+//   ① 主进程往渲染入口注入 <html data-resolution="…">（src/main/video.ts）
+//   ② 主进程把它写进生成提示词，让模型按同一块画布排版式（src/main/projects.ts）
+//   ③ 渲染层选项表与预览 iframe 的画布尺寸（renderer/utils/render.ts、HtmlGenPage/PreviewSection.vue）
+// 改这里的尺寸/取值时，CLI 那边若对不上，成片会退回 CLI 自己的兜底 portrait（见 video.ts 的注释）。
+export const RENDER_CANVASES: RenderCanvas[] = ['landscape', 'portrait', 'square'];
+// 每个画布的实际像素（= composition 尺寸 = 成片尺寸；CLI 不传 --resolution 时输出就是它本身）
+export const CANVAS_SIZES: Record<RenderCanvas, { width: number; height: number }> = {
+  landscape: { width: 1920, height: 1080 },
+  portrait: { width: 1080, height: 1920 },
+  square: { width: 1080, height: 1080 }
+};
+// 画布的界面/提示词文案（中文简写）。放这里而不是各处自己拼：提示词（主进程）与下拉选项（渲染层）
+// 必须说同一句话，否则「界面选的」和「告诉模型的」会对不上。
+export const CANVAS_LABELS: Record<RenderCanvas, string> = {
+  landscape: '横屏 16:9',
+  portrait: '竖屏 9:16',
+  square: '方形 1:1'
+};
+// 项目没设 canvas 时用的画布。选 landscape 的理由：应用内预览画布历来是 16:9、首页也写着「1080P 导出」，
+// 老项目因此保持原有观感；此前「成片莫名变竖屏」正是因为没有这个确定值（CLI 兜底 portrait）。
+export const DEFAULT_CANVAS: RenderCanvas = 'landscape';
+
