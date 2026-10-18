@@ -2,14 +2,6 @@
   <div>
     <StepBar :page="'content'" />
     <div class="card hgen-panel">
-      <div class="panel-title"><span class="dot"></span>内容脚本 · 全局视觉风格</div>
-      <div class="hgen-row">
-        <label class="sel-label" style="flex:none;width:auto">风格</label>
-        <input v-model="style" class="hgen-input" style="flex:1" placeholder="全局视觉风格描述，将作用于后续配音 / 字幕 / HTML 生成的整体观感，如：深空科技 Cyber 风、霓虹紫渐变、粒子背景" />
-      </div>
-      <div class="hgen-tip">描述整支视频的视觉基调。留空 = 未指定，后续节点将按各自提示生成。</div>
-    </div>
-    <div class="card hgen-panel" style="margin-top:16px">
       <div class="panel-title"><span class="dot"></span>场景分镜（旁白 + 画面分镜 + 时长提示）</div>
       <div v-if="!scenes.length" class="empty-hint">暂无场景。点击「添加场景」开始编写内容脚本。</div>
       <template v-else>
@@ -57,7 +49,6 @@ interface Scene {
   durHint: string
 }
 
-const style = ref('');
 const scenes = ref<Scene[]>([]);
 
 function emptyScene(): Scene {
@@ -66,7 +57,6 @@ function emptyScene(): Scene {
 
 function load(): void {
   const content = (appState.project && appState.project.content) || { style: '', scenes: [] };
-  style.value = content.style || '';
   scenes.value = (Array.isArray(content.scenes) ? content.scenes : []).map((s) => {
     const item = (s && typeof s === 'object') ? s as Record<string, unknown> : {};
     return {
@@ -97,10 +87,13 @@ function move(i: number, delta: number): void {
 }
 
 async function save(): Promise<void> {
-  const content = { style: style.value.trim(), scenes: scenes.value.map((s) => ({ id: s.id, narration: s.narration, visual: s.visual, durHint: s.durHint })) };
+  // 全局视觉风格已改到「HTML生成」页维护：这里把项目里**已落盘**的 style 原样带回——
+  // project:save-content 是整份 content 覆盖，不带就等于把风格清掉。
+  const persisted = (appState.project && appState.project.content && appState.project.content.style) || '';
+  const content = { style: persisted, scenes: scenes.value.map((s) => ({ id: s.id, narration: s.narration, visual: s.visual, durHint: s.durHint })) };
   const res = await window.projectTools.saveContent(appState.currentName, content);
   if (!res || !res.ok) { toast((res as { message?: string })?.message || '保存失败'); return; }
   await refreshProject();
-  toast('内容脚本已保存：' + scenes.value.length + ' 个场景' + (content.style ? '，风格「' + content.style + '」' : ''));
+  toast('内容脚本已保存：' + scenes.value.length + ' 个场景');
 }
 </script>

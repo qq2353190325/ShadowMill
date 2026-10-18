@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（项目化流水线 + project:* IPC）
-- **规模**：1105 行（实测 `[IO.File]::ReadAllLines`）
+- **规模**：1125 行（实测 `[IO.File]::ReadAllLines`）
 - **对外导出**：
   - 函数/常量：`register`、`scanProjects`、`projectsRoot`（**函数**，见 §3）、`projectDir`、`projectFilePath`、`readProject`、`writeProject`、`ensureProject`、`resolveVideoAbs`、`parseSubtitle`、`normalizeContent`、`copyAudioIntoProject`、`copyMaterialIntoProject`、`normalizeMaterials`
   - **本轮导出面变化**：新增 `resolveVideoAbs`（成品路径「落盘相对 / 交出绝对」的唯一解析入口，见 3.8）；更早一轮新增 `copyMaterialIntoProject` 与 `normalizeMaterials`，原 `copyVideoIntoProject` 已被 `copyMaterialIntoProject` 取代并**从导出清单移除**
@@ -52,7 +52,7 @@
 | `htmlPath` | `string` | 是 | `index.html` 的**绝对路径**（空串表示未生成） |
 | `videoPath` | `string` | 是 | **转视频产物的项目内相对路径**（形如 `video/output.mp4`；空串表示未生成 / 已失效）。`project:load` 返回给渲染层前会经 `resolveVideoAbs()` 换算成**绝对路径**，`project:save-video` 落盘时把项目目录内的绝对路径换算回相对路径——详见 3.8。HTML 变更后会被置空表示失效 |
 | `materials` | `ProjectMaterial[]` | 否 | **项目素材库**（图片 / 视频），`ensureProject` 的初始对象为 `[]`；读盘与写盘都经 `normalizeMaterials()` 规范化（见 2.5） |
-| `canvas` | `RenderCanvas` | 否 | **成片画布方向（本次新增，项目属性）**：`'landscape'` / `'portrait'` / `'square'`，字段不存在即缺省 `DEFAULT_CANVAS` = `landscape`（1920×1080）；由 `project:set-canvas` 写入，**生成提示词 / 预览画布 / 渲染入口注入的 `<html data-resolution>` 三处都读它**（见 4 的 `project:set-canvas` 行与 5.13） |
+| `canvas` | `RenderCanvas` | 否 | **成片画布方向（项目属性）**：`'landscape'` / `'portrait'` / `'square'`，字段不存在即缺省 `DEFAULT_CANVAS` = `landscape`（1920×1080）；由 `project:set-canvas` 写入，**生成提示词 / 预览画布 / 渲染入口注入的 `<html data-resolution>` 三处都读它**（见 4 的 `project:set-canvas` 行与 5.13） |
 | `videoMaterial` | `string` | 否 | **历史字段**：单视频素材时代的相对引用（`video/xxx`）。本轮起不再写入、素材列表也不读它；仅 `project:extract-video-audio` 这个已下线入口的 handler 仍在读它（见 3.6 / 4 的 `project:extract-video-audio` 行） |
 | `audioFile` | `string` | 是 | 背景音频相对引用（`audio/xxx`，空串表示无）；同时是注入 HTML 音轨（`<audio id="myv-bgm">`）的唯一来源，见 3.5 |
 | `content` | `ContentScript` | 是 | 内容脚本（`style` + `scenes`） |
@@ -118,21 +118,21 @@
 | `materialSeq` / `newMaterialId()` | 否 | 231 / 232 | 素材 id：`'mat-' + Date.now().toString(36) + '-' + materialSeq`，`materialSeq` 为模块级自增序号，保证同一毫秒内多个素材也不同 id |
 | `materialKindOf(filePath)` | 否 | 238 | 由扩展名判类型（`path.extname(...).replace('.','').toLowerCase()`）：命中 `IMAGE_MATERIAL_EXTS` → `'image'`、命中 `VIDEO_MATERIAL_EXTS` → `'video'`，**白名单外一律返回 `''`，调用方自行跳过** |
 | `materialExtsText()` | 否 | 298 | 白名单的可读文案：`['图片 ' + IMAGE_MATERIAL_EXTS.join('/'), '视频 ' + VIDEO_MATERIAL_EXTS.join('/')].join('，')`，用于「没有可添加的素材」失败提示 |
-| `buildAgentPrompt(parts)` | 否 | — | `parts.filter(Boolean).join('\n')`，拼接提示词片段 |
-| `buildContentBlock(content)` | 否 | — | 由 `content` 生成「内容脚本」提示块；无有效场景（旁白全空）返回 `''`，老项目因此回退原流程 |
+| `buildAgentPrompt(parts)` | 否 | 303 | `parts.filter(Boolean).join('\n')`，拼接提示词片段 |
+| `buildContentBlock(content)` | 否 | 310 | 由 `content` 生成「内容脚本」提示块；无有效场景（旁白全空）返回 `''`，老项目因此回退原流程 |
 | `HG_PREVIEW_CTRL` | 否 | — | 注入预览副本的播放控制脚本源码（IIFE 字符串常量） |
 | `BGM_TAG_ID` | 否 | — | 注入音轨标签的固定 id 常量 `'myv-bgm'`——保证重复设置不叠出多条音轨（见 3.5） |
-| `insertHtmlSnippet(html, snippet)` | 否 | — | 把片段插到文档末尾：优先 `</body>` 前，其次 `</head>` 后，都没有则拼最前。`IPC.Project.PreviewHtml` 原先内联的同一段 if/else 已改为调用本助手（行为不变） |
-| `escapeRegExp(s)` | 否 | — | 转义正则元字符（供 `stripAudioOfFile` 把音频文件名安全拼进正则） |
-| `stripInjectedBgm(html)` | 否 | — | 按 `BGM_TAG_ID` 摘掉本应用注入的音轨标签（幂等） |
-| `stripAudioOfFile(html, audioRef)` | 否 | — | 摘掉引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入），避免与新标签双份播放 |
-| `applyBgmToHtml(name, proj?)` | 否 | — | 按 `proj.audioFile` 重写 `index.html` 的音轨；无 HTML 时静默返回 `false`，内容无变化不写盘；返回 `true` = 文件被改写（见 3.5） |
+| `insertHtmlSnippet(html, snippet)` | 否 | 486 | 把片段插到文档末尾：优先 `</body>` 前，其次 `</head>` 后，都没有则拼最前。`IPC.Project.PreviewHtml` 原先内联的同一段 if/else 已改为调用本助手（行为不变） |
+| `escapeRegExp(s)` | 否 | 493 | 转义正则元字符（供 `stripAudioOfFile` 把音频文件名安全拼进正则） |
+| `stripInjectedBgm(html)` | 否 | 498 | 按 `BGM_TAG_ID` 摘掉本应用注入的音轨标签（幂等） |
+| `stripAudioOfFile(html, audioRef)` | 否 | 503 | 摘掉引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入），避免与新标签双份播放 |
+| `applyBgmToHtml(name, proj?)` | 否 | 512 | 按 `proj.audioFile` 重写 `index.html` 的音轨；无 HTML 时静默返回 `false`，内容无变化不写盘；返回 `true` = 文件被改写（见 3.5） |
 | `resolveMaterials(proj, payload: ProjectAgentPayload)` | 否 | 536 | 解析 `subtitleProject` / `materialIds`，返回 `{ subtitleText, materials }`（**两个选择项都只是「要不要带上」**：字幕不带路径；素材按 id 从项目素材库取，顺序 = 渲染层列表顺序，取不到的 id 静默忽略；音频则由 `applyBgmToHtml` 注入 HTML、完全不经过本函数） |
 | `buildMaterialBlock(materials)` | 否 | 556 | 由勾选素材生成「【图片素材】/【视频素材】」两段提示词（见 3.7） |
-| `buildCanvasBlock(proj)` | 否 | 576 | **生成/修改共用的【画布】块（本次新增）**：把项目选定的画布告诉模型（`成片画布固定为 <CANVAS_LABELS[canvas]>（<宽>×<高> 像素），渲染视口就等于这块画布`），并列出四条要求（写死 `data-resolution`、主舞台严格等于该尺寸且写固定 px、不要 vw / vh / 百分比 / `transform: scale`、内容排满整块画布）。`project.json` 可能被手改过 ⇒ **非 `RENDER_CANVASES` 白名单取值一律落回 `DEFAULT_CANVAS`**（避免 `CANVAS_SIZES` 取不到而崩） |
-| `buildMaterialPrompt(prompt, proj, mats, extra)` | 否 | 591 | 生成/修改共用的提示词装配：`extra`（修改时为当前 HTML 源码）在最前，随后需求、内容脚本、字幕、【音轨】声明、**【画布】块（`buildCanvasBlock(proj)`，本次插入）**、**【成片时长】声明**、`buildMaterialBlock(mats.materials)` |
-| `progressText(info)` | 否 | — | 把 `AgentProgress.stage` 转为中文进度文案（连接/推理/生成/重试/完成） |
-| `register(ctx?)` | 是 | — | 注册全部 `project:*` IPC（**25 个 `ipcMain.handle`**）；`ctx.getWindow` 用于给各类对话框提供父窗口 |
+| `buildCanvasBlock(proj, forModify = false)` | 否 | 577 | **生成/修改共用的【画布】块**：把项目选定的画布告诉模型（`成片画布固定为 <CANVAS_LABELS[canvas]>（<宽>×<高> 像素），渲染视口就等于这块画布`），并列出**四条固定要求**（写死 `data-resolution`、主舞台严格等于该尺寸且写固定 px、不要 vw / vh / 百分比 / `transform: scale`、内容排满整块画布）；**`forModify === true` 时额外追加第 ⑤ 条**——若当前页面的 `<html data-resolution>` 或主舞台尺寸与本画布**不一致**（典型：页面原按横屏 1920×1080 排过版、画布后来改成方形 / 竖屏），必须**重新排布**（主舞台改成上面的尺寸、按新画布重算所有元素的位置 / 字号 / 间距、内容排满整块画布），**不要**用 `transform: scale`、居中留白或黑边把旧版式硬套进新画布（详见 4.2）。第 ①–④ 条与原有措辞一字未改。`project.json` 可能被手改过 ⇒ **非 `RENDER_CANVASES` 白名单取值一律落回 `DEFAULT_CANVAS`**（避免 `CANVAS_SIZES` 取不到而崩） |
+| `buildMaterialPrompt(prompt, proj, mats, extra, forModify = false)` | 否 | 601 | 生成/修改共用的提示词装配：`extra`（修改时为当前 HTML 源码）在最前，随后需求、内容脚本、字幕、【音轨】声明、**【画布】块（`buildCanvasBlock(proj, forModify)`）**、**【成片时长】声明**、`buildMaterialBlock(mats.materials)`。**`forModify` 只透传给画布块**：生成路径不传（默认 `false`），修改路径显式传 `true`（见 4.2 / 5.2 / 5.3） |
+| `progressText(info)` | 否 | 620 | 把 `AgentProgress.stage` 转为中文进度文案（连接/推理/生成/重试/完成） |
+| `register(ctx?)` | 是 | 631 | 注册全部 `project:*` IPC（**25 个 `ipcMain.handle`**）；`ctx.getWindow` 用于给各类对话框提供父窗口 |
 
 ### 3.1 `parseSubtitle` 细节
 
@@ -325,8 +325,8 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 | `project:load` | `name?: string`（裸字符串） | `Project` \| `null` | 无名字返回 `null`；否则 `readProject(name) || ensureProject(name)`（不落盘），**返回值为 `{ ...proj, videoPath: resolveVideoAbs(name, proj.videoPath), materials: normalizeMaterials(proj.materials) }`**——素材列表按当前盘上数据规范化、`videoPath` 换算成**绝对路径**后一起交给渲染层 |
 | `project:save-subtitle` | `ProjectSaveSubtitlePayload`（`{ name?, subtitle?, title? }`） | `{ ok, project }` | 写 `subtitle.txt`（utf8）；`title` 非空才覆盖；同步 `subtitle` 与 `subtitleCount` |
 | `project:save-content` | `ProjectSaveContentPayload`（`{ name?, content? }`） | `{ ok, project }` | 经 `normalizeContent` 归一化后整体保存 `content` |
-| `project:generate-html` | `ProjectAgentPayload`（`{ name, prompt, subtitleProject?, materialIds? }`） | `{ ok, htmlPath, compatible, message }`；失败 `{ ok:false, message, needConfig?, title? }` | 解析素材（字幕 / 勾选素材）→ 装配提示词 → `chatWithCustomModel` → `extractHtmlFromReply` → `hfEnv.localizeGsapHtml` 本地化 → 引用本地时 `copyGsapIntoProject`，**复制失败则 `externalizeGsapHtml` 退回 CDN** → 写 `index.html` → **`applyBgmToHtml` 补注入音轨**；置空 `videoPath` |
-| `project:modify-html` | 同 `project:generate-html`（同一 `ProjectAgentPayload`） | `{ ok, htmlPath, compatible, message }`；失败 `{ ok:false, message, needConfig?, title? }` | 需已有 `index.html`；把当前源码作为 `extra` 前置，Agent 输出完整新 HTML 后**同样先本地化、再按复制结果决定是否退回 CDN**，覆盖写盘后**再 `applyBgmToHtml` 补回音轨**（模型重写时可能整段丢掉注入标签） |
+| `project:generate-html` | `ProjectAgentPayload`（`{ name, prompt, subtitleProject?, materialIds? }`） | `{ ok, htmlPath, compatible, message }`；失败 `{ ok:false, message, needConfig?, title? }` | 解析素材（字幕 / 勾选素材）→ 装配提示词（**不传 `forModify`**，【画布】块只有 ①–④）→ `chatWithCustomModel` → `extractHtmlFromReply` → `hfEnv.localizeGsapHtml` 本地化 → 引用本地时 `copyGsapIntoProject`，**复制失败则 `externalizeGsapHtml` 退回 CDN** → 写 `index.html` → **`applyBgmToHtml` 补注入音轨**；置空 `videoPath` |
+| `project:modify-html` | 同 `project:generate-html`（同一 `ProjectAgentPayload`） | `{ ok, htmlPath, compatible, message }`；失败 `{ ok:false, message, needConfig?, title? }` | 需已有 `index.html`；把当前源码作为 `extra` 前置，装配提示词时**显式传 `forModify = true`**（【画布】块因此多带第 ⑤ 条：旧版式与新画布不一致必须重排，见 4.2），Agent 输出完整新 HTML 后**同样先本地化、再按复制结果决定是否退回 CDN**，覆盖写盘后**再 `applyBgmToHtml` 补回音轨**（模型重写时可能整段丢掉注入标签） |
 | `project:download-html` | `name?: string`（裸字符串） | `{ ok, savedPath }` / `{ ok:false, canceled:true }` | 「另存为」导出项目 `index.html`（默认文件名 `<name>.html`）：读原文 → `hfEnv.externalizeGsapHtml` 把 `./gsap.min.js` 换回固定版本 CDN → **文本写出**（不再 `copyFileSync`），理由见 5.9 |
 | `project:export-srt` | `ProjectExportSrtPayload`（`{ name?, srt? }`） | `{ ok, savedPath }` | 内容为空则拒绝；否则写 `.srt` 文件（utf8） |
 | `project:open-folder` | `name?: string`（裸字符串） | `{ ok, message }` | `await shell.openPath(projectDir)`；目录不存在提示「项目目录不存在（项目尚未保存）」 |
@@ -334,7 +334,7 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 | `project:delete` | `name?: string`（裸字符串） | `{ ok }` / `{ ok:false, message }` | 仅允许删除 `projectsRoot()` 下的目录（`dir.startsWith(projectsRoot())` 校验），`rmSync(..., { recursive: true, force: true })` |
 | `project:save-video` | `ProjectSetVideoPayload`（`{ name?, videoPath? }`；该类型**现在只服务本频道的产物回写**） | `{ ok, project }` | 视频渲染完成后回写产物路径（点亮链路「视频」节点）：**项目目录内的路径换算成项目内相对路径 `video/output.mp4` 存入，目录外的原样存**（见 5.6） |
 | `project:set-render` | `ProjectSetRenderPayload`（`{ name?, render?: RenderOverride \| null }`） | `{ ok, project }` | 写 / 清除**项目级渲染档位覆盖**：`render` 传 `null`（或字段全非法）即删除 `proj.render`，回到跟随 `settings.json` 的全局默认 |
-| `project:set-canvas` | `ProjectSetCanvasPayload`（`{ name?, canvas?: RenderCanvas }`） | `{ ok, project }` | **写成片画布方向（本次新增）**：它是**项目属性、不是渲染档位**（不进 `settings.json`、没有全局默认那一层）。缺 `name` → `缺少项目名`；`RENDER_CANVASES.indexOf(canvas) < 0` → `画布取值非法`；**值变化时**写 `proj.canvas` 并把已有的 `proj.videoPath` 置空（尺寸变了，旧成片不再代表当前产物），再 `writeProject(proj)`。画布一变，**已生成的 HTML 版式不会自动重排**——界面提示用户重新「生成 HTML」/「按需求修改」（见 5.13） |
+| `project:set-canvas` | `ProjectSetCanvasPayload`（`{ name?, canvas?: RenderCanvas }`） | `{ ok, project }` | **写成片画布方向**：它是**项目属性、不是渲染档位**（不进 `settings.json`、没有全局默认那一层）。缺 `name` → `缺少项目名`；`RENDER_CANVASES.indexOf(canvas) < 0` → `画布取值非法`；**值变化时**写 `proj.canvas` 并把已有的 `proj.videoPath` 置空（尺寸变了，旧成片不再代表当前产物），再 `writeProject(proj)`。画布一变，**已生成的 HTML 版式不会自动重排**——界面提示用户重新「生成 HTML」/「按需求修改」，而修改路径的提示词会硬性要求模型重排（第 ⑤ 条，见 4.2 与 5.13） |
 | `project:pick-audio` | 无 | 绝对路径 \| `null` | 打开文件选择框（`mp3/wav/m4a/aac/ogg/flac/mp4`），取消返回 `null` |
 | `project:set-audio` | `ProjectSetAudioPayload`（`{ name?, audioPath? }`） | `{ ok, audioFile, htmlUpdated }` | 校验文件存在 → 复制进 `audio/` → 写入 `proj.audioFile` → `applyBgmToHtml` 立即重写 HTML 音轨；`htmlUpdated` = 是否真的改写了 `index.html` |
 | `project:clear-audio` | `ProjectNamePayload`（`{ name: string }`） | `{ ok, htmlUpdated }` | 仅清空 `proj.audioFile` 引用（保留音频文件，避免误删），并由 `applyBgmToHtml` 把 HTML 里注入的 `<audio>` 一并摘掉（否则成片仍有声、与项目状态不符） |
@@ -343,7 +343,7 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 | `project:save-materials` | `ProjectSaveMaterialsPayload`（`{ name?, materials? }`） | `{ ok, materials }` / `{ ok:false, message }` | **整份素材列表回写**（移除与勾选共用）：`proj.materials = normalizeMaterials(payload.materials)` 后落盘 |
 | `project:extract-video-audio` | `name?: string`（裸字符串） | 成功 `{ ok, audioFile, htmlUpdated }`；**缺 ffmpeg 运行环境包时 `{ ok: false, needPacks: ['ffmpeg'], message }`** | **handler 一行未改、当前界面入口已下线**（见 3.6 末与 5.6 末）：先按 `FFMPEG_PACKS = ['ffmpeg']` 做缺包纯校验（不下载、不阻塞），通过后用 ffmpeg 从**历史字段 `proj.videoMaterial`** 提取音轨为 `audio/<同名>.m4a`（AAC 192k）并设为背景音频，随后 `applyBgmToHtml` 立即注入 HTML |
 | `project:read-html` | `name?: string`（裸字符串） | `{ ok, html }` | 读取当前 `index.html` 源码供编辑器载入 |
-| `project:preview-html` | `name?: string`（裸字符串） | `{ ok, previewPath }` | 生成去掉 CSP、**对副本做 GSAP 本地化**、注入 `HG_PREVIEW_CTRL` 的 `index.preview.html` 副本；注入片段落位复用的是音轨注入同一助手 `insertHtmlSnippet()` |
+| `project:preview-html` | `name?: string`（裸字符串） | `{ ok, previewPath, pageCanvas }` | 生成去掉 CSP、**对副本做 GSAP 本地化**、注入 `HG_PREVIEW_CTRL` 的 `index.preview.html` 副本；注入片段落位复用的是音轨注入同一助手 `insertHtmlSnippet()`。**另外在去 CSP / 本地化之前**，用正则 `/<html[^>]*\sdata-resolution\s*=\s*["']([^"']*)["']/i` 从**原 HTML** 取页面自己声明的画布，经 `RENDER_CANVASES` 白名单校验后作为 `pageCanvas` 返回（缺失 / 非法 = `''`）——渲染层据此把预览 iframe 设成「页面原生尺寸」，见 5.4 |
 | `project:save-html` | `ProjectSaveHtmlPayload`（`{ name?, html? }`） | `{ ok, htmlPath, compatible }`（**未新增 `htmlUpdated`**） | 先 `hfEnv.localizeGsapHtml` 改写 CDN 引用（**合规校验也用改写后的 `localHtml`**），再在引用本地时 `copyGsapIntoProject`、**复制失败则 `externalizeGsapHtml` 退回 CDN**，然后覆盖保存编辑器中的 HTML；置空 `videoPath` 表示旧视频失效；随后调 `applyBgmToHtml` 把音轨补回（手改 / 粘贴进来的 HTML 可能没有音轨）。该频道目前在渲染层**没有调用方**（预留接口） |
 | `project:html-progress` | 主→渲染推送：`Object.assign({}, info, { text })` | — | 生成/修改过程中由 `event.sender.send` 推送 Agent 进度（`sender.isDestroyed()` 时不发送） |
 
@@ -361,15 +361,23 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 
 > 与 `video.ts` 的配合是「声明 → 实测 → 最长媒体」三级兜底：模型写了就用声明（零成本），没写就由主进程用无头 Chromium 现场量 GSAP 时间轴，两者都拿不到才交给 CLI 按最长媒体裁定。**但声明只能把成片拉长、拉不短**（规则是 `max(声明, 最长媒体)`），所以主进程还会按裁定值把超长媒体**裁成副本**再渲染——两件事合起来成片时长才真被顶住。
 
-### 4.2 提示词里的【画布】块（`buildCanvasBlock(proj)`，本次新增）
+### 4.2 提示词里的【画布】块（`buildCanvasBlock(proj, forModify = false)`）
 
-`buildMaterialPrompt()` 在**【音轨】与【成片时长】之间**插入了 `buildCanvasBlock(proj)` 的产物（生成与修改共用同一个装配函数，因此两个频道的提示词同时带上它）。产出的那段文案是：
+`buildMaterialPrompt()` 在**【音轨】与【成片时长】之间**插入了 `buildCanvasBlock(proj, forModify)` 的产物。产出的那段文案是（**①–④ 生成与修改都有**）：
 
 > 【画布】成片画布固定为 `<CANVAS_LABELS[canvas]>`（`<width>×<height>` 像素），渲染视口就等于这块画布。必须：① 在 `<html>` 标签上写死 `data-resolution="<canvas>"`；② 页面主舞台（承载全部内容的那层容器）尺寸严格等于 `<width>×<height>`，写固定 px，不要用 vw / vh / 百分比自适应，也不要用 `transform: scale` 去缩放舞台；③ 内容排满整块画布（该铺满的铺满、该居中的居中），四周不要留大片空白；④ 所有元素的坐标、字号、间距都按这块画布设计。
+
+**第 ⑤ 条只在修改路径追加**（`forModify === true`），条文原文（源码里是三行字符串拼接，此处合成一段）：
+
+> ⑤ 若当前页面的 `<html data-resolution>` 或主舞台尺寸与本画布**不一致**（典型情形：页面原来按横屏 1920×1080 排过版，而画布后来被改成了方形 / 竖屏），必须**重新排布**：把主舞台改成上面的尺寸，并按新画布重算所有元素的位置、字号与间距，让内容排满整块画布；**不要**用 transform: scale、居中留白或黑边把旧版式硬套进新画布。
+
+源码注释给出的「为什么只给修改」（参数含义逐字）：**`forModify`：修改场景追加第 ⑤ 条——换过画布的旧页面必须重排，而不是把旧版式硬塞进新画布**；以及「⑤ 只在修改时给：换画布不会自动重排已有页面（`project.canvas` 变了、页面舞台还是旧的），于是渲染视口变成新画布后四周留黑边、内容还会被裁——只能让模型按新画布重排一次」。**生成路径是从零做一版**、页面本来就按当前画布排，因此不追加；第 ①–④ 条与原有措辞**一字未改**。
 
 源码注释给出的动机：画布是**渲染时的实际视口尺寸**（HyperFrames composition 尺寸 = 成片尺寸），模型若按自己习惯的 `1600x900` 之类固定尺寸画，画布一变四周就会留大片黑边（本项目实测故障）；缺省画布 = `DEFAULT_CANVAS`（`landscape`），与老项目的原始观感一致。
 
 与 `video.ts` 的配合是「双保险」，**两道都必要**：提示词要求模型写死 `data-resolution`，但模型可能漏写或写错——渲染入口还会由 `video.ts` 的 `applyCanvasDeclaration()` 再写一次（CLI 的画布解析链里 `data-resolution` 优先级最高，压过页面自己声明的舞台尺寸；一条都读不到时 CLI 会**兜底 `portrait`**，成片变竖屏 + 黑边）。两处说法都取 `shared/constants.ts` 的 `CANVAS_LABELS` / `CANVAS_SIZES`（同源），因此「告诉模型的尺寸」与「界面选的、预览用的、渲染注入的」必然一致。
+
+> **应用侧的另一种做法本轮没做**：让预览 / 渲染把旧页面**等比缩放、上下留黑带**（成片会永远带黑边，且必须同时改预览副本与渲染入口）属**待定事项**——渲染层与 `video.ts` 本轮一行未改，换画布后的重排完全靠上面这条提示词硬要求 + 用户重新「生成 HTML」/「按需求修改」。
 
 ## 5. 关键流程
 
@@ -386,7 +394,7 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 
 1. 校验 `name` 与 `prompt.trim()`，任一为空直接失败。
 2. `ensureProject(name)` 取项目（无则用默认值），`resolveMaterials(proj, payload || {})` 处理字幕 / 勾选素材——**两者都只是「要不要带上」**：素材按 `materialIds` 从项目素材库取（复制入库早在 `project:add-materials` 完成），**音频不在这里解析**（音轨由 `applyBgmToHtml` 注入 HTML）。
-3. `buildMaterialPrompt('用户需求：' + prompt.trim(), proj, mats, [])` 装配提示词：需求 → 内容脚本块 → 字幕块 → 【音轨】声明行（固定文案：音轨由应用在渲染前自动注入 `<audio id="myv-bgm">`，请勿写入 / 修改 / 删除任何 `<audio>` 标签，也不要为音轨预留页面元素）→ **【画布】块（`buildCanvasBlock(proj)`，见 4.2）** → **【成片时长】声明行（见 4.1）** → `buildMaterialBlock()` 的【图片素材】/【视频素材】两段。
+3. `buildMaterialPrompt('用户需求：' + prompt.trim(), proj, mats, [])` 装配提示词：需求 → 内容脚本块 → 字幕块 → 【音轨】声明行（固定文案：音轨由应用在渲染前自动注入 `<audio id="myv-bgm">`，请勿写入 / 修改 / 删除任何 `<audio>` 标签，也不要为音轨预留页面元素）→ **【画布】块（`buildCanvasBlock(proj, false)`，见 4.2）** → **【成片时长】声明行（见 4.1）** → `buildMaterialBlock()` 的【图片素材】/【视频素材】两段。**该调用不传第 5 个参数 ⇒ `forModify` 取默认 `false`，画布块只有 ①–④ 条**。
 4. 构造 `onProgress`，把 `progressText(info)` 的结果经 `project:html-progress` 推给发起窗口。
 5. `await chatWithCustomModel(userPrompt, { onProgress, meta: { project: name, action: 'generate' } })`。
 6. `extractHtmlFromReply(reply)` 抽出 HTML 后交给 `hfEnv.localizeGsapHtml()`（把 GSAP CDN 引用改写为 `./gsap.min.js`；随包文件缺失则原样返回）；`trim()` 为空返回「模型未返回内容，请检查自定义模型配置」。
@@ -401,18 +409,19 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 1. 校验 `name` 与需求描述。
 2. `projectFilePath(name, 'index.html')` 不存在则返回「该项目还没有 HTML，请先生成」。
 3. 读取当前源码 `curHtml`，`resolveMaterials(proj, payload || {})` 重新解析素材（字幕 / 勾选素材，可在改造时换素材）。
-4. 提示词把 `['当前项目的 index.html 源码如下：', '```html', curHtml, '```', '']` 作为 `extra` 置于最前，再附需求「在此基础上改造后输出完整新 HTML」。
+4. 提示词把 `['当前项目的 index.html 源码如下：', '```html', curHtml, '```', '']` 作为 `extra` 置于最前，再附需求「在此基础上改造后输出完整新 HTML」；**该调用显式传第 5 个参数 `true`（`forModify = true`）**，调用处源码注释逐字：「forModify=true：画布块多带一条『旧页面版式与新画布不一致就必须重排』的硬要求」——因此修改路径的【画布】块比生成路径多一条第 ⑤ 条（见 4.2）。
 5. 调用 Agent（`meta.action = 'modify'`），同样支持 `project:html-progress` 进度推送。
 6. 抽取 HTML 并先经 `hfEnv.localizeGsapHtml()` 本地化、再走同一套兜底（`if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(projDir)) html = hfEnv.externalizeGsapHtml(html);`）；随后**覆盖** `index.html`，更新 `htmlPath`、置空 `videoPath`、`writeProject`，**再调 `applyBgmToHtml(name, proj)` 补回音轨**（模型重写时可能整段丢掉注入标签），最后返回合规校验结果（`compatible` 基于最终写盘的 HTML）。
 
 ### 5.4 预览副本 `index.preview.html` 的生成
 
 1. `project:preview-html` 中确认 `index.html` 存在。
-2. 读取源码，用 `/<meta[^>]*content-security-policy[^>]*>/gi` 删除 CSP meta（**仅副本**，保证注入脚本可执行）。
-3. **对副本做 GSAP 本地化**：`html = hfEnv.localizeGsapHtml(html)`；若结果引用 `./gsap.min.js`（`hfEnv.referencesLocalGsap`）则 `hfEnv.copyGsapIntoProject(path.dirname(htmlPath))`——只改副本、不去动原件；`gsap.min.js` 落在项目目录，因此原件里的相对引用同样成立。
-4. 组装 `<script>` + `HG_PREVIEW_CTRL` + `</scr' + 'ipt'>` 注入片段，调用 `insertHtmlSnippet(html, ctrl)` 落位（**与音轨注入复用同一助手**）：优先插到 `</body>`（`lastIndexOf`）前；无 `</body>`（模型输出被截断）时插到 `</head>` 之后；连 `</head>` 也没有时插到文档最前——避免拼在文件末尾落入未闭合 `<script>` 导致整页脚本 SyntaxError。
-5. `htmlPath.replace(/\.html$/i, '.preview.html')` 得到 `index.preview.html` 并写盘，返回 `previewPath`。
-6. 预览副本与原件**同目录**，相对素材引用仍有效（包括原件里的 `<audio id="myv-bgm">`、页面里的 `<img src="images/…">` / `<video src="video/…">`）；下载与转视频始终使用原件 `index.html`。
+2. **先解析页面自己声明的画布**（在去 CSP / GSAP 本地化**之前**、从原 HTML 取）：正则 `/<html[^>]*\sdata-resolution\s*=\s*["']([^"']*)["']/i` 取属性值 → `trim()` → 只有 `RENDER_CANVASES.indexOf(值) >= 0` 才认，缺失 / 非法一律 `''`；结果作为 **`pageCanvas`** 随回执返回（渲染层据此把预览 iframe 设成「页面原生尺寸」，无声明时回落项目画布）。源码注释：「渲染层要用它把预览 iframe 设成页面原生尺寸，再整体缩进当前视角里看（等比 contain + 黑边），这样横屏页面放进方形视口时右边不会被裁」。
+3. 读取源码，用 `/<meta[^>]*content-security-policy[^>]*>/gi` 删除 CSP meta（**仅副本**，保证注入脚本可执行）。
+4. **对副本做 GSAP 本地化**：`html = hfEnv.localizeGsapHtml(html)`；若结果引用 `./gsap.min.js`（`hfEnv.referencesLocalGsap`）则 `hfEnv.copyGsapIntoProject(path.dirname(htmlPath))`——只改副本、不去动原件；`gsap.min.js` 落在项目目录，因此原件里的相对引用同样成立。
+5. 组装 `<script>` + `HG_PREVIEW_CTRL` + `</scr' + 'ipt'>` 注入片段，调用 `insertHtmlSnippet(html, ctrl)` 落位（**与音轨注入复用同一助手**）：优先插到 `</body>`（`lastIndexOf`）前；无 `</body>`（模型输出被截断）时插到 `</head>` 之后；连 `</head>` 也没有时插到文档最前——避免拼在文件末尾落入未闭合 `<script>` 导致整页脚本 SyntaxError。
+6. `htmlPath.replace(/\.html$/i, '.preview.html')` 得到 `index.preview.html` 并写盘，返回 `{ ok: true, previewPath, pageCanvas }`。
+7. 预览副本与原件**同目录**，相对素材引用仍有效（包括原件里的 `<audio id="myv-bgm">`、页面里的 `<img src="images/…">` / `<video src="video/…">`）；下载与转视频始终使用原件 `index.html`。
 
 ### 5.5 字幕保存与条目统计（`project:save-subtitle`）
 
@@ -534,14 +543,14 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 2. `ensureProject(name)` → `proj.materials = normalizeMaterials(payload && payload.materials)` → `writeProject(proj)` → `{ ok: true, materials: proj.materials }`。
 3. 主进程只做「规范化后落盘」，不做差集比对；**移除素材只摘登记、不删项目内的文件**（与原来的 `clear-video` 语义一致，避免误删资源）。
 
-### 5.13 成片画布（`project:set-canvas`，本次新增）
+### 5.13 成片画布（`project:set-canvas`）
 
 渲染档位那条线（5.10）是「项目覆盖 > 全局默认 > 内置默认」的三层结构；**成片画布刻意不走这套层级**——它是**项目属性**（源码注释：不进 `settings.json`、没有全局默认那一层），只在一处选（「HTML生成」页生成侧的「画布」下拉），落进 `project.json` 的 `canvas`，并且同一个值同时决定三件事：生成提示词里的版式尺寸（4.2）、预览 iframe 的画布、渲染入口注入的 `<html data-resolution>`。
 
 1. **取值**：`payload.canvas` 必须命中 `shared/constants.ts` 的 `RENDER_CANVASES`（`landscape` / `portrait` / `square`），否则 `{ ok: false, message: '画布取值非法' }`；缺 `name` → `{ ok: false, message: '缺少项目名' }`。
 2. **只在值真变了才写**：`if (proj.canvas !== next)` 成立时才 `proj.canvas = next`，并**把已有的 `proj.videoPath` 置空**——理由与「HTML 改动后旧成片失效」同构：画布一变，已渲好的成片尺寸就不再匹配当前项目设定，不能继续被当成当前产物（界面据此重新显示「未生成视频」）。
 3. **一定落盘**：无论值是否变化都 `writeProject(proj)` 并返回 `{ ok: true, project: proj }`（幂等，渲染层拿回执刷新全局状态）。
-4. **它不会重排已有版式**：画布只影响**下一次**生成/修改时的提示词与之后的渲染；已有 `index.html` 的版式仍是按旧画布排的。界面上的提示文案（`HtmlGenPage` 的 `canvasHint`）明确要求用户换画布后重新「生成 HTML」或「按需求修改」。
+4. **它不会自动重排已有版式**：画布只影响**下一次**生成/修改时的提示词与之后的渲染；已有 `index.html` 的版式仍是按旧画布排的。改完之后：**修改路径会硬性要求模型重排**（`project:modify-html` 传 `forModify = true`，画布块多带第 ⑤ 条，见 4.2 / 5.3）；**生成路径没有这条**（从零做一版，本来就按当前画布排）。界面上的提示分两处承接：`HtmlGenPage` 画布行 `?` 气泡的固定常量 `canvasHint` 说明「换画布不会自动重排已有页面：…切到竖屏 / 方形会留下黑边或裁切」，动作行上方的统一 `.hgen-tip` 要求「改完要重新「生成 HTML」或「按需求修改」才会体现在页面上」。**应用侧「等比缩放旧页面 + 上下留黑带」本轮没做**（会让成片永远带黑边，且要同时改预览副本与渲染入口），属待定事项。
 5. **渲染侧的对应值**：渲染时渲染层把 `appState.project.canvas` 随 `video:render` 载荷一起下发（`VideoRenderPayload.canvas`），`video.ts` 再白名单校验一次（非法 / 缺省落 `DEFAULT_CANVAS`）后写进入口 HTML。详见 [video.ts.md](./video.ts.md) §1.2。
 
 ## 6. 依赖与协作
@@ -555,12 +564,12 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 | `node:child_process` | `spawn` | 调用内置 ffmpeg 提取视频音轨 |
 | `./htmlAgent` | `chatWithCustomModel`、`extractHtmlFromReply`、`type AgentProgress` | 调用自定义模型生成/修改 HTML、抽取回复中的 HTML、进度事件类型 |
 | `../shared/errors` | `configTargetOf` | 两处 Agent 调用失败时，对**已翻译的中文文案**复用同一张码表补配置类分类（`needConfig` / `title`），供渲染层弹「去设置」；余额类不参与（它没有 `needConfig`） |
-| `../shared/constants` | `CANVAS_LABELS, CANVAS_SIZES, DEFAULT_CANVAS, IMAGE_MATERIAL_EXTS, MAX_MATERIALS, RENDER_CANVASES, VIDEO_MATERIAL_EXTS` | 素材类型白名单与合计上限（`materialKindOf` / `materialExtsText` / `normalizeMaterials` / `project:pick-media` / `project:add-materials`）+ **成片画布三档与尺寸（本次新增：`buildCanvasBlock()` 拼【画布】块、`project:set-canvas` 做白名单校验）** |
+| `../shared/constants` | `CANVAS_LABELS, CANVAS_SIZES, DEFAULT_CANVAS, IMAGE_MATERIAL_EXTS, MAX_MATERIALS, RENDER_CANVASES, VIDEO_MATERIAL_EXTS` | 素材类型白名单与合计上限（`materialKindOf` / `materialExtsText` / `normalizeMaterials` / `project:pick-media` / `project:add-materials`）+ **成片画布三档与尺寸（`buildCanvasBlock()` 拼【画布】块、`project:set-canvas` 做白名单校验）** |
 | `./hfEnv` | **命名空间导入** `import * as hfEnv from './hfEnv'`：`hfEnv.BUILTIN_RESOURCES`（取 `ffmpeg`，来自 ffmpeg 运行环境包）、`hfEnv.isHyperframesComposition`、`hfEnv.localizeGsapHtml`、`hfEnv.referencesLocalGsap`、`hfEnv.copyGsapIntoProject`、`hfEnv.externalizeGsapHtml` | ffmpeg 路径、HyperFrames composition 合规校验、生成 / 修改 / 保存 / 预览四个写盘环节的 GSAP 本地化，以及两个导出频道的反向外部化 |
 | `./runtime` | `import * as runtime` → `runtime.missingPacks()` / `runtime.packSizeText()` | `project:extract-video-audio` 先做**缺包纯校验**（`FFMPEG_PACKS = ['ffmpeg']`）：缺包即返回 `{ ok: false, needPacks, message }`，**不下载、不阻塞**；是否下载由界面（`useEnvGate`）问用户。ffmpeg 属于「ffmpeg 运行环境包」（包实测 **42.6 MB**，2026-10-14；解包 179.9 MB），不再随安装包 |
 | `../shared/ipc` | `IPC` | 频道常量（`IPC.Project.*`） |
 | `./settings` | `pickRenderOverride` | `project:set-render` 的项目级档位覆盖白名单过滤（与 `settings.ts` / `video.ts` 复用同一实现） |
-| `../shared/types` | `type RegisterCtx`、`type ProjectAgentPayload`、`type ProjectExportSrtPayload`、`type ProjectNamePayload`、`type ProjectSaveContentPayload`、`type ProjectSaveHtmlPayload`、`type ProjectSaveSubtitlePayload`、`type ProjectSetAudioPayload`、`type ProjectSetVideoPayload`、`type ProjectSetRenderPayload`、**`type ProjectSetCanvasPayload`**（本次新增）、**`type ProjectMaterial`、`type ProjectMaterialKind`、`type ProjectAddMaterialsPayload`、`type ProjectPickMediaPayload`、`type ProjectSaveMaterialsPayload`**、**`type RenderCanvas`**（本次新增：画布局部变量与 handler 载荷元素类型），以及 `type ContentScript` / `type Project` / `type Scene` / `type SubtitleLine`（后者四个在 import 后立即 `export type { … } from '../shared/types'` 再导出） | `register(ctx)` 的窗口上下文类型 + 全部 `project:*` handler 的载荷类型 + 项目结构（单一真源，本文件不再自行声明 interface） |
+| `../shared/types` | `type RegisterCtx`、`type ProjectAgentPayload`、`type ProjectExportSrtPayload`、`type ProjectNamePayload`、`type ProjectSaveContentPayload`、`type ProjectSaveHtmlPayload`、`type ProjectSaveSubtitlePayload`、`type ProjectSetAudioPayload`、`type ProjectSetVideoPayload`、`type ProjectSetRenderPayload`、**`type ProjectSetCanvasPayload`**、**`type ProjectMaterial`、`type ProjectMaterialKind`、`type ProjectAddMaterialsPayload`、`type ProjectPickMediaPayload`、`type ProjectSaveMaterialsPayload`**、**`type RenderCanvas`**（画布局部变量与 handler 载荷元素类型），以及 `type ContentScript` / `type Project` / `type Scene` / `type SubtitleLine`（后者四个在 import 后立即 `export type { … } from '../shared/types'` 再导出） | `register(ctx)` 的窗口上下文类型 + 全部 `project:*` handler 的载荷类型 + 项目结构（单一真源，本文件不再自行声明 interface） |
 
 **被谁使用：**
 
@@ -597,3 +606,5 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 21. **`./hfEnv` 已改为命名空间导入**：`import * as hfEnv from './hfEnv'`，全文以 `hfEnv.` 前缀引用，原解构导入已取消。
 22. **音轨注入的三条不变量**：① 标签 id 固定为 `myv-bgm`，注入前先 `stripInjectedBgm`，重复设置不会叠出多条音轨；② 引用同一项目音频文件的历史 `<audio>`（旧版由模型按提示词写入）由 `stripAudioOfFile` 摘掉，避免双份播放；③ 没有 `index.html` 时 `applyBgmToHtml` 静默返回 `false`——因此「先生成音频、后生成 HTML」的顺序不会报错，音频会在下次生成 / 修改时随 HTML 一起补上。
 23. **预览默认静止、播放由用户驱动**：合成的 timeline 是 `paused: true` 创建、开头又 `gsap.set(..., { opacity: 0 })`，所以载入后画面停在第 0 帧、**起始帧本来就是空的**——这不是加载失败。`HG_PREVIEW_CTRL` 只做三件事：`freeze()` 冻住并立刻上报一次；用户发来任何 `pause`/`play`/`seek`/`restart` 就置 `userActed` 停手；`watchEnd()` 在真实时间轴全部跑完时统一 `setPaused(true)`。配套地 `isPlaying()` 把「已播完」排除在「在播」之外；`setTime()` 只挪播放头、不改播放/暂停状态，并在 seek 后回一条带 `ack` 的上报供父页定位。
+24. **换画布后「旧页面重排」靠提示词、不靠应用缩放**：`buildCanvasBlock()` 的第 ⑤ 条**只在修改路径注入**（`project:modify-html` 传 `forModify = true`；生成路径不传、默认 `false`），条文要求模型把主舞台改成新画布尺寸并重算坐标 / 字号 / 间距，**不许用 `transform: scale` / 居中留白 / 黑边硬套旧版式**。应用侧「把旧页面等比缩放、上下留黑带」本轮**没有做**（渲染层与 `video.ts` 一行未改）：那是另一种结果（成片永远带黑边），且必须同时改预览副本与渲染入口，属待定事项。因此换画布后必须重新「生成 HTML」或「按需求修改」才会生效。
+25. **预览视口由「页面声明」决定，成片仍按项目画布**：`project:preview-html` 除 `previewPath` 还回 **`pageCanvas`**（从原 HTML 的 `<html data-resolution>` 解析 + `RENDER_CANVASES` 白名单，缺失 / 非法 `''`）；渲染层用它把预览 iframe 设成**页面原生尺寸**，再整体按视角 contain（等比 + 黑边）。**这只是一条只读回执字段**：不新增频道、preload 一行未改、`video.ts` 不受影响——**成片仍按项目画布渲染、该裁就裁**，所以「页面版式与画布不匹配」时预览与成片可以不一致；要让成片也重排只能靠 4.2 的第 ⑤ 条提示词 + 重新生成。

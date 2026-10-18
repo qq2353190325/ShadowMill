@@ -573,29 +573,39 @@ function buildMaterialBlock(materials: ProjectMaterial[]): string {
 // 为什么必须说：画布是**渲染时的实际视口尺寸**（HyperFrames composition 尺寸 = 成片尺寸），
 // 模型若按自己习惯的 1600x900 之类固定尺寸画，画布一变就会在四周留大片黑边（本项目的真实故障）。
 // 缺省画布 = DEFAULT_CANVAS（landscape），与老项目的原始观感一致。
-function buildCanvasBlock(proj: Project): string {
+// forModify：修改场景追加第 ⑤ 条——换过画布的旧页面必须重排，而不是把旧版式硬塞进新画布。
+function buildCanvasBlock(proj: Project, forModify = false): string {
   // project.json 可能被手改过：非白名单取值一律落回缺省画布，避免 CANVAS_SIZES 取不到而崩
   const raw = proj && proj.canvas;
   const canvas: RenderCanvas = raw && RENDER_CANVASES.indexOf(raw) >= 0 ? raw : DEFAULT_CANVAS;
   const size = CANVAS_SIZES[canvas];
   const label = CANVAS_LABELS[canvas] || canvas;
+  // ⑤ 只在修改时给：换画布不会自动重排已有页面（project.canvas 变了、页面舞台还是旧的），
+  // 于是渲染视口变成新画布后四周留黑边、内容还会被裁——只能让模型按新画布重排一次。
+  const relayout = forModify
+    ? '⑤ 若当前页面的 <html data-resolution> 或主舞台尺寸与本画布**不一致**（典型情形：页面原来按横屏 1920×1080 排过版，'
+      + '而画布后来被改成了方形 / 竖屏），必须**重新排布**：把主舞台改成上面的尺寸，并按新画布重算所有元素的位置、字号与间距，'
+      + '让内容排满整块画布；**不要**用 transform: scale、居中留白或黑边把旧版式硬套进新画布。'
+    : '';
   return '\n【画布】成片画布固定为 ' + label + '（' + size.width + '×' + size.height + ' 像素），渲染视口就等于这块画布。必须：' +
     '① 在 <html> 标签上写死 data-resolution="' + canvas + '"；' +
     '② 页面主舞台（承载全部内容的那层容器）尺寸严格等于 ' + size.width + '×' + size.height + '，写固定 px，' +
     '不要用 vw / vh / 百分比自适应，也不要用 transform: scale 去缩放舞台；' +
     '③ 内容排满整块画布（该铺满的铺满、该居中的居中），四周不要留大片空白；' +
-    '④ 所有元素的坐标、字号、间距都按这块画布设计。';
+    '④ 所有元素的坐标、字号、间距都按这块画布设计。' +
+    relayout;
 }
 
 // 构造 Agent 用户提示（生成与修改共用；extra 置于最前——修改场景为「当前 HTML 源码」段）
-function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText: string; materials: ProjectMaterial[] }, extra: string[]): string {
+// forModify=true 时画布块会追加「旧页面版式与本画布不一致就必须重排」的硬要求（见 buildCanvasBlock）
+function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText: string; materials: ProjectMaterial[] }, extra: string[], forModify = false): string {
   return buildAgentPrompt([
     ...extra,
     prompt,
     buildContentBlock(proj.content),
     mats.subtitleText ? '\n【项目字幕】每行格式为 [开始-结束] 文本，时间为秒、可带小数（毫秒精度，如 17.920）：该条字幕必须在开始时间出现、在结束时间前完成淡出，严格按此窗口显示，不得挂到下一条开始；GSAP 时间轴直接用这些小数秒定位（如 tl.to(el,{...},17.920)）；仅 [开始] 无结束时间的行自行按语义安排节奏。\n' + mats.subtitleText : '',
     '\n【音轨】背景音轨由应用在渲染前自动注入（<audio id="myv-bgm">），请勿写入、修改或删除任何 <audio> 标签，也不要为音轨预留页面元素。',
-    buildCanvasBlock(proj),
+    buildCanvasBlock(proj, forModify),
     // 成片时长声明：不给这个数，渲染器只能取「页面里最长媒体」当片长——素材常比动画长得多
     // （实测：动画 45 秒 + 素材原声 225 秒 ⇒ 成片 3 分 45 秒、后 3 分钟全是黑帧）。
     // 根节点写死这个属性，成片就与动画等长；写错/漏写时应用会自己量一次时间轴兜底（见 video.ts）。
@@ -738,11 +748,13 @@ function register(ctx?: RegisterCtx): void {
     const proj = ensureProject(name);
     const curHtml = fs.readFileSync(htmlPath, 'utf8');
     const mats = resolveMaterials(proj, payload || {});
+    // forModify=true：画布块多带一条「旧页面版式与新画布不一致就必须重排」的硬要求
     const userPrompt = buildMaterialPrompt(
       '用户需求（在此基础上改造后输出完整新 HTML）：' + prompt.trim(),
       proj,
       mats,
-      ['当前项目的 index.html 源码如下：', '```html', curHtml, '```', '']
+      ['当前项目的 index.html 源码如下：', '```html', curHtml, '```', ''],
+      true
     );
 
     try {
@@ -1050,6 +1062,14 @@ function register(ctx?: RegisterCtx): void {
     const htmlPath = projectFilePath(String(name || ''), 'index.html');
     if (!fs.existsSync(htmlPath)) return { ok: false, message: '该项目还没有 HTML' };
     let html = fs.readFileSync(htmlPath, 'utf8');
+    // 页面自己声明的画布（<html data-resolution="…">）：渲染层要用它把预览 iframe 设成「页面原生尺寸」，
+    // 再整体缩进当前视角里看（等比 contain + 黑边），这样横屏页面放进方形视口时右边不会被裁。
+    // 只认白名单取值；缺失 / 非法一律 ''，由渲染层回落成「按项目当前画布显示」。
+    const declared = /<html[^>]*\sdata-resolution\s*=\s*["']([^"']*)["']/i.exec(html);
+    const declaredCanvas = declared ? declared[1].trim() : '';
+    const pageCanvas: RenderCanvas | '' = RENDER_CANVASES.indexOf(declaredCanvas as RenderCanvas) >= 0
+      ? declaredCanvas as RenderCanvas
+      : '';
     // 预览副本去除 CSP 限制（仅副本），保证注入的控制脚本可执行
     html = html.replace(/<meta[^>]*content-security-policy[^>]*>/gi, '');
     // GSAP 本地化（仅副本，不动原件）：老项目仍引 CDN 时也能离线预览
@@ -1061,7 +1081,7 @@ function register(ctx?: RegisterCtx): void {
     html = insertHtmlSnippet(html, ctrl);
     const previewPath = htmlPath.replace(/\.html$/i, '.preview.html');
     fs.writeFileSync(previewPath, html, 'utf8');
-    return { ok: true, previewPath };
+    return { ok: true, previewPath, pageCanvas };
   });
 
   // 直接保存（覆盖）项目 HTML 源码，支持"不满意再改"

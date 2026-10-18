@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：936 行
+- **规模**：940 行
 - **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 3 个（`IpcFail`、`IpcResult`、**`ConfigTarget`**）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含 `UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位 `RenderQuality` / `RenderFps` / `RenderOptions` / `RenderOverride` 与**成片画布 `RenderCanvas`**）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境（**分包**）4 个（`RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 **（素材库那次新增 `ProjectMaterialKind` / `ProjectMaterial` / 三个素材载荷与 `ProjectMaterialsResult`；本次新增 `ProjectSetCanvasPayload`）** ⑦ 预览 / 转视频 2 个（`VideoRenderPayload`——**本次新增 `canvas?`**、`VideoRenderResult`）⑧ 进度推送 ⑨ `PreloadApi` 1 个；另有 ① 节 `IpcFail.needPacks`（缺哪个运行环境包）与 `IpcFail.needConfig` / `title`（配置类错误）、⑨ 节 `settingsTools.pickRuntimePack` 等成员
 
 ## 1. 作用与职责
@@ -276,7 +276,7 @@
 | `ProjectMaterialsResult` | `interface` | **素材接口回执**（本轮新增）：`{ materials: ProjectMaterial[]; message?: string }`——`materials` 恒为落盘/读取后的完整列表，渲染层直接用它替换本地状态；`message` 非空表示「部分成功」之类需要告知用户的补充说明（如跳过了几个不支持的文件） |
 | `ProjectReadHtmlResult` | `interface` | `{ html }` |
 | `ProjectSaveHtmlPayload` | `interface` | `{ name?, html? }` |
-| `ProjectPreviewHtmlResult` | `interface` | `{ previewPath }` |
+| `ProjectPreviewHtmlResult` | `interface` | `{ previewPath; pageCanvas?: RenderCanvas \| '' }`——**新增可选 `pageCanvas`**：页面自己声明的画布（取自 `<html data-resolution>`，只认白名单取值），预览据此把 iframe 设成**页面原生尺寸**；缺失 / 非法为空串 ⇒ 渲染层回落成「按项目当前画布显示」（老页面没有这个声明）。**不新增频道、preload 未改**，只是多带一个字段 |
 | `ProjectOpenFolderOfResult` | `interface` | `{ dir }` |
 | `ProjectHtmlMaterials` | `interface` | HTML 生成/修改的素材选择：`subtitleProject?` / **`materialIds?: string[]`**（**`audioPath?` 已删除**：背景音频不是生成素材，由应用按 `project.audioFile` 注入 HTML 的 `<audio id="myv-bgm">`。`materialIds` = 本次参与生成的素材 id 列表，顺序即提示词里的顺序，空/缺省 = 不带素材） |
 | `ProjectAgentPayload` | `interface` | `extends ProjectHtmlMaterials` + `name` / `prompt`（`generateHtml` / `modifyHtml` 线上载荷） |

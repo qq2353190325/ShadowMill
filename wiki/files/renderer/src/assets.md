@@ -5,7 +5,7 @@
 - **覆盖文件**：`assets/main.css`（本目录唯一文件，全局设计系统样式表）
 - **所在目录**：src/renderer/src/assets/
 - **类型**：全局样式表（设计系统）
-- **规模**：1890 行（单文件设计系统随迭代持续增长；当前体量见 `[IO.File]::ReadAllLines` 实测）
+- **规模**：1893 行（单文件设计系统随迭代持续增长；当前体量见 `[IO.File]::ReadAllLines` 实测）
 
 ## 1. 作用与职责
 
@@ -24,9 +24,9 @@
 | `App.vue` | 全局骨架 `#app` / `.layout`、`.titlebar*`、`.win-btn`、`.sidebar` / `.menu*`、`.content`；自身另有 `<style scoped>` 定义 `.toast-*` |
 | `pages/HomePage/index.vue` | `.hero*`、`.flow-pipeline` / `.flow-node*`、`.metric-*`、`.proj-grid` / `.proj-card*`、`.panel-title` / `.dot` |
 | `components/StepBar.vue` | `.project-bar`、`.step-chain`、`.step-node`、`.step-arrow` |
-| `pages/HtmlGenPage/index.vue` | `.hgen-*`、`.panel-title` / `.panel-title-sm`、`.proj-*`、`.hg-help*`（两个动作按钮**内部**各自的行内帮助 `?`）、`.hf-*`（动作行按钮、「转视频」弹窗里的档位控件与状态条）；「转视频」弹窗的外壳复用通用弹窗类 `.hf-modal*`；**本页只剩「字幕」1 处 + 「质量 / 帧率」2 处下拉**（样式随 `components/HfSelect.vue`） |
+| `pages/HtmlGenPage/index.vue` | `.hgen-*`、`.panel-title` / `.panel-title-sm`、`.proj-*`、`.hg-help*`（行内帮助 `?` 共 4 处：两个动作按钮**内部**各 1 个 + 卡片标题「用法」+ 画布行）、`.hf-*`（动作行按钮、「转视频」弹窗里的档位控件与状态条）；「转视频」弹窗的外壳复用通用弹窗类 `.hf-modal*`；**本页下拉 4 处：字幕（260px）与画布（188px）同一行 + 弹窗里的「质量 / 帧率」2 处**（样式随 `components/HfSelect.vue`） |
 | **`pages/HtmlGenPage/MaterialsSection.vue`（本项目素材库，本轮新增）** | **新增节「HTML生成页：项目素材库（图片 / 视频卡片墙）」**：`.mat-grid` / `.mat-card`(+`.off`) / `.mat-thumb`(+`.mat-play`) / `.mat-meta` / `.mat-name` / `.mat-path` / `.mat-check`(+`.on`) / `.mat-del` / `.mat-add` / `.mat-count` / `.panel-title .dot.dot-img`；另复用 `.hgen-block`、`.panel-head` / `.panel-head-actions`、`.panel-title` / `.panel-title-sm`、`.hgen-tip`、`.hf-btn` / `.hf-btn-danger` |
-| **`pages/HtmlGenPage/PreviewSection.vue`（预览卡片）** | `.card.hgen-panel` 外壳、`.panel-title`、`.hgen-row`、`.sel-label`、`.hf-file`、`.hgen-input`（语速输入框）、`.hf-status`（+`.hf-ok` / `.hf-error`）、`.empty-hint`、`.hgen-frame-wrap` / `.hgen-frame`、`.hg-prev-*`（播放控制条三件套）、`.rate-spinner`（包裹，本文件无对应规则、样式由内联 `style` 提供）；背景音频下拉走 `components/HfSelect.vue`；AI 思考过程块用的是**行内 `style`**（无专有类） |
+| **`pages/HtmlGenPage/PreviewSection.vue`（预览卡片）** | `.card.hgen-panel` 外壳、`.panel-title`、`.hgen-row`、`.sel-label`、`.hgen-input`（语速输入框）、`.hf-status`（+`.hf-ok` / `.hf-error`）、`.hf-btn`（语速 ± 两个小按钮；**「移除」按钮已删除**）、`.hg-help*`（**只剩「视角比例」行一处 `?`**；背景音频行的已删除）、`.hgen-tip`（`v-show="viewHint"`）、`.empty-hint`、`.hgen-frame-wrap` / `.hgen-frame`、`.hg-prev-*`（播放控制条三件套）、`.rate-spinner`（包裹，本文件无对应规则、样式由内联 `style` 提供）；**背景音频的占满整行下拉（`flex:1`）与「视角比例」下拉**都走 `components/HfSelect.vue`（前者触发器占满整行 ⇒ 弹层也随 `max(触发器宽, 220px)` 变宽）；AI 思考过程块用的是**行内 `style`**（无专有类）。**本组件不用 `.hf-file`、也没有值胶囊类**（值由下拉自己承载），也没有独立的「本地文件…」按钮（并入下拉分组） |
 | `pages/VideoPreviewPage/index.vue`（视频预览） | `.hf-toolbar`、`.hf-btn*`、`.hf-file`、`.hf-status`、`.hf-video*`、`.hf-tip`、`.card.hgen-panel` 外壳与 `.panel-title`；「预览项目」下拉走 `components/HfSelect.vue` |
 | `pages/SubtitlePage/index.vue` / `TranscribeSection.vue` | `.model-*`、`.whisper-*`、`.sub-list` / `.sub-row` 等字幕编辑器类、`.hf-modal-*` |
 | `pages/TextTtsPage/index.vue` / `{SynthSection,AlignSection,VoiceSection}.vue` | `.hf-tabs` / `.hf-tab`、`.align-*`、`.sub-textarea`、`.hgen-tip`、`.panel-head*` / `.voice-list*`（音色列表）；各处下拉走 `components/HfSelect.vue` |
@@ -82,15 +82,15 @@
 | 流水线节点卡片 | `.flow-pipeline`、`.flow-node*`、`.flow-arrow` | hover 上浮 4px 并叠加双层辉光 |
 | 数据指标卡 | `.metric-grid`、`.metric-card`、`.metric-value`、`.metric-label` | 4 列 grid；指标卡描边/辉光用数据绿 |
 | 首页 · 我的项目卡片（只选择 / 打开，新建入口在顶部工作项目栏） | `.proj-grid`、`.proj-card*` | `repeat(auto-fill, minmax(220px, 1fr))` 卡片网格 |
-| 预览 / HyperFrames 转视频 | `.hf-toolbar`、`.hf-btn*`、`.hf-file`、`.hf-status`(+`.hf-ok` / `.hf-error`)、`.hf-detail`、`.hf-video*`、`.hf-tip` | 全应用主按钮体系与状态行：`.hf-btn-primary` hover **必须重写 `background`**（特异性 0,3,0 的基础 hover 会顶掉渐变）；`.hf-btn-danger` 紧随 `.hf-btn-primary:hover` 之后（靠「写在后面」取胜）；`.hf-detail` 紧跟 `.hf-status.hf-error` 定义。现由 `pages/VideoPreviewPage/index.vue`（工具栏 / 播放器 / 定位按钮 / 状态条）、**`pages/HtmlGenPage/PreviewSection.vue`（背景音频行 `.hf-file`、状态条 `.hf-status`）**、`pages/HtmlGenPage/index.vue`（动作按钮与弹窗档位控件）与 `pages/SettingsPage/components/UpdateSection.vue`（状态行与 `.hf-detail`）共同使用 |
+| 预览 / HyperFrames 转视频 | `.hf-toolbar`、`.hf-btn*`、`.hf-file`、`.hf-status`(+`.hf-ok` / `.hf-error`)、`.hf-detail`、`.hf-video*`、`.hf-tip` | 全应用主按钮体系与状态行：`.hf-btn-primary` hover **必须重写 `background`**（特异性 0,3,0 的基础 hover 会顶掉渐变）；`.hf-btn-danger` 紧随 `.hf-btn-primary:hover` 之后（靠「写在后面」取胜）；`.hf-detail` 紧跟 `.hf-status.hf-error` 定义。现由 `pages/VideoPreviewPage/index.vue`（工具栏 / 播放器 / 定位按钮 / 状态条）、**`pages/HtmlGenPage/PreviewSection.vue`（状态条 `.hf-status`、两个动作按钮 `.hf-btn` / `.hf-btn-danger`）**、`pages/HtmlGenPage/index.vue`（动作按钮与弹窗档位控件）与 `pages/SettingsPage/components/UpdateSection.vue`（状态行与 `.hf-detail`）共同使用 |
 | 项目链路状态条（贯通各页，两行：上流程链 / 下工作项目切换） | `.project-bar*`、`.step-chain`、`.step-node*`、`.step-arrow` | 胶囊节点 + 圆点状态机（灰 / 绿 / 蓝脉冲） |
 | 配音页 Tab 切换 | `.hf-tabs`、`.hf-tab` | 999px 胶囊 Tab |
 | HTML 生成页（与紧随其后的「行内帮助」小节交错） | `.hgen-grid`、`.panel-title`、`.panel-title .dot`、`.hgen-subtitle`、`.hgen-input`、`.hgen-row`、`.hgen-actions`、`.hgen-tip` | 面板标题带发光小圆点（`.panel-title` / `.dot` 已全局化）；`.hgen-subtitle` 为 260px 高文本域。**注意**：本节规则被下面「行内帮助」小节从中间分开 |
-| 行内帮助：`?` 图标 + 悬浮说明（放在按钮内部：每个动作各带一个 `?`） | `.hg-help*` | 16px 圆形 `?` + 320px 悬浮气泡；默认 `opacity:0` + `visibility:hidden` + `pointer-events:none`；气泡位于 `<button>` 内故重置排版 |
+| 行内帮助：`?` 图标 + 悬浮说明（**默认**放在按钮内部：每个动作各带一个 `?`；HtmlGenPage 另在卡片标题「用法」与画布行各挂一个**非按钮锚点**） | `.hg-help*` | 16px 圆形 `?` + 320px 悬浮气泡；默认 `opacity:0` + `visibility:hidden` + `pointer-events:none`；气泡位于 `<button>` 内故重置排版（标题那处的锚点落在带 `2px` 字距的 `.panel-title` 里，改用内联 `letter-spacing:0` 覆盖） |
 | HTML 工作台：分区小标题 + 源码编辑器 | `.panel-title-sm`、`.hgen-source*` | 通用小标题（主色 13px 600）；源码编辑器 `min-height:320px`、Consolas、`resize: vertical` |
 | 项目详情小卡 | `.proj-meta`、`.proj-stat`(+`.on`) | `auto-fit, minmax(130px, 1fr)` 自适应栅格；`.on` 切数据绿（HTML生成页的「素材」格就落在这里） |
-| 预览画布 | `.hgen-frame-wrap`、`.hgen-frame` | **这里只是「默认值（横屏）」的占位**：容器 `padding-bottom:56.25%`（16:9）与 iframe 的 `1920px × 1080px` 都保持原值不变，但**挂载后一律被 `pages/HtmlGenPage/PreviewSection.vue` 的内联样式覆盖**——容器的 `padding-bottom` 绑定 `framePadPct`（画布高/宽×100）、iframe 的宽高绑定 `canvasBox`（项目画布的像素，横屏 1920×1080 / 竖屏 1080×1920 / 方形 1080×1080，见 `shared/constants.ts` 的 `CANVAS_SIZES`）。`transform-origin: 0 0` 不变、`scale` 仍由 JS 设，但缩放比改为「容器宽 ÷ **当前画布宽**」。源码注释已把这层语义写明：**预览 iframe 内部视口 = 项目选定的画布尺寸（= 转视频的成片尺寸）**，本文件里的 16:9 / 1920×1080 只在组件挂载前占位 |
-| 预览播放控制条（进度条 + 暂停/播放 + 重新播放） | `.hg-prev-ctl`、`.hg-prev-bar`(+`.seeking`)、`.hg-prev-track`、`.hg-prev-bar-fill`、`.hg-prev-time`、`.hg-prev-hint`、`.empty-hint` | `.hg-prev-bar` 是**可点可拖的跳转热区**（`padding:5px 0`，视觉厚度仍是 8px）；`.hg-prev-track` 用 `box-shadow: inset 0 0 0 1px …` 当描边；`.seeking` 时关掉填充的 0.25s 补间；`.hg-prev-hint` 是「已暂停在第 0 帧…」的说明文字。**使用方现为 `pages/HtmlGenPage/PreviewSection.vue`**（整块随预览卡片搬出 `index.vue`） |
+| 预览画布 | `.hgen-frame-wrap`、`.hgen-frame` | **这里只是「默认值（横屏）」的占位**：容器 `padding-bottom:56.25%`（16:9）与 iframe 的 `1920px × 1080px` 都保持原值不变，但**挂载后一律被 `pages/HtmlGenPage/PreviewSection.vue` 的内联样式覆盖**——容器改绑 **`frameStyle`**（**高度上限 800px、宽度 = `min(100%, round(800 × 宽/高)px)`、高度由 `aspect-ratio` 撑、`paddingBottom` 内联设成 `'0'`**，即 CSS 那套 `padding-bottom` 留位技巧被彻底旁路；宽窗口下 16:9 → **1422×800**、9:16 → **450×800**、1:1 → **800×800**，窄窗口宽度退 `100%`、高度按比例降），iframe 的宽高绑定 **`pageBox`**（**页面自己声明的画布**：`pageCanvas` 经 `project:preview-html` 从原 HTML 的 `<html data-resolution>` 带回，无声明时回落项目当前画布；像素见 `shared/constants.ts` 的 `CANVAS_SIZES`；**视角比例不改 iframe 尺寸**）。`transform-origin: 0 0` 不变、`transform` 仍由 JS 设，是 **contain**：`min(容器宽/页面宽, 容器高/页面高)` + `translate` 居中。**容器本身水平居中**：本文件给 `.hgen-frame-wrap` 新加了 **`margin-inline: auto`**（宽度由内联 `frameStyle` 决定，小于可用宽度时左右均分余量；宽度吃满时 margin 为 0 等于没变），否则预览会贴左、右边空一大块（9:16 最明显）。源码注释已把这层语义写明：**预览 iframe 的视口 = 页面原生画布**，本文件里的 16:9 / 1920×1080 只在组件挂载前占位 |
+| 预览播放控制条（进度条 + **一个三态键** + 时间） | `.hg-prev-ctl`、`.hf-btn`（三态键）、`.hg-prev-bar`(+`.seeking`)、`.hg-prev-track`、`.hg-prev-bar-fill`、`.hg-prev-time`、`.hg-prev-hint`、`.empty-hint` | `.hg-prev-bar` 是**可点可拖的跳转热区**（`padding:5px 0`，视觉厚度仍是 8px）；`.hg-prev-track` 用 `box-shadow: inset 0 0 0 1px …` 当描边；`.seeking` 时关掉填充的 0.25s 补间；`.hg-prev-hint` 是「已暂停在第 0 帧…」的说明文字。**按钮只剩一个**（暂停 / 播放 / 重新播放三态，由组件内的 `prevToggleText` / `prevToggleTitle` 决定文案，样式仍复用全局 `.hf-btn`；原「重新播放」独立按钮已删除）。**使用方现为 `pages/HtmlGenPage/PreviewSection.vue`**（整块随预览卡片搬出 `index.vue`） |
 | 首页流水线节点状态 | `.flow-node.flow-done`、`.flow-badge` | 完成节点绿描边；绿色胶囊徽标 |
 | HTML 生成/修改：需求输入区块 + 设置页复选框 | `.hgen-block`、`.hgen-check` | 区块上边距统一 `--space-4`；复选框 `accent-color: var(--color-primary)` |
 | 字幕生成（whisper.cpp）：模型档位卡片 | `.model-grid`、`.model-card*`、`.model-*` | `auto-fill, minmax(210px,1fr)` 栅格；已下载态整卡转绿 |
@@ -310,7 +310,7 @@
 | **`mat-*`** | **HTML生成页素材库（本轮新增）** | **素材卡片墙**：`mat-grid`、`mat-card`（状态类 `.off`）、`mat-thumb`、`mat-play`、`mat-meta`、`mat-name`、`mat-path`、`mat-check`（状态类 `.on`）、`mat-del`、`mat-add`、`mat-count`；图片组的点靠 `.dot.dot-img` 而非新前缀 |
 | **`cl-*`** | **设置页更新日志弹窗** | **随包 `CHANGELOG.md` 的展示**：`cl-ver`（版本 + 时间抬头）、`cl-list`、`cl-item`、`cl-item-title`、`cl-date`、`cl-count`、`cl-tag`（配色档 `.cl-tag-ok` / `.cl-tag-err` / `.cl-tag-warn`）、`cl-more`、`cl-hist`、`cl-hist-head`、`cl-hist-body`、`cl-hist-block`、`cl-hist-ver`、`cl-hist-name`、`cl-caret` |
 | `hg-prev-*` | 预览播放控制条 | `hg-prev-ctl`、`hg-prev-bar`（状态类 `.seeking`）、`hg-prev-track`、`hg-prev-bar-fill`、`hg-prev-time`、`hg-prev-hint` |
-| `hg-help*` | HTML 生成页动作按钮**内部** | 行内帮助 `?`：`hg-help`、`hg-help-icon`、`hg-help-pop`；显隐靠 `.hg-help:hover` 后代选择器 |
+| `hg-help*` | HTML 生成页（**动作按钮内部 2 处 + 卡片标题「用法」+ 画布行**） | 行内帮助 `?`：`hg-help`、`hg-help-icon`、`hg-help-pop`；显隐靠 `.hg-help:hover` 后代选择器。设计系统本身未变：后两处是**非按钮锚点**，靠模板内联覆盖——`letter-spacing:0`（锚在带 2px 字距的 `.panel-title` 里）与 `top:calc(100% + 8px);bottom:auto`（**向下**展开，避免顶出滚动容器 `.content` 的 `overflow-y:auto` 被整块裁掉） |
 | `step-*` / `project-bar*` | 项目链路状态条 | `project-bar*`、`step-chain`、`step-node`、`step-dot`、`step-arrow`；状态用修饰类 `.done` / `.active-now` / `.clickable` |
 | `sub-*` | 字幕编辑器与字幕写入方式 | `sub-list`、`sub-row`、`sub-idx`、`sub-time`、`sub-arrow`、`sub-text`、`sub-del`、`sub-count`、`sub-note`、`sub-empty`、`sub-textarea`、`sub-mode-btn` |
 | `model-*` / `whisper-*` / `align-*` | whisper 模型卡、下载进度与转录、逐句对齐 | 状态类为 `.downloaded` / `.selected` / `.current` / `.error` / `.done` / `.indeterminate` / `.ok` / `.warn` |
@@ -332,7 +332,7 @@
 - **与 scoped 样式的配合**：本文件是全局样式，不受 `data-v-*` 影响；反过来也命中不了 scoped 组件内部结构。
 - **变量是组件行内样式的桥梁**：多个组件直接在模板 `style` 属性中引用本文件变量（素材卡片、预览卡片都有大量行内 `style`，如 `.hgen-row` 里的 `style="flex:none;width:auto"`）。
 - **类名复用是主要协作方式**：`MaterialsSection.vue` 就是典型——除新增的 `.mat-*` 外，其余（`.hgen-block`、`.panel-head*`、`.panel-title*`、`.hgen-tip`、`.hf-btn*`）全部复用既有类；更新日志弹窗同理——`.hf-modal*` / `.hf-btn` / `.hf-status` / `.hf-error` / `.hf-detail` 全部复用，只自带 `.cl-*` 一组（宽度靠模板内联 `style="width:min(720px,92vw)"`，不新增类）。
-- **JS 与 CSS 的契约**：`.hgen-frame` 的缩放依赖 JS 写 `transform: scale(...)`，**它的宽高与容器的 `padding-bottom` 也依赖组件内联样式**（`.hgen-frame-wrap` 与 `.hgen-frame` 上的 16:9 / 1920×1080 是默认值，`PreviewSection.vue` 挂载后按项目画布覆盖）；`.hg-prev-bar-fill` / `.whisper-bar-fill` 的宽度依赖 JS 写 `style.width`；`.mat-check` 的 `✓` 与 `.mat-card.off` 由 Vue 按 `selected` 渲染；`.mat-add` 的 `:disabled` 由 `busy` 控制。
+- **JS 与 CSS 的契约**：`.hgen-frame` 的缩放依赖 JS 写 `transform: translate(...) scale(...)`，**它的宽高与容器的尺寸也依赖组件内联样式**（`.hgen-frame-wrap` 与 `.hgen-frame` 上的 16:9 / 1920×1080 是默认值：挂载后容器按 **`frameStyle`**（高度上限 800、宽度按比例、`aspect-ratio` 定高、`paddingBottom:'0'`）覆盖、iframe 宽高按**页面声明的画布**（`pageBox`）覆盖）；`.hg-prev-bar-fill` / `.whisper-bar-fill` 的宽度依赖 JS 写 `style.width`；`.mat-check` 的 `✓` 与 `.mat-card.off` 由 Vue 按 `selected` 渲染；`.mat-add` 的 `:disabled` 由 `busy` 控制。
 - **与设计规范一致**：变量名与取值同 `src/renderer/agents.md` 逐条对应；字号刻度见该文件 §3.1 / §3.2，列表面板（`.panel-head*`）的结构约定见 §5.6。
 
 ## 6. 注意事项与实现要点
@@ -346,7 +346,7 @@
 - **性能敏感属性**：被动画的属性为 `transform` / `background-position` / `box-shadow` / `margin-left`。
 - **过渡时长成体系但不统一**：`0.15s` / `0.18s` / `0.2s` / `0.25s`；素材节的过渡都是 `0.2s ease`。
 - **响应式**：本文件**不含任何 `@media` 查询**；自适应靠 flex（`flex-wrap`）、grid（`auto-fit/auto-fill + minmax`）与 `min()` 宽度。
-- **固定视口的特例**：`.hgen-frame` 写着 `1920px × 1080px`（横屏默认值），实际尺寸由 `PreviewSection.vue` 按项目画布内联覆盖，缩放仍交给 JS——**不要把它当成「恒为 1920×1080」**：项目选了竖屏 / 方形时预览 iframe 就是 1080×1920 / 1080×1080（与成片尺寸一致）。
+- **固定视口的特例**：`.hgen-frame` 写着 `1920px × 1080px`（横屏默认值），实际尺寸由 `PreviewSection.vue` 按**页面自己声明的画布**（`pageBox`）内联覆盖，缩放仍交给 JS——**不要把它当成「恒为 1920×1080」**：页面声明竖屏 / 方形时预览 iframe 就是 1080×1920 / 1080×1080；**页面没声明时回落项目当前画布**。**它可能与本项目的画布不同**（那正是「预览按页面原样」的意义）；**预览「视角比例」下拉也不改这个尺寸**：它只换**外层容器**的尺寸（`frameStyle`：高度上限 800、宽度 = `min(100%, 800×比例)`、`aspect-ratio` 定高）并让 iframe 在新形状里 contain + 居中，多出来的部分是黑边。
 - **深色专属假设**：所有颜色按深底亮字设计；`--color-secondary` 现被素材节的 `.dot.dot-img` 真正引用（不再是「已定义但未使用」）。
 - **素材节的三个取舍**（源码注释原文已写进 §3.2）：① 未勾选只压暗不禁用（`.off` 而非 `disabled`）；② 视频不抽帧、用 `▶` 占位；③ 勾选框与移除键直接写在按钮上并显式抬 `z-index`，不额外包一层容器。
 - **类名缺口**：`.sel-label` 在多处页面模板中使用（包括素材库上方的「字幕」行与预览卡片的「背景音频」/「语速」），但本文件未定义其样式——排查「标签样式不生效」时需注意。

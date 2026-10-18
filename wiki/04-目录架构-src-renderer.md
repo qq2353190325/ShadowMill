@@ -9,14 +9,14 @@
 ```
 src/renderer/
 ├─ index.html                    # 103 行  HTML 宿主：#app + 启动画面（内联样式，不等 JS）+ CSP meta + 模块入口；品牌文案用 %APP_*% 占位、构建期注入
-├─ agents.md                     # 174 行   科技主题（Cyber UI / 深空科技）设计规范正文（自 pages/ 上提到 renderer/ 层）
+├─ agents.md                     # 184 行   科技主题（Cyber UI / 深空科技）设计规范正文（自 pages/ 上提到 renderer/ 层；§5.7 项目属性行 = 标签 + 控件 + `?`）
 └─ src/
    ├─ main.ts                    #  15 行   createApp + 挂载 + 导入全局 CSS + 启动画面淡出移除
    ├─ App.vue                    # 327 行   外壳：标题栏（文案取 @shared/constants 的 APP_NAME）+ 运行环境横幅（下载中 / 缺包 / 失败三态）+ 运行环境确认框（内联 `.hf-modal`）+ **配置类错误弹窗宿主**（`useConfigPrompt`，[去设置] / [取消]）+ 侧栏菜单 + 页面容器 + 旧数据弹窗宿主 + Toast + 启动流程（initRenderProgress → initRuntime → initEnvGate → initLegacyData → initApp）
    ├─ env.d.ts                   #   8 行   .vue 等模块类型补丁
    ├─ constants.ts               #  59 行   渲染层公共常量：localStorage 键名前缀 + 两个持久化键（不跟随品牌名，改前缀必须补迁移）
    ├─ assets/
-   │  └─ main.css                # 1890 行  全局设计系统（深空科技主题；本轮末尾新增「HTML生成页：项目素材库」一节）
+   │  └─ main.css                # 1893 行  全局设计系统（深空科技主题；末尾几轮新增「HTML生成页：项目素材库」等节；曾试过「值胶囊 `.prop-chip*`」、已连同样式删除）
    ├─ components/
    │  ├─ StepBar.vue             #  90 行   五节点链路状态条 + 工作项目切换器（新建入口改为弹窗）
    │  ├─ NewProjectDialog.vue    #  83 行   新建项目弹窗（创建 + 刷新 + 切换，成功后 emit created）
@@ -46,7 +46,7 @@ src/renderer/
       ├─ AboutPage/
       │  └─ index.vue            #  18 行   关于（静态）
       ├─ ContentPage/
-      │  └─ index.vue            # 106 行   内容脚本
+      │  └─ index.vue            #  99 行   内容脚本（场景分镜；保存时把项目里已落盘的 `content.style` 原样带回，风格编辑入口在 HTML生成页）
       ├─ TextTtsPage/
       │  ├─ index.vue            #  37 行   配音页外壳（三个 Tab：文字生音频 / 字幕配音 / 音色管理；Tab 值用 helpers 的 `activeTtsTab`）
       │  ├─ SynthSection.vue     # 379 行   文字生音频卡（音色/模型下拉受「Key 已配置」门控；**切回本 Tab 自动重拉音色**；合成失败时 `configPrompt.fromResult(res)` 弹「去设置」）
@@ -58,9 +58,9 @@ src/renderer/
       │  ├─ TranscribeSection.vue# 365 行   转录弹窗（**缺 ffmpeg 运行环境包时经 `useEnvGate` 弹确认框**，`doTranscribe(skipEnvGuard)`）
       │  └─ helpers.ts           # 165 行   字幕助手（估时、条目类型等）
       ├─ HtmlGenPage/             # **本轮由「单文件」拆成三个文件（一个文件一件事）**
-      │  ├─ index.vue            # 416 行   页面入口：StepBar + 项目状态卡（`.proj-meta`，含「素材」格）+ 字幕素材下拉 + **画布（成片尺寸）下拉** + `<MaterialsSection />` + 需求描述 + 四个动作按钮（生成 HTML / 按需求修改 / 下载 HTML / 转视频）+ `<PreviewSection />` + 转视频弹窗；生成流程只把 `{ subtitleProject, materialIds }` 交给主进程，渲染载荷为 `{ quality, fps, canvas }`
+      │  ├─ index.vue            # 478 行   页面入口：StepBar + 项目状态卡（`.proj-meta`，3 个纯数据格 + 标题右侧「用法」`?` 气泡）+ **字幕 / 画布下拉（同一个 `.hgen-row`）** + **全局视觉风格输入框（`content.style`，与画布同级的项目属性；失焦即 `saveContent` 落盘并把现有 scenes 原样带回）** + `<MaterialsSection />` + 需求描述 + 动作行上方统一的生成前提提示 + 四个动作按钮（生成 HTML / 按需求修改 / 下载 HTML / 转视频）+ `<PreviewSection />` + 转视频弹窗；生成流程只把 `{ subtitleProject, materialIds }` 交给主进程，渲染载荷为 `{ quality, fps, canvas }`
       │  ├─ MaterialsSection.vue # 167 行   「项目素材」区块：图片 / 视频两堵 `.mat-grid` 卡片墙（勾选 / 移除 / 添加），**无 props、无 emits**，状态就是 `appState.project.materials`；末尾有一段被注释下线的「提取原声为背景音频」实现
-      │  └─ PreviewSection.vue   # 353 行   「预览」卡片：背景音频选定 + 试听与语速 + 状态行 + AI 思考过程 + **只读「画布」行** + iframe 预览副本（**iframe 内部视口 = 项目选定的画布尺寸，宽高与容器 `padding-bottom` 由内联样式按画布设置，`fitFrame()` 按当前画布宽度算缩放**）+ 播放控制条（暂停 / 重播 / 拖动 seek）；**props `{ status, statusClass, thinkText, rendering }` + `defineExpose({ reload })`**
+      │  └─ PreviewSection.vue   # 439 行   「预览」卡片：**背景音频行（一行只有一个控件：`sel-label` 56px + `HfSelect` `flex:1` 占满整行；**当前音频就是「已生成音频」里的选中项**——`currentAudioIndex` 把 `audioFile` 按 basename 匹配回列表，「不使用背景音频」也在下拉里；没有独立「移除」按钮、也不挂 `?`）** + 试听与语速（`onMounted` 按项目现有 `audioFile` 初始化试听源） + 状态行 + AI 思考过程 + **「视角比例」行**（`viewMode`：16:9 / 9:16 / 1:1，默认 = 页面天然比例 `pageMode`、不落盘，行尾 `.hgen-tip` 用 `v-show="viewHint"` 做 2 态说明；**不显示画布值**） + iframe 预览副本（**iframe 视口 = 页面自己声明的画布（`pageCanvas`，无声明回落项目画布）；容器尺寸由 `frameStyle` 决定：高度上限 800px、宽度 `min(100%, 800×比例)`、`aspect-ratio` 定高（宽窗口 16:9=1422×800 / 9:16=450×800 / 1:1=800×800），并由 `main.css` 的 `margin-inline:auto` 水平居中；`fitFrame()` 用 contain：`min(宽比, 高比)` + `translate` 居中**） + 播放控制条（**一个三态键**：暂停 / 播放 / 重新播放（`prevEnded` 判定） + 拖动 seek）；**props `{ status, statusClass, thinkText, rendering }` + `defineExpose({ reload })`**
       ├─ VideoPreviewPage/
       │  └─ index.vue            # 149 行   视频预览（纯预览：可选任意「有视频成品」的项目播放 / 定位；**切换只换本页播放内容、不改工作项目**；播放源经 `toHgPreviewUrl()` → `utils/url.ts` 的 `previewUrl()` 拼成 `hgpreview://p/…`——原 `file://` 拼接在 dev 下（渲染页是 `http://localhost`）会被 Chromium 拒绝、视频全黑，该分支已删除；「转视频」与渲染档位在 HTML生成页）
       └─ SettingsPage/            # 一页一目录：外壳 + 页面级 .ts + components/ 下的区块组件
@@ -140,7 +140,7 @@ export async function goPage(key: PageKey) {
 | `content` | `ContentPage/index.vue` | ✅ 内容脚本 | 流水线起点（内容源） |
 | `text-tts` | `TextTtsPage/index.vue` | ✅ 配音 | 内含三个 Tab：文字生音频 / 字幕配音 / 音色管理（原独立页 `SoundCopyPage` 已并入） |
 | `subtitle` | `SubtitlePage/index.vue` | ✅ 字幕生成 | 含转录弹窗子组件 |
-| `html-gen` | `HtmlGenPage/index.vue`（+ `MaterialsSection.vue` / `PreviewSection.vue`） | ✅ HTML生成 | **本轮拆成三个文件**：入口只剩状态卡 / 字幕下拉 / **画布（成片尺寸）下拉（全应用唯一选择点，`canvasHint` 说明「换画布后要重新生成 / 修改才会重排版式」）** / 需求描述 / 四个动作按钮 / 转视频弹窗；**项目素材库（多图片 + 多视频，勾选参与生成）在 `MaterialsSection.vue`**；背景音频、状态行、AI 思考过程与预览播放控制在 `PreviewSection.vue`。**转视频入口与渲染档位仍在此页** |
+| `html-gen` | `HtmlGenPage/index.vue`（+ `MaterialsSection.vue` / `PreviewSection.vue`） | ✅ HTML生成 | **本轮拆成三个文件**：入口只剩状态卡（3 个纯数据格 + 标题右侧「用法」`?` 气泡）/ **字幕与画布同一行**（原先各占一个 `.hgen-block`，两条 `panel-title-sm` 已删除、名称交给行内标签；画布仍是全应用唯一选择点，画布说明**只在 `?` 气泡里**——正文是 `canvasNote`（随画布变）+ `canvasHint`（固定常量）两段拼接，「改完要重新生成」统一由动作行上方的 `.hgen-tip` 说） / **全局视觉风格输入框（`content.style`，该字段全应用唯一编辑点；失焦即落盘、把现有 scenes 原样带回；标题保留）** / 需求描述 / 动作行上方统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；**项目素材库（多图片 + 多视频，勾选参与生成）在 `MaterialsSection.vue`**；背景音频、状态行、AI 思考过程与预览播放控制在 `PreviewSection.vue`。**转视频入口与渲染档位仍在此页** |
 | `video-preview` | `VideoPreviewPage/index.vue` | ✅ 视频预览 | 流水线终点：**可选项目预览**——默认当前工作项目，下拉另列「有视频成品」的项目；**切换只换本页播放的成品，不改 `appState.currentName`**；渲染由 HTML生成页发起并回写 `videoPath`（落盘为项目内相对路径 `video/output.mp4`，经 `project:load` 换算成绝对路径后交给本页） |
 | `about` | `AboutPage/index.vue` | ✅ 关于 | 静态页 |
 | `settings` | `SettingsPage/index.vue` | ✅ 设置 | 外壳只决定「显示哪一类」，正文分布在 `SettingsPage/components/` 的 5 个区块组件里 |
@@ -194,14 +194,14 @@ export async function goPage(key: PageKey) {
 |---|---|---|
 | HomePage | 项目列表与进度标记、切换项目、跳转各节点 | `projectTools` |
 | AboutPage | 纯静态 | — |
-| ContentPage | 编辑并保存内容脚本（style + scenes） | `projectTools` |
+| ContentPage | 编辑并保存内容脚本（`scenes`；`save()` 把项目里已落盘的 `content.style` 原样带回，风格编辑入口已在 HTML生成页） | `projectTools` |
 | TextTtsPage | 壳：Tab 切换三个子卡 | — |
 | ├ SynthSection | 音色/模型选择、文字合成、试听（`ttsUrl()` → `hgpreview://tts/…?tts=1`）、设为背景音频、已生成音频列表；**合成失败且为配置类时弹「去设置」** | `voiceTools`、`projectTools`、`useConfigPrompt` |
 | ├ AlignSection | 逐句对齐（模式 A/B）、进度与取消、整轨与逐句试听（`ttsUrl()` → `hgpreview://tts/…?tts=1`）、结果写回；**失败分支先判配置类弹窗、再判缺 ffmpeg 包** | `voiceTools`、`projectTools`、`useEnvGate`、`useConfigPrompt` |
 | └ VoiceSection | 创建克隆音色（`Teleport` 弹窗）、云端/系统音色列表、本地显示名与绑定模型 | `voiceTools`、`useConfigPrompt` |
 | SubtitlePage | 字幕条目编辑、SRT 写入方式、复制、导出、由脚本旁白生成、保存 | `projectTools` |
 | └ TranscribeSection | 选音频与语言、转录、进度、结果替换/追加 | `whisperTools` |
-| **HtmlGenPage（3 个文件）** | **入口**：提示词生成/修改 HTML（两个并列按钮、各带行内 `?`；「生成 HTML」点一次即执行、无二次确认）、**字幕素材下拉**、需求描述、四个动作按钮、**转视频（先开「渲染档位」弹窗）**、**失败分支 `res.needConfig` → `configPrompt.open(...)` 且不叠 toast**；**`MaterialsSection`**：素材库增删勾选（`pickMedia` / `addMaterials` / `saveMaterials`），缩略图经 `previewUrl()` 取（`hgpreview://p/…`）；**`PreviewSection`**：背景音频选定（`pickAudio` / `setAudio` / `clearAudio`，音轨由主进程注入 HTML，不经 Agent）+ 背景音频试听（源经 `previewUrl(项目名, res.audioFile, true)` 取，**项目内相对路径**）、预览副本（`previewHtml`）、只读画布行与按画布缩放的预览框、状态行与 AI 思考过程（父页 props 传入） | `projectTools`（`generateHtml` / `modifyHtml` / `downloadHtml` / `previewHtml` / **`pickMedia` / `addMaterials` / `saveMaterials`** / `pickAudio` / `setAudio` / `clearAudio` / **`extractVideoAudio`（保留但当前无界面入口）** / `saveVideo` / `setRender` / **`setCanvas`（本次新增：写成片画布方向）** / `onHtmlProgress`）、`hfTools`（`renderVideo`，载荷含 `canvas`）、`voiceTools`（`listGenerated`，仅填充音频下拉）、全局 `renderProgress` / `renderDefaults`、`useEnvGate`、`useConfigPrompt` |
+| **HtmlGenPage（3 个文件）** | **入口**：提示词生成/修改 HTML（两个并列按钮、各带行内 `?`；「生成 HTML」点一次即执行、无二次确认）、**字幕 / 画布下拉（同一行）**、需求描述、四个动作按钮、**转视频（先开「渲染档位」弹窗）**、**失败分支 `res.needConfig` → `configPrompt.open(...)` 且不叠 toast**；**`MaterialsSection`**：素材库增删勾选（`pickMedia` / `addMaterials` / `saveMaterials`），缩略图经 `previewUrl()` 取（`hgpreview://p/…`）；**`PreviewSection`**：背景音频选定（`pickAudio` / `setAudio` / `clearAudio`，音轨由主进程注入 HTML，不经 Agent）+ 背景音频试听（源经 `previewUrl(项目名, res.audioFile, true)` 取，**项目内相对路径**）、预览副本（`previewHtml`，回执带 `pageCanvas`）、**「视角比例」行（16:9 / 9:16 / 1:1，纯观看状态不落盘；预览卡里不再显示画布值）与按页面声明画布 contain 的预览框**、状态行与 AI 思考过程（父页 props 传入） | `projectTools`（`generateHtml` / `modifyHtml` / `downloadHtml` / `previewHtml` / **`pickMedia` / `addMaterials` / `saveMaterials`** / `pickAudio` / `setAudio` / `clearAudio` / **`extractVideoAudio`（保留但当前无界面入口）** / `saveVideo` / `setRender` / **`setCanvas`（本次新增：写成片画布方向）** / **`saveContent`（本次新增调用点：全局视觉风格失焦落盘，须把现有 `scenes` 原样带回）** / `onHtmlProgress`）、`hfTools`（`renderVideo`，载荷含 `canvas`）、`voiceTools`（`listGenerated`，仅填充音频下拉）、全局 `renderProgress` / `renderDefaults`、`useEnvGate`、`useConfigPrompt` |
 | VideoPreviewPage | **可选项目**的成品预览：默认当前工作项目，下拉另列 `hasVideo` 的项目；播放 / 定位成品 MP4（`<video class="hf-video" controls>`，播放源由 `toHgPreviewUrl()` 内部调 `utils/url.ts` 的 `previewUrl()` 拼成 `hgpreview://p/<编码项目名>/<逐段编码的相对路径>?v=<时间戳>`）；「重新加载」始终可用（重读清单 + 所选项目被删/改名时回落当前项目）；空态按「没 HTML」/「没视频成品」分文案。**不发起渲染，也不切工作项目**；数据来自 `project:list` 的 `hasVideo` / `hasHtml` 与 `project:load` 的 `videoPath`（**无新增频道**；播放走 `src/main/index.ts` 早已注册的 `hgpreview://` 协议，不是 IPC） | `projectTools`（经 `refreshProject` 与 `load`）、`hfTools`（`showInFolder`）、全局 `renderProgress` |
 | SettingsPage | 外壳 5 类导航 + 5 个区块组件（自定义模型 / 语音服务 / 渲染默认档位 / 应用更新 / 语音识别模型）；`ModelSection.vue` 的 `onTest()` 刻意不弹配置类弹窗 | `settingsTools`（含 `pickRuntimePack`）、`voiceTools`、`updateTools`、`runtimeTools`、`whisperTools` |
 
@@ -211,7 +211,7 @@ export async function goPage(key: PageKey) {
 
 ## 6. 样式策略
 
-- **全局设计系统**：`assets/main.css`（**当前实测 1890 行**；素材库那一轮由 1676 → 1796，此后随更新日志弹窗与画布改动继续增长）承载根变量、标题栏、布局、菜单、卡片、按钮、表单、表格、`step-bar` 以及各页面专有样式（按源码注释可划分为约 35 个样式节，**本轮末尾新增「HTML生成页：项目素材库（图片 / 视频卡片墙）」一节**：`.mat-grid` / `.mat-card`(+`.off`) / `.mat-thumb`(+`.mat-play`) / `.mat-meta` / `.mat-name` / `.mat-path` / `.mat-check`(+`.on`) / `.mat-del` / `.mat-add` / `.mat-count` / `.panel-title .dot.dot-img`，使用方只有 `HtmlGenPage/MaterialsSection.vue`）；由 `main.ts` 全局导入。其中 `html, body` 另设**全局基准字号 `font-size: 14px`**。视觉规范写在 `src/renderer/agents.md`（根目录 `agents.md` 只是指针；列表面板结构约定见该文件 §5.6）。
+- **全局设计系统**：`assets/main.css`（**当前实测 1893 行**；素材库那一轮由 1676 → 1796，此后随更新日志弹窗与画布改动继续增长；一度试过的「值胶囊 `.prop-chip*`」已连同样式整体删除）承载根变量、标题栏、布局、菜单、卡片、按钮、表单、表格、`step-bar` 以及各页面专有样式（按源码注释可划分为约 35 个样式节，较近几轮新增「HTML生成页：项目素材库（图片 / 视频卡片墙）」一节：`.mat-grid` / `.mat-card`(+`.off`) / `.mat-thumb`(+`.mat-play`) / `.mat-meta` / `.mat-name` / `.mat-path` / `.mat-check`(+`.on`) / `.mat-del` / `.mat-add` / `.mat-count` / `.panel-title .dot.dot-img`，使用方只有 `HtmlGenPage/MaterialsSection.vue`）；由 `main.ts` 全局导入。其中 `html, body` 另设**全局基准字号 `font-size: 14px`**。视觉规范写在 `src/renderer/agents.md`（根目录 `agents.md` 只是指针；列表面板结构约定见该文件 §5.6、**项目属性行见 §5.7**）。
 - **组件补充**：经核查，全部 `.vue` 中带 `<style>` 块的只有 **3 个文件、4 段**——`App.vue`（`<style scoped>`，Toast 宿主）、`components/HfSelect.vue`（`<style scoped>` 触发器 + **不带 `scoped`** 的弹层，因为弹层 Teleport 到 `body`）、`components/LegacyDataDialog.vue`（`<style scoped>`，`.path-line` / `.opt-list` / `.danger-text` / `.hf-btn.danger`）；其余页面与组件（含**本轮新增的两个 HtmlGenPage 子组件**）不含样式块，完全依赖 `main.css` 的类名 + 模板行内 `style`。**唯一例外是启动画面**（`index.html` 的内联 `<style>`），它必须自包含。
 - 主题通过 CSS 变量切换；若要加亮色模式只需在 `:root[data-theme="light"]` 覆盖变量。
 

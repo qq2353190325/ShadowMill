@@ -940,14 +940,17 @@ body {
   color: var(--color-success);
 }
 
-/* 预览画布：iframe 内部视口 = 项目选定的画布尺寸（横屏 1920x1080 / 竖屏 1080x1920 / 方形 1080x1080，
-   见 shared/constants.ts 的 CANVAS_SIZES 与 pages/HtmlGenPage/PreviewSection.vue），与转视频的成片尺寸一致；
-   外层容器按画布宽高比留位（padding-bottom 由组件内联设置），iframe 由 JS 按容器宽度等比缩放。
-   下面这组 16:9 / 1920x1080 是**默认值（横屏）**，在组件挂载前先用它占位，挂载后一律被内联样式覆盖。 */
+/* 预览「屏幕」：尺寸由组件内联决定（`pages/HtmlGenPage/PreviewSection.vue` 的 frameStyle）——
+   高度上限 800px、宽度 = min(可用宽度, 800×比例)，用 aspect-ratio 表达；iframe 由 JS 等比缩进这块屏幕。
+   下面这组 width / padding-bottom / 1920x1080 是**组件挂载前的默认占位（横屏 16:9）**，
+   挂载后一律被内联样式覆盖（内联的 padding-bottom 会被设成 0，高度改由 aspect-ratio 决定）。 */
 .hgen-frame-wrap {
   position: relative;
   width: 100%;
   padding-bottom: 56.25%; /* 16:9（横屏默认；竖屏 / 方形由内联样式覆盖） */
+  /* 水平居中：容器宽度由内联 frameStyle 决定（min(100%, 800×比例)），宽度小于可用宽度时左右均分余量，
+     否则预览会贴左、右边空一大块（9:16 特别明显）。宽度吃满时 margin 为 0，等于没有。 */
+  margin-inline: auto;
   border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 12px;
   background: #051018;

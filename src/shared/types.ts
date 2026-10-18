@@ -677,6 +677,10 @@ export interface ProjectSaveHtmlPayload {
 }
 export interface ProjectPreviewHtmlResult {
   previewPath: string
+  // 页面自己声明的画布（取自 <html data-resolution>，仅白名单取值）：预览据此把 iframe 设成**页面原生尺寸**，
+  // 再整体缩进「视角」形状里看（等比 contain + 黑边），避免把横屏页面塞进方形视口时右边被裁。
+  // 缺失 / 非法为空串 ⇒ 渲染层回落成「按项目当前画布显示」（老页面没有这个声明）。
+  pageCanvas?: RenderCanvas | ''
 }
 export interface ProjectOpenFolderOfResult {
   dir: string

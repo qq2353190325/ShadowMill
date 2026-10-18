@@ -64,10 +64,10 @@ const brandTag = APP_NAME + ' · ' + APP_NAME_EN.toUpperCase();
 
 // 首页：动态流水线（反映当前项目状态，可点击跳转）
 const flowDefs = computed(() => [
-  { idx: '01', t: '内容脚本', d: '编写旁白与画面分镜，定义全局风格', page: 'content' as PageKey, done: hasContent.value },
+  { idx: '01', t: '内容脚本', d: '编写逐场景的旁白、画面分镜与时长提示', page: 'content' as PageKey, done: hasContent.value },
   { idx: '02', t: '配音', d: '由脚本旁白合成为自然语音', page: 'text-tts' as PageKey, done: hasAudio.value },
   { idx: '03', t: '字幕', d: '由旁白派生对齐的同步字幕', page: 'subtitle' as PageKey, done: hasSubtitle.value },
-  { idx: '04', t: 'HTML生成', d: '由脚本整体生成精美的 HTML 动画', page: 'html-gen' as PageKey, done: hasHtml.value },
+  { idx: '04', t: 'HTML生成', d: '按脚本与全局视觉风格生成 HTML 动画，并可转视频', page: 'html-gen' as PageKey, done: hasHtml.value },
   { idx: '05', t: '视频预览', d: '查看 / 定位导出的视频成品（转视频在 HTML生成页）', page: 'video-preview' as PageKey, done: hasVideo.value }
 ]);
 

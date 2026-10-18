@@ -2,30 +2,59 @@
   <div>
     <StepBar :page="'html-gen'" />
     <div class="card hgen-panel">
-      <div class="panel-title"><span class="dot"></span>HTML · Agent {{ hasHtml ? '修改' : '生成' }}</div>
-      <!-- 项目状态（原 renderMeta 的 #hg-meta） -->
+      <div class="panel-title"><span class="dot"></span>HTML · Agent {{ hasHtml ? '修改' : '生成' }}
+        <!-- 「用法」原本是 .proj-meta 里的第 4 个状态格——它是操作说明、不是项目数据，会把状态条撑得很难扫，
+             现改为标题右侧的行内帮助。两点必须写死：① letter-spacing 归零——.panel-title 带 2px，
+             不清掉气泡正文会整段变宽；② 气泡改**向下**展开（.hg-help-pop 默认向上），因为标题就在卡片最顶端，
+             向上会顶出滚动容器 .content 的 overflow 被整块裁掉。 -->
+        <span class="hg-help" style="letter-spacing:0" @click.stop>
+          <span class="hg-help-icon">?</span>
+          <span class="hg-help-pop" style="top:calc(100% + 8px);bottom:auto">{{ usageHint }}</span>
+        </span>
+      </div>
+      <!-- 项目状态（原 renderMeta 的 #hg-meta）：只放「这个项目现在有什么」这类数据，说明类文案一律不进这里 -->
       <div class="proj-meta">
         <div class="proj-stat" :class="{ on: meta.hasH }"><b>HTML</b>{{ meta.hasH ? '已生成' : '尚未生成' }}</div>
         <div class="proj-stat" :class="{ on: meta.sceneN > 0 }"><b>内容脚本</b>{{ meta.sceneN ? meta.sceneN + ' 个场景（生成时自动附带）' : '无（可先到「内容脚本」页编写）' }}</div>
         <div class="proj-stat" :class="{ on: meta.matN > 0 || meta.subCount > 0 }"><b>素材</b>{{ meta.matText }}</div>
-        <div class="proj-stat"><b>用法</b>{{ meta.hasH ? '填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份' : '在「项目素材」里选好素材（可多张图片 / 多个视频，勾选决定这次用哪些），再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定' }}</div>
       </div>
+      <!-- 生成前提（字幕 + 画布）并成一行：这两块原先各有一行小标题，两个控件挤一行后「哪个标题管哪个控件」
+           会歧义，故这两条标题去掉、名称交给行内标签（「全局视觉风格」仍保留自己的标题）。
+           画布那句「预览与成片都按…」连同「换画布不会自动重排」一起收进 ? 气泡（行内不再显示）；
+           字幕「留空则跳过」由下拉第一项「不使用字幕」本身表达，不再单独写提示。 -->
       <div class="hgen-block">
-        <div class="panel-title-sm">字幕素材（可选，留空则跳过）</div>
-        <div class="hgen-row">
-          <span class="sel-label" style="flex:none;width:auto">字幕</span>
-          <HfSelect v-model="subSel" :groups="subSelGroups" title="按所选字幕逐条设计动画" />
-        </div>
-      </div>
-      <!-- 画布：**项目属性**（不是渲染档位，不进设置页那套"全局默认/项目覆盖"）。
-           它是生成前的版式前提：模型要按这块画布排版式，预览与成片也都用它，所以放在生成这一侧。 -->
-      <div class="hgen-block">
-        <div class="panel-title-sm">画布（成片尺寸）</div>
         <div class="hgen-row" style="margin-bottom:0">
+          <span class="sel-label" style="flex:none;width:40px">字幕</span>
+          <HfSelect v-model="subSel" :groups="subSelGroups" style="width:260px;flex:none" title="按所选字幕逐条设计动画" />
           <label class="sel-label" style="flex:none;width:40px">画布</label>
-          <HfSelect v-model="canvas" :groups="canvasGroups" :disabled="rendering" @change="onCanvasChange" />
+          <!-- 画布：**项目属性**（不是渲染档位，不进设置页那套"全局默认/项目覆盖"）。它是生成前的版式前提：
+               模型要按这块画布排版式，预览与成片也都用它，所以放在生成这一侧；
+               「改完要重新生成」那句统一在动作行上方说一次，这里不重复。 -->
+          <HfSelect v-model="canvas" :groups="canvasGroups" :disabled="rendering" style="width:188px;flex:none" @change="onCanvasChange" />
+          <span class="hg-help" style="letter-spacing:0" @click.stop>
+            <span class="hg-help-icon">?</span>
+            <!-- 气泡向下展开：这一行常被滚到视口顶端，向上会被 .content 的 overflow 裁掉（.hg-help-pop 默认向上）。
+                 正文两段：canvasNote 随画布变（这块画布管什么）+ canvasHint 固定（换画布要付出什么代价）。 -->
+            <span class="hg-help-pop" style="top:calc(100% + 8px);bottom:auto">{{ canvasNote }} {{ canvasHint }}</span>
+          </span>
         </div>
-        <div class="hgen-tip">{{ canvasHint }}</div>
+      </div>
+      <!-- 全局视觉风格：**项目属性**（存 project.json 的 content.style），与上面的「画布」同属生成前的整片级前提，
+           所以编辑入口放在生成这一侧。它只进 HTML 生成提示词（projects.ts 的 buildContentBlock 写成「全局视觉风格：…」），
+           配音与字幕只读场景的旁白 / 时长提示、不读这个字段。 -->
+      <div class="hgen-block">
+        <div class="panel-title-sm">全局视觉风格（整片视觉基调）</div>
+        <div class="hgen-row" style="margin-bottom:0">
+          <label class="sel-label" style="flex:none;width:40px">风格</label>
+          <input
+            v-model="styleText"
+            class="hgen-input"
+            style="flex:1"
+            placeholder="整支片子的视觉基调，如：深空科技 Cyber 风、霓虹紫渐变、粒子背景（只影响「生成 HTML」）"
+            @change="onStyleChange"
+          />
+        </div>
+        <div class="hgen-tip">留空 = 未指定，模型按需求描述自行拟定；改完失焦即保存到项目。</div>
       </div>
       <!-- 项目素材库（图片 / 视频）：增删与勾选都在子组件里完成，落盘后刷新全局项目状态 -->
       <MaterialsSection />
@@ -33,6 +62,8 @@
         <div class="panel-title-sm">需求描述（提示词）</div>
         <textarea v-model="prompt" class="hgen-subtitle" spellcheck="false" :placeholder="promptPlaceholder"></textarea>
       </div>
+      <!-- 画布与视觉风格的共同前提（原先在两处 tip 里各说一遍）：改完不会自动生效，要重新生成 -->
+      <div class="hgen-tip">画布与视觉风格都是生成前提：改完要重新「生成 HTML」或「按需求修改」才会体现在页面上。</div>
       <div class="hgen-actions">
         <!-- 两个动作并列：生成（从零做一版） / 按需求修改（在现有页面上改）；
              每个按钮里各带一个 ? 图标，鼠标悬浮出现该动作自己的说明（.hg-help-pop；点击 ? 不会触发按钮） -->
@@ -157,8 +188,10 @@ const canvasGroups = computed<HfSelectGroup[]>(() => [{
   label: '',
   options: RENDER_CANVAS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
 }]);
-const canvasHint = computed(() => '预览与成片都按「' + canvasLabel(canvas.value) + '」这块画布；'
-  + '版式是生成时按画布排的，所以换画布后请重新「生成 HTML」或「按需求修改」，让模型按新画布重排（只换画布不会自动重排已有页面）。');
+// 画布 ? 气泡的**前半句**（随当前画布变）：这块画布管什么
+const canvasNote = computed(() => '预览与成片都按「' + canvasLabel(canvas.value) + '」这块画布。');
+// 画布 ? 气泡的**后半句**（固定文案）：换画布要付出什么代价（「改完要重新生成」那句统一在动作行上方说一次，这里不重复）
+const canvasHint = '换画布不会自动重排已有页面：版式是生成时按画布排的，模型若按横屏排过版，切到竖屏 / 方形会留下黑边或裁切。';
 // 项目切换 / 刷新后同步显示值（脏数据落回默认横屏）
 function syncCanvas(): void {
   canvas.value = normalizeCanvas(appState.project && appState.project.canvas);
@@ -173,6 +206,29 @@ async function onCanvasChange(): Promise<void> {
   await refreshProject();
   syncCanvas();
   previewRef.value?.reload();   // 预览画布尺寸变了：重载 iframe，缩放比按新画布重算
+}
+
+// ===== 全局视觉风格（项目属性 content.style）=====
+// 只影响 HTML 生成：主进程 buildContentBlock() 把它写成提示词里的「全局视觉风格：…」一行。
+// 配音（SynthSection「载入脚本旁白」）与字幕（「由脚本旁白生成」）只读场景的旁白 / 时长提示，不读它，
+// 所以这个输入框放在生成侧（与「画布」同级），不再放「内容脚本」页。
+const styleText = ref('');
+function syncStyle(): void {
+  styleText.value = (appState.project && appState.project.content && appState.project.content.style) || '';
+}
+// 失焦即落盘（与「画布」@change 同一节奏）：project:save-content 是整份 content 覆盖，
+// 所以必须把现有 scenes 原样带回——只提交 style 会把场景清空。
+async function onStyleChange(): Promise<void> {
+  const cur = appState.project && appState.project.content;
+  const scenes = (cur && Array.isArray(cur.scenes)) ? cur.scenes : [];
+  const res = await window.projectTools.saveContent(appState.currentName, { style: styleText.value.trim(), scenes });
+  if (!res || !res.ok) {
+    toast((res as { message?: string })?.message || '保存视觉风格失败');
+    syncStyle();   // 落盘失败：把输入框退回项目里的旧值，避免界面显示一个并没保存的值
+    return;
+  }
+  await refreshProject();
+  syncStyle();
 }
 
 // 提示词占位文案随状态变：没 HTML 时讲"要什么样的页面"，已有 HTML 时讲"这次改什么"
@@ -204,6 +260,11 @@ const meta = computed(() => {
     matText: parts.length ? parts.join(' · ') : '无素材（可先到「字幕生成」页添加字幕，或在上方「项目素材」里添加图片 / 视频）'
   };
 });
+
+// 「用法」说明（原 .proj-meta 的第 4 个状态格）：操作引导不是项目数据，现挂在标题右侧的 ? 气泡里
+const usageHint = computed(() => (meta.value.hasH
+  ? '填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份。'
+  : '在「项目素材」里选好素材（可多张图片 / 多个视频，勾选决定这次用哪些），再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定。'));
 
 // 预览子组件的对外契约只有 reload()（Agent 成功后按新的 HTML 重载预览副本）
 const previewRef = ref<{ reload: () => void } | null>(null);
@@ -398,6 +459,7 @@ onMounted(() => {
   resetRenderProgress();   // 清掉上一次渲染的 trace 残留（渲染中若再次进入本页，随后仍会被新 trace 覆盖）
   syncFromEffective();     // 渲染档位显示：项目覆盖 > 设置页全局默认
   syncCanvas();            // 画布显示：项目属性（缺省横屏）
+  syncStyle();             // 全局视觉风格显示：项目属性（content.style）
   // 生成/修改过程的实时状态与 AI 思考过程：本页（子组件）自己订阅，主进程为单订阅语义
   window.projectTools.onHtmlProgress((info) => {
     if (!info) return;

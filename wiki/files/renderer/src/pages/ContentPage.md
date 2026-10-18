@@ -1,21 +1,21 @@
 # src/renderer/src/pages/ContentPage/（页面）
 
-> 内容脚本编辑器：全局视觉风格 + 场景分镜的增删改排序与保存。
+> 内容脚本编辑器：场景分镜（旁白 + 画面分镜 + 时长提示）的增删改排序与保存；**全局视觉风格已不在本页**——它的编辑入口搬到了「HTML生成」页。
 
-- **覆盖文件**：`ContentPage/index.vue`（本目录唯一文件，106 行）
+- **覆盖文件**：`ContentPage/index.vue`（本目录唯一文件，99 行）
 - **所在目录**：`src/renderer/src/pages/ContentPage/`
 - **类型**：页面组件（SFC）
-- **规模**：106 行
+- **规模**：99 行
 - **对外导出**：默认导出组件（无 props）
 
 ## 1. 作用与职责
 
 本页是五节点流水线的**第一站**，负责编辑当前项目的 `content` 字段：
 
-- **全局视觉风格**：编辑 `content.style`，作用于后续配音 / 字幕 / HTML 生成的整体观感。
 - **场景分镜列表**：以 `v-model` 直接编辑 `content.scenes` 数组，每条场景包含 `narration`（旁白）、`visual`（画面分镜）、`durHint`（时长提示，秒）。
 - **场景管理**：添加、删除、上移、下移。
 - **保存**：经 `window.projectTools.saveContent` 落盘，随后 `refreshProject()` 让链路节点「内容脚本」自动点亮。
+- **全局视觉风格不在本页编辑**：`content.style` 的输入框已搬到「HTML生成」页（与「画布」同级，见 [HtmlGenPage.md](./HtmlGenPage.md) §5.1）。本页 `save()` 只把项目里**已落盘**的 `style` 原样带回——`project:save-content` 是**整份 `content` 覆盖**，不带就等于把风格清掉（源码注释原文：「这里把项目里**已落盘**的 style 原样带回……不带就等于把风格清掉」）。
 
 原 `pages/content/{template,index}.js` 的 `innerHTML` + `collect()` 手工收集改为响应式 `v-model`；`StepBar` 的响应式刷新取代了原先重调 `renderStepBar`。
 
@@ -24,10 +24,9 @@
 | 区块 | 说明 |
 | --- | --- |
 | `StepBar :page="'content'"` | 顶部项目链路状态条，高亮「内容脚本」节点，并提供工作项目切换 / 新建 / 打开目录入口 |
-| 「内容脚本 · 全局视觉风格」卡片 | `div.card.hgen-panel`，内含 `v-model="style"` 的 `input.hgen-input`，placeholder 说明风格描述的作用范围；下方 `hgen-tip` 提示「留空 = 未指定」 |
-| 「场景分镜」卡片 | `div.card.hgen-panel`（`margin-top:16px`），标题为「场景分镜（旁白 + 画面分镜 + 时长提示）」 |
+| 「场景分镜」卡片 | `div.card.hgen-panel`——**本页唯一的卡片**（原先在它上面的「内容脚本 · 全局视觉风格」卡片、以及它的 `style="margin-top:16px"` 都已删除）；`panel-title` 为「场景分镜（旁白 + 画面分镜 + 时长提示）」 |
 | 空态 | `v-if="!scenes.length"` 时渲染 `div.empty-hint`：「暂无场景。点击「添加场景」开始编写内容脚本。」 |
-| 场景块 `v-else` | `v-for="(s, i) in scenes"` :key 为 `s.id`，`div.hgen-block.ct-scene`；标题 `场景 #{{ i + 1 }}` |
+| 场景块 `v-else` | `v-for="(s, i) in scenes"` :key 为 `s.id`，`div.hgen-block.ct-scene`（行内 `style` 给边框 / 圆角 / 内边距 / 背景）；标题 `场景 #{{ i + 1 }}` |
 | 旁白输入 | `<textarea v-model="s.narration" class="hgen-subtitle">`，高度 84px |
 | 画面分镜输入 | `<textarea v-model="s.visual" class="hgen-subtitle">`，高度 64px |
 | 时长与操作行 | `<input v-model="s.durHint">`（宽 110px）+ 「上移」（`i === 0` 禁用）+ 「下移」（`i === scenes.length - 1` 禁用）+ 「删除」 |
@@ -46,10 +45,9 @@
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `style` | `ref<string>` | 全局视觉风格，初值 `''`；绑定到 `input` 的 `v-model` |
 | `scenes` | `ref<Scene[]>` | 场景列表，初值 `[]`；每个元素通过 `v-model` 双向绑定到表单控件 |
 
-> 注意：`style` 的 `v-model` 为局部 `ref`，`scenes[i]` 的 `v-model` 是对象属性绑定；两者在 `save()` 中才被组装成 `content` 提交。
+> **本页已无 `style` ref**：全局视觉风格不在本页编辑，`save()` 时直接从 `appState.project.content.style` 取值（见 4.3）。`scenes[i]` 的 `v-model` 是对象属性绑定。
 
 ### 函数
 
@@ -72,36 +70,33 @@
 
 ### 4.1 页面挂载加载数据（`load`）
 
-1. 取 `const content = (appState.project && appState.project.content) || { style: '', scenes: [] }`。
-2. `style.value = content.style || ''`。
-3. `scenes.value = (Array.isArray(content.scenes) ? content.scenes : []).map(...)`，逐字段做类型守卫：
+1. 取 `const content = (appState.project && appState.project.content) || { style: '', scenes: [] }`（只用到 `content.scenes`，`style` 只作为回退对象的字段存在）。
+2. `scenes.value = (Array.isArray(content.scenes) ? content.scenes : []).map(...)`，逐字段做类型守卫：
    - `id`：非空字符串则 `trim()` 后保留，否则新生成一个 `scene-...` 形式的 id；
    - `narration` / `visual`：仅接受字符串，否则 `''`；
    - `durHint`：`undefined` / `null` 转为 `''`，其余用 `String(...)` 转换。
-4. 若 `!scenes.value.length`，推入一个 `emptyScene()`——即「已有项目无内容脚本时默认展示一个空场景」。
+3. 若 `!scenes.value.length`，推入一个 `emptyScene()`——即「已有项目无内容脚本时默认展示一个空场景」。
 
 ### 4.2 用户交互
 
-- 修改风格或任一场景字段：`v-model` 直接写入 `style.value` / `scenes.value[i].narration` / `.visual` / `.durHint`。
+- 修改任一场景字段：`v-model` 直接写入 `scenes.value[i].narration` / `.visual` / `.durHint`。
 - 「添加场景」→ `add()`；「删除」→ `remove(i)`；「上移 / 下移」→ `move(i, -1)` / `move(i, 1)`。
 - 首个场景的「上移」与末个场景的「下移」按钮通过 `:disabled` 置灰。
 
 ### 4.3 落盘持久化（`save`）
 
-1. 组装载荷：
+1. 先把项目里**已落盘**的风格取回来（带注释说明原因：整份 `content` 覆盖，不带就等于把风格清掉）：
    ```ts
-   const content = {
-     style: style.value.trim(),
-     scenes: scenes.value.map((s) => ({ id: s.id, narration: s.narration, visual: s.visual, durHint: s.durHint }))
-   }
+   const persisted = (appState.project && appState.project.content && appState.project.content.style) || '';
+   const content = { style: persisted, scenes: scenes.value.map((s) => ({ id: s.id, narration: s.narration, visual: s.visual, durHint: s.durHint })) };
    ```
 2. `const res = await window.projectTools.saveContent(appState.currentName, content)`。
-3. 失败处理：`if (!res || !res.ok) { toast(res?.message || '保存失败'); return; }`。
+3. 失败处理：`if (!res || !res.ok) { toast((res as { message?: string })?.message || '保存失败'); return; }`。
 
 ### 4.4 状态刷新
 
 1. `await refreshProject()` 重新拉取 `appState.myProjects` 与当前项目详情，`hasContent` 随之变为真，`StepBar` 与首页流水线的「内容脚本」节点自动点亮。
-2. `toast('内容脚本已保存：' + scenes.value.length + ' 个场景' + (content.style ? '，风格「' + content.style + '」' : ''))`。
+2. `toast('内容脚本已保存：' + scenes.value.length + ' 个场景')`——**不再回显风格**（本页已无风格输入框）。
 
 ## 5. 依赖与协作
 
@@ -118,18 +113,18 @@
 
 | 方法 | 用途 |
 | --- | --- |
-| `window.projectTools.saveContent(appState.currentName, content)` | 将 `{ style, scenes }` 写入当前项目的 `project.json` |
+| `window.projectTools.saveContent(appState.currentName, content)` | 把 `{ style, scenes }` 写入当前项目的 `project.json`；其中 `style` 是从项目读回的**已落盘值**（复用既有频道 `project:save-content`，未新增 IPC） |
 | `window.projectTools.load(...)`（经 `refreshProject`） | 重新加载当前项目详情，`load()` 从中读取 `content` |
 
 **注册关系**：在 `src/renderer/src/pages/index.ts` 中作为 `pages.content` 注册，对应页面 key `content`（与 `StepBar`、`HomePage` 流水线的 `page: 'content'` 一致）。
 
 ## 6. 注意事项与实现要点
 
-- **保存没有前置拦截**：`save()` 只做「组装载荷 → 调 `project:save-content` → 失败 toast」三步，不检查项目形态；每个项目都是可读可写的普通目录。
+- **保存没有前置拦截**：`save()` 只做「取已落盘 style → 组装载荷 → 调 `project:save-content` → 失败 toast」几步，不检查项目形态；每个项目都是可读可写的普通目录。
 - **空数组自动补位**：`load()` 与 `remove()` 都会在 `scenes` 为空时补一个 `emptyScene()`，因此「空态提示」实际上只在极短暂的初始渲染阶段可能出现（`scenes` 初始为 `[]`，`onMounted` 后即被填充）。
 - **`v-model` 直接改对象**：`s.narration` / `s.visual` / `s.durHint` 都是对 `scenes.value[i]` 属性的直接绑定，没有 `collect()` 收集步骤；`save()` 时再做一次显式字段挑选（只提交 `id` / `narration` / `visual` / `durHint`）。
 - **`durHint` 以字符串保存**：`Scene.durHint` 类型为 `string`，`load()` 用 `String(item.durHint)` 归一化，输入框 placeholder 为「可空」。
-- **`style` 提交前 `trim()`**：空字符串表示「未指定」，此时保存提示中不拼接风格片段。
-- **错误提示统一形态**：所有失败分支都用 `toast`，并优先取结果对象上的 `message` 字段，缺失时回退到固定文案（`'创建失败'` 形态的 `'保存失败'`）。
+- **`style` 原样带回、本页不做任何加工**：`save()` 直接读 `appState.project.content.style`（缺省 `''`）提交，**没有「提交前 `trim()`」这一步**（那是风格输入框还在本页时的写法）；写入的仍是同一个 `content.style` 字段，只是值不变。这样「HTML生成」页保存的风格不会被本页的保存覆盖掉。
+- **错误提示统一形态**：所有失败分支都用 `toast`，并优先取结果对象上的 `message` 字段，缺失时回退到固定文案（`'保存失败'`）。
 - **响应式刷新链路**：`saveContent` → `refreshProject()` → `hasContent` computed 变化 → `StepBar` 与 `HomePage.flowDefs` 自动更新，无需手动调用渲染函数。
 - **`StepBar` 的页面 key**：本页传入字面量 `'content'`，同时用于节点高亮 `active-now` 与「切换项目后重进当前页」的 `goPage(props.page)`。
