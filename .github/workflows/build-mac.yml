@@ -19,10 +19,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          npm-version: 10.9.8
           cache: npm
 
       - name: Install dependencies
         run: npm ci
+
+      # 依赖残缺时立即明确失败，避免 npm ci 看似成功但 build 静默 exit 1
+      - name: Verify dependencies
+        run: |
+          node -e "require.resolve('electron-vite'); console.log('deps OK')"
+          npm ls electron-vite vite electron --depth=0
 
       # 项目当前无原生模块，此步作为保险：若有原生模块则自动 rebuild
       - name: Rebuild native dependencies (if any)
