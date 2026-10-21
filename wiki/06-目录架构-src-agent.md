@@ -23,7 +23,7 @@
 | 类型检查 | 由 `tsconfig.agent.json` 单独覆盖（`include: src/agent/**/*.ts`，`noEmit: true`），与主工程的三份配置分开管理 |
 | 模块体系 | 根 `package.json` 刻意不声明 `"type": "module"`（主进程/preload 需 CJS）；本目录用**目录级** `package.json` 单独声明 ESM，二者互不影响 |
 
-> 注意区别：**应用内**负责生成/修改 HTML 的 Agent 是 `src/main/htmlAgent.ts`（经 `project:generate-html` 调用、写入项目 `index.html`）；`src/agent/index.ts` 是通用编码 Agent 样例，与应用 UI 完全无关。
+> 注意区别：**应用内**负责生成/修改 HTML 的 Agent 是 `src/main/agent/html.ts`（经 `project:generate-html` 调用、写入项目 `index.html`；同一层里的 `src/main/agent/script.ts` 管内容脚本），经 `src/main/agent/index.ts` 统一出口对外；`src/agent/index.ts` 是通用编码 Agent 样例，与应用 UI 完全无关。
 
 ---
 
@@ -104,4 +104,4 @@ npx tsc && node dist/agent/index.js
 ## 6. 相关文档
 
 - 逐文件说明：[files/agent/](./files/agent/)
-- 应用内的 HTML Agent（不同东西）：[files/main/htmlAgent.ts.md](./files/main/htmlAgent.ts.md)
+- 应用内的 HTML Agent（不同东西，目录级一篇）：[files/main/agent.md](./files/main/agent.md)

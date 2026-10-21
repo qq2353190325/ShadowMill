@@ -69,7 +69,7 @@ function matchText(err: unknown, hint?: string): string {
 | `provider` | 否 | 已解析出的厂家 key（如 `qwen`） |
 | `baseUrl` | 否 | 本次请求的 Base URL（**排障详情用**；源码注释另注明：也曾用于给余额类找充值页，那个按钮已按用户要求摘除） |
 | `extras` | 否 | 附加到详情里的字段（原始 code / HTTP 状态 / 请求地址），比从文案里正则抠更可靠 |
-| `hint` | 否 | **分类提示**：调用方已经知道的事实，但原文案里没有关键词（故正则匹配不到）。例：配置项 `enabled=false` 抛出的「自定义模型未启用」这句里没有 `400` / `api key`，单靠文案无法定位到「未启用」档，于是 `htmlAgent.ts` 传 `hint: 'model-not-enabled'`；写成 kebab 短标识即可被码表匹配。只参与匹配，不进 message、也不进 detail |
+| `hint` | 否 | **分类提示**：调用方已经知道的事实，但原文案里没有关键词（故正则匹配不到）。例：配置项 `enabled=false` 抛出的「自定义模型未启用」这句里没有 `400` / `api key`，单靠文案无法定位到「未启用」档，于是 `agent/chat.ts` 传 `hint: 'model-not-enabled'`；写成 kebab 短标识即可被码表匹配。只参与匹配，不进 message、也不进 detail |
 
 `friendlyError` 本体只有两步：
 
@@ -118,7 +118,7 @@ export function friendlyError(err: unknown, ctx: ErrorContext): FriendlyError {
 
 - **只有标了 `needConfig` 的档位会弹窗**（② 未启用/未配置、401/403、地址或模型不存在、400/422），其余档位（① 余额、限流、5xx、合规、网络、文件系统、兜底）都只给 `message` + `detail`，由页面写进内嵌状态行或 toast。
 - **`cfgTargetOf(ctx)`** 是私有分流函数：`label` 含「语音 / 音色 / 合成」则回 `'voice'`，否则回 `'model'`。它让「API Key 无效」这类文案在语音链路里也能把用户送到「设置 → 语音服务」。
-- 404/405 那一档要读 `ctx.extras`（`htmlAgent.ts` 会把「请求地址：…」塞进 extras），否则「Base URL 填错」与「模型不存在」不好区分。
+- 404/405 那一档要读 `ctx.extras`（`agent/chat.ts` 会把「请求地址：…」塞进 extras），否则「Base URL 填错」与「模型不存在」不好区分。
 - 每一档的 `detail` 都由 `detailOf()` 统一产出，与该档文案无关。
 
 ## 5. 排障详情 `detail`（`detailOf`）
@@ -134,7 +134,7 @@ function detailOf(text: string, extras?: string[]): string | undefined {
 
 - 原始报文取**首行**（`trim()` 后按 `\n` 切第一段）并截断 **500** 字符（与 `updater/base.ts` 的 `humanError` 同一口径，只是阈值放宽）；
 - 前缀固定为 `原始报错：`；
-- `extras` 过滤空值后用「；」连接追加在后（`htmlAgent.ts` 传来的是 `'请求地址：<apiUrl>'` 与 `httpDetail`）；
+- `extras` 过滤空值后用「；」连接追加在后（`agent/chat.ts` 传来的是 `'请求地址：<apiUrl>'` 与 `httpDetail`）；
 - 两者都为空时返回 `undefined`（`FriendlyError.detail` 是可选字段）。
 
 ## 6. 充值页：已整条摘除
@@ -182,7 +182,7 @@ export function configTargetOf(message: string): { needConfig?: ConfigTarget; ti
 
 | 消费方 | 用法 | 备注 |
 | --- | --- | --- |
-| `src/main/htmlAgent.ts` | `friendlyError` + `ConfigTarget` | 两处配置校验走 `cfgErr()`（`label: '生成 HTML'`、`baseUrl: m.baseUrl`；未启用带 `hint: 'model-not-enabled'`）；每次尝试的 `catch` 用 `label: '生成 HTML'` + `extras: ['请求地址：' + apiUrl, httpDetail]`，产出 `attemptErr` / `attemptCfg`（`{ needConfig: ConfigTarget } \| null`）/ `attemptDetail` |
+| `src/main/agent/html.ts` | `friendlyError` + `ConfigTarget` | 两处配置校验走 `cfgErr()`（`label: '生成 HTML'`、`baseUrl: m.baseUrl`；未启用带 `hint: 'model-not-enabled'`）；每次尝试的 `catch` 用 `label: '生成 HTML'` + `extras: ['请求地址：' + apiUrl, httpDetail]`，产出 `attemptErr` / `attemptCfg`（`{ needConfig: ConfigTarget } \| null`）/ `attemptDetail` |
 | `src/main/settings.ts` | `friendlyError` | `IPC.Settings.Test` 的失败分支：`friendlyError(e, { label: '连接失败', baseUrl: m.baseUrl })`，把 `message` / `detail` / `needConfig` 一起回给界面（渲染层的设置页刻意不弹窗，只显示状态） |
 | `src/main/voice.ts` | `friendlyError` + `ConfigTarget` | `voiceFriendlyError()` 是薄包装：`friendlyError(err, { label, provider: activeProviderDef().key, baseUrl: activeProviderDef().apiBase })`，再把 `detail` 追加回文案（`f.message + '（' + f.detail + '）'`，保留旧行为让用户能报障）；`voiceNoKeyFail()` 直接产出 `needConfig: 'voice'` |
 | `src/main/projects.ts` | 只用 `configTargetOf` | `project:generate-html` / `project:modify-html` 两处 catch：`return { ok: false, message: msg, ...configTargetOf(msg) }` |
@@ -205,5 +205,5 @@ export function configTargetOf(message: string): { needConfig?: ConfigTarget; ti
 
 - 类型真源：[types.ts](./types.ts.md)（① 节的 `ConfigTarget` 与 `IpcFail.needConfig` / `title`）
 - 弹窗消费方：`src/renderer/src/composables/useConfigPrompt.ts`（见 [renderer/src/common.md](../renderer/src/common.md)）与 `src/renderer/src/App.vue`（见 [renderer/src/App.vue.md](../renderer/src/App.vue.md)）
-- 主进程接入点：[main/htmlAgent.ts.md](../main/htmlAgent.ts.md)、[main/settings.ts.md](../main/settings.ts.md)、[main/voice.ts.md](../main/voice.ts.md)、[main/projects.ts.md](../main/projects.ts.md)
+- 主进程接入点：[main/agent.md](../main/agent.md)（`chat.ts` 的 `friendlyError` / `cfgErr` 与 `script.ts` 的 `configTargetOf`）、[main/settings.ts.md](../main/settings.ts.md)、[main/voice.ts.md](../main/voice.ts.md)、[main/projects.ts.md](../main/projects.ts.md)
 - 设计文档（仓库内，非 wiki）：`docs/error-mapping.md`

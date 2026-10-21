@@ -1,11 +1,11 @@
 # src/shared/ipc.ts
 
-> 三端共享的 IPC 频道名常量表，**10 组频道常量**的唯一真源（preload 11 个命名空间全部依赖这些字面量）
+> 三端共享的 IPC 频道名常量表，**11 组频道常量**的唯一真源（preload 12 个命名空间全部依赖这些字面量）
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量（含派生类型）
-- **规模**：138 行
-- **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / Video / Runtime / **Legacy** 十个分组（共 **87** 个频道））、`IpcChannel`（频道字面量联合类型）
+- **规模**：150 行
+- **对外导出**：`IPC`（`as const` 常量对象，含 Window / App / Update / Settings / Voice / Whisper / Project / **Script** / Video / Runtime / **Legacy** 十一个分组（共 **94** 个频道））、`IpcChannel`（频道字面量联合类型）
 
 ## 1. 作用与职责
 
@@ -13,18 +13,18 @@
 
 1. 消除主进程 `ipcMain.handle` / `ipcMain.on` 与 preload `ipcRenderer.invoke` / `send` / `on` 之间的"手写字符串魔数"重复 —— 两侧都 `import { IPC }`，拼写错误在编译期就能被发现。
 2. 用 `as const` 冻结字面量类型，再由 `IpcChannel` 派生出全部频道名的联合类型，可用于类型收窄或工具函数签名。
-3. 通过分组（Window / App / Update / Settings / Voice / Whisper / Project / Video / Runtime / Legacy）让"哪个进程模块负责哪批频道"一目了然：分组名与 `src/main/*.ts` 的文件职责基本对应。
+3. 通过分组（Window / App / Update / Settings / Voice / Whisper / Project / **Script** / Video / Runtime / Legacy）让"哪个进程模块负责哪批频道"一目了然：分组名与 `src/main/*.ts` 的文件职责基本对应。
 
-文件首行注释明确了硬约束：**频道名与现行实现逐一对应，禁止改动**。preload 的 **11 个命名空间**（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / `updateTools` / `runtimeTools` / `legacyTools`）与渲染层全部调用都依赖这些字符串，任何一个字符的改动都会导致 invoke 无响应（`ipcMain.handle` 未命中时 Promise 会抛 "No handler registered"）。
+文件首行注释明确了硬约束：**频道名与现行实现逐一对应，禁止改动**。preload 的 **12 个命名空间**（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / **`scriptTools`** / `updateTools` / `runtimeTools` / `legacyTools`）与渲染层全部调用都依赖这些字符串，任何一个字符的改动都会导致 invoke 无响应（`ipcMain.handle` 未命中时 Promise 会抛 "No handler registered"）。
 
-> 源码第 2 行的注释已同步为「preload 11 命名空间」（2026-10 修正，此前写着 8）。命名空间再增减时，这行注释与本文都要一起改。
+> 源码第 2 行的注释已同步为「preload **12 命名空间**与渲染层调用依赖它们」（含本轮新增的 `scriptTools`），与本文一致。命名空间或分组再增减时，这行注释与本文都要一起改。
 
 ## 2. 导出与关键实现
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `IPC` | `const` 对象（`as const`） | 十个分组的嵌套常量表，值为普通字符串字面量 |
-| `IpcChannel` | `export type` | `(typeof IPC)[keyof typeof IPC]`，即十个分组对象类型的并集（注意：类型粒度为"分组对象"，而非单个频道字符串） |
+| `IPC` | `const` 对象（`as const`） | 十一个分组的嵌套常量表，值为普通字符串字面量 |
+| `IpcChannel` | `export type` | `(typeof IPC)[keyof typeof IPC]`，即十一个分组对象类型的并集（注意：类型粒度为"分组对象"，而非单个频道字符串） |
 
 ### 2.1 Window 分组（窗口控制 + 状态回推）
 
@@ -113,8 +113,7 @@
 
 ### 2.7 Project 分组（projects.js / projects.ts）
 
-> 本组共 **26** 个频道。素材库改造是 **3 换 3**：`PickVideo` / `SetVideo` / `ClearVideo` 下线，`PickMedia` / `AddMaterials` / `SaveMaterials` 上线，**组内计数不变**（那次改造时全库合计 86）；此后 
-> `Update.Changelog`（上一批「更新日志弹窗」）与本次成片画布的 `Project.SetCanvas` 各净增 1 条 ⇒ 全库合计 **87**。
+> 本组共 **26** 个频道。素材库改造是 **3 换 3**：`PickVideo` / `SetVideo` / `ClearVideo` 下线，`PickMedia` / `AddMaterials` / `SaveMaterials` 上线，**组内计数不变**；此后 `Update.Changelog`、成片画布的 `Project.SetCanvas` 与 `Script` 分组（先 2 条、后 +2 条、本轮再扩到 7 条）各净增若干条 ⇒ 全库合计 **94**（10 组 → 11 组）。
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
@@ -145,7 +144,21 @@
 | `Project.SaveHtml` | `project:save-html` | 保存手工编辑后的 HTML |
 | `Project.HtmlProgress` | `project:html-progress` | main → renderer，推送 HTML 生成/修改进度（单订阅） |
 
-### 2.8 Video 分组（video.js / video.ts）
+### 2.8 Script 分组（`src/main/agent/script.ts`，内容脚本 Agent）
+
+> 本组共 **7** 个频道，位置在 `Project` 之后、`Video` 之前。分组注释把定位写死：**生成只产出文本、不写文件——场景落盘走 `project:save-content`**（由渲染层的自动保存触发）；**chat 系列管的是对话记录**（`projects/<项目名>/chat/`：`index.json` 索引 + `versions/<versionId>.json` 每版副本，读写与 100 轮上限在 `agent/chatLog.ts`）。
+
+| 常量 | 频道名 | 用途 |
+| --- | --- | --- |
+| `Script.Generate` | `script:generate` | renderer → main，`invoke`，内容脚本 Agent：载荷 `ScriptGeneratePayload`（`name` / `request` / `scenes` / `sceneCount?` / `targetSeconds?`）→ 返回 `ScriptGenerateReply`（成功 `{ ok:true, scenes, totalChars, message? }` / 失败 `{ ok:false, message, raw?, needConfig?, title? }`）。**上下文（当前场景）由渲染层随载荷给，主进程不读 `content.json`** |
+| `Script.LoadChat` | `script:load-chat` | renderer → main，`invoke`，载荷 `{ name }`：读 `chat/index.json` → `IpcResult<ScriptChatIndex>`（`{ ok: true, rounds, activeVersionId }`，**不含 scenes**）；索引不存在 / 损坏、副本已丢的条目都被剔除，缺项目名回 `缺少项目名` |
+| `Script.AppendRound` | `script:append-round` | renderer → main，`invoke`，载荷 `ScriptAppendRoundPayload`（`{ name, round, scenes }`）：**先写副本 `chat/versions/<新 id>.json`，再更新索引**并把 `activeVersionId` 指向新版本 → `IpcResult<{ versionId }>`；没有可用场景回 `这一轮没有场景，未写入对话记录`，写失败回 `保存对话记录失败：…` |
+| `Script.ReadVersion` | `script:read-version` | renderer → main，`invoke`，载荷 `{ name, versionId }`：读某一版副本 → `IpcResult<ScriptVersionResult>`（`{ ok: true, scenes }`）；`versionId` 非法回 `非法的版本 id`，副本不在回 `这一版脚本读不到了（副本可能已被删除）`；**只读、无副作用** |
+| `Script.SetActiveVersion` | `script:set-active-version` | renderer → main，`invoke`，载荷 `{ name, versionId }`：把某一版记为「当前应用」＝只改索引的 `activeVersionId`（**不写 `content.json`**）；该版不在索引里回 `这一版不在对话记录里` |
+| `Script.ClearChat` | `script:clear-chat` | renderer → main，`invoke`，载荷 `{ name }`：删掉整个 `chat/` 目录（索引 + 全部版本副本）→ `IpcResult`；**不动 `content.json` / 编辑器里的场景** |
+| `Script.Progress` | `script:progress` | main → renderer，`send`，推送五阶段进度 + 中文 `text` 文案（`ScriptProgressPayload`，单订阅；由 `agent/script.ts` 的 `registerScript(getProjectDir)` 用 `event.sender.send` 只推给发起窗口） |
+
+### 2.9 Video 分组（video.js / video.ts）
 
 | 常量 | 频道名 | 用途 |
 | --- | --- | --- |
@@ -154,7 +167,7 @@
 | `Video.Render` | `video:render` | HyperFrames 渲染为视频 |
 | `Video.Progress` | `video:progress` | main → renderer，推送渲染进度 `{ text }` |
 
-### 2.9 Runtime 分组（runtime.ts，运行环境分包）
+### 2.10 Runtime 分组（runtime.ts，运行环境分包）
 
 > 运行环境由「安装包里带一个整体包」改为**分包**：`ffmpeg` 与 `hyperframes` 各自一个 7z、首次用到时下载并解到 `<userData>/runtime/<包名>/`，`whisper` 随安装包。方案见 `docs/runtime-pack-split.md`。
 
@@ -165,7 +178,7 @@
 | `Runtime.Cancel` | `runtime:cancel` | renderer → main，`invoke`，**取消**进行中的下载 / 解包（中断 HTTP 请求与 `7za` 子进程，并清掉半成品） |
 | `Runtime.Progress` | `runtime:progress` | main → renderer，`send`，推送运行环境进度（单订阅；唯一出口 `push()`） |
 
-### 2.10 Legacy 分组（`src/main/index.ts`，历史数据目录）
+### 2.11 Legacy 分组（`src/main/index.ts`，历史数据目录）
 
 > 品牌 / 目录改名后，老目录里可能留着用户的全部数据（项目、模型、配置）。**主进程负责扫描与执行；界面完全在渲染层**（应用内弹窗 `LegacyDataDialog.vue`，沿用 `.hf-modal` 体系），因此这里只有「问一次」与「回传选择」两个频道，没有任何主 → 渲染的推送。
 
@@ -202,13 +215,14 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 | `src/main/video.ts` | 同上 |
 | `src/main/updater/index.ts`（目录出口） | 同上 |
 | `src/main/runtime.ts` | 同上（`Runtime` 四频道：`Status` / `Prepare` / `Cancel` / `Progress`） |
+| `src/main/agent/script.ts` | 同上（`Script` 七频道：`Generate` / `LoadChat` / `AppendRound` / `ReadVersion` / `SetActiveVersion` / `ClearChat` 的 `ipcMain.handle` 与 `Progress` 的 `event.sender.send`） |
 | `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`，逐方法绑定频道 |
 | `tsconfig.web.json` | `include` 含 `"src/shared/**/*.ts"`，故渲染层也可直接引用 |
 
 ### 3.2 `as const` 与 `IpcChannel`
 
 - `export const IPC = { ... } as const` 使每个属性成为**只读的字面量类型**（如 `'window:minimize'` 而非 `string`），赋值给其他变量时不会意外放宽。
-- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Video' | 'Runtime' | 'Legacy'` 十个键，取 `[keyof ...]` 后得到的是**十个分组对象类型**的并集，而不是 87 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
+- `export type IpcChannel = (typeof IPC)[keyof typeof IPC]`：TypeScript 中 `keyof typeof IPC` 得到 `'Window' | 'App' | 'Update' | 'Settings' | 'Voice' | 'Whisper' | 'Project' | 'Script' | 'Video' | 'Runtime' | 'Legacy'` **十一个**键，取 `[keyof ...]` 后得到的是**十一个分组对象类型**的并集，而不是 94 个频道字符串字面量的并集。因此该别名适合"传一个分组对象"这类签名，并不适合用于"传单个频道名"的参数约束。
 
 ### 3.3 三种通道方向约定
 
@@ -216,7 +230,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 | --- | --- | --- |
 | renderer → main（请求-响应） | `settings:get`、`project:list`、**`project:pick-media`**、`voice:synth`、`update:open-log`、**`update:changelog`**、`legacy:status`、`legacy:resolve`、`app:copy-text` | 主进程 `ipcMain.handle`，preload `invoke` |
 | renderer → main（单向） | `window:minimize`、`voice:align-cancel` | 主进程 `ipcMain.on`，preload `send` |
-| main → renderer（推送） | `window:maximized-change`、`video:progress`、`whisper:progress`、`voice:align-progress`、`project:html-progress`、`update:progress`、`runtime:progress` | 主进程 `win.webContents.send`，preload `on` |
+| main → renderer（推送） | `window:maximized-change`、`video:progress`、`whisper:progress`、`voice:align-progress`、`project:html-progress`、**`script:progress`**、`update:progress`、`runtime:progress` | 主进程 `win.webContents.send`（或 `event.sender.send`），preload `on` |
 
 > `Legacy` 组**刻意只走第一种方向**：旧数据是否存在的结论由渲染层主动拉取，主进程不推送、不弹窗。
 >
@@ -227,15 +241,16 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 | 方向 | 对象 | 说明 |
 | --- | --- | --- |
 | 依赖 | 无 | 本文件零 import、零副作用，是纯常量模块 |
-| 被 import | `src/main/` 9 个模块 | 全部 IPC 注册点（`index.ts` / `settings.ts` / `projects.ts` / `voice.ts` / `ttsAlign.ts` / `whisper.ts` / `video.ts` / `updater/index.ts` / `runtime.ts`；`hfEnv.ts` / `htmlAgent.ts` / `systemVoices.ts` / `vad.ts` 不注册 IPC） |
-| 被 import | `src/preload/index.ts` | 全部 API 绑定点（11 个命名空间） |
+| 被 import | `src/main/` 10 个模块 | 全部 IPC 注册点（`index.ts` / `settings.ts` / `projects.ts` / **`agent/script.ts`** / `voice.ts` / `ttsAlign.ts` / `whisper.ts` / `video.ts` / `updater/index.ts` / `runtime.ts`；`hfEnv.ts` / `agent/chat.ts` / `agent/html.ts` / `systemVoices.ts` / `vad.ts` 不注册 IPC） |
+| 被 import | `src/preload/index.ts` | 全部 API 绑定点（12 个命名空间） |
 | 被 include | `tsconfig.node.json` / `tsconfig.web.json` | 分别覆盖主进程/preload 与渲染层编译 |
 | 类型被消费 | `IpcChannel` | 供需要约束频道名的工具函数使用 |
 
 ## 5. 注意事项与实现要点
 
 - **禁止改动频道名字符串**：文件首行注释即写明"频道名与现行实现逐一对应，禁止改动"。改动会导致 `ipcMain.handle` 未命中，渲染层收到 `Error: No handler registered for 'xxx'`。
-- **素材库这一次是三处齐改的正面实例**：`shared/ipc.ts` 换 3 个常量 → `src/main/projects.ts` 换 3 个 handler → `src/preload/index.ts` 换 3 个桥接方法，并同步 `src/shared/types.ts` ⑨ 节 `PreloadApi.projectTools` 的签名（`pickVideo` / `setVideo` / `clearVideo` 出、`pickMedia` / `addMaterials` / `saveMaterials` 进）。**组内计数不变**（当时的 25 / 86）——「3 换 3」时不要顺手改动总数。**此后 Project 组新增 `SetCanvas`（25 → 26）、Update 组新增 `Changelog`（8 → 9）**，全库合计 **87**。
+- **素材库这一次是三处齐改的正面实例**：`shared/ipc.ts` 换 3 个常量 → `src/main/projects.ts` 换 3 个 handler → `src/preload/index.ts` 换 3 个桥接方法，并同步 `src/shared/types.ts` ⑨ 节 `PreloadApi.projectTools` 的签名。**组内计数不变**——「3 换 3」时不要顺手改动总数。此后 `Project.SetCanvas`（25 → 26）与 `Update.Changelog`（8 → 9）各净增 1 条；`Script` 分组先新增 2 条（分组 10 → 11、全库 87 → 89），再为对话记录补 `LoadChat` / `SaveChat`（组内 2 → 4、全库 **89 → 91**），**本轮把它扩成 5 条 chat handler**（`LoadChat` / `AppendRound` / `ReadVersion` / `SetActiveVersion` / `ClearChat`，删掉 `SaveChat`：组内 **4 → 7**、全库 **91 → 94**，**分组数仍是 11**）。
+- **`Script` 分组是三处齐改的又一实例**：`shared/ipc.ts` 加 `Script.Generate` / `Script.Progress`（后加 `LoadChat` / `SaveChat`，本轮换成 `AppendRound` / `ReadVersion` / `SetActiveVersion` / `ClearChat`）→ `src/main/agent/script.ts` 的 `registerScript(getProjectDir)` 挂对应 `ipcMain.handle(IPC.Script.…)` 并 `event.sender.send(IPC.Script.Progress, …)`（对话记录的文件读写下沉到 `src/main/agent/chatLog.ts`）→ `src/preload/index.ts` 加 `scriptTools` 七个方法；同时 `src/shared/types.ts` 补 ⑥ 节 `ScriptGeneratePayload` / `ScriptGenerateReply` / `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`、⑧ 节 `ScriptProgressPayload`、⑨ 节 `PreloadApi.scriptTools`。**生成与 `project:*` 的分界是「只造文本、不碰文件」**：`script:generate` 不写 `content.json`（落盘由渲染层自动保存调 `project:save-content`）；**对话记录确实写文件，但只碰自己那个 `chat/` 目录**（索引 + 每版副本），与项目索引 / 正文完全无关。
 - **命名不再完全对齐**：`Window.*` 用 `window:` 前缀、`Video.OpenHtml` 却用 `dialog:open-html` 前缀，属历史遗留，**不可"顺手统一"**，因为字符串就是协议本身。
 - **新增频道需三处齐改**：本文件加常量 → `src/main/*.ts` 注册 handler（载荷用 `shared/types.ts` 的 `*Payload` 标注）→ `src/preload/index.ts` 绑定方法，并在 `src/shared/types.ts` ⑨ 节 `PreloadApi` 补签名（`src/preload/index.d.ts` 只做 `extends`，无需改动）。`legacy:status` / `legacy:resolve`、运行环境分包的 `Runtime.Cancel` 与 `Settings.PickRuntimePack` 都是这条流程的实例（其中 `app:open-external` 曾按同法加过，又在 `909526c` 按「摘除未经同意的按钮」整条三处一起删掉——**加与删都要走齐三处**）。
 - **往 `IpcFail` 加字段不必改 preload**：preload 只是 `ipcRenderer.invoke` 转发、原样返回主进程对象，因此 `IpcFail` 新增的 `needConfig` / `title` 与 preload 无关（改动只落在 `src/shared/types.ts` 的声明与主进程/渲染层的读写上）。
@@ -243,7 +258,7 @@ ipcMain.handle/on      ipcRenderer.invoke/send   window.* 间接使用)
 - **`Update.Status` 的位置与语义**（2026-10 新增）：它排在 `Version` 之后、`OpenLog` 之前，值 `update:status`，`ipcMain.handle(IPC.Update.Status, () => payload())`。存在的理由：启动静默检查发生在设置页订阅 `update:progress` 之前，没有这条通道渲染层只会看到 `idle`。主进程 `state` 常驻，设置页每次挂载都能拉到当前状态；它与 `OpenLog` 一样不进 `ensureUpdater()`。
 - **`Project.SetCanvas` 的位置与语义**（本次新增）：它排在 `SetRender` 之后、`PickAudio` 之前，值 `project:set-canvas`，`ipcMain.handle(IPC.Project.SetCanvas, …)`（`src/main/projects.ts`）。它是**成片画布方向**，属**项目属性而非渲染档位**——不写进 `settings.json`、没有「全局默认 → 项目覆盖」那套层级，只在「HTML生成」页生成侧的「画布」下拉里选一次，落进 `project.json` 的 `canvas`，并由同一个值决定生成提示词的版式尺寸、预览 iframe 的画布与渲染入口注入的 `<html data-resolution>`。白名单来自 `shared/constants.ts` 的 `RENDER_CANVASES`（`landscape` / `portrait` / `square`），非法值回 `{ ok:false, message:'画布取值非法' }`、缺项目名回 `缺少项目名`；值变化时把已有的 `videoPath` 置空（尺寸变了，旧成片不再代表当前产物）。
 - **`Update.Changelog` 的位置与语义**：它排在 `OpenLog` 之后、`Progress` 之前，值 `update:changelog`，`ipcMain.handle(IPC.Update.Changelog, () => readBundledChangelog())`（`readBundledChangelog()` 在 `src/main/updater/base.ts`）。主进程**只定位并读文件**（`path.join(app.getAppPath(), 'CHANGELOG.md')`，dev = 项目根、打包后 = asar 根，两种形态同一份路径逻辑），失败回 `{ ok: false, message, detail }`；**解析与排版一律在渲染层**（`src/renderer/src/utils/changelog.ts`）。与 `OpenLog` / `Status` 一样**刻意不进 `ensureUpdater()`**：看日志与更新器能否加载无关。消费方是设置页「应用更新」的「查看更新日志」按钮与其弹窗 `ChangelogDialog.vue`。
-- **分组名 ≠ 文件名**：`Settings` 对应 `settings.ts`，`Video` 对应 `video.ts`，`App` 分组实际由 `src/main/index.ts` 处理，`Voice` 分组横跨 `voice.ts` 与 `ttsAlign.ts`，**`Legacy` 分组也由 `src/main/index.ts` 处理**（与 `App` 同理）。
+- **分组名 ≠ 文件名**：`Settings` 对应 `settings.ts`、`Video` 对应 `video.ts`、**`Script` 对应 `agent/script.ts`**；`App` 分组实际由 `src/main/index.ts` 处理、`Voice` 分组横跨 `voice.ts` 与 `ttsAlign.ts`、**`Legacy` 分组也由 `src/main/index.ts` 处理**（与 `App` 同理）。
 - **`as const` 后不可写**：所有属性为只读，运行时尝试 `IPC.Window.Close = 'x'` 在严格模式下会抛错。
 - **`IpcChannel` 粒度提示**：如上文所述它是"分组对象"的并集，误当作"频道字符串联合"使用会得到过于宽泛的类型。
 - **零运行时开销**：常量会被打包器内联，主进程与 preload 各自持有自己的副本，不存在跨进程共享对象。

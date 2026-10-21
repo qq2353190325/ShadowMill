@@ -1,83 +1,71 @@
-// src/main/htmlAgent.ts
-// HTML 生成/修改：自定义模型 Agent 实现（生成/修改共用）
-// 提供：HTML_AGENT_SYSTEM / extractHtmlFromReply / chatWithCustomModel
-// 依赖：settings(settings.getCustomModel / settings.loadOpenAI)
+// src/main/agent/chat.ts
+// 通用 AI 对话层：多轮消息 + 流式输出 + max_tokens 升档重试 + 过程记录。
+// 调用方：agent/html.ts（生成/修改 HTML）、agent/script.ts（生成/修改内容脚本）。
+// 本模块**不认识任何业务**——系统提示词、完成判定、日志文件、错误文案都由调用方传入，
+// 所以以后再加"对话式操作"只需再写一个薄封装。
+//
+// 依赖：../settings（模型配置 + openai 懒加载）/ ../../shared/errors（英文报错转人话）。
+// 不依赖任何项目模块：本层只负责"问模型、收流、重试、记日志"，不读写项目文件。
 import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
-import { getCustomModel, loadOpenAI } from './settings'
-import { friendlyError } from '../shared/errors'
-import type { ConfigTarget, HtmlAgentProgress } from '../shared/types'
+import { getCustomModel, loadOpenAI } from '../settings'
+import { friendlyError } from '../../shared/errors'
+import type { AgentProgressPayload, ConfigTarget } from '../../shared/types'
 
-const HTML_AGENT_SYSTEM = [
-  '你是专业的 HTML 动画创作者，为桌面创作应用输出完整、独立、可运行的 HTML 单页。',
-  '必须遵守以下硬性要求：',
-  '1. 直接输出一个完整 HTML 文档（以 <!DOCTYPE html> 开头），包含 <head> 与 <body>。',
-  '2. 必须满足 HyperFrames composition 规范（用于后续转视频）：',
-  '   - 动画根容器元素带 data-composition-id 属性（如 <div data-composition-id="main">），并记住这个 id；',
-  '   - 用 <script src="./gsap.min.js"></script> 引入 GSAP（该文件由应用随项目提供，禁止改用任何 CDN 地址）；',
-  '   - 时间轴一律用 gsap.timeline({ paused: true }) 创建（起播由渲染器与预览控制负责，不要自动播放）；',
-  '   - 时间轴登记到「以 composition id 为键的对象」上，而不是数组：',
-  '     window.__timelines = window.__timelines || {}; window.__timelines["main"] = tl;（键必须与 data-composition-id 完全一致）',
-  '   - 画布（成片尺寸）以用户消息里【画布】给出的尺寸为准：在 <html> 上写死 data-resolution="landscape|portrait|square"，',
-  '     并把主舞台容器做成该尺寸的固定 px 版式（不要用 vw / vh / 百分比自适应、不要 transform: scale 缩放舞台），内容排满整块画布；',
-  '3. 视觉风格：深空科技 / Cyber UI（深色背景 #0B1220、电子蓝 #00D4FF 辉光、玻璃拟态、霓虹渐变）。',
-  '4. 若用户提供了字幕，按字幕条目逐条依次播放入场动画。',
-  '5. 字幕时间轴必须严格按提供的起止时间执行：每条字幕在其开始时间出现、结束时间前完成淡出，禁止把上一条字幕显示到下一条开始；时间为秒、可带小数（毫秒精度），GSAP 时间轴直接按这些小数秒定位，不要四舍五入或自行重排；无结束时间的行自行按语义安排节奏。',
-  '6. 不得输出任何解释文字、Markdown 注释或代码块围栏，只输出 HTML 源码。'
-].join('\n');
+// 一条对话消息（OpenAI 兼容协议）。多轮场景由调用方按顺序排好（system 在最前）。
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
 
-// 从模型回复中提取 HTML（兼容 Markdown 代码块包裹的情况）
-function extractHtmlFromReply(text: string): string {
-  const t = String(text || '').trim();
-  const fence = t.match(/```(?:html)?\s*([\s\S]*?)```/i);
-  if (fence && fence[1] && fence[1].trim()) return fence[1].trim();
-  const start = t.search(/<!DOCTYPE html|<html/i);
-  if (start >= 0) return t.slice(start).trim();
-  return t;
+export interface AgentChatOptions {
+  // friendlyError 的文案前缀，如「生成 HTML」「生成脚本」
+  label: string
+  // 失败文案里的名词，如 'HTML'、'脚本'
+  noun: string
+  // 过程记录文件（相对 userData），如 'html-agent/chat.jsonl'
+  logFile: string
+  // 仅在 finish_reason === 'length'（被 max_tokens 截断）时用于判定"其实是否完整"。
+  // 不传 = 有内容也算不完整（走升档重试）。
+  isComplete?: (content: string) => boolean
+  // 截断时给用户的下一步建议（拼进错误文案）
+  truncatedHint?: string
+  meta?: { project?: string; action?: string }
+  maxTokenTries?: number[]
+  onProgress?: (p: AgentProgressPayload) => void
 }
 
 // 生成类任务 max_tokens 升档序列：推理模型可能把配额全耗在 reasoning 导致 content 为空，
 // 8192/16384 实测会被 thinking 阶段耗尽（reasoning_tokens=16384 仍无输出），故直接 32768 起步
 const MAX_TOKEN_TRIES = [32768, 65536];
 
-// 对话记录落盘：每次生成/修改写一行 jsonl，含完整会话与全过程记录——
-//   messages：system + user 完整输入；attempts：每档 max_tokens 尝试的完整思考原文（reasoning_content 全文）、
-//   完整输出、finish_reason、usage 与各阶段耗时（首 token / 思考 / 输出），供事后分析每次生成的优化空间。
-// 路径：userData/html-agent/chat.jsonl（记录失败静默忽略，不影响主流程）
-function logConversation(entry: Record<string, unknown>): void {
+// 对话记录落盘：每次调用追加一行 jsonl，含完整会话与全过程记录——
+//   messages：完整输入（system + 多轮 user/assistant）；attempts：每档 max_tokens 尝试的完整思考原文
+//   （reasoning_content 全文）、完整输出、finish_reason、usage 与各阶段耗时（首 token / 思考 / 输出）。
+// 记录失败静默忽略，不影响主流程。
+function logConversation(logFile: string, entry: Record<string, unknown>): void {
   try {
-    const dir = path.join(app.getPath('userData'), 'html-agent');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, 'chat.jsonl'), JSON.stringify(entry) + '\n', 'utf8');
+    const full = path.join(app.getPath('userData'), logFile);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.appendFileSync(full, JSON.stringify(entry) + '\n', 'utf8');
   } catch (e) { /* ignore */ }
 }
 
-// 进度载荷类型统一取自 shared/types.ts 的 HtmlAgentProgress（⑧ 节）
-export type AgentProgress = HtmlAgentProgress
-
-export interface AgentOpts {
-  meta?: { project?: string; action?: string }
-  maxTokenTries?: number[]
-  onProgress?: (p: AgentProgress) => void
-}
-
-// 调用自定义模型（OpenAI 兼容协议），流式接收并通过 opts.onProgress 上报阶段
-// content 为空且 finish_reason=length 时自动升档重试；升档后仍无内容则抛出带 usage 的诊断错误
-async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promise<string> {
+// 调用自定义模型（OpenAI 兼容协议），流式接收并通过 opts.onProgress 上报阶段。
+// content 为空 / 被 max_tokens 截断时自动升档重试；全部档位失败则抛出人话错误。
+// 成功时返回模型正文（调用方自己提取 / 解析），思考内容只进日志与进度，绝不混进返回值。
+async function chatWithModel(messages: ChatMessage[], opts: AgentChatOptions): Promise<string> {
   const m = getCustomModel();
   // 配置类失败统一走 friendlyError（人话文案 + 排障详情；配置类还带 needConfig，界面据此弹「去设置」）
   const cfgErr = (raw: string, hint?: string): never => {
-    const f = friendlyError(new Error(raw), { label: '生成 HTML', baseUrl: m.baseUrl, hint });
+    const f = friendlyError(new Error(raw), { label: opts.label, baseUrl: m.baseUrl, hint });
     throw new Error(f.message);
   };
   if (!m.enabled) cfgErr('自定义模型未启用', 'model-not-enabled');
   if (!m.baseUrl || !m.modelId || !m.apiKey) cfgErr('自定义模型配置不完整：Base URL / Model ID / API Key 均需填写');
-  const meta = (opts && opts.meta) || {};
-  const messages: any[] = [
-    { role: 'system', content: HTML_AGENT_SYSTEM },
-    { role: 'user', content: userPrompt }
-  ];
+
+  const meta = opts.meta || {};
   const attempts: Record<string, unknown>[] = []; // 每档 max_tokens 尝试的完整记录，随流式过程逐次填充
   const logEntry = (extra: Record<string, unknown>) => Object.assign({
     ts: new Date().toISOString(),
@@ -88,8 +76,11 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
     messages,
     attempts
   }, extra);
-  const tries = (opts && opts.maxTokenTries) || MAX_TOKEN_TRIES;
-  const onProgress = (opts && opts.onProgress) || null;
+
+  const tries = opts.maxTokenTries || MAX_TOKEN_TRIES;
+  const onProgress = opts.onProgress || null;
+  const isComplete = opts.isComplete || null;
+
   for (const maxTokens of tries) {
     let content = '';
     let thinkText = '';
@@ -117,7 +108,7 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
       if (kind === 'think' && !firstThinkAt) firstThinkAt = now;
       if (kind === 'write' && !firstWriteAt) firstWriteAt = now;
     };
-    const emit = (stage: AgentProgress['stage'], force?: boolean) => {
+    const emit = (stage: AgentProgressPayload['stage'], force?: boolean) => {
       const now = Date.now();
       if (!force && now - lastEmitAt < 300) return;
       lastEmitAt = now;
@@ -153,8 +144,7 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
         }
       } else {
         // 兜底 fetch：SSE 流式解析
-        const url = apiUrl;
-        const resp = await fetch(url, {
+        const resp = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + m.apiKey },
           body: JSON.stringify({ model: m.modelId, messages, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true } })
@@ -203,7 +193,7 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
     } catch (e) {
       // 原始报错一律先翻译成人话：message 给用户、detail 给排障、needConfig 决定界面是否弹「去设置」
       const f = friendlyError(e, {
-        label: '生成 HTML',
+        label: opts.label,
         baseUrl: m.baseUrl,
         extras: [apiUrl ? '请求地址：' + apiUrl : '', httpDetail]
       });
@@ -216,7 +206,7 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
       startTs: new Date(reqStart).toISOString(),
       thinkText,          // 完整思考原文（reasoning_content 全文，供分析推理质量）
       thinkChars: thinkText.length,
-      content,            // 本次尝试完整输出（成功时即最终 HTML 源码）
+      content,            // 本次尝试完整输出（成功时即最终正文）
       contentChars: content.length,
       finishReason,
       usage: usage || null,
@@ -231,19 +221,19 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
       }
     });
     if (attemptErr) {
-      logConversation(logEntry({ ok: false, reply: '', error: attemptErr, detail: attemptDetail }));
+      logConversation(opts.logFile, logEntry({ ok: false, reply: '', error: attemptErr, detail: attemptDetail }));
       throw new Error(attemptErr);
     }
-    // content 非空但被 max_tokens 截断（finishReason=length 且结尾缺 </body>/</html>，HTML 明显不完整）
-    // → 升档重试，避免把残缺 HTML 落盘（残缺脚本会导致预览缩放/时间轴全部失效）
-    const truncated = finishReason === 'length' && !!content.trim() && !/<\/(body|html)\s*>\s*$/i.test(content.trim());
+    // content 非空但被 max_tokens 截断（finishReason=length 且调用方判定"不完整"）
+    // → 升档重试，避免把残缺内容交给调用方（残缺 HTML / 残缺 JSON 都是坏结果）
+    const truncated = finishReason === 'length' && !!content.trim() && !(isComplete ? isComplete(content) : false);
     if (truncated) {
       emit('retry', true);
       continue;
     }
     if (content.trim()) {
       emit('done', true);
-      logConversation(logEntry({ ok: true, reply: content, error: null }));
+      logConversation(opts.logFile, logEntry({ ok: true, reply: content, error: null }));
       return content;
     }
     // content 为空：若因 max_tokens 截断（配额耗在 reasoning）则升档重试，否则也再试一档兜底
@@ -254,22 +244,18 @@ async function chatWithCustomModel(userPrompt: string, opts?: AgentOpts): Promis
     break;
   }
   const last = attempts.length ? attempts[attempts.length - 1] : null;
-  const lastFinish = last ? last.finishReason : '';
+  const lastFinish = last ? String(last.finishReason || '') : '';
   const lastContent = last ? String(last.content || '').trim() : '';
-  const truncatedHtml = lastFinish === 'length' && !!lastContent && !/<\/(body|html)\s*>\s*$/i.test(lastContent);
+  const truncatedOut = lastFinish === 'length' && !!lastContent && !(isComplete ? isComplete(lastContent) : false);
   const usageInfo = last && last.usage ? '（usage: ' + JSON.stringify(last.usage) + '）' : '';
-  const errMsg = truncatedHtml
-    ? 'HTML 被 max_tokens 截断：全部配额档位均用完仍不完整，请精简字幕/素材或更换模型' + usageInfo
+  const errMsg = truncatedOut
+    ? opts.noun + ' 被 max_tokens 截断：全部配额档位均用完仍不完整' + (opts.truncatedHint ? '，' + opts.truncatedHint : '') + usageInfo
     : '模型未返回内容' +
       (lastFinish === 'length'
-        ? '：max_tokens 已用完但未产出 HTML，可能是推理模型将配额耗在思考阶段，已自动升档重试仍失败' + usageInfo
+        ? '：max_tokens 已用完但未产出 ' + opts.noun + '，可能是推理模型将配额耗在思考阶段，已自动升档重试仍失败' + usageInfo
         : '：模型响应为空' + usageInfo);
-  logConversation(logEntry({ ok: false, reply: '', error: errMsg }));
+  logConversation(opts.logFile, logEntry({ ok: false, reply: '', error: errMsg }));
   throw new Error(errMsg);
 }
 
-export {
-  HTML_AGENT_SYSTEM,
-  extractHtmlFromReply,
-  chatWithCustomModel
-};
+export { MAX_TOKEN_TRIES, chatWithModel };

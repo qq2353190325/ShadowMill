@@ -191,7 +191,7 @@
 
 ### 6.2 被谁使用
 
-- `src/main/index.ts`：`import * as ttsAlign from './ttsAlign'`，并在主进程注册阶段调用 `ttsAlign.register(ctx)`。其头部注释记录依赖链为 `settings ← htmlAgent ← projects ← voice ← ttsAlign`，且声明无环。
+- `src/main/index.ts`：`import * as ttsAlign from './ttsAlign'`，并在主进程注册阶段调用 `ttsAlign.register(ctx)`。其头部注释记录依赖链为 `settings ← agent(chat ← html/script) ← projects ← voice ← ttsAlign`，且声明无环。
 - `src/preload/index.ts`：暴露 `window.voiceTools.synthAligned(payload)`、`cancelAlign()`、`onAlignProgress(cb)`，其中进度订阅为**单订阅**实现（重复注册只替换回调，避免页面切换叠加监听）；频道名取自 `IPC.Voice.*`。
 - `src/renderer/src/pages/TextTtsPage/AlignSection.vue`：字幕配音页 UI。单选「重排字幕（音频驱动）/ 修正音频（时间轴驱动）」、最小停顿输入（`min=0 max=10 step=0.1`），结果用 `details` 渲染逐句行，并可「写入当前项目」（`saveSubtitle` + `setAudio`）。
 

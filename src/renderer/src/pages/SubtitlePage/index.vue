@@ -6,8 +6,9 @@
       <div class="hgen-tip">逐条编辑字幕：序号 / 起始时间 / 结束时间 / 文本，可删除与新增；也可切「SRT」模式用单个文本域按标准 SRT 格式编辑（序号 / 时间轴 / 文本）。还可由音频自动识别，或由内容脚本旁白生成初稿。字幕时间轴以下方的「起始时间」为准。</div>
       <div class="hgen-actions" style="margin-top:var(--space-4)">
         <button class="hf-btn hf-btn-primary" @click="openTranscribe">从音频生成字幕</button>
-        <button class="hf-btn" title="依据内容脚本的场景旁白与时长提示生成逐条字幕，覆盖当前条目" @click="fromContent">由脚本旁白生成</button>
+        <button class="hf-btn" :title="'依据内容脚本的场景旁白与时长提示生成逐条字幕，覆盖当前条目；时长是估时（' + EST_CHARS_PER_SEC + ' 字/秒），不读配音音频'" @click="fromContent">由脚本旁白生成</button>
       </div>
+      <div class="hgen-tip" style="margin-top:var(--space-2)">「由脚本旁白生成」的时间轴是<code>估时</code>：按 <code>{{ EST_CHARS_PER_SEC }} 字/秒</code> 推算（120 字的旁白排 30 秒），<b>不读配音音频</b>；要按真实语音对齐，请到「配音 · 字幕配音（逐句对齐）」量一次。</div>
     </div>
     <div class="card hgen-panel" style="margin-top:16px">
       <div class="panel-title"><span class="dot"></span>字幕条目</div>
@@ -66,6 +67,8 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { fmtTime } from '@renderer/utils/time'
+// 提示文案里的语速直接用估时口径本身（@shared/constants），不在界面里再写一个数字
+import { EST_CHARS_PER_SEC } from '@shared/constants'
 import {
   estDur, fillEnds, fmtTimeTrim, itemsToSrt, parseSrtText, parseSubtitleText,
   parseTime, plainText, serializeItems, type SubtitleItem
@@ -227,7 +230,7 @@ function fromContent(): void {
   if (textMode.value) srtText.value = itemsToSrt(items.value);
   toast('已由脚本旁白生成 ' + list.length + ' 条字幕，可保存到项目'
     + (usedDur ? '（' + usedDur + ' 条按时长提示累计）' : '')
-    + (estimated ? '（' + estimated + ' 条按估时）' : ''));
+    + (estimated ? '（' + estimated + ' 条按 ' + EST_CHARS_PER_SEC + ' 字/秒估时）' : ''));
 }
 
 // ===== 转录弹窗 ctx（供 TranscribeSection 回填条目） =====

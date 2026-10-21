@@ -1,6 +1,6 @@
 # 02 · 目录架构：`src/main/`（主进程）
 
-> 主进程是整个应用的能力中心：窗口与生命周期、运行环境（**分包**：ffmpeg / hyperframes 各自一个 7z、首次用到时下载，whisper 随安装包）的准备与解包、userData 历史数据目录的扫描与**用户确认式处置**（`legacy:*` 两个频道 + 渲染层应用内弹窗）、文件系统、外部程序调用（whisper / ffmpeg / HyperFrames）、全部网络请求（Qwen-TTS / 自定义模型 / 模型下载 / 运行环境包）以及 **87** 个 IPC 频道的实现，全部集中在这个目录。
+> 主进程是整个应用的能力中心：窗口与生命周期、运行环境（**分包**：ffmpeg / hyperframes 各自一个 7z、首次用到时下载，whisper 随安装包）的准备与解包、userData 历史数据目录的扫描与**用户确认式处置**（`legacy:*` 两个频道 + 渲染层应用内弹窗）、文件系统、外部程序调用（whisper / ffmpeg / HyperFrames）、全部网络请求（Qwen-TTS / 自定义模型 / 模型下载 / 运行环境包）以及 **94** 个 IPC 频道的实现，全部集中在这个目录。
 
 ---
 
@@ -8,12 +8,12 @@
 
 | 文件 | 行数 | 角色 | 注册的 IPC 域 |
 |---|---|---|---|
-| [index.ts](./files/main/index.ts.md) | 542 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议（**两条路由**：`p/<项目名>/…` 项目内文件、`tts/<相对路径>?tts=1` 项目外语音产物且只读白名单 `TTS_PREVIEW_DIRS = ['tts-output','voice']`；路径解析抽成 `resolveHgPreviewPath(rawUrl)`；`rangeResponse()` 支持 `Range` 字节范围取 → `206` / `416`，响应体走文件流）、窗口控制与剪贴板 IPC、启动时序打点 `startup.log` | `window:*`、`app:copy-text`、`legacy:*` |
+| [index.ts](./files/main/index.ts.md) | 546 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议（**两条路由**：`p/<项目名>/…` 项目内文件、`tts/<相对路径>?tts=1` 项目外语音产物且只读白名单 `TTS_PREVIEW_DIRS = ['tts-output','voice']`；路径解析抽成 `resolveHgPreviewPath(rawUrl)`；`rangeResponse()` 支持 `Range` 字节范围取 → `206` / `416`，响应体走文件流）、窗口控制与剪贴板 IPC、各域 `register()` 顺序（**含 `agent.registerScript(projects.projectDir)`**——把项目目录解析函数注入给 agent）、启动时序打点 `startup.log` | `window:*`、`app:copy-text`、`legacy:*` |
 | [hfEnv.ts](./files/main/hfEnv.ts.md) | 343 | 环境探测与**按包解析**的内置资源定位（`resolvePackRoot()` / `refreshPack()` / `packReady()`，`root` 只作旧布局与 dev 的兜底）+ GSAP 本地化 / 导出外部化辅助（不注册 IPC）；`findChromeShell()` **只缓存「找到的」结果**（找不到返回 `null` 但不写缓存，避免「解包完成前被问过一次」把 `chrome=无` 永久钉住） | — |
 | [settings.ts](./files/main/settings.ts.md) | 452 | 设置存储（`userData/settings.json`，含 `voice` 按厂家配置（**只有 apiKey**）与视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` + 「出厂状态」判定 `isPristineSettings`（供 index.ts 的 `migrateFrom()` 迁移老数据时决定能否覆盖 settings.json）+ 运行环境「从本地文件安装…」`settings:pick-runtime-pack`（选 `ffmpeg.7z` / `hyperframes.7z` 导入 `userData/runtime/local-import/`） | `settings:*`（6） |
 | [systemVoices.ts](./files/main/systemVoices.ts.md) | 62 | Qwen-TTS 内置系统音色静态表（**只有 `SYSTEM_VOICES` 一个导出**，判定函数已删除） | — |
-| [htmlAgent.ts](./files/main/htmlAgent.ts.md) | 275 | 自定义模型 Agent：流式生成/修改 HTML（不注册 IPC，被 projects 调用；SDK 经 settings 懒加载）；系统提示词的 composition 规范里新增两条**画布要求**（按用户消息里【画布】的尺寸写死 `<html data-resolution>`、主舞台固定 px 版式） | — |
-| [projects.ts](./files/main/projects.ts.md) | 1125 | 项目化流水线：`project.json`、字幕、内容脚本、**项目素材库（多图片 / 多视频：选文件 / 复制入库 / 整份列表回写）**、HTML、背景音轨注入（`<audio id="myv-bgm">`）、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、**成片画布（项目属性：写进生成提示词的【画布】块；由 `project:set-canvas` 落进 `project.json` 的 `canvas`，值一变旧 `videoPath` 置空；**修改路径的【画布】块多带一条「旧页面版式与新画布不一致就必须重排」的硬要求**）**、音视频产物（项目结构再导出 `shared/types`；项目根 `projectsRoot()` 为**函数**、惰性求值；预览副本注入脚本默认静止、支持 `seek` 播放头定位与播完自动停住；**`project:preview-html` 还会从原 HTML 解析页面自己声明的画布，作为 `pageCanvas` 一并回给渲染层**） | `project:*`（25 handle + 1 推送） |
+| [agent/](./files/main/agent.md)（**目录级一篇，5 个文件**：`chat.ts` 261 / `chatLog.ts` 155 / `html.ts` 80 / `script.ts` 323 / `index.ts` 15） | 261 / 155 / 80 / 323 / 15 | **Agent 层**（同名目录 + `index.ts` 统一出口，依赖单向 `chat ← html / script`、`script → chatLog`）：`chat.ts` 是**通用对话层**——多轮 `messages` + 流式（`openai` SDK / `fetch` 手写 SSE 两条等价路径）+ `max_tokens` 升档重试（`MAX_TOKEN_TRIES = [32768, 65536]`，`finish_reason === 'length'` 时用调用方的 `isComplete` 判完整性）+ 全过程记录追加 `userData/<logFile>` 的 jsonl + 人话错误 + 300ms 节流进度，**不认识任何业务、不读写项目文件**；`chatLog.ts` 是**对话记录的磁盘读写**（`MAX_CHAT_ROUNDS = 100` / `chatDirOf` + `chatIndexPathOf`（`chat/index.json` + `versions/<id>.json`）/ `isValidVersionId` / `newVersionId` / `normalizeScenes` / `readChatIndex` / `writeChatIndex`（写后清理不再被引用的副本）/ `writeVersion` / `readVersion` / `clearChat`，只依赖 `node:fs` / `node:path` / 类型，**不由 `index.ts` 再导出**）；`html.ts` 是 HTML 薄封装（`HTML_AGENT_SYSTEM` + `extractHtmlFromReply` + `chatWithCustomModel` + `AgentProgress` / `AgentOpts`）；`script.ts` 是内容脚本 Agent（`SCRIPT_AGENT_SYSTEM` + `buildScriptPrompt` + `parseScriptReply` + **`registerScript(getProjectDir)`**，不 import `node:fs` / `node:path`、不反向 import projects）；`index.ts` **只做再导出、不写逻辑**。`projects.ts` 只 `from './agent'` 取三个名字 | `script:generate` / `script:load-chat` / `script:append-round` / `script:read-version` / `script:set-active-version` / `script:clear-chat`（6 handle）+ `script:progress`（推送） |
+| [projects.ts](./files/main/projects.ts.md) | 1207 | 项目化流水线：`project.json`（**只存索引 `ProjectIndex`**）+ `subtitle.txt` / `content.json`（**两个正文文件**，老项目读时兼容、写时自动迁移）、**项目素材库（多图片 / 多视频：选文件 / 复制入库 / 整份列表回写）**、HTML、背景音轨注入（`<audio id="myv-bgm">`）、GSAP 本地化 / 导出外部化（含复制失败退回 CDN 的兜底）、**成片画布（项目属性：写进生成提示词的【画布】块；由 `project:set-canvas` 落进 `project.json` 的 `canvas`，值一变旧 `videoPath` 置空；**修改路径的【画布】块多带一条「旧页面版式与新画布不一致就必须重排」的硬要求**）**、音视频产物（项目结构再导出 `shared/types`；项目根 `projectsRoot()` 为**函数**、惰性求值；预览副本注入脚本默认静止、支持 `seek` 播放头定位与播完自动停住；**`project:preview-html` 还会从原 HTML 解析页面自己声明的画布，作为 `pageCanvas` 一并回给渲染层**） | `project:*`（25 handle + 1 推送） |
 | [voiceCatalog.ts](./files/main/voiceCatalog.ts.md) | 104 | **语音服务目录（按厂家组织）**：厂家定义 `VoiceProviderDef`（Key 提示 / apiBase / 克隆模型 `enrollModel` / 出厂默认模型 / 模型表 / 系统音色表）+ 查询函数（`providerByKey` / `providerOfModel` / `providerOfSystemVoice` / `seriesDefaultModel`）；千问模型表 **2 条**（`qwen3-tts-flash` 系统 / `qwen-audio-3.0-tts-flash` 复刻——本地文件 + 公网 URL）；**`enrollModelAudio` 字段与 vc 系列的两条 clone 模型已删除** | — |
 | [voice.ts](./files/main/voice.ts.md) | 753 | 语音服务（按厂家取端点与 Key）：音色管理 + 文字生音频；**跨厂家「音色 ↔ 模型」绑定会被显式拒绝**，映射绑着已下线模型时忽略并按固定绑定回落；**克隆只服务 Qwen-Audio-TTS**（非 `qwen-audio-*` 目标模型直接拒绝），参考音频用内置 ffmpeg 裁前 15 秒并转 data URI 提交（`input.url` 也收公网 URL，`prefix` 统一 10 位）；**合成一律「接口 → `output.audio.url` → 二次下载」**；**云端克隆音色列表单一接口 `list_voice`**；`voice:delete-cloud`（删云端克隆音色，**单一写法 `action:'delete_voice'`**）；`voice:save-config` 分「存某厂家 Key」与「只存全局保存目录」两条路径 | `voice:*`（16） |
 | [ttsAlign.ts](./files/main/ttsAlign.ts.md) | 338 | 字幕配音逐句合成与时间对齐（模式 A/B）；`voice:synth-aligned` 先 `runtime.missingPacks(['ffmpeg'])` 校验，缺包即返回 `needPacks` | `voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
@@ -26,9 +26,9 @@
 | [runtime.ts](./files/main/runtime.ts.md) | 959 | 运行环境（**分包**）：`PACK_DEFS` 包注册表（`ffmpeg` 180 MB / `hyperframes` 440 MB 各成一个 7z，whisper 不进包）→ 从更新源或本地包取 `<包名>.json` + `<包名>.7z` → sha512 校验（`Range` 断点续传）→ `7za` 解到 `userData/runtime/<包名>/`，维护 `packs.json` 记录 + 每包自己的 `ok.json` 完整性标记，就绪后按包调 `hfEnv.refreshPack()`；`packsStatus()` 纯探测、`ensurePacks()` 才下载解包（可取消），`register()` 里**启动只探测不下载**（排最后只保证 handler 先挂上）；取远端清单有 **20 秒硬超时**（`MANIFEST_TIMEOUT`，超时不算取消、残片保留） | `runtime:*`（3 handle + 1 推送） |
 | [vad.ts](./files/main/vad.ts.md) | 122 | WAV 采样读取与静音裁剪（零依赖纯函数） | — |
 
-> 行数取自工作区源码实测（`[IO.File]::ReadAllLines` 与编辑器行号一致）。目录下共 **17** 个 `.ts` 文件 = **13 个顶层文件 + `updater/` 目录 4 个文件**（`Get-ChildItem src\main -Recurse -File -Filter *.ts` 实测）；上表**已全部收录**（含 `runtime.ts`，其逐文件说明见 [files/main/runtime.ts.md](./files/main/runtime.ts.md)；`updater/` 四个文件合成**目录级一篇** [files/main/updater.md](./files/main/updater.md)，旧名 [files/main/updater.ts.md](./files/main/updater.ts.md) 只留过渡指针）。
+> 行数取自工作区源码实测（`[IO.File]::ReadAllLines` 与编辑器行号一致）。目录下共 **21** 个 `.ts` 文件 = **12 个顶层文件 + `agent/` 目录 5 个文件 + `updater/` 目录 4 个文件**（`Get-ChildItem src\main -Recurse -File -Filter *.ts` 实测）；上表**已全部收录**（含 `runtime.ts`，其逐文件说明见 [files/main/runtime.ts.md](./files/main/runtime.ts.md)；`agent/` 与 `updater/` 各合成**目录级一篇**：[files/main/agent.md](./files/main/agent.md)、[files/main/updater.md](./files/main/updater.md)，旧名 [files/main/updater.ts.md](./files/main/updater.ts.md) 只留过渡指针）。
 >
-> 目录 / 文件组织约定见根 `AGENTS.md` 关键约定 9：**300 行考虑拆、500 行是硬上限**；模块拆分的形态固定为「**同名目录 + `index.ts` 统一出口**、具名导出原样挂在 `index.ts` 上、依赖方向单向、跨文件共享的 `let` 收进 `state` / `flags` 对象或改取值函数（不许按值导出）」，另有 4 类可不拆的例外。`updater/` 就是这条约定的样板。
+> 目录 / 文件组织约定见根 `AGENTS.md` 关键约定 9：**300 行考虑拆、500 行是硬上限**；模块拆分的形态固定为「**同名目录 + `index.ts` 统一出口**、具名导出原样挂在 `index.ts` 上、依赖方向单向、跨文件共享的 `let` 收进 `state` / `flags` 对象或改取值函数（不许按值导出）」，另有 4 类可不拆的例外。`updater/` 与 `agent/` 就是这条约定的两个样板。
 
 ---
 
@@ -41,13 +41,18 @@
 const ctx: RegisterCtx = { getWindow }        // getWindow: () => BrowserWindow | null
 settings.register(ctx)
 projects.register(ctx)
+
+agent.registerScript(projects.projectDir)      // 只传「项目名 → 项目目录」，不传 ctx
 voice.register(ctx)
 ttsAlign.register(ctx)
 video.register(ctx)
 whisper.register(ctx)
 updater.register(ctx)
+
 runtime.register(ctx)                          // 运行环境包，最后一步
 ```
+
+> `agent.registerScript(projects.projectDir)` 是**唯一不接收 `ctx` 的 register**：它既不弹对话框（不需要父窗口）、也不读主窗口引用，推送走 `event.sender`（发起调用的那个窗口）。它唯一的一个参数是**「项目名 → 项目目录」的解析函数**（`projects.projectDir`，`src/main/projects.ts` 导出），用于拼 `projects/<项目名>/chat/index.json` 与 `chat/versions/<id>.json` 的路径；**传函数而不是让 agent 去 import projects**——否则会与 `projects → agent`（`projects.ts` 调 `chatWithCustomModel`）成环。函数名是 `registerScript` 而不是 `register`（收进 `src/main/agent/` 目录时改的），避免与 HTML 侧入口混淆。
 
 > `updater.register(ctx)` 除注册 `update:*` 频道，还会在 3 秒后做一次「启动静默检查」（受 `settings.json` 的 `updater.autoCheck` 控制；dev 环境未提供 `dev-app-update.yml` 时跳过）；主进程更新状态 `state` 常驻，渲染层可随时用 `update:status` 取一次（设置页据此补出这次静默检查的失败）。`runtime.register(ctx)` 排在最后：它在 `register()` 里**只做一次探测**（`prepareInBackground()` **不下载**），排最后只保证自己的 handler 先挂上——需要同步做的只有几个 `existsSync` / `statSync` 探测（微秒级）；真正的下载 / 解包要等用户在界面上确认后 `ensurePacks()` 才发生（可取消）。
 >
@@ -62,8 +67,10 @@ runtime.register(ctx)                          // 运行环境包，最后一步
 ## 3. 模块依赖图（无环）
 
 ```
-settings ──→ htmlAgent ──→ projects ──→ voice ──→ ttsAlign
-                                     ↗
+settings ──→ agent(chat ← html / script；script → chatLog) ──→ projects ──→ voice ──→ ttsAlign
+                     │
+                     └─ script 只造 JSON、不碰文件工具；对话记录读写下沉到 chatLog；index.ts 只再导出（对外仍是 './agent'）
+                                      ↗
 hfEnv ──→ projects / voice / whisper / ttsAlign / video / runtime
 vad   ──→ whisper
 systemVoices ──→ voice
@@ -80,16 +87,18 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 | `ttsAlign → voice` | 复用 `synthOne()`（单句合成）、`resolveVoiceModel()`（音色→模型解析）、`voiceFriendlyError()`（错误友好化） |
 | `whisper → vad` | 转录前用 `vadTrimSegments()` 裁掉起止静音；用 `toVadSamples()`（走 `hfEnv` 的 ffmpeg）统一采样率 |
 | `whisper / ttsAlign / video / projects / voice → hfEnv` | 定位 CLI、Node 运行方式（`findNode()` 返回 `{ cmd, env }`，**两级**优先：Electron 内嵌 Node → 系统 Node ≥ 22）、按包解析的 FFmpeg bin（`ffmpeg` 包）与 chrome-headless-shell（`hyperframes` 包），以及 `isHyperframesComposition()` 合规校验；`projects` / `video` 另用 GSAP 本地化的 `localizeGsapHtml()` / `referencesLocalGsap()` / `copyGsapIntoProject()`；`voice.ts` 用 `BUILTIN_RESOURCES.ffmpeg` / `ffprobe`（来自 ffmpeg 运行环境包，未安装时为空串）裁剪克隆参考音频 |
-| `projects → htmlAgent` | `project:generate-html` / `project:modify-html` 调用 `chatWithCustomModel()`，并把 `onProgress` 映射为阶段文案推送给渲染层 |
+| `projects → agent（html.ts）` | `project:generate-html` / `project:modify-html` 调用 `chatWithCustomModel()`，并把 `onProgress` 映射为阶段文案推送给渲染层（`html.ts` 本身是薄封装，真正的传输在 `agent/chat.ts`） |
+| `agent/chat.ts ← agent/html.ts / agent/script.ts / agent/chatLog.ts` | `html.ts` 的 `chatWithCustomModel()` 与 `script.ts` 的 `script:generate` 都调 `chatWithModel()`——传输层（多轮 / 流式 / 升档 / 日志 / 错误翻译）只有一份；`chat.ts → settings`（`getCustomModel` / `loadOpenAI`）与 `chat.ts → shared/errors`（`friendlyError`）是这两条 Agent 链路唯一的配置与报错出口。**方向单向：`chat` 在最上游，`html` / `script` 只依赖它；`chatLog` 只被 `script` 依赖、自己只依赖 `node:fs` / `node:path` / 类型** |
+| `agent → index.ts` | `index.ts` 里 `import * as agent from './agent'` 并在 `projects.register(ctx)` 之后调 **`agent.registerScript(projects.projectDir)`**；`agent/script.ts` 只依赖 `./chat` / `./chatLog` / `shared/{errors,ipc,types}`，**不 import projects / settings / hfEnv**（项目目录是构造参数，见 §2）；`agent/index.ts` 只做再导出（**不含 chatLog**） |
 | `projects → shared/constants` | **本轮新增**：`IMAGE_MATERIAL_EXTS` / `MAX_MATERIALS` / `VIDEO_MATERIAL_EXTS` —— 素材类型判定（`materialKindOf()`）、文件框过滤（`project:pick-media`）、上限校验（`project:add-materials`）与列表截断（`normalizeMaterials()`）共用同一份白名单与上限，渲染层用同一份常量显示 `n / 20` 与支持格式 |
-| `voice / whisper / htmlAgent → settings` | 读取 API Key、目标模型、当前识别模型与自定义模型列表；写回配置 |
+| `voice / whisper / agent（经 chat.ts） → settings` | 读取 API Key、目标模型、当前识别模型与自定义模型列表；写回配置 |
 | `index → settings` | 用户选「迁移过来」后，`migrateFrom()` 调 `settings.isPristineSettings(dst)` 判断新 `settings.json` 是否仍是「出厂状态」（是才允许被老配置覆盖，覆盖前先备份成 `.before-migrate.bak`） |
 | `projects → runtime` | `project:extract-video-audio` 先 `runtime.missingPacks(['ffmpeg'])` 纯校验，缺包直接返回 `{ ok:false, needPacks, message }`（不下载、不阻塞）；`video.ts`（`['ffmpeg','hyperframes']`）/ `ttsAlign.ts`（`['ffmpeg']`）/ `whisper.ts`（转码时才要 `ffmpeg`）同构 |
 | `runtime → hfEnv` | 探测到某包就绪（`syncStatus()`）与解包完成时调 `hfEnv.refreshPack(name, root)`，把该包目录交给 `hfEnv` 重算它的包缓存（并按需失效 `cachedChrome` / `cachedNode`）；`refreshBuiltinResources(root?)` 仅作兼容保留 |
 | `runtime → settings` | `getUpdaterSettings().feedUrl` 作为运行环境包的下载源（与 `updater/actions.ts` 的 `applyFeedUrl()` 同优先级，其次才回落 `app-update.yml`） |
 | `updater → settings` | 读 `updater.feedUrl`（非空即 `autoUpdater.setFeedURL` 覆盖打包内置地址）、`autoCheck`（启动静默检查开关）、`skippedVersion`（用户跳过的版本）；下载「跳过版本」的更新时清掉该标记 |
 
-`src/main/index.ts` 顶部的注释即为这份依赖图的权威描述（`settings ← htmlAgent ← projects ← voice ← ttsAlign`；`hfEnv ← projects, voice, whisper, ttsAlign, video, runtime`；`updater ← settings`；无环）。
+`src/main/index.ts` 顶部的注释即为这份依赖图的权威描述（`settings ← agent(chat ← html/script) ← projects ← voice ← ttsAlign`；`hfEnv ← projects, voice, whisper, ttsAlign, video, runtime`；`updater ← settings`；无环）。
 
 ---
 
@@ -152,26 +161,77 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 - 「是不是内置音色」的判定**不在本模块**：改由 `voiceCatalog.providerOfSystemVoice()` 精确全等匹配。
 - 与 `voice.ts` 四处配合：默认模型由 `voiceCatalog.seriesDefaultModel` 按 series 推导、`voice:list-system-voices` 输出附带 `model` 与 `provider`、`voice:list-all` 生成 `key = 'system:' + voice` 条目，以及渲染层音色管理的回退组装。
 
-### 4.5 `htmlAgent.ts` —— 自定义模型 Agent
+### 4.5 `agent/` —— Agent 层（目录，5 文件）
 
-- 导出 `chatWithCustomModel` 与进度类型（`AgentProgress` 是 `src/shared/types.ts` 的 `HtmlAgentProgress` 的类型别名）；核心在**两条等价的流式路径**：优先用 `openai` SDK（`stream: true`），失败回退直接 `fetch ${baseUrl}/chat/completions` 并手写 SSE 解析。
-- 关键设计：
-  - 系统提示词约束「输出完整、独立、符合 HyperFrames composition 规范的 HTML」，回复中的 HTML 由 `extractHtmlFromReply()` 提取。
-  - `reasoning_content`（思考）与 `content`（输出）分离统计；`onProgress` 按 `connecting / thinking / writing / retry / done` 分阶段回调。
-  - 推理模型可能把 `max_tokens` 全耗在思考上导致 `content` 为空且 `finish_reason === 'length'`，此时按 `32768 → 65536` 自动升档重试。
-  - 每次会话追加写入 `userData/html-agent/chat.jsonl`。
-  - **错误一律先翻译成人话**：走内部 `cfgErr(raw, hint?)` → `friendlyError(...)`；循环内每次尝试失败经 `friendlyError` 得到 `message` / `detail` / `needConfig`；兜底 fetch 的非 2xx 分支把响应体（前 300 字符）与请求地址一起放进排障详情。
+一个模块、五个文件：**一个传输层 + 两个业务薄封装 + 一份对话记录读写 + 一个统一出口**，形态是「同名目录 + `index.ts`」（与 `updater/` 同一套约定）。**`chat.ts` 不认识任何业务**；`chatLog.ts` 不认识业务、也不认项目名（只收一个文件路径）；`html.ts` 与 `script.ts` 各自只保留「业务专属」的东西（提示词、完成判定、结果提取 / 解析、日志路径与错误文案）；`index.ts` 只做再导出（**不含 `chatLog`**）。目录级说明见 [files/main/agent.md](./files/main/agent.md)。
+
+| 文件 | 行数 | 一句话 |
+|------|------|--------|
+| `chat.ts` | 261 | 通用对话层：多轮 `messages` + 流式（SDK / fetch SSE）+ `max_tokens` 升档重试 + jsonl 过程记录 + 人话错误 |
+| `chatLog.ts` | 155 | 对话记录读写：`<项目目录>/chat/index.json`（索引，不含 scenes）+ `versions/<id>.json`（每版副本），`MAX_CHAT_ROUNDS = 100`、写索引后清理孤儿副本、清空删整个 `chat/`（**内部模块，不挂 `index.ts`**） |
+| `html.ts` | 80 | HTML 薄封装：`HTML_AGENT_SYSTEM` + `extractHtmlFromReply` + `chatWithCustomModel`（重构前 275 行，导出名与签名未变） |
+| `script.ts` | 323 | 内容脚本：`SCRIPT_AGENT_SYSTEM` + `buildScriptPrompt` + `parseScriptReply` + **`registerScript(getProjectDir)`**（域 `script:*` 七条） |
+| `index.ts` | 15 | 统一出口：只再导出（9 个值 + 4 个类型），不写逻辑 |
+
+依赖单向：`chat` 在最上游（不 import 同目录任何模块），`html` / `script` 只从 `./chat` 取 `chatWithModel`，`script` 另从 `./chatLog` 取 8 个读写 / 清理函数，`index.ts` 聚合三者。
+
+#### 4.5.1 `chat.ts` —— 传输层
+
+- 导出 `chatWithModel(messages, opts)`、`ChatMessage`、`AgentChatOptions`、`MAX_TOKEN_TRIES = [32768, 65536]`。
+- `AgentChatOptions` 的 8 个字段各有唯一职责：`label`（错误前缀）/ `noun`（失败文案名词）/ `logFile`（相对 `userData` 的记录路径）/ `isComplete?`（**只在 `finish_reason === 'length'` 时**判「其实是否完整」）/ `truncatedHint?`（截断建议）/ `meta?`（只进记录）/ `maxTokenTries?` / `onProgress?`。
+- 两条等价路径：`loadOpenAI()` 可用时走 SDK（`stream: true` + `stream_options: { include_usage: true }`），否则 `fetch ${baseUrl}/chat/completions` 手写 SSE 解析；两条路径的 chunk 处理完全同构。
+- 升档判定只三种情形：本档抛错 → **直接抛**（不换档）；`finish_reason === 'length'` 且内容不完整（或内容为空）→ `retry` 换档；内容非空且完整 → `done` 返回。
+- 最终失败文案三种模板（截断 / `length` 但无正文 / 空响应），都带 `（usage: …）` 诊断；日志写 `userData/<logFile>`，一行一次调用，`attempts` 里存每档的思考全文、输出、`finish_reason`、`usage`、`detail`、`needConfig` 与四个耗时。
+- **不注册 IPC、不碰项目文件、不拼提示词、不决定日志路径**——这四条边界就是它的规格（详见 [files/main/agent.md](./files/main/agent.md) §5.1）。
+
+#### 4.5.2 `html.ts` —— HTML 薄封装
+
+- 只剩三样东西：`HTML_AGENT_SYSTEM`（**5 条**硬性要求：完整 HTML 文档 / HyperFrames 规范（`data-composition-id`、`./gsap.min.js`、`gsap.timeline({ paused: true })`、以 composition id 为键的 `__timelines`、按【画布】写死 `data-resolution` 与固定 px 舞台）/ 字幕逐条依次入场 / 字幕严格按起止时间 / 只输出 HTML 源码。**刻意不含视觉风格**——原第 3 条「深空科技 / Cyber UI」属硬性要求、会把用户填的「全局视觉风格」压掉，已删除；风格改由 `projects.ts` 的 `buildStyleBlock()` 从用户消息里的【全局视觉风格】块注入）、`extractHtmlFromReply()`、`chatWithCustomModel()`；另有私有 `isCompleteHtml()`（`/<\/(body|html)\s*>\s*$/i`）。
+- 包装时写死业务参数：`label: '生成 HTML'` / `noun: 'HTML'` / `logFile: 'html-agent/chat.jsonl'` / `truncatedHint: '请精简字幕/素材或更换模型'`；`meta` / `maxTokenTries` / `onProgress` 由 `AgentOpts` 原样透传。
+- 导出名与签名**完全不变**：`HTML_AGENT_SYSTEM` / `extractHtmlFromReply` / `chatWithCustomModel` / `type AgentProgress` / `interface AgentOpts`；因此 `src/main/projects.ts` 只改了 import 的来源（`import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './agent'`），三个名字与调用点一字未动。
+- 行为等价点（重构验收线）：完成判定正则未改、日志文件仍是 `userData/html-agent/chat.jsonl`、错误文案逐字未改；系统提示词在「收进目录」那轮**逐字未改**，**本轮的删风格条款是之后独立的一次修改**（见上一条）。
+
+#### 4.5.3 `script.ts` —— 内容脚本 Agent（域 `script:*`）
+
+- 频道：`script:generate` / `script:load-chat` / `script:append-round` / `script:read-version` / `script:set-active-version` / `script:clear-chat`（**六条 `ipcMain.handle`**）+ 推送 `script:progress`；入口函数 **`registerScript(getProjectDir: (name: string) => string)`**（原名 `register`，收进目录时改名并加参）。
+- **项目目录靠注入**：`registerScript(getProjectDir)` 把参数存进模块级 `projectDirOf`（默认 `() => ''` 兜底），私有 `projectDir(name)` = `projectDirOf(name)`，路径规则全在 `chatLog.ts`。`src/main/index.ts` 传的是 `projects.projectDir`——**agent 不反向 import `projects`**，否则与 `projects → agent` 成环。
+- 生成流程：校验 `request` 非空 → 整理上下文场景（只收对象、`slice(0, MAX_SCENES=30)`、四字段归一化）→ `buildScriptPrompt()`（【要求】/【当前脚本】/【参数】三段；`targetSeconds × 4.5` 折成字数预算）→ `chatWithModel()`（`label '生成脚本'` / `noun '脚本'` / `logFile 'script-agent/chat.jsonl'` / `isComplete` 按结尾 `}` 粗判 / `meta.action = scenes.length ? 'modify' : 'generate'` / `onProgress` 经 `event.sender.send` 推 `script:progress`）→ `parseScriptReply()` → `{ ok: true, scenes, totalChars }`。
+- 三个生成侧返回分支：成功；`Agent 调用失败：…`（`...configTargetOf(msg)` 补 `needConfig` / `title`）；`脚本解析失败：…` + `raw`（模型原文截 2 万字符）。
+- **五个对话记录 handler**（`chat/index.json` 索引 + `chat/versions/<id>.json` 每版副本）：
+  - `script:load-chat`（载荷 `{ name? }`，缺名回 `缺少项目名`）→ `readChatIndex(dir)` → `{ ok: true, rounds, activeVersionId }`（**不含 scenes**；索引不存在 / 损坏 / 副本已丢的条目都被剔除）。
+  - `script:append-round`（载荷 `ScriptAppendRoundPayload`）→ `normalizeScenes(payload.scenes)`，无场景回「这一轮没有场景，未写入对话记录」；否则 **`writeVersion()` 先写副本 → `readChatIndex()` → `writeChatIndex({ rounds: [...旧, 本轮元数据], activeVersionId: 新版本 })`**（顺序不能反：写索引会顺带清理不再被引用的旧副本）→ `{ ok: true, versionId }`。
+  - `script:read-version`（载荷 `{ name?, versionId? }`，`isValidVersionId` 不过回 `非法的版本 id`）→ `readVersion()`，读不到回「这一版脚本读不到了（副本可能已被删除）」；**只读、无副作用**。
+  - `script:set-active-version`：要求该 `versionId` 在 `index.rounds` 里（否则「这一版不在对话记录里」），再 `writeChatIndex({ rounds, activeVersionId })`；**不写 `content.json`**。
+  - `script:clear-chat`：`clearChat(dir)` 删整个 `chat/` 目录。
+- `parseScriptReply` 的容错：去 ` ```json ` 围栏 → 依次试「首个 `{` 到末个 `}`」「首个 `[` 到末个 `]`」「原文」三种切法，取第一个能 `JSON.parse` 且形状可用的（带 `scenes` 数组或本身是数组）；**旁白允许为空**（静音段），只丢旁白与画面分镜**都空**的场景、`durHint` 有就保留、场景截到 30、一条有效场景都没有则抛错（文案「模型返回的脚本里没有有效场景（旁白与画面分镜都为空）」）。
+- **定位：不碰文件系统**——**连 `node:fs` / `node:path` 都不 import**、没有文件工具与 shell；上下文来自载荷（渲染层编辑器当前 `scenes`），场景落盘走 `project:save-content`（由渲染层的自动保存触发），对话记录的文件操作全在 `chatLog.ts`。
+
+#### 4.5.4 `chatLog.ts` —— 对话记录读写（内部模块）
+
+- **磁盘布局**：`projects/<项目名>/chat/index.json`（索引：每轮元数据 + `activeVersionId`，**不含 scenes**）+ `projects/<项目名>/chat/versions/<id>.json`（该轮脚本的完整副本，展开 / 应用时才读）。
+- **十一个导出**：`MAX_CHAT_ROUNDS = 100`、`chatDirOf(projectDir)`（`<项目目录>/chat`；**收项目目录而不是项目名**，目录规则只由 `projects.projectDir` 一处给）、`chatIndexPathOf(projectDir)`、`isValidVersionId(versionId)`（白名单 `^[A-Za-z0-9_-]{1,64}$`，挡路径穿越）、`newVersionId()`、`normalizeScenes(raw)`、`readChatIndex(projectDir)`、`writeChatIndex(projectDir, index)`、`writeVersion(projectDir, versionId, scenes)`、`readVersion(projectDir, versionId)`、`clearChat(projectDir)`；私有 `MAX_SCENES = 30` / `VERSION_ID_RE` / `versionsDirOf` / `versionPathOf` / `normalizeRoundMeta` / `pruneVersions`。
+- **规范化口径**：索引只存 `{ id, request, versionId, totalChars, sceneCount, ts }`；`versionId` 非法 ⇒ 整条丢弃；`totalChars` / `sceneCount` 为负数 / 非数时归 0、`ts` 非法则补当前时间。场景只留四字段、补 `id`、截到 30。
+- **读索引**：文件不存在 / `JSON.parse` 失败 ⇒ 空索引；**丢掉「版本副本已不存在」的条目**；`activeVersionId` 不在活着的轮次里则清成 `''`；最后 `slice(-MAX_CHAT_ROUNDS)`。
+- **写索引**：`mkdirSync` 后写 `{ version: 1, updatedAt, activeVersionId, rounds }`，随后 `pruneVersions()` **删掉 `versions/` 下不再被索引引用（含超出 100 轮被裁掉）的文件**——磁盘因此不会无限增长。
+- **单版副本**：`writeVersion` 写 `{ versionId, createdAt, scenes }` 并返回规范化后的场景（非法 id / 无场景直接抛错）；`readVersion` 不存在 / 损坏 / id 非法 ⇒ `null`；`clearChat` 用 `fs.rmSync(chatDirOf(dir), { recursive: true, force: true })` 删整个目录。
+- 依赖只有 `node:fs` / `node:path` / `../../shared/types` 的 `Scene`、`ScriptChatIndex`、`ScriptChatRoundMeta`；**不注册 IPC、不 import 同目录任何模块、不由 `index.ts` 再导出**。
+
+#### 4.5.5 `index.ts` —— 统一出口
+
+- 15 行、**只有 `export … from` 语句**：`chatWithModel` / `MAX_TOKEN_TRIES` / `HTML_AGENT_SYSTEM` / `extractHtmlFromReply` / `chatWithCustomModel` / `SCRIPT_AGENT_SYSTEM` / `buildScriptPrompt` / `parseScriptReply` / `registerScript`（9 个值）+ `ChatMessage` / `AgentChatOptions` / `AgentOpts` / `AgentProgress`（4 个类型）。
+- 文件头注释记录四个子文件的一句话分工与依赖方向（`chat` 在最上游，`html` / `script` 只依赖它）；**不写任何逻辑、不注册 IPC、不 import 目录外模块**。`chatLog.ts` **不在**这份清单里——它是 `script.ts` 的内部依赖，不是 Agent 层的对外能力。
 
 ### 4.6 `projects.ts` —— 项目化流水线（最大模块）
 
-- 项目实体：`userData/projects/<项目名>/`，元数据 `project.json`（`title` / `subtitle` / `subtitleCount` / `content` / `audioFile` / **`materials`** / **`canvas`** / `htmlPath` / **`videoPath`（本项目内相对路径 `video/output.mp4`）** / `createdAt` / `updatedAt`），旁挂 `subtitle.txt`、`index.html`、`index.preview.html`、`gsap.min.js`（按需从随包文件复制）、`audio/`、**`images/`**、**`video/`**（`video/output.mp4` 是转视频的产出成品，`video/xxx.mp4` 是素材库里的输入素材——同目录、不同语义）。
+- 项目实体：`userData/projects/<项目名>/`。**索引与正文分文件（数据层重构后）**：`project.json` **只有索引**（`ProjectIndex`：`name` / `title` / `subtitleCount` / `htmlPath` / **`videoPath`（本项目内相对路径 `video/output.mp4`）** / `audioFile` / **`materials`** / `render` / **`canvas`** / `createdAt` / `updatedAt`，**不含 `subtitle` / `content` 正文**）；字幕正文在 `subtitle.txt`（唯一正文）、内容脚本正文在 `content.json`（`{ style, scenes }`，唯一正文）。同目录旁挂 `index.html`、`index.preview.html`、`gsap.min.js`（按需从随包文件复制）、`audio/`、**`images/`**、**`video/`**（`video/output.mp4` 是转视频的产出成品，`video/xxx.mp4` 是素材库里的输入素材——同目录、不同语义）。
+  - **读写分层**：`readProject()` 只读索引并返回 `ProjectIndex`；`ensureProject()` 把索引 + `subtitle.txt`（内联旧字段优先、文件兜底）+ `content.json`（文件优先、内联兜底）拼成完整 `Project`，因此 `project:load` 的对外结构不变（渲染层 0 行改动）；`writeProject()` **先把正文落盘（`subtitle.txt` 内容不同才写、`content.json` 文件不存在才写）再只写索引**并把 `subtitle` / `content` 两个字段剥掉；`project:save-content` 改为写 `content.json`；`scanProjects()` 的 `hasSubtitle` 改由「`subtitleCount > 0` 或 内联旧 `subtitle` 非空 或 `subtitle.txt` 存在」三路判定。老项目**免批量迁移**：读时兼容，下一次任意 `writeProject` 自动把正文落到文件（见 [projects.ts.md](./files/main/projects.ts.md) §2.7 / §3.9）。
   - **`materials` 是项目素材库**（图片 + 视频，多素材）：每条 `ProjectMaterial` = `{ id, kind, file, label, selected, addedAt }`，`file` 是**项目内相对引用**（`images/xxx` / `video/xxx`），`kind` 决定落在哪个目录；`project.json` 只登记相对引用，因此项目目录可以整体搬走 / 复制。
   - **`videoMaterial` 是历史字段**（单视频素材时代的相对引用）：本轮起**不再写入**、素材列表也不读它；保留声明只为不改动已隐藏入口的 `project:extract-video-audio` handler（它仍按此字段定位视频）。`ensureProject()` 的初始对象里加的是 `materials: []`。
   - **`audioFile` 同样是项目内相对引用**（`copyAudioIntoProject()` 复制进 `audio/` 后返回 `'audio/' + saveName`），`set-audio` / `clear-audio` / 回执里的 `audioFile` 都是这个相对值——渲染层据此拼 `hgpreview://p/…` 试听。
 - **项目根路径是函数**：`projectsRoot()` 返回 `path.join(app.getPath('userData'), 'projects')`，**每次调用重新求值**。内部三个调用点：`projectDir()`、`scanProjects()`、`project:delete` 的 `dir.startsWith(projectsRoot())` 校验。
 - 对外能力（25 个 `handle` + 1 个推送；素材库那次 **3 换 3**、总数不变，本次再净增 `project:set-canvas`）：项目 list / create / load / delete、字幕保存、内容脚本保存、HTML 生成 / 修改 / 读取 / 保存 / 预览 / 下载、SRT 导出、项目目录与指定路径所在目录打开、**项目素材库三件套**（`project:pick-media` 选文件 / `project:add-materials` 复制入库 + 登记 / `project:save-materials` 整份列表回写，其中后两者分别是「复制入库 + 登记」与「移除 + 勾选共用」）、音频的挑选 / 设置 / 清除、从视频提取音轨（**handler 保留、界面入口本轮临时下线**）、视频产物回写、渲染档位覆盖、**成片画布覆盖（`project:set-canvas`：值变化时把 `videoPath` 置空——尺寸变了旧成片不再代表当前产物）**。其中 `set-audio` / `clear-audio` / `extract-video-audio` 会同步改写 HTML 里的注入音轨并回带 `htmlUpdated`。
   - **本轮下线的三个频道**：`project:pick-video` / `project:set-video` / `project:clear-video`（连同 `shared/ipc.ts` 的常量与 preload 的方法一起三处齐删；旧的单视频素材下拉行被 `MaterialsSection.vue` 的卡片墙取代）。
-- 关键内部设施：`projectDir()`（路径派生的唯一入口，也被 `hgpreview` 协议使用）、`parseSubtitle()`、`normalizeContent()`、**`resolveVideoAbs(name, videoPath)`（成品路径「落盘相对 / 交出绝对」的唯一解析入口，见 [projects.ts.md](./files/main/projects.ts.md) §3.8）**、`scanProjects()`（列表与 `has*` 标记；`hasVideo = !!resolveVideoAbs(p.name, p.videoPath)`，取代原先依赖路径形态的 `fs.existsSync`）、`buildContentBlock()` / `buildMaterialPrompt()` / **`buildCanvasBlock(proj, forModify = false)`**（生成/修改的【画布】块：**插在【音轨】与【成片时长】之间**，写明画布尺寸并要求模型写死 `data-resolution`、主舞台固定 px、不要 vw / vh / 百分比 / `transform: scale`、内容排满整块画布；**`forModify === true`（只由 `project:modify-html` 传）时追加第 ⑤ 条**——旧页面的 `data-resolution` / 主舞台尺寸与新画布不一致时必须按新画布重排，禁止用 scale / 居中留白 / 黑边硬套旧版式）/ **`buildMaterialBlock()`**（拼装 Agent 提示词；素材块分「【图片素材】/【视频素材】」两段，给模型的是项目内相对路径）、**素材库助手**（`MATERIAL_DIR` = `{ image: 'images', video: 'video' }`、`newMaterialId()`、`materialKindOf()`、`copyMaterialIntoProject()`（取代原 `copyVideoIntoProject`）、`normalizeMaterials()`（读盘与写盘共用：校验 kind、`file` 必须在本项目素材目录下且不含 `..`、补 id、`selected` 缺省 true、条数截到 `MAX_MATERIALS`）、`materialExtsText()`）、**`resolveMaterials()`**（返回 `{ subtitleText, materials }`：字幕来源 + 按 `payload.materialIds` 过滤出的本次素材，顺序 = 渲染层列表顺序）、背景音轨注入一组（`BGM_TAG_ID` / `insertHtmlSnippet()` / `stripInjectedBgm()` / `stripAudioOfFile()` / `applyBgmToHtml()`，共 6 处调用点）、预览副本注入脚本 `HG_PREVIEW_CTRL`、`progressText()`。
+- 关键内部设施：`projectDir()`（路径派生的唯一入口，也被 `hgpreview` 协议使用）、`parseSubtitle()`、`normalizeContent()`、**`resolveVideoAbs(name, videoPath)`（成品路径「落盘相对 / 交出绝对」的唯一解析入口，见 [projects.ts.md](./files/main/projects.ts.md) §3.8）**、`scanProjects()`（列表与 `has*` 标记；`hasVideo = !!resolveVideoAbs(p.name, p.videoPath)`，取代原先依赖路径形态的 `fs.existsSync`）、`buildContentBlock()`（内容脚本块，**有效场景 = 画面分镜非空**，无有效场景返回 `''`，**不含风格**）/ **`buildStyleBlock()`**（【全局视觉风格】块，判断 `content.style` 后**无条件注入**：风格原先只是内容脚本块里的一行，那块没有有效场景就 `return ''`，用户填的风格因此进不了提示词）/ `buildMaterialPrompt()` / **`buildCanvasBlock(proj, forModify = false)`**（生成/修改的【画布】块：**插在【音轨】与【成片时长】之间**，写明画布尺寸并要求模型写死 `data-resolution`、主舞台固定 px、不要 vw / vh / 百分比 / `transform: scale`、内容排满整块画布；**`forModify === true`（只由 `project:modify-html` 传）时追加第 ⑤ 条**——旧页面的 `data-resolution` / 主舞台尺寸与新画布不一致时必须按新画布重排，禁止用 scale / 居中留白 / 黑边硬套旧版式）/ **`buildMaterialBlock()`**（拼装 Agent 提示词；素材块分「【图片素材】/【视频素材】」两段，给模型的是项目内相对路径）、**素材库助手**（`MATERIAL_DIR` = `{ image: 'images', video: 'video' }`、`newMaterialId()`、`materialKindOf()`、`copyMaterialIntoProject()`（取代原 `copyVideoIntoProject`）、`normalizeMaterials()`（读盘与写盘共用：校验 kind、`file` 必须在本项目素材目录下且不含 `..`、补 id、`selected` 缺省 true、条数截到 `MAX_MATERIALS`）、`materialExtsText()`）、**`resolveMaterials()`**（返回 `{ subtitleText, materials }`：字幕来源 + 按 `payload.materialIds` 过滤出的本次素材，顺序 = 渲染层列表顺序）、背景音轨注入一组（`BGM_TAG_ID` / `insertHtmlSnippet()` / `stripInjectedBgm()` / `stripAudioOfFile()` / `applyBgmToHtml()`，共 6 处调用点）、预览副本注入脚本 `HG_PREVIEW_CTRL`、`progressText()`。
 - GSAP 本地化：生成 / 修改 / 保存（`project:save-html`）/ 预览副本四个写盘环节先 `hfEnv.localizeGsapHtml()` 改写 CDN 引用，再按需 `hfEnv.copyGsapIntoProject()`；**作者态三处会用复制返回值做兜底**——复制失败就把引用换回 CDN。反向地，`project:download-html` 用 `externalizeGsapHtml()` 把 `./gsap.min.js` 换回固定版本 CDN 后再文本写出。
 - `project:extract-video-audio` 先按 `FFMPEG_PACKS = ['ffmpeg']` 调 `runtime.missingPacks()` **纯校验**：缺包立刻返回 `{ ok: false, needPacks, message }`（**不再** `await` 等待下载），校验通过后才用内置 ffmpeg 从**历史字段 `proj.videoMaterial`** 提取音轨。**该 handler 本轮一行未改**，但上方新增了注释说明「界面入口已临时注释下线、恢复前要按素材 id 重做」。
 - `project:open-folder` 在项目目录不存在时返回「项目目录不存在（项目尚未保存）」。
@@ -263,7 +323,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 6. **userData 位置保持 Electron 默认**：`USER_DATA_DIR = app.getPath('userData')` = `%APPDATA%\<package.json 的 name>`，**没有 `setPath`、没有位置钉死**；老数据靠 `index.ts` 的「归属证明 + 用户确认式处置」处理。
 7. **userData 路径一律惰性求值（纯保险）**：`projects.projectsRoot()` / `whisper.modelsDir()` / `runtime.runtimeDir()` / `settings.settingsFile()` 都写成函数 / getter——不要退化成常量，也不要在模块顶层 `const root = …()`。
 8. **改 `package.json` 的 `name` 必须手动登记旧目录名**：`index.ts` 的 `LEGACY_DIR_NAMES`（现为 `['my-app']`）是**唯一**的发现机制。`TTS_PREVIEW_DIRS` 又是另一张手工清单——它与渲染层 `utils/url.ts` 的 `TTS_DIRS` 必须同步改（加一类可预览产物时两处齐改）。
-9. **持久化边界**：只有 `settings.ts` 与 `projects.ts` 直接写盘；其余模块通过它们落盘；`runtime.ts` 是例外——它只写自己的 `userData/runtime/**`。
+9. **持久化边界**：只有 `settings.ts` 与 `projects.ts` 直接写项目 / 用户配置；其余模块通过它们落盘；`runtime.ts` 是例外——它只写自己的 `userData/runtime/**`；**`agent/chatLog.ts` 也只写自己那份 `projects/<项目名>/chat/`**（对话记录的索引 + 每版副本，不进 `project.json`、不参与 `scanProjects`）。
 10. **载荷 / 结果类型全部来自 `src/shared/types.ts`**：`src/main/` 下已无本地声明的 payload / result / progress 接口，各 handler 的 `payload` 参数统一标注共享层的 `*Payload`（本轮新增 `ProjectPickMediaPayload` / `ProjectAddMaterialsPayload` / `ProjectSaveMaterialsPayload`）；项目结构类型（`Scene` / `ContentScript` / `Project` / `SubtitleLine`）由 `projects.ts` 再导出，**素材结构 `ProjectMaterial` / `ProjectMaterialKind` 也定义在共享层**。
 11. **运行时依赖由 electron-builder 自动收集，不要手写 `node_modules` 白名单**：新增 `dependencies` 后仍要复核 `npm run pack && npx asar list …`。
 

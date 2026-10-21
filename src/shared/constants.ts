@@ -68,3 +68,21 @@ export const CANVAS_LABELS: Record<RenderCanvas, string> = {
 // 老项目因此保持原有观感；此前「成片莫名变竖屏」正是因为没有这个确定值（CLI 兜底 portrait）。
 export const DEFAULT_CANVAS: RenderCanvas = 'landscape';
 
+// ===== 估时语速（字/秒，**唯一真源**）=====
+// 一个语速三个用处，改这一行就一起变：
+//   ① 字幕估时公式 estimateSubtitleDur()（本文件下方）。它有两个消费方——渲染层字幕页
+//      （SubtitlePage/helpers.ts 的 estDur → 「由脚本旁白生成」/ 新增条目 / 纯文本与 SRT 解析）
+//      与主进程 parseSubtitle（逐句对齐时给「整行没有 [时间] 前缀」的行兜底起始时间）；
+//   ② 内容脚本页「AI 创作」结果卡上的「估算时长」= 总字数 ÷ 它（ContentPage 的 AiChatPanel / ScriptRoundCard）；
+//   ③ 主进程脚本 Agent 提示词里的字数预算：「目标总时长 × 它 = 旁白总字数上限」（agent/script.ts）。
+// 历史：这条规则原来在渲染层与主进程各写了一遍（0.15 秒/字 ≈ 6.7 字/秒，本是给「一条短句」估时用的
+// 老系数，套到一整段场景旁白上快一倍——93 字的旁白只排 15.5 秒、实际要读 23 秒，字幕读不完），
+// 而内容脚本页另写 4.5 字/秒，两套口径对不上；2026-10-21 统一成 4 字/秒。
+// 注意：这只是**估时**，不读音频；真实时长得走配音页的「字幕配音（逐句对齐）」实测。
+export const EST_CHARS_PER_SEC = 4;
+// 估时公式：max(2.4, 1.6 + 字数 / 语速)。下限 2.4 秒与基数 1.6 秒是历史沿用的取值，与语速无关。
+export function estimateSubtitleDur(text: string): number {
+  const n = String(text == null ? '' : text).length;
+  return Math.max(2.4, 1.6 + n / EST_CHARS_PER_SEC);
+}
+

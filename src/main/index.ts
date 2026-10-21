@@ -3,7 +3,7 @@
 // 业务逻辑按域拆至 src/main/ 下：
 //   hfEnv.ts     环境探测与 HyperFrames 资源定位（纯函数）
 //   settings.ts  设置存储（settings.json）+ settings:* IPC
-//   htmlAgent.ts HTML 生成/修改的自定义模型 Agent（chatWithCustomModel）
+//   agent/       Agent 层（目录，5 文件）：chat.ts 通用对话传输 / chatLog.ts 对话记录读写 / html.ts HTML Agent / script.ts 内容脚本 Agent / index.ts 统一出口
 //   projects.ts  项目化流水线 + project:* IPC（含 copyAudioIntoProject，供 voice 引用）
 //   voice.ts     千问语音（音色管理/文字生音频）+ voice:* IPC
 //   ttsAlign.ts  字幕配音逐句合成与时间对齐 + voice:synth-aligned / voice:align-cancel IPC
@@ -11,7 +11,7 @@
 //   whisper.ts   whisper.cpp 字幕转录 + whisper:* IPC
 //   updater.ts   应用自更新（electron-updater generic provider）+ update:* IPC
 //   runtime.ts   运行环境包（ffmpeg/hyperframes/whisper 解包到 userData）+ runtime:* IPC
-// 依赖图：settings ← htmlAgent ← projects ← voice ← ttsAlign；hfEnv ← projects, voice, whisper, ttsAlign, video, runtime；updater ← settings；无环。
+// 依赖图：settings ← agent(chat ← html/script) ← projects ← voice ← ttsAlign；hfEnv ← projects, voice, whisper, ttsAlign, video, runtime；updater ← settings；无环。
 // 打包输出 out/main/index.js；preload 输出 out/preload/index.js；渲染层输出 out/renderer/。
 import { app, BrowserWindow, Menu, ipcMain, clipboard, protocol } from 'electron'
 import path from 'node:path'
@@ -21,6 +21,7 @@ import { IPC } from '../shared/ipc'
 import type { LegacyDataInfo, LegacyResolveAction, LegacyResolveResult, RegisterCtx } from '../shared/types'
 import * as settings from './settings'
 import * as projects from './projects'
+import * as agent from './agent'
 import * as voice from './voice'
 import * as ttsAlign from './ttsAlign'
 import * as video from './video'
@@ -516,6 +517,9 @@ app.whenReady().then(() => {
   const ctx: RegisterCtx = { getWindow }
   settings.register(ctx)
   projects.register(ctx)
+  // 内容脚本 Agent（script:*）：生成只造文本（落盘由 project:save-content 负责）；
+  // 对话记录要写项目目录，故把 projects.projectDir 注入进去（agent 不反向 import projects）
+  agent.registerScript(projects.projectDir)
   voice.register(ctx)
   ttsAlign.register(ctx)
   video.register(ctx)

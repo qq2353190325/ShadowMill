@@ -1,99 +1,35 @@
 <template>
   <div>
     <StepBar :page="'content'" />
-    <div class="card hgen-panel">
-      <div class="panel-title"><span class="dot"></span>场景分镜（旁白 + 画面分镜 + 时长提示）</div>
-      <div v-if="!scenes.length" class="empty-hint">暂无场景。点击「添加场景」开始编写内容脚本。</div>
-      <template v-else>
-        <div
-          v-for="(s, i) in scenes"
-          :key="s.id"
-          class="hgen-block ct-scene"
-          style="border:1px solid rgba(0,212,255,.15);border-radius:10px;padding:14px 16px;margin-top:12px;background:rgba(0,212,255,.03);"
-        >
-          <div class="panel-title-sm">场景 #{{ i + 1 }}</div>
-          <div class="hgen-row"><label class="sel-label" style="flex:none;width:auto">旁白</label>
-            <textarea v-model="s.narration" class="hgen-subtitle" spellcheck="false" style="height:84px" placeholder="该场景的旁白/配音文本，字幕将据此生成…"></textarea></div>
-          <div class="hgen-row"><label class="sel-label" style="flex:none;width:auto">画面分镜</label>
-            <textarea v-model="s.visual" class="hgen-subtitle" spellcheck="false" style="height:64px" placeholder="描述该场景呈现的画面，如：深空背景，标题从上方浮入…"></textarea></div>
-          <div class="hgen-row">
-            <label class="sel-label" style="flex:none;width:auto">时长提示(秒)</label>
-            <input v-model="s.durHint" class="hgen-input" style="flex:none;width:110px" placeholder="可空" />
-            <button class="hf-btn" style="padding:6px 12px;font-size:12px" :disabled="i === 0" @click="move(i, -1)">上移</button>
-            <button class="hf-btn" style="padding:6px 12px;font-size:12px" :disabled="i === scenes.length - 1" @click="move(i, 1)">下移</button>
-            <button class="hf-btn" style="padding:6px 12px;font-size:12px;color:#ff5470;border-color:rgba(255,84,112,.5)" @click="remove(i)">删除</button>
-          </div>
-        </div>
-      </template>
-      <div class="hgen-actions">
-        <button class="hf-btn" @click="add">添加场景</button>
-        <button class="hf-btn hf-btn-primary" @click="save">保存到项目</button>
-      </div>
-      <div class="hgen-tip">场景按顺序播放：<code>旁白</code> 将作为配音文本、并派生字幕；<code>画面分镜</code> 描述该场景对应的视觉画面（供 HTML 生成引用）；<code>时长提示</code>（秒）可空。保存后项目链路「内容脚本」节点自动点亮。已有项目无内容脚本时默认展示一个空场景。</div>
+    <!-- 两个 Tab 常驻可见：默认「场景编辑」（= 原来的页面），「AI 创作」是对话式生成/修改 -->
+    <div class="hf-tabs">
+      <button class="hf-tab" :class="{ active: tab === 'edit' }" @click="tab = 'edit'">场景编辑</button>
+      <button class="hf-tab" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">AI 创作</button>
+    </div>
+    <!-- v-show 而非 v-if：切 Tab 不销毁组件，输入框草稿与展开状态都保留 -->
+    <div v-show="tab === 'edit'">
+      <SceneEditor />
+    </div>
+    <div v-show="tab === 'chat'">
+      <AiChatPanel />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// pages/ContentPage/index.vue —— 内容脚本页（原 JS 版 content 模块 {template,index}.js 移植）
-// v-model 直接绑定场景对象，替代原 innerHTML + collect() 手工收集；StepBar 响应式刷新替代 renderStepBar 重调。
-import { onMounted, ref } from 'vue'
-import { appState, refreshProject } from '@renderer/composables/useAppStore'
-import { toast } from '@renderer/composables/useToast'
+// pages/ContentPage/index.vue —— 内容脚本页外壳：StepBar + 两个 Tab（场景编辑 / AI 创作）。
+// 场景状态与保存逻辑在 ./helpers（模块级单例，两个 Tab 共享同一份 scenes）；本文件只是外壳。
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import StepBar from '@renderer/components/StepBar.vue'
+import { loadScenes, flushPending } from './helpers'
+import SceneEditor from './SceneEditor.vue'
+import AiChatPanel from './AiChatPanel.vue'
 
-interface Scene {
-  id: string
-  narration: string
-  visual: string
-  durHint: string
-}
+// 默认场景编辑：空项目也停在这里（用户可以先自己填；AI 是右侧常驻 Tab，不是默认路径）
+const tab = ref<'edit' | 'chat'>('edit');
 
-const scenes = ref<Scene[]>([]);
-
-function emptyScene(): Scene {
-  return { id: 'scene-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6), narration: '', visual: '', durHint: '' };
-}
-
-function load(): void {
-  const content = (appState.project && appState.project.content) || { style: '', scenes: [] };
-  scenes.value = (Array.isArray(content.scenes) ? content.scenes : []).map((s) => {
-    const item = (s && typeof s === 'object') ? s as Record<string, unknown> : {};
-    return {
-      id: (typeof item.id === 'string' && item.id.trim()) ? item.id.trim() : ('scene-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)),
-      narration: typeof item.narration === 'string' ? item.narration : '',
-      visual: typeof item.visual === 'string' ? item.visual : '',
-      durHint: (item.durHint === undefined || item.durHint === null) ? '' : String(item.durHint)
-    };
-  });
-  if (!scenes.value.length) scenes.value.push(emptyScene());
-}
-
-onMounted(load);
-
-function add(): void {
-  scenes.value.push(emptyScene());
-}
-function remove(i: number): void {
-  scenes.value.splice(i, 1);
-  if (!scenes.value.length) scenes.value.push(emptyScene());
-}
-function move(i: number, delta: number): void {
-  const j = i + delta;
-  if (j < 0 || j >= scenes.value.length) return;
-  const t = scenes.value[i];
-  scenes.value[i] = scenes.value[j];
-  scenes.value[j] = t;
-}
-
-async function save(): Promise<void> {
-  // 全局视觉风格已改到「HTML生成」页维护：这里把项目里**已落盘**的 style 原样带回——
-  // project:save-content 是整份 content 覆盖，不带就等于把风格清掉。
-  const persisted = (appState.project && appState.project.content && appState.project.content.style) || '';
-  const content = { style: persisted, scenes: scenes.value.map((s) => ({ id: s.id, narration: s.narration, visual: s.visual, durHint: s.durHint })) };
-  const res = await window.projectTools.saveContent(appState.currentName, content);
-  if (!res || !res.ok) { toast((res as { message?: string })?.message || '保存失败'); return; }
-  await refreshProject();
-  toast('内容脚本已保存：' + scenes.value.length + ' 个场景');
-}
+// 进入页面即从当前项目加载（goPage 会重建页面组件，这里每次都会重新拉一次）
+onMounted(loadScenes);
+// 离开页面时把还在防抖里的改动写掉（只写"确有快照"的，避免切项目时写串）
+onBeforeUnmount(flushPending);
 </script>

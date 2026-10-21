@@ -37,7 +37,7 @@
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `PageKey` | 字符串字面量联合 | 页面键，与菜单 `data-page` 一致：`'home' \| 'about' \| 'content' \| 'text-tts' \| 'subtitle' \| 'html-gen' \| 'video-preview' \| 'settings'`（视频环节的键是 `video-preview`，页名「视频预览」：转视频动作已并入「HTML生成」页，该页只做预览；原「音色管理」独立页的 `'sound-copy'` 已随页面并入配音页第三个 Tab 而下线） |
-| `ProjectState` | interface（本文件定义） | 当前项目**详情**（渲染层自身的视图模型，与主进程 `project.json` 字段对应） |
+| `ProjectState` | interface（本文件定义） | 当前项目**详情**（渲染层自身的视图模型，对应主进程 `project:load` 返回的**完整 `Project`**——字幕正文来自 `subtitle.txt`、内容脚本正文来自 `content.json`，`project.json` 只存索引） |
 | `ProjectMeta` | interface（**再导出**） | 「我的项目」**列表项**元信息；真实定义在 `src/shared/types.ts` ⑥ 节，本文件以 `import type { ProjectMeta } from '@shared/types'` + `export type { ProjectMeta }` 转发，保持 `import { ProjectMeta } from '@renderer/composables/useAppStore'` 的既有引用面 |
 
 **结构体字段表（`ProjectState` / `ProjectMeta`）**

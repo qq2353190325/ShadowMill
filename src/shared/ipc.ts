@@ -1,5 +1,5 @@
 // src/shared/ipc.ts —— IPC 频道名常量（main / preload / 渲染层三端共享）
-// 频道名与现行实现逐一对应，禁止改动（preload 11 命名空间与渲染层调用依赖它们）。
+// 频道名与现行实现逐一对应，禁止改动（preload 12 命名空间与渲染层调用依赖它们）。
 
 export const IPC = {
   // 窗口控制（renderer → main，send）+ 最大化状态回推（main → renderer）
@@ -109,6 +109,18 @@ export const IPC = {
     PreviewHtml: 'project:preview-html',
     SaveHtml: 'project:save-html',
     HtmlProgress: 'project:html-progress'
+  },
+  // 内容脚本 Agent（main/agent/script.ts）：对话式生成 / 修改场景脚本。
+  // generate 只产出文本（落盘走 project:save-content）；chat 系列管 projects/<名>/chat/ 下的
+  // 索引（index.json）与每版脚本副本（versions/<versionId>.json）。
+  Script: {
+    Generate: 'script:generate',
+    LoadChat: 'script:load-chat',
+    AppendRound: 'script:append-round',
+    ReadVersion: 'script:read-version',
+    SetActiveVersion: 'script:set-active-version',
+    ClearChat: 'script:clear-chat',
+    Progress: 'script:progress'
   },
   // 预览 / HyperFrames 转视频（video.js）
   Video: {

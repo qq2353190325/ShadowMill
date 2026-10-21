@@ -5,12 +5,12 @@
 - **覆盖文件**（AGENTS.md 第五节 6：页面自己的子组件与助手并入同一篇）：
   | 文件 | 行数 | 角色 |
   |------|------|------|
-  | `HtmlGenPage/index.vue` | 478 | 页面入口：状态条（3 个纯数据格 + 标题右侧「用法」`?`）/ **字幕 + 画布（同一行）** / **全局视觉风格输入框** / 需求描述 / 统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；生成与渲染两套动作链 |
+  | `HtmlGenPage/index.vue` | 490 | 页面入口：状态条（3 个纯数据格 + 标题右侧「用法」`?`）/ **字幕 + 画布（同一行）** / **全局视觉风格输入框** / 需求描述 / 统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；生成与渲染两套动作链 |
   | `HtmlGenPage/MaterialsSection.vue` | 167 | 「项目素材」区块：图片组 / 视频组的卡片墙（勾选、移除、添加） |
   | `HtmlGenPage/PreviewSection.vue` | 439 | 「预览」卡片：**背景音频行（一个占满整行的下拉：当前音频 = 「已生成音频」里的选中项 + 清空/本地两项动作）**、状态行、AI 思考过程、**「视角比例」行**（**不显示画布值**）、iframe 预览副本（**视口 = 页面声明的画布**；**容器高度上限 800px、宽度按比例、水平居中**，页面按 contain 缩放 + 居中）、播放控制条（**一个三态键** + 进度条 + 时间） |
 - **所在目录**：`src/renderer/src/pages/HtmlGenPage/`（一页一目录，入口 `index.vue`）
 - **类型**：页面组件（SFC，`<script setup lang="ts">`）
-- **规模**：3 个文件合计 1084 行（`index.vue` 478 + `MaterialsSection.vue` 167 + `PreviewSection.vue` 439）
+- **规模**：3 个文件合计 1096 行（`index.vue` 490 + `MaterialsSection.vue` 167 + `PreviewSection.vue` 439）
 - **对外导出**：`index.vue` 默认导出组件（无 props，模板内渲染 `StepBar` / `MaterialsSection` / `PreviewSection`）；两个子组件分别是「无 props / 无 emits」与「4 个 props + `reload()`」
 
 ## 1. 作用与职责
@@ -46,10 +46,10 @@
 | `.panel-title` 内的「用法」`?` | `<span class="panel-title"><span class="dot"></span>HTML · Agent …` 之后：`<span class="hg-help" style="letter-spacing:0" @click.stop>` > `.hg-help-icon`「?」+ `.hg-help-pop`（**行内 `style="top:calc(100% + 8px);bottom:auto"`，向下展开**），正文 `{{ usageHint }}`。原先它是 `.proj-meta` 的第 4 个状态格。源码注释把两点写死：① **`letter-spacing:0`**——`.panel-title` 带 `2px` 字距，不清掉气泡正文会整段变宽；② **气泡向下**——标题就在卡片最顶端，向上会顶出滚动容器 `.content`（`overflow-y:auto`）被整块裁掉（`.hg-help-pop` 默认向上） |
 | `.proj-meta` | 项目状态条（源码注释标为「原 renderMeta 的 `#hg-meta`」），无条件渲染 **3 条纯数据 `.proj-stat`**（数据源 `meta` computed）——HTML / 内容脚本 / 素材。源码注释：「只放「这个项目现在有什么」这类数据，说明类文案一律不进这里」；原先的第 4 格「用法」已删除，改挂标题右侧的 `?` 气泡（上一行） |
 | `.proj-stat`（HTML） | `:class="{ on: meta.hasH }"`，文案 `已生成` / `尚未生成` |
-| `.proj-stat`（内容脚本） | `:class="{ on: meta.sceneN > 0 }"`，`meta.sceneN` 为场景数（按 `narration` 非空过滤），文案提示「生成时自动附带」 |
+| `.proj-stat`（内容脚本） | `:class="{ on: meta.sceneN > 0 }"`，文案三态：`meta.sceneN ? meta.sceneN + ' 个场景（生成时自动附带）' : (meta.missVisual ? '有旁白但都没填「画面分镜」' : '无（可先到「内容脚本」页编写）')`——**`meta.sceneN` 按画面分镜（`visual`）非空过滤**，与主进程 `buildContentBlock` 的附带口径一致（旁白可以为空 = 静音段）；`meta.missVisual` 专门承接「写了旁白、但一场都没填画面分镜」这一态 |
 | `.proj-stat`（素材） | `:class="{ on: meta.matN > 0 \|\| meta.subCount > 0 }"`，文案为 `meta.matText`——**一格同时反映字幕 / 背景音频 / 素材库**（见 2.1） |
 | `.hgen-block`（**字幕 + 画布，本轮合并成一行**） | **一个 `.hgen-block` + 一个 `.hgen-row`（行内 `style="margin-bottom:0"`）**，顺序固定：`span.sel-label`（行内 `style="flex:none;width:40px"`）「字幕」→ `HfSelect` `v-model="subSel"` `:groups="subSelGroups"` **`style="width:260px;flex:none"`** `title="按所选字幕逐条设计动画"` → `label.sel-label`（同样 `style="flex:none;width:40px"`）「画布」→ `HfSelect` `v-model="canvas"` `:groups="canvasGroups"` `:disabled="rendering"` **`style="width:188px;flex:none"`** `@change="onCanvasChange"` → `.hg-help`（内联 `style="letter-spacing:0"`、`@click.stop`；气泡 `style="top:calc(100% + 8px);bottom:auto"` **向下展开**，正文 `{{ canvasNote }} {{ canvasHint }}`）。**两条 `.panel-title-sm`（「字幕素材（可选，留空则跳过）」「画布（成片尺寸）」）已删除**（源码注释：两个控件挤一行后「哪个标题管哪个控件」会歧义，名称交给行内标签）；字幕「留空则跳过」也不再单独提示——下拉第一项就叫「不使用字幕」。**画布说明全在气泡里**（`canvasNote` 随画布变 + `canvasHint` 固定），**行内不再有 `.hgen-tip`**；气泡向下的原因：**这一行常被滚到视口顶端，向上会被 `.content` 的 `overflow` 裁掉**（`.hg-help-pop` 默认向上）。**两个下拉宽度刻意不对称**：字幕 260px 是因为它的选项是「项目「标题」字幕（N 条）」这类长句，而 `HfSelect` 的 `.hf-sel-text` 是 `overflow:hidden + text-overflow:ellipsis`、`title` 又被固定说明「按所选字幕逐条设计动画」占用（不显示选中项全文），收到 188px 就分不清选的是哪个项目；画布选项是「横屏 16:9（1920×1080）」这类短句，188px 够用。**这是画布在全应用里唯一的选择点**（转视频弹窗里刻意没有画布）；源码注释写明它是**项目属性**（不是渲染档位，不进设置页那套「全局默认 / 项目覆盖」，「改完要重新生成」那句统一在动作行上方说一次）——该段注释挂在**行内的 `HfSelect` 上方**（原先挂在 `.hgen-block` 上方） |
-| `.hgen-block`（全局视觉风格，排在字幕 + 画布之后、`<MaterialsSection />` 之前） | `.panel-title-sm`「全局视觉风格（整片视觉基调）」**（标题保留**——另外两条小标题已随字幕 / 画布的合并删除）+ `.hgen-row`（行内 `style="margin-bottom:0"`）：`label.sel-label`（行内 `style="flex:none;width:40px"`）「风格」+ `input.hgen-input`（行内 `style="flex:1"`）`v-model="styleText"`、`@change="onStyleChange"`、placeholder 原文「整支片子的视觉基调，如：深空科技 Cyber 风、霓虹紫渐变、粒子背景（只影响「生成 HTML」）」；下方 `.hgen-tip` 原文「留空 = 未指定，模型按需求描述自行拟定；改完失焦即保存到项目。」（删掉了原先那句「生效方式与画布相同：要重新「生成 HTML」或「按需求修改」才会体现在页面上」——它已统一到动作行上方的 `.hgen-tip`）。源码注释写明：**存 `project.json` 的 `content.style`**，是**项目属性**（与「画布」同属生成前的整片级前提，所以编辑入口放在生成这一侧）；只进 HTML 生成提示词（`projects.ts` 的 `buildContentBlock()` 写成「全局视觉风格：…」），配音与字幕只读场景的旁白 / 时长提示、不读这个字段。这是该字段**在全应用里唯一的编辑点**（内容脚本页只做只读回写） |
+| `.hgen-block`（全局视觉风格，排在字幕 + 画布之后、`<MaterialsSection />` 之前） | `.panel-title-sm`「全局视觉风格（整片视觉基调）」**（标题保留**——另外两条小标题已随字幕 / 画布的合并删除）+ `.hgen-row`（行内 `style="margin-bottom:0"`）：`label.sel-label`（行内 `style="flex:none;width:40px"`）「风格」+ `input.hgen-input`（行内 `style="flex:1"`）`v-model="styleText"`、`@change="onStyleChange"`、placeholder 原文「整支片子的视觉基调，如：深空科技 Cyber 风、霓虹紫渐变、粒子背景（只影响「生成 HTML」）」；下方 `.hgen-tip` 原文「留空 = 未指定，模型按需求描述自行拟定；改完失焦即保存到项目。」（删掉了原先那句「生效方式与画布相同：要重新「生成 HTML」或「按需求修改」才会体现在页面上」——它已统一到动作行上方的 `.hgen-tip`）。源码注释写明：**存内容脚本正文文件 `content.json` 的 `content.style`**（即 `project:save-content` 写的那个文件；`project.json` 只更新索引、不含正文），是**项目属性**（与「画布」同属生成前的整片级前提，所以编辑入口放在生成这一侧）；只进 HTML 生成提示词（`projects.ts` 的 `buildStyleBlock()` 写成【全局视觉风格】块，**无条件注入**——原先写在 `buildContentBlock()` 里，那块没有有效场景就返回空串、风格会跟着丢掉），配音与字幕只读场景的旁白 / 时长提示、不读这个字段。这是该字段**在全应用里唯一的编辑点**（内容脚本页只做只读回写） |
 | `<MaterialsSection />` | 无 props、无 emits（见第 3 节） |
 | `.hgen-block`（需求描述） | `textarea.hgen-subtitle`，`v-model="prompt"`、`spellcheck="false"`、`:placeholder="promptPlaceholder"`；文案随 `hasHtml` 变：已有 HTML 讲「这次要改什么」（换紫色霓虹配色 / 字幕节奏放慢），否则讲「你想要的 HTML 效果」（深空科技风格标题动画页 / 每条字幕间隔两秒依次上浮淡入） |
 | 统一的 `.hgen-tip`（动作行上方） | 原文：「画布与视觉风格都是生成前提：改完要重新「生成 HTML」或「按需求修改」才会体现在页面上。」——源码注释：「画布与视觉风格的共同前提（原先在两处 tip 里各说一遍）：改完不会自动生效，要重新生成」。它是 `.hgen-actions` 之前、卡片内的最后一个区块 |
@@ -61,6 +61,11 @@
 ### 2.1 项目状态条文案（`meta` computed）
 
 ```js
+const c = (p && p.content) || { scenes: [] };
+const filled = (Array.isArray(c.scenes) ? c.scenes : [])
+  .filter((s) => s && (String(s.narration || '').trim() || String(s.visual || '').trim()));
+const sceneN = filled.filter((s) => String(s.visual || '').trim()).length;
+const missVisual = filled.length > 0 && sceneN === 0;
 const mats = (p && p.materials) || [];
 const images = mats.filter((m) => m.kind === 'image').length;
 const videos = mats.filter((m) => m.kind === 'video').length;
@@ -72,10 +77,10 @@ if (p && p.audioFile) parts.push('已配背景音频');
 if (mats.length) parts.push('素材 ' + mats.length + ' 个（图片 ' + images + ' · 视频 ' + videos + '，参与生成 ' + picked + '）');
 ```
 
-- `meta` 返回 `{ hasH, sceneN, subCount, matN, matText }`（`hasH` 取 `hasHtml.value`，`sceneN` 统计非空 `narration` 场景数）。
+- `meta` 返回 `{ hasH, sceneN, missVisual, subCount, matN, matText }`：`hasH` 取 `hasHtml.value`；`filled` = 「旁白或画面分镜非空」的场景（**两个字段都空**的空壳不算——`loadScenes` 会给空项目补一个空场景）；`sceneN` = `filled` 里**画面分镜非空**的条数（统计**画面分镜非空**的场景数，与主进程 `buildContentBlock` 的附带口径一致，旁白可以为空 = 静音段）；`missVisual` = `filled.length > 0 && sceneN === 0`（**写了旁白、但一场都没填画面分镜**——这时报「无内容脚本」会让人以为自己的脚本白写了，所以要单独说清楚缺什么）。
 - 三段都为空时 `matText` 恒为「无素材（可先到「字幕生成」页添加字幕，或在上方「项目素材」里添加图片 / 视频）」。
 - 与素材库的联动是**自动的**：`MaterialsSection` 每次落盘后调 `refreshProject()`，本 computed 直接读 `appState.project.materials`，因此计数与「参与生成 N 个」无需父页参与。
-- **「用法」文案不在 `meta` 里**：`usageHint` 是定义在 `meta` **之后**的另一个 computed（`meta.value.hasH` 为真 / 为假各给一段，逐字来自原先的第 4 格，只补了句号），挂在标题右侧的 `?` 气泡上；`meta` 只保留上面这五项数据，`.proj-meta` 因此只剩 3 格。
+- **「用法」文案不在 `meta` 里**：`usageHint` 是定义在 `meta` **之后**的另一个 computed（`meta.value.hasH` 为真 / 为假各给一段，逐字来自原先的第 4 格，只补了句号），挂在标题右侧的 `?` 气泡上；`meta` 只保留上面这六项数据，`.proj-meta` 因此只剩 3 格。
 
 ## 3. `MaterialsSection.vue`：「项目素材」区块
 
@@ -300,7 +305,7 @@ defineExpose({ reload: syncPreview });
 | `styleText` | `ref<string>` | **全局视觉风格文本（项目属性 `content.style`）**：初值 `''`，挂载时由 `syncStyle()` 从 `appState.project.content.style` 同步；输入框 `v-model="styleText"`，`@change`（失焦）触发 `onStyleChange()` 落盘。它是该字段在全应用里**唯一的编辑点**（内容脚本页只做「原样带回」的只读回写） |
 | `subSelGroups` | `computed<HfSelectGroup[]>` | 字幕下拉选项：`'不使用字幕'` + 仅当 `appState.project?.subtitle` 非空时出现的 `'当前项目字幕（N 条）'` + `appState.myProjects.filter(m => m.name !== currentName && m.hasSubtitle)` 的项目字幕（文案 `项目「标题或名」字幕（N 条）`） |
 | `status` / `statusClass` / `thinkText` | `ref<string>` | 状态条文本、样式类（`''` / `'hf-ok'` / `'hf-error'`）、AI 思考原文；三者整体传给 `PreviewSection` |
-| `meta` | `computed` | 项目状态条数据源，见 2.1（**只出数据**：`{ hasH, sceneN, subCount, matN, matText }`） |
+| `meta` | `computed` | 项目状态条数据源，见 2.1（**只出数据**：`{ hasH, sceneN, missVisual, subCount, matN, matText }`；`sceneN` 数**画面分镜非空**的场景、`missVisual` = 有旁白但一场都没填画面分镜） |
 | `usageHint` | `computed<string>` | 标题右侧「用法」`?` 气泡的正文，定义在 `meta` **之后**：`meta.value.hasH` 为真 → 「填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份。」；为假 → 「在「项目素材」里选好素材（可多张图片 / 多个视频，勾选决定这次用哪些），再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定。」——两段逐字来自原先 `.proj-meta` 的第 4 格（只补了句号） |
 | `previewRef` | `ref<{ reload: () => void } \| null>` | 预览子组件引用；**对外契约只有 `reload()`** |
 | `agentRunning` | `let agentRunning = false` | **模块作用域普通变量**（非 ref），生成/修改并发互斥标志 |
@@ -355,7 +360,7 @@ defineExpose({ reload: syncPreview });
 
 1. `agentRunning` 为真 → `toast('上一个请求还在处理中，请稍候')` 并返回（重复提交防护）。
 2. `rendering` 为真 → `toast('正在渲染视频，请等它结束再提交需求')` 并返回；`prompt.trim()` 为空 → `toast('请先填写需求描述（上方提示词输入框）')` 并返回。
-3. 置 `agentRunning = true`，再按 `meta.value.sceneN` 写初始状态文案：有场景为「将附带当前项目内容脚本（N 个场景），已提交给 Agent，处理中...」，无场景为「当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...」，并清空 `statusClass`。
+3. 置 `agentRunning = true`，再按 `meta.value.sceneN` 与 `meta.value.missVisual` 写初始状态文案（**三态**）：有场景（`sceneN` 为真）→「将附带当前项目内容脚本（N 个场景），已提交给 Agent，处理中...」（N 即画面分镜非空的场景数）；`missVisual`（有旁白但一场都没填画面分镜，而画面才是附带门槛）→「当前项目的内容脚本都缺「画面分镜」，附带不到提示词里，将仅按需求描述生成。已提交给 Agent，处理中...」；其余 →「当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...」。最后清空 `statusClass`。
 4. 组装本次生成的素材载荷（源码注释：字幕 + 素材库里**勾选**的图片/视频，顺序 = 列表顺序；**音轨不在其中**，主进程在 HTML 落盘后按 `project.audioFile` 注入 `<audio id="myv-bgm">`）：
 
 ```js

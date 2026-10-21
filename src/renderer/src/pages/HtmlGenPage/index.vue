@@ -15,7 +15,7 @@
       <!-- 项目状态（原 renderMeta 的 #hg-meta）：只放「这个项目现在有什么」这类数据，说明类文案一律不进这里 -->
       <div class="proj-meta">
         <div class="proj-stat" :class="{ on: meta.hasH }"><b>HTML</b>{{ meta.hasH ? '已生成' : '尚未生成' }}</div>
-        <div class="proj-stat" :class="{ on: meta.sceneN > 0 }"><b>内容脚本</b>{{ meta.sceneN ? meta.sceneN + ' 个场景（生成时自动附带）' : '无（可先到「内容脚本」页编写）' }}</div>
+        <div class="proj-stat" :class="{ on: meta.sceneN > 0 }"><b>内容脚本</b>{{ meta.sceneN ? meta.sceneN + ' 个场景（生成时自动附带）' : (meta.missVisual ? '有旁白但都没填「画面分镜」' : '无（可先到「内容脚本」页编写）') }}</div>
         <div class="proj-stat" :class="{ on: meta.matN > 0 || meta.subCount > 0 }"><b>素材</b>{{ meta.matText }}</div>
       </div>
       <!-- 生成前提（字幕 + 画布）并成一行：这两块原先各有一行小标题，两个控件挤一行后「哪个标题管哪个控件」
@@ -40,7 +40,8 @@
         </div>
       </div>
       <!-- 全局视觉风格：**项目属性**（存 project.json 的 content.style），与上面的「画布」同属生成前的整片级前提，
-           所以编辑入口放在生成这一侧。它只进 HTML 生成提示词（projects.ts 的 buildContentBlock 写成「全局视觉风格：…」），
+           所以编辑入口放在生成这一侧。它只进 HTML 生成提示词（projects.ts 的 buildStyleBlock 写成
+           「【全局视觉风格】…」一块，无条件注入，与有没有内容脚本无关），
            配音与字幕只读场景的旁白 / 时长提示、不读这个字段。 -->
       <div class="hgen-block">
         <div class="panel-title-sm">全局视觉风格（整片视觉基调）</div>
@@ -209,7 +210,7 @@ async function onCanvasChange(): Promise<void> {
 }
 
 // ===== 全局视觉风格（项目属性 content.style）=====
-// 只影响 HTML 生成：主进程 buildContentBlock() 把它写成提示词里的「全局视觉风格：…」一行。
+// 只影响 HTML 生成：主进程 buildStyleBlock() 把它写成提示词里的【全局视觉风格】块（无条件注入）。
 // 配音（SynthSection「载入脚本旁白」）与字幕（「由脚本旁白生成」）只读场景的旁白 / 时长提示，不读它，
 // 所以这个输入框放在生成侧（与「画布」同级），不再放「内容脚本」页。
 const styleText = ref('');
@@ -240,9 +241,15 @@ const promptPlaceholder = computed(() => (hasHtml.value
 const meta = computed(() => {
   const p = appState.project;
   const c = (p && p.content) || { scenes: [] };
-  const sceneN = Array.isArray(c.scenes)
-    ? c.scenes.filter((s) => s && typeof s.narration === 'string' && s.narration.trim()).length
-    : 0;
+  // 有内容的场景（旁白或画面分镜非空）：「两个字段都空」的空壳不算——loadScenes 会给空项目补一个空场景。
+  const filled = (Array.isArray(c.scenes) ? c.scenes : [])
+    .filter((s) => s && (String(s.narration || '').trim() || String(s.visual || '').trim()));
+  // 场景数口径与主进程 buildContentBlock 一致：**画面分镜非空**才算一场（旁白可以为空 = 静音段）。
+  // 早先只数旁白非空，静音段被漏掉，这个格子写的「N 个场景（生成时自动附带）」就与实际附带的对不上。
+  const sceneN = filled.filter((s) => String(s.visual || '').trim()).length;
+  // 「写了旁白、但一场都没填画面分镜」是真会发生的情形（画面才是附带门槛）：这时报「无内容脚本」会
+  // 让人以为自己的脚本白写了，得单独说清楚缺什么。
+  const missVisual = filled.length > 0 && sceneN === 0;
   const mats = (p && p.materials) || [];
   const images = mats.filter((m) => m.kind === 'image').length;
   const videos = mats.filter((m) => m.kind === 'video').length;
@@ -255,6 +262,7 @@ const meta = computed(() => {
   return {
     hasH: hasHtml.value,
     sceneN,
+    missVisual,
     subCount,
     matN: mats.length,
     matText: parts.length ? parts.join(' · ') : '无素材（可先到「字幕生成」页添加字幕，或在上方「项目素材」里添加图片 / 视频）'
@@ -278,10 +286,14 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
   if (!p) { toast('请先填写需求描述（上方提示词输入框）'); return; }
   agentRunning = true;
   const sceneN = meta.value.sceneN;
-  // 方案B：生成/修改前提示将附带当前项目内容脚本（脚本为 HTML 的整体内容源）
+  // 方案B：生成/修改前提示将附带当前项目内容脚本（脚本为 HTML 的整体内容源）。
+  // 附带门槛是「画面分镜非空」，所以「有旁白但都没填画面」要单独说一句，否则会显示成"无内容脚本"，
+  // 让人以为自己的脚本白写了（这正是用户最初以为「AI 生成跟自己脚本无关」的观感来源之一）。
   status.value = sceneN
     ? '将附带当前项目内容脚本（' + sceneN + ' 个场景），已提交给 Agent，处理中...'
-    : '当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...';
+    : (meta.value.missVisual
+      ? '当前项目的内容脚本都缺「画面分镜」，附带不到提示词里，将仅按需求描述生成。已提交给 Agent，处理中...'
+      : '当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...');
   statusClass.value = '';
   // 本次生成/修改所选素材：字幕 + 素材库里**勾选**的图片/视频（顺序 = 列表顺序，提示词按此顺序列路径）。
   // 音轨不在其中：主进程在 HTML 落盘后按 project.audioFile 注入 <audio id="myv-bgm">。

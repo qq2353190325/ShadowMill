@@ -1,5 +1,6 @@
 // pages/SubtitlePage/helpers.ts —— 字幕页纯函数（原 JS 版 subtitle 模块 index.js 的工具段移植）
 // fmtTime / fmtTimeMs 已合并至 utils/time.ts（与 TextTtsPage 的 align 卡共用）。
+import { estimateSubtitleDur } from '@shared/constants'
 import { fmtTimeMs } from '@renderer/utils/time'
 
 export interface SubtitleItem {
@@ -8,11 +9,10 @@ export interface SubtitleItem {
   text: string
 }
 
-// 无时间戳行的估时规则（与主进程 parseSubtitle 保持一致：max(2.4, 1.6 + 字数 * 0.15)）
-export function estDur(text: string): number {
-  const t = String(text || '');
-  return Math.max(2.4, 1.6 + t.length * 0.15);
-}
+// 无时间戳行的估时规则：**唯一真源在 @shared/constants 的 estimateSubtitleDur()**
+// （主进程 parseSubtitle 也用同一份，别在这里另写一个系数）。
+// 这里保留 estDur 这个名字只为不改动页面内既有调用点。
+export const estDur = estimateSubtitleDur
 
 // 时间输入解析：支持 分:秒 / 分:秒.毫秒 / 纯秒数；失败返回 null
 export function parseTime(str: string): number | null {

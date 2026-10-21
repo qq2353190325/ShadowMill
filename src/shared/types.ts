@@ -563,7 +563,9 @@ export interface ContentScript {
   scenes: Scene[]
 }
 
-// userData/projects/<项目名>/project.json 的完整结构
+// 项目的**完整视图**（renderer 侧与主进程内部使用的形状）。
+// 注意：正文（subtitle / content）**不在 project.json 里**——它们分别是项目目录下的 subtitle.txt 与
+// content.json；project:load 由主进程把三者拼成这个结构，渲染层契约因此不变。
 export interface Project {
   name: string
   title: string
@@ -585,6 +587,15 @@ export interface Project {
   canvas?: RenderCanvas
   createdAt: string
   updatedAt?: string
+}
+
+// 磁盘上 project.json 的实际形状：**只有索引**，没有 subtitle / content 正文。
+// 正文位置：字幕 → subtitle.txt，内容脚本 → content.json（见 main/projects.ts 顶部说明）。
+// subtitle / content 两个可选字段只作为**老项目的内联旧格式**存在：读取时当回退来源，
+// writeProject() 写回时一律剥掉，所以它们不会在新数据里再出现。
+export type ProjectIndex = Omit<Project, 'subtitle' | 'content'> & {
+  subtitle?: string
+  content?: ContentScript
 }
 
 // ===== 项目素材（HTML 生成用的图片 / 视频）=====
@@ -731,6 +742,54 @@ export interface ProjectHtmlResult {
   message?: string
 }
 
+// ===== 内容脚本 Agent（script:generate）=====
+// 输入 = 「要写什么」+ 当前脚本（上下文由渲染层给，主进程不读项目文件）。
+// 输出 = 结构化场景数组；落盘仍走 project:save-content（模型永远不写文件）。
+export interface ScriptGeneratePayload {
+  name: string
+  // 本轮要求：空脚本时是主题，非空时是修改指令
+  request: string
+  // 当前编辑器里的场景（空数组 = 从零写）
+  scenes: Scene[]
+  // 目标场景数 / 目标总时长（秒）：都可空，空则由模型决定
+  sceneCount?: number
+  targetSeconds?: number
+}
+// 失败分支带上模型原文（raw）——解析失败时界面要把原文摆给用户，不能静默吞掉
+export type ScriptGenerateReply =
+  | { ok: true; scenes: Scene[]; totalChars: number; message?: string }
+  | { ok: false; message: string; raw?: string; needConfig?: ConfigTarget; title?: string }
+
+// ===== 内容脚本对话记录（按项目持久化）=====
+// 磁盘布局：projects/<项目名>/chat/index.json（只有索引）+ chat/versions/<versionId>.json（每版脚本副本）。
+// 索引里**不存 scenes**：展开 / 应用某一版时才按 versionId 去读那个副本（懒加载）。
+// 不存模型思考与原文；与 project.json / content.json 都无关。
+export interface ScriptChatRoundMeta {
+  id: string
+  // 用户原话
+  request: string
+  // 该轮脚本副本的 id（对应 chat/versions/<versionId>.json）
+  versionId: string
+  totalChars: number
+  sceneCount: number
+  ts: number
+}
+export interface ScriptChatIndex {
+  rounds: ScriptChatRoundMeta[]
+  // 当前已应用到编辑器的那一版（没有则为空串）
+  activeVersionId: string
+}
+// script:read-version 的返回：某一版的完整场景
+export interface ScriptVersionResult {
+  scenes: Scene[]
+}
+// script:append-round 的载荷：用户这条要求 + 本轮产出的场景（主进程负责写副本并更新索引）
+export interface ScriptAppendRoundPayload {
+  name: string
+  round: { id: string; request: string; totalChars: number; ts: number }
+  scenes: Scene[]
+}
+
 // ============================================================
 // ⑦ 预览 / HyperFrames 转视频（video.ts）
 // ============================================================
@@ -749,17 +808,26 @@ export type VideoRenderResult =
   | { ok: false; message: string; compatible?: boolean; needPacks?: RuntimePackName[] }
 
 // ============================================================
-// ⑧ 进度推送（4 路 main → renderer，均为单订阅语义）
+// ⑧ 进度推送（5 路 main → renderer，均为单订阅语义）
 // ============================================================
 // project:html-progress —— HTML 生成/修改的五阶段（projects.ts 额外补 text 文案字段）
-export type HtmlAgentStage = 'connecting' | 'thinking' | 'writing' | 'retry' | 'done'
-export interface HtmlAgentProgress {
-  stage: HtmlAgentStage
+// 两个 Agent（HTML / 内容脚本）共用同一套五阶段进度：connecting / thinking / writing / retry / done
+// （`main/agent/chat.ts` 统一产出，`HtmlAgentStage` / `HtmlAgentProgress` 保留为旧名别名，旧引用零改动）
+export type AgentStage = 'connecting' | 'thinking' | 'writing' | 'retry' | 'done'
+export interface AgentProgressPayload {
+  stage: AgentStage
   thinkChars: number
   contentChars: number
   thinkText: string
 }
-export interface HtmlProgressPayload extends HtmlAgentProgress {
+export type HtmlAgentStage = AgentStage
+export type HtmlAgentProgress = AgentProgressPayload
+// project:html-progress —— HTML 生成/修改（projects.ts 额外补 text 文案字段）
+export interface HtmlProgressPayload extends AgentProgressPayload {
+  text: string
+}
+// script:progress —— 内容脚本生成/修改（main/agent/script.ts 额外补 text 文案字段）
+export interface ScriptProgressPayload extends AgentProgressPayload {
   text: string
 }
 
@@ -795,7 +863,7 @@ export interface VideoProgressPayload {
 // 用法：preload/index.ts 用 PreloadApi['<命名空间>'] 标注各 contextBridge 对象（实现被契约校验），
 //      preload/index.d.ts 用 `interface Window extends PreloadApi` 暴露给渲染层（消费方拿到同一签名）。
 // 因此「preload 实现」与「渲染层看到的 window.*」不会再各自漂移：改这里两端同时生效。
-// 命名空间与 IPC 频道的对应关系见 src/shared/ipc.ts（9 个命名空间 ↔ 8 组频道常量）。
+// 命名空间与 IPC 频道的对应关系见 src/shared/ipc.ts（12 个命名空间 ↔ 11 组频道常量）。
 export interface PreloadApi {
   electronAPI: {
     platform: string
@@ -936,5 +1004,21 @@ export interface PreloadApi {
     // 成片画布方向（项目属性，不是渲染档位）：非法值由主进程忽略
     setCanvas(name: string, canvas: RenderCanvas): Promise<IpcResult<ProjectSaveResult>>
     onHtmlProgress(callback: (data: HtmlProgressPayload) => void): void
+  }
+  // 内容脚本 Agent（main/agent/script.ts）：对话式生成/修改场景脚本。
+  // generate 只做「模型调用 + 解析」，不写项目文件；落盘走 projectTools.saveContent。
+  // chat 系列管对话记录（projects/<名>/chat/ 下的索引与版本副本），与 content.json 无关。
+  scriptTools: {
+    generate(payload: ScriptGeneratePayload): Promise<ScriptGenerateReply>
+    loadChat(name: string): Promise<IpcResult<ScriptChatIndex>>
+    // 追加一轮：写 chat/versions/<versionId>.json + 更新索引，并把 activeVersionId 指向它
+    appendRound(payload: ScriptAppendRoundPayload): Promise<IpcResult<{ versionId: string }>>
+    // 读某一版的场景（展开预览用，无副作用）
+    readVersion(name: string, versionId: string): Promise<IpcResult<ScriptVersionResult>>
+    // 把某一版设为「当前应用」（应用旧版时调用）
+    setActiveVersion(name: string, versionId: string): Promise<IpcResult>
+    // 清空：删索引与全部版本副本（不动 content.json）
+    clearChat(name: string): Promise<IpcResult>
+    onProgress(callback: (data: ScriptProgressPayload) => void): void
   }
 }

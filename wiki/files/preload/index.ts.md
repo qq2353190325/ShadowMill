@@ -1,12 +1,12 @@
 # src/preload/index.ts
 
-> 通过 contextBridge 向渲染层暴露 11 个命名空间的预加载桥接层
+> 通过 contextBridge 向渲染层暴露 **12** 个命名空间的预加载桥接层
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
-- **规模**：236 行
-- **对外导出**：本文件不产生模块导出；其作用是把 11 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、`updateTools`、`runtimeTools`、`legacyTools`
-- **类型契约**：11 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
+- **规模**：259 行
+- **对外导出**：本文件不产生模块导出；其作用是把 **12** 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、**`scriptTools`**、`updateTools`、`runtimeTools`、`legacyTools`
+- **类型契约**：12 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
 ## 1. 作用与职责
 
@@ -14,7 +14,7 @@
 
 1. 用 `contextBridge.exposeInMainWorld` 把固定命名的 API 对象挂到渲染层的 `window` 上，使渲染层（Vue 页面）无需开启 `nodeIntegration` 即可调用主进程能力。
 2. 为每个方法绑定一个来自 `IPC` 常量的频道名，`invoke` 用于请求-响应，`send` 用于单向通知。
-3. 对进度推送频道实施**单订阅语义**：模块级保存回调并仅注册一次 `ipcRenderer.on`，重复注册只替换回调，避免页面切换时监听器不断叠加 —— 实际覆盖 `project:html-progress` / `whisper:progress` / `voice:align-progress` / `update:progress` / `runtime:progress` 五路；`hfTools.onProgress`（`video:progress`）仍是直接转发的 `ipcRenderer.on`，没有单订阅包装（详见 3.2）。
+3. 对进度推送频道实施**单订阅语义**：模块级保存回调并仅注册一次 `ipcRenderer.on`，重复注册只替换回调，避免页面切换时监听器不断叠加 —— 有单订阅标志的是 **6 路**：`project:html-progress` / **`script:progress`** / `whisper:progress` / `voice:align-progress` / `update:progress` / `runtime:progress`；`hfTools.onProgress`（`video:progress`）仍是直接转发的 `ipcRenderer.on`，没有单订阅包装（详见 3.2）。**整层因此是 7 路进度订阅**——源文件头注释的「6 个进度推送通道」指的是有单订阅标志的那 6 路。
 
 由于 preload 运行在 sandbox 环境且全项目无 `"type":"module"`，本文件必须被编译为 **CJS**；`import` 由 electron-vite 打包内联，运行时仅依赖 `require('electron')`。
 
@@ -24,7 +24,7 @@
 
 ### 2.0 类型标注方式（`PreloadApi['<命名空间>']`）
 
-11 个对象都写成「契约标注 + 字面量实现」的形式：
+**12** 个对象都写成「契约标注 + 字面量实现」的形式：
 
 ```ts
 import type {
@@ -35,13 +35,14 @@ import type {
   RenderOverride,
   RuntimePackName,
   RuntimeProgressPayload,
+  ScriptProgressPayload,
   UpdateProgressPayload,
   VideoRenderPayload,
   WhisperProgressPayload
 } from '../shared/types'
 ```
 
-（以上为 `src/preload/index.ts` 第 10–21 行的逐字内容，**共 10 个类型**——本次新增 `RenderCanvas` 与 `VideoRenderPayload`；下面两行是示意——真实实现里每个命名空间都写成「契约标注 + 字面量对象」再 `contextBridge.exposeInMainWorld`。）
+（以上为 `src/preload/index.ts` 第 10–22 行的逐字内容，**`PreloadApi` + 10 个类型**；本轮新增的是 `ScriptProgressPayload`。）
 
 ```ts
 const hfTools: PreloadApi['hfTools'] = { /* 方法实现 */ };
@@ -49,7 +50,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 ```
 
 - `PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节，是「preload 实现 ↔ 渲染层消费」的唯一真源；方法名拼错、参数个数不符、返回类型不匹配都会在 `tsconfig.node.json` 阶段直接编译失败。
-- 进度回调的模块级状态变量也用共享层的载荷类型标注：`_htmlProgressCb: ((data: HtmlProgressPayload) => void) | null`、`_whisperProgressCb: ((data: WhisperProgressPayload) => void) | null`、`_alignProgressCb: ((data: AlignProgressPayload) => void) | null`、`_updateProgressCb: ((data: UpdateProgressPayload) => void) | null`、`_runtimeProgressCb: ((data: RuntimeProgressPayload) => void) | null`（`hfTools.onProgress` 仍是就地构造的 `{ text: string }`）。
+- 进度回调的模块级状态变量也用共享层的载荷类型标注：`_htmlProgressCb: ((data: HtmlProgressPayload) => void) | null`、**`_scriptProgressCb: ((data: ScriptProgressPayload) => void) | null`**、`_whisperProgressCb`、`_alignProgressCb`、`_updateProgressCb`、`_runtimeProgressCb`（`hfTools.onProgress` 仍是就地构造的 `{ text: string }`）。
 - 本文件不再从 `../shared/types` 引入 `AppSettings` / `CustomModelConfig` / `VoiceProfile` / `VoiceTTSConfig` 等业务结构：这些类型已由 `PreloadApi` 的成员签名间接表达。
 
 ### 2.1 非方法成员（electronAPI）
@@ -135,6 +136,13 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `projectTools` | `setRender` | `project:set-render` | `{ name, render }`；`render` 传 `null` 清除项目级档位覆盖 |
 | `projectTools` | **`setCanvas`** | **`project:set-canvas`** | **成片画布方向（项目属性，不是渲染档位）**。签名 `setCanvas(name: string, canvas: RenderCanvas)`，实现 `ipcRenderer.invoke(IPC.Project.SetCanvas, { name, canvas })`；白名单校验在主进程（`RENDER_CANVASES`），非法值由主进程忽略并回 `画布取值非法` |
 | `projectTools` | `onHtmlProgress` | `project:html-progress` | HTML 生成/修改进度订阅（单订阅） |
+| **`scriptTools`** | **`generate`** | **`script:generate`** | 内容脚本 Agent。实现 `generate: (payload) => ipcRenderer.invoke(IPC.Script.Generate, payload)`——载荷原样透传（`ScriptGeneratePayload`：`name` / `request` / `scenes` / `sceneCount?` / `targetSeconds?`），返回 `Promise<ScriptGenerateReply>`（成功 `{ ok:true, scenes, totalChars }` / 失败 `{ ok:false, message, raw?, needConfig?, title? }`）。**只造文本**：场景落盘由渲染层的自动保存走 `projectTools.saveContent` |
+| **`scriptTools`** | **`loadChat`** | **`script:load-chat`** | **对话记录：读索引**。实现 `loadChat: (name: string) => ipcRenderer.invoke(IPC.Script.LoadChat, { name })`，返回 `Promise<IpcResult<ScriptChatIndex>>`（`{ ok: true, rounds, activeVersionId }`，**不含 scenes**）。索引不存在 / 损坏、以及「版本副本已不存在」的条目都被主进程剔除 |
+| **`scriptTools`** | **`appendRound`** | **`script:append-round`** | **对话记录：追加一版**。实现 `appendRound: (payload) => ipcRenderer.invoke(IPC.Script.AppendRound, payload)`（载荷原样透传 `ScriptAppendRoundPayload`：`{ name, round, scenes }`），返回 `Promise<IpcResult<{ versionId: string }>>`；**主进程写 `chat/versions/<id>.json` + 更新索引并把 `activeVersionId` 指向新版本**，preload 不拼路径、不裁剪 |
+| **`scriptTools`** | **`readVersion`** | **`script:read-version`** | **对话记录：读某一版副本**。实现 `readVersion: (name: string, versionId: string) => ipcRenderer.invoke(IPC.Script.ReadVersion, { name, versionId })`，返回 `Promise<IpcResult<ScriptVersionResult>>`（`{ ok: true, scenes }`）；**只读、无副作用**（展开预览 / 应用前取内容） |
+| **`scriptTools`** | **`setActiveVersion`** | **`script:set-active-version`** | **对话记录：应用哪一版**。实现 `setActiveVersion: (name: string, versionId: string) => ipcRenderer.invoke(IPC.Script.SetActiveVersion, { name, versionId })`，返回 `Promise<IpcResult>`；只改索引的 `activeVersionId`（**不写 `content.json`**，内容落盘仍走 `projectTools.saveContent`） |
+| **`scriptTools`** | **`clearChat`** | **`script:clear-chat`** | **对话记录：清空**。实现 `clearChat: (name: string) => ipcRenderer.invoke(IPC.Script.ClearChat, { name })`，返回 `Promise<IpcResult>`；主进程删掉整个 `chat/` 目录（索引 + 全部版本副本），不动编辑器里的场景 |
+| **`scriptTools`** | **`onProgress`** | **`script:progress`** | 内容脚本生成/修改进度订阅（**单订阅**；`_scriptProgressCb` / `_scriptProgressBound`）。载荷 `ScriptProgressPayload` = 五阶段 + `thinkChars` / `contentChars` / `thinkText` + 中文 `text` 文案 |
 | `updateTools` | `version` | `update:version` | **同步**返回当前版本号字符串（`sendSync`），供设置页首屏显示 |
 | `updateTools` | `check` | `update:check` | 检查更新，返回 `{ ok: true, state: 'none' \| 'available' \| 'skipped', version, currentVersion, message, detail? }`（失败分支为 `{ ok: false, message, detail? }`） |
 | `updateTools` | `download` | `update:download` | 下载安装包（`autoDownload = false`，仅用户触发）；失败分支带 `message` + `detail` |
@@ -185,16 +193,19 @@ saveMaterials: (name: string, materials) => ipcRenderer.invoke(IPC.Project.SaveM
 | 同步取值 | `ipcRenderer.sendSync(channel)` | `update:version`（全工程唯一的同步频道，只回版本号字符串） |
 | 主进程推送 | `ipcRenderer.on(channel, handler)` | `window:maximized-change`、`video:progress`、`update:progress`、`runtime:progress` |
 
-### 3.2 6 个进度通道与单订阅语义
+### 3.2 7 路进度通道与单订阅语义
 
 | 通道 | 订阅方法 | 相关模块级状态 |
 | --- | --- | --- |
 | `video:progress` | `hfTools.onProgress` | 无状态标志（直接 `ipcRenderer.on` 注册） |
 | `project:html-progress` | `projectTools.onHtmlProgress` | `_htmlProgressCb`、`_htmlProgressBound` |
+| **`script:progress`** | **`scriptTools.onProgress`** | **`_scriptProgressCb`、`_scriptProgressBound`** |
 | `whisper:progress` | `whisperTools.onProgress` | `_whisperProgressCb`、`_whisperProgressBound` |
 | `voice:align-progress` | `voiceTools.onAlignProgress` | `_alignProgressCb`、`_alignProgressBound` |
 | `update:progress` | `updateTools.onProgress` | `_updateProgressCb`、`_updateProgressBound` |
 | `runtime:progress` | `runtimeTools.onProgress` | `_runtimeProgressCb`、`_runtimeProgressBound` |
+
+> 计数口径：**表里 7 行 = 整层 7 路进度通道**；其中 6 行有模块级单订阅标志（`video:progress` 那行没有），这正是源文件头注释写「6 个进度推送通道」的原因。写新文档 / 加新通道时按 7 路核。
 
 单订阅的实现模式（以 HTML 进度为例）：
 
@@ -216,7 +227,7 @@ saveMaterials: (name: string, materials) => ipcRenderer.invoke(IPC.Project.SaveM
 | --- | --- | --- |
 | 依赖 | `electron` | 仅使用 `contextBridge` 与 `ipcRenderer` |
 | 依赖 | `../shared/ipc` | 引入 `IPC` 常量对象，所有频道名均取自此处，不写字面量 |
-| 依赖（仅类型） | `../shared/types` | `PreloadApi`（11 个对象的契约类型）、`AlignProgressPayload`、`HtmlProgressPayload`、**`RenderCanvas`**、`RenderOverride`、`RuntimeProgressPayload`、`UpdateProgressPayload`、**`VideoRenderPayload`**、`WhisperProgressPayload`（进度回调载荷） |
+| 依赖（仅类型） | `../shared/types` | `PreloadApi`（**12** 个对象的契约类型）、`AlignProgressPayload`、`HtmlProgressPayload`、**`RenderCanvas`**、`RenderOverride`、`RuntimePackName`、`RuntimeProgressPayload`、**`ScriptProgressPayload`（本轮新增）**、`UpdateProgressPayload`、**`VideoRenderPayload`**、`WhisperProgressPayload`（进度回调载荷） |
 | 被构建使用 | `electron.vite.config.ts` → `preload` 段 | 打包为 out/preload 产物，由主进程 `webPreferences.preload` 加载 |
 | 被消费 | 渲染层全部页面 | 契约由 `src/shared/types.ts` ⑨ 节的 `PreloadApi` 定义、经 `src/preload/index.d.ts` 挂到 `window`，`window.*` 调用遍布 `src/renderer/src/pages/`、`src/renderer/src/composables/`、`src/renderer/src/App.vue` |
 | 对端实现 | `src/main/*.ts` | `ipcMain.handle` / `ipcMain.on` 的注册方，频道名与本文件逐一对应（素材三件套在 `src/main/projects.ts` 的 `register()` 里） |
@@ -224,11 +235,12 @@ saveMaterials: (name: string, materials) => ipcRenderer.invoke(IPC.Project.SaveM
 ## 5. 注意事项与实现要点
 
 - **频道名不得硬编码**：本文件所有频道都通过 `IPC.Xxx.Yyy` 取用，禁止改成字符串字面量，否则与 `src/main/*.ts` 的注册方脱钩。
-- **方法名与参数顺序是对外契约**：唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi` —— 本文件的 11 个对象都以 `PreloadApi['<命名空间>']` 标注（实现侧被校验），渲染层经 `index.d.ts` 的 `interface Window extends PreloadApi {}` 拿到同一份签名；改契约请改共享层，不要在任一侧另行声明。
+- **方法名与参数顺序是对外契约**：唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi` —— 本文件的 **12** 个对象都以 `PreloadApi['<命名空间>']` 标注（实现侧被校验），渲染层经 `index.d.ts` 的 `interface Window extends PreloadApi {}` 拿到同一份签名；改契约请改共享层，不要在任一侧另行声明。
 - **`send` 与 `invoke` 不可混用**：`windowControls` 的三个窗口操作和 `voiceTools.cancelAlign` 是 `send`（无返回值），`updateTools.version` 是 `sendSync`（同步有返回值，主进程用 `ipcMain.on` + `event.returnValue`），其余基本是 `invoke`（含 `updateTools.openLog` 与 `updateTools.changelog`）。
 - **payload 透传**：`whisperTools.addModel/updateModel/removeModel/transcribe` 与 `voiceTools.synthAligned` 原样透传对象载荷，不在 preload 做字段校验，字段合法性由主进程负责；`voiceTools.synth` / `create` 则把位置参数组装成共享层定义的载荷对象后 `invoke`。
 - **`generateHtml` / `modifyHtml` 的对象展开**：使用 `{ name, prompt, ...(materials || {}) }`，因此 `materials` 的键会与 `name` / `prompt` 平铺在同一层，`materials` 中不要出现同名键。`materials` 现为 `ProjectHtmlMaterials`（`subtitleProject` / `materialIds`），`audioPath` 与 `videoPath` 都已删除；对应的 `ProjectAgentPayload` 因此也不再携带音频选择。
 - **素材三件套的载荷必须是普通对象 / 数组**：`invoke` 的参数要过**结构化克隆**，Vue 响应式 `Proxy` 会直接抛 `DataCloneError`（主进程 handler 根本不会执行）。因此 `HtmlGenPage/MaterialsSection.vue` 在调 `saveMaterials` 前用 `plainList()` 把 `appState.project.materials` 的元素铺平成普通对象；`addMaterials` 传的是 `pickMedia` 返回的普通字符串数组。**新增写素材的代码不要直接把 reactive 列表传进来**。
-- **单订阅的副作用**：`onHtmlProgress` / `whisperTools.onProgress` / `onAlignProgress` / `updateTools.onProgress` / `runtimeTools.onProgress` 均无法"注销"回调；页面卸载后旧回调仍被引用，若回调里访问已销毁的组件状态需自行容错。
+- **单订阅的副作用**：`onHtmlProgress` / **`scriptTools.onProgress`** / `whisperTools.onProgress` / `onAlignProgress` / `updateTools.onProgress` / `runtimeTools.onProgress` 均无法"注销"回调；页面卸载后旧回调仍被引用，若回调里访问已销毁的组件状态需自行容错（`ContentPage/AiChatPanel.vue` 的做法是回调内先判 `busy`，非生成态直接 return）。
+- **`scriptTools` 是第 12 个命名空间、现有 7 个方法**：`generate` 直接把渲染层给的 `payload` 原样 `invoke`（不做字段校验，校验在 `src/main/agent/script.ts`）；`loadChat` 只组装 `{ name }`、`appendRound` 原样透传、`readVersion` / `setActiveVersion` 组装 `{ name, versionId }`、`clearChat` 组装 `{ name }`（**路径、副本命名、索引清理、100 轮上限全在主进程**，preload 不拼路径也不裁剪）；`onProgress` 是标准单订阅。它与 `projectTools.saveContent` 的关系是「前者只造文本、后者负责落盘」，**不要在 preload 里替它写文件**。
 - **`legacyTools` 是纯拉取、没有推送通道**：它只有 `status` / `resolve` 两个 `invoke` 方法，故意不提供任何 `on*` 订阅——旧数据是否存在由渲染层挂载时主动问一次（`status`），主进程不做推送、也不弹任何界面（原生 `dialog.showMessageBox` 已废弃）。`resolve` 的实现就是把 `action` 字符串直接交给 `ipcRenderer.invoke(IPC.Legacy.Resolve, action)`，不在 preload 侧包成对象。
 - **`process` 可用性**：preload 在 sandbox 下仍可读取 `process.platform` 与 `process.versions`，但不可假设 `process.env`、文件系统等其他 Node 能力可用。

@@ -1,5 +1,5 @@
 // src/preload/index.ts —— 预加载脚本：通过 contextBridge 向渲染进程暴露安全 API
-// 11 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/updateTools/runtimeTools/legacyTools）
+// 12 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/scriptTools/updateTools/runtimeTools/legacyTools）
 // 与 6 个进度推送通道的单订阅语义（重复注册仅替换回调，避免页面切换叠加监听）。
 // 类型契约：每个对象都以 PreloadApi['<命名空间>'] 标注（见 src/shared/types.ts ⑨ 节），
 //           渲染层拿到的 window.* 签名由 preload/index.d.ts 挂载同一份契约 —— 两处不会漂移。
@@ -15,6 +15,7 @@ import type {
   RenderOverride,
   RuntimePackName,
   RuntimeProgressPayload,
+  ScriptProgressPayload,
   UpdateProgressPayload,
   VideoRenderPayload,
   WhisperProgressPayload
@@ -173,6 +174,26 @@ const projectTools: PreloadApi['projectTools'] = {
 };
 contextBridge.exposeInMainWorld('projectTools', projectTools);
 
+// 内容脚本 Agent：对话式生成/修改场景脚本（generate 只造文本，落盘走 projectTools.saveContent）
+// 另有对话记录读写（项目目录 chat/ 下的索引与版本副本，与 content.json 无关）
+const scriptTools: PreloadApi['scriptTools'] = {
+  generate: (payload) => ipcRenderer.invoke(IPC.Script.Generate, payload),
+  loadChat: (name: string) => ipcRenderer.invoke(IPC.Script.LoadChat, { name }),
+  appendRound: (payload) => ipcRenderer.invoke(IPC.Script.AppendRound, payload),
+  readVersion: (name: string, versionId: string) => ipcRenderer.invoke(IPC.Script.ReadVersion, { name, versionId }),
+  setActiveVersion: (name: string, versionId: string) => ipcRenderer.invoke(IPC.Script.SetActiveVersion, { name, versionId }),
+  clearChat: (name: string) => ipcRenderer.invoke(IPC.Script.ClearChat, { name }),
+  // 单订阅：重复注册仅替换回调，避免页面切换叠加监听
+  onProgress: (callback) => {
+    _scriptProgressCb = callback;
+    if (!_scriptProgressBound) {
+      _scriptProgressBound = true;
+      ipcRenderer.on(IPC.Script.Progress, (_event, data) => { if (typeof _scriptProgressCb === 'function') _scriptProgressCb(data); });
+    }
+  }
+};
+contextBridge.exposeInMainWorld('scriptTools', scriptTools);
+
 // 应用自更新（electron-updater generic provider）：检查 / 下载 / 取消 / 重启安装 / 打开日志；进度经 update:progress 回推
 const updateTools: PreloadApi['updateTools'] = {
   // 同步取版本号（主进程 app.getVersion()，极快，不阻塞首屏）
@@ -226,6 +247,8 @@ contextBridge.exposeInMainWorld('legacyTools', legacyTools);
 // ===== 进度通道单订阅状态（模块级标志，避免页面切换叠加监听） =====
 let _htmlProgressCb: ((data: HtmlProgressPayload) => void) | null = null;
 let _htmlProgressBound = false;
+let _scriptProgressCb: ((data: ScriptProgressPayload) => void) | null = null;
+let _scriptProgressBound = false;
 let _whisperProgressCb: ((data: WhisperProgressPayload) => void) | null = null;
 let _whisperProgressBound = false;
 let _alignProgressCb: ((data: AlignProgressPayload) => void) | null = null;

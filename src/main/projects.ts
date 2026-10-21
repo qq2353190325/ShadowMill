@@ -1,23 +1,25 @@
 // src/main/projects.ts
 // 项目化贯通流水线：字幕 → HTML → 预览/转视频
 // 每个项目 = userData\projects\<项目名>\ 下一个目录：
-//   subtitle.txt  字幕文本
-//   index.html    由字幕生成的 HTML composition
-//   project.json  项目元数据（name/subtitle/htmlPath/videoPath/materials/title 等）
+//   subtitle.txt  字幕文本（**唯一正文**）
+//   content.json  内容脚本 { style, scenes }（**唯一正文**）
+//   index.html    由脚本/字幕生成的 HTML composition
+//   project.json  **只有索引**：name/title/subtitleCount/htmlPath/videoPath/audioFile/
+//                 materials/render/canvas/时间戳 等小字段；不含字幕与脚本正文
 //   images/       图片素材（HTML 生成用，project.json 的 materials 以相对引用登记）
 //   video/        视频素材（同上）
 // 提供：scanProjects / projectDir / projectFilePath / readProject / writeProject /
 //       ensureProject / parseSubtitle / copyAudioIntoProject（供 voice 引用）/
 //       copyMaterialIntoProject + normalizeMaterials + 全部 project:* IPC
-// 依赖：htmlAgent(chatWithCustomModel / extractHtmlFromReply) /
+// 依赖：agent(chatWithCustomModel / extractHtmlFromReply) /
 //       hfEnv(isHyperframesComposition) / runtime(确保运行环境包已解包) / settings(渲染档位白名单) / dialog / shell
 import { app, ipcMain, dialog, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
-import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './htmlAgent'
+import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './agent'
 import { configTargetOf } from '../shared/errors'
-import { CANVAS_LABELS, CANVAS_SIZES, DEFAULT_CANVAS, IMAGE_MATERIAL_EXTS, MAX_MATERIALS, RENDER_CANVASES, VIDEO_MATERIAL_EXTS } from '../shared/constants'
+import { CANVAS_LABELS, CANVAS_SIZES, DEFAULT_CANVAS, IMAGE_MATERIAL_EXTS, MAX_MATERIALS, RENDER_CANVASES, VIDEO_MATERIAL_EXTS, estimateSubtitleDur } from '../shared/constants'
 import * as hfEnv from './hfEnv'
 import * as runtime from './runtime'
 import { pickRenderOverride } from './settings'
@@ -28,6 +30,7 @@ import type {
   ProjectAddMaterialsPayload,
   ProjectAgentPayload,
   ProjectExportSrtPayload,
+  ProjectIndex,
   ProjectMaterial,
   ProjectMaterialKind,
   ProjectNamePayload,
@@ -72,7 +75,14 @@ function projectFilePath(name: string, file: string): string {
   return path.join(projectDir(name), file);
 }
 
-function readProject(name: string): Project | null {
+// ===== 读盘：索引 + 正文分开 =====
+// project.json 只存索引；字幕在 subtitle.txt、内容脚本在 content.json。
+// 老项目免迁移：文件缺失时回退到 project.json 里的内联旧字段，下次保存自然迁走（写回时剥掉内联字段）。
+function contentFilePath(name: string): string {
+  return projectFilePath(name, 'content.json');
+}
+
+function readProject(name: string): ProjectIndex | null {
   const jsonPath = path.join(projectDir(name), 'project.json');
   if (!fs.existsSync(jsonPath)) return null;
   try {
@@ -81,11 +91,50 @@ function readProject(name: string): Project | null {
     return null;
   }
 }
+
+// 字幕正文：**老项目的内联字段优先**——它才是当前界面显示的那一份。
+// 实测历史数据里两者可能不一致（某项目 subtitle.txt 只有 1.5KB、project.json 里的内联是 5.7KB），
+// 若让文件优先，老项目一升级字幕就会变短。内联字段会在下一次 writeProject 时被剥掉，之后只剩文件。
+function readSubtitle(name: string, legacy?: unknown): string {
+  if (typeof legacy === 'string' && legacy) return legacy;
+  try {
+    const p = projectFilePath(name, 'subtitle.txt');
+    if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
+  } catch (e) { /* 文件读不到就当空 */ }
+  return '';
+}
+
+// 内容脚本正文：content.json 优先；文件缺失/损坏时回退内联旧字段（都没有就是空的 { style:'', scenes:[] }）
+function readContent(name: string, legacy?: unknown): ContentScript {
+  try {
+    const p = contentFilePath(name);
+    if (fs.existsSync(p)) return normalizeContent(JSON.parse(fs.readFileSync(p, 'utf8')));
+  } catch (e) { /* 回退内联 */ }
+  return normalizeContent(legacy);
+}
+
+function writeContent(name: string, content: ContentScript): void {
+  const dir = projectDir(name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(contentFilePath(name), JSON.stringify(content, null, 2), 'utf8');
+}
+
 function writeProject(proj: Project): Project {
   const dir = projectDir(proj.name);
   fs.mkdirSync(dir, { recursive: true });
   proj.updatedAt = new Date().toISOString();
-  fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(proj, null, 2), 'utf8');
+  // 剥掉正文之前先把正文落盘：老项目的字幕 / 脚本可能只存在于 project.json 的内联字段里，
+  // 直接剥掉等于把它们删了（下一次读会回退到更旧的 subtitle.txt）。只在「文件缺失或内容不同」时写。
+  const subPath = path.join(dir, 'subtitle.txt');
+  let fileSub = '';
+  try { fileSub = fs.existsSync(subPath) ? fs.readFileSync(subPath, 'utf8') : ''; } catch (e) { fileSub = ''; }
+  if (proj.subtitle && proj.subtitle !== fileSub) fs.writeFileSync(subPath, proj.subtitle, 'utf8');
+  const hasContent = !!(proj.content && (proj.content.style || (proj.content.scenes || []).length));
+  if (hasContent && !fs.existsSync(contentFilePath(proj.name))) writeContent(proj.name, proj.content);
+  // 只写索引：正文（字幕 / 内容脚本）在各自文件里，这里剥掉——否则老项目的内联字段会一直留着，
+  // 而且 project.json 会随内容变大（它被 scanProjects 对**每个项目**解析，不能塞正文）。
+  const { subtitle, content, ...index } = proj;
+  fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(index, null, 2), 'utf8');
   return proj;
 }
 // ===== 视频成品路径：项目内相对路径 =====
@@ -102,10 +151,17 @@ function resolveVideoAbs(name: string, videoPath: string): string {
 }
 
 function ensureProject(name: string): Project {
-  const existing = readProject(name);
-  if (existing) {
-    existing.name = name;
-    return existing;
+  const index = readProject(name);
+  if (index) {
+    // 索引 + 正文（subtitle.txt / content.json 优先，缺失回退内联旧字段）= 完整 Project。
+    // 老项目里的内联 subtitle / content 只当回退来源，下一次 writeProject 就会把它们从索引里剥掉。
+    const { subtitle: legacySub, content: legacyContent, ...rest } = index;
+    return {
+      ...rest,
+      name,
+      subtitle: readSubtitle(name, legacySub),
+      content: readContent(name, legacyContent)
+    };
   }
   return {
     name,
@@ -152,10 +208,14 @@ function scanProjects(): { name: string; title: string; hasSubtitle: boolean; ha
     if (!d.isDirectory()) continue;
     const p = readProject(d.name);
     if (!p) continue;
+    // 字幕正文已不在索引里：判「有没有字幕」看 subtitleCount（老项目与 SaveSubtitle 都会写），
+    // 再兜底看内联旧字段与 subtitle.txt（内联优先的那份可能还没来得及迁移到文件）。
+    const hasSubtitle = (p.subtitleCount || 0) > 0 || !!p.subtitle
+      || fs.existsSync(projectFilePath(d.name, 'subtitle.txt'));
     list.push({
       name: p.name,
       title: p.title || '字幕动画',
-      hasSubtitle: !!p.subtitle,
+      hasSubtitle,
       hasHtml: !!(p.htmlPath && fs.existsSync(p.htmlPath)),
       hasVideo: !!resolveVideoAbs(p.name, p.videoPath),
       subtitleCount: p.subtitleCount || 0,
@@ -190,7 +250,7 @@ function parseSubtitle(text: string): SubtitleLine[] {
     if (!txt) { lineNo++; continue; }
     if (time === null) {
       time = autoT;
-      autoT += Math.max(2.4, 1.6 + txt.length * 0.15);
+      autoT += estimateSubtitleDur(txt); // 估时规则与渲染层共用（@shared/constants），别在这里另写系数
     }
     items.push({ n: lineNo, text: txt, time, end });
     lineNo++;
@@ -305,26 +365,43 @@ function buildAgentPrompt(parts: string[]): string {
 }
 
 // 由项目 content 构造「内容脚本」块（方案B：脚本为 HTML 的整体内容源）。
-// 含全局 style 与逐场景 { 旁白, 画面分镜, 时长提示 }，指示模型据此设计页面视觉与动画节奏。
-// 无 content 或 scenes 为空（含全部无旁白）时返回 ''，老项目（无内容脚本）走原 prompt 流程。
+// 含逐场景 { 旁白, 画面分镜, 时长提示 }，指示模型据此设计页面视觉与动画节奏。
+// **有效场景的判据是「画面分镜非空」**（旁白可以为空：那样的场景是静音段，成片里纯画面播放）。
+// 早先按「旁白非空」筛，等于把静音段整段从提示词里丢掉；反过来画面分镜空着的场景没什么可画，不必给模型。
+// **全局视觉风格不在这里**：本块在没有有效场景时返回空串，风格挂在里面会被一起吞掉 —— 见 buildStyleBlock()。
+// 无 content 或没有有效场景时返回 ''，老项目（无内容脚本）走原 prompt 流程。
 function buildContentBlock(content: ContentScript | undefined): string {
   const src = content || {} as ContentScript;
   const scenes = Array.isArray(src.scenes) ? src.scenes : [];
-  const valid = scenes.filter((s) => s && typeof s.narration === 'string' && s.narration.trim());
+  const valid = scenes.filter((s) => s && String(s.visual || '').trim());
   if (!valid.length) return '';
-  const style = typeof src.style === 'string' && src.style.trim() ? src.style.trim() : '';
-  const parts = ['【内容脚本 · 本项目的整体内容源，请据此设计页面视觉风格与动画节奏】'];
-  parts.push(style ? '全局视觉风格：' + style : '全局视觉风格：（未指定，可自行拟定）');
+  const parts = ['【内容脚本 · 本项目的整体内容源，请据此设计页面视觉风格与动画节奏；旁白写「（无，本场静音）」的场景没有配音，按画面分镜照常呈现即可】'];
   valid.forEach((s, i) => {
     const dur = (s.durHint !== undefined && s.durHint !== null && String(s.durHint).trim() !== '')
       ? String(s.durHint).trim() + ' 秒'
       : '未指定';
-    const visual = (typeof s.visual === 'string' && s.visual.trim()) ? s.visual.trim() : '（未指定）';
+    const visual = String(s.visual || '').trim();
+    // 旁白可以空：那样的场景是静音段（没有配音、成片里纯画面），明确写出来免得模型误以为漏填而自行补旁白
+    const narration = String(s.narration || '').trim();
     parts.push('场景 ' + (i + 1) + '（时长提示：' + dur + '）：');
-    parts.push('- 旁白：' + s.narration.trim());
+    parts.push('- 旁白：' + (narration || '（无，本场静音）'));
     parts.push('- 画面分镜：' + visual);
   });
   return '\n' + parts.join('\n');
+}
+
+// 「全局视觉风格」块（生成/修改共用，**无条件注入**）。
+// 数据来源：用户在「HTML生成」页填的「全局视觉风格」输入框（存 project.json 的 content.style）。
+// 为什么不并进 buildContentBlock：那块在没有「画面分镜非空」的场景时直接 return ''，
+// 没写内容脚本的项目，用户在输入框里填的风格就一个字都进不了提示词（填了看着没反应）。
+// 风格是整片级前提，与有没有场景无关，所以单独成块、无条件返回。
+// 与之配套：HTML 系统提示词里不写任何风格（html.ts），本块是模型唯一的风格来源；
+// 用户没填时由它说「未指定、自行拟定」，避免模型滑向固定配色。
+function buildStyleBlock(content: ContentScript | undefined): string {
+  const style = content && typeof content.style === 'string' ? content.style.trim() : '';
+  return style
+    ? '\n【全局视觉风格】本项目整片的视觉基调（用户指定，页面配色、质感与氛围以此为准）：' + style
+    : '\n【全局视觉风格】用户未指定，按需求描述与内容脚本自行拟定（不要套用固定的配色模板）。';
 }
 
 // ===== 预览播放控制脚本（注入到 index.preview.html 副本） =====
@@ -539,8 +616,9 @@ function resolveMaterials(proj: Project, payload: ProjectAgentPayload): { subtit
   const subSel = payload.subtitleProject;
   if (subSel === '__current__') subtitleText = proj.subtitle || '';
   else if (subSel && typeof subSel === 'string') {
+    // 别的项目的字幕同样按「内联优先、其次 subtitle.txt」取（与 ensureProject 同一口径）
     const src = readProject(subSel);
-    subtitleText = (src && src.subtitle) || '';
+    subtitleText = src ? readSubtitle(subSel, src.subtitle) : '';
   }
   // 素材：按 id 从项目素材库取（顺序 = 渲染层列表顺序）；取不到的 id 静默忽略
   const ids = Array.isArray(payload.materialIds) ? payload.materialIds : [];
@@ -603,6 +681,8 @@ function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText
     ...extra,
     prompt,
     buildContentBlock(proj.content),
+    // 风格紧跟内容脚本、**不受「有没有场景」影响**（见 buildStyleBlock 注释）
+    buildStyleBlock(proj.content),
     mats.subtitleText ? '\n【项目字幕】每行格式为 [开始-结束] 文本，时间为秒、可带小数（毫秒精度，如 17.920）：该条字幕必须在开始时间出现、在结束时间前完成淡出，严格按此窗口显示，不得挂到下一条开始；GSAP 时间轴直接用这些小数秒定位（如 tl.to(el,{...},17.920)）；仅 [开始] 无结束时间的行自行按语义安排节奏。\n' + mats.subtitleText : '',
     '\n【音轨】背景音轨由应用在渲染前自动注入（<audio id="myv-bgm">），请勿写入、修改或删除任何 <audio> 标签，也不要为音轨预留页面元素。',
     buildCanvasBlock(proj, forModify),
@@ -646,7 +726,8 @@ function register(ctx?: RegisterCtx): void {
 
   ipcMain.handle(IPC.Project.Load, (_event, name?: string) => {
     if (!name) return null;
-    const proj = readProject(name) || ensureProject(name);
+    // ensureProject 会把索引与两个正文文件拼成完整 Project —— 渲染层契约不变
+    const proj = ensureProject(name);
     // 素材列表按当前盘上数据规范化后再交给渲染层（脏数据/越权路径在这里就被清掉，界面不必再校验一遍）；
     // videoPath 一并换算成**绝对路径**（视频预览页要拿它 play、要"在文件夹中显示"）。
     return {
@@ -673,13 +754,14 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, project: proj };
   });
 
-  // 整体保存内容脚本（style + scenes）到当前项目
+  // 整体保存内容脚本（style + scenes）到当前项目：正文写 content.json，project.json 只更新时间戳
   ipcMain.handle(IPC.Project.SaveContent, (_event, payload?: ProjectSaveContentPayload) => {
     const name = payload && payload.name;
     if (!name) return { ok: false, message: '缺少项目名' };
     const content = normalizeContent(payload && payload.content);
     const proj = ensureProject(name);
     proj.content = content;
+    writeContent(name, content);
     writeProject(proj);
     return { ok: true, project: proj };
   });

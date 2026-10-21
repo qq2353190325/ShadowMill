@@ -1,19 +1,19 @@
 # src/renderer/src/pages/SubtitlePage/（页面）
 
-> 字幕条目编辑器 + whisper 转录弹窗 + 纯函数助手：估时、SRT 互转与落盘
+> 字幕条目编辑器 + whisper 转录弹窗 + 纯函数助手：估时（4 字/秒 · 占位估时）、SRT 互转与落盘
 
 - **覆盖文件**：
 
 | 文件 | 行数 | 作用 |
 |------|------|------|
-| `src/renderer/src/pages/SubtitlePage/index.vue` | 259 | 页面组件（`PageKey = 'subtitle'` 对应页）：条目增删改、双写入方式、导出与落盘 |
-| `src/renderer/src/pages/SubtitlePage/TranscribeSection.vue` | 345 | 页面子组件（弹窗，SFC）：调 whisper.cpp 本机转录并回填条目 |
-| `src/renderer/src/pages/SubtitlePage/helpers.ts` | 165 | 模块级助手（无 Vue 状态、无副作用，仅依赖 `@renderer/utils/time`）：估时 / 时间解析 / 项目文本与 SRT 互转 |
+| `src/renderer/src/pages/SubtitlePage/index.vue` | 256 | 页面组件（`PageKey = 'subtitle'` 对应页）：条目增删改、双写入方式、导出与落盘 |
+| `src/renderer/src/pages/SubtitlePage/TranscribeSection.vue` | 365 | 页面子组件（弹窗，SFC）：调 whisper.cpp 本机转录并回填条目 |
+| `src/renderer/src/pages/SubtitlePage/helpers.ts` | 165 | 模块级助手（无 Vue 状态、无副作用，仅依赖 `@shared/constants`（估时的唯一真源）与 `@renderer/utils/time`）：估时 / 时间解析 / 项目文本与 SRT 互转 |
 
 - **类型**：页面 + 子组件 + 模块级助手
 - **对外导出**：
   - `SubtitlePage`：默认导出 `<script setup>` 组件，无具名导出。
-  - `helpers.ts`：`SubtitleItem`（interface）、`estDur`、`parseTime`、`fmtTimeTrim`、`fillEnds`、`parseSubtitleText`、`serializeItems`、`plainText`、`fmtSrt`、`itemsToSrt`、`parseSrtText`。
+  - `helpers.ts`：`SubtitleItem`（interface）、`estDur`（= `@shared/constants` 的 `estimateSubtitleDur` 的别名）、`parseTime`、`fmtTimeTrim`、`fillEnds`、`parseSubtitleText`、`serializeItems`、`plainText`、`fmtSrt`、`itemsToSrt`、`parseSrtText`。
   - `TranscribeSection`：默认导出组件，`defineExpose({ open })`；props 仅 `pageCtx`（模板以 `:page-ctx` 传入）；无 `emits`，反馈全靠 `pageCtx` 回调 + `toast`。
 
 ## 1. 结构总览
@@ -28,9 +28,9 @@
 | `isTextMode` | `() => boolean` | 是否 SRT 模式 |
 | `syncTextArea` | `() => void` | SRT 模式下用 `itemsToSrt` 同步文本域 |
 | `saveToProject` | `(options?: { silent?: boolean }) => Promise<boolean>` | 落盘；子组件以 `{ silent: true }` 调用 |
-| `estDur` | `(t: string) => number` | 直接复用 helpers 的估时函数 |
+| `estDur` | `(t: string) => number` | 直接复用 helpers 的 `estDur`（即 `@shared/constants` 的 `estimateSubtitleDur`，4 字/秒占位估时） |
 
-- **helpers 复用**：`SubtitlePage/index.vue` 导入 `estDur`、`fillEnds`、`fmtTimeTrim`、`itemsToSrt`、`parseSrtText`、`parseSubtitleText`、`parseTime`、`plainText`、`serializeItems`、`type SubtitleItem`；`TranscribeSection.vue` 只导入 `estDur` 与 `type SubtitleItem`。helpers 自身不接触 `appState`、不调用任何 preload 方法，可被任意页面安全复用。
+- **helpers 复用**：`SubtitlePage/index.vue` 导入 `estDur`、`fillEnds`、`fmtTimeTrim`、`itemsToSrt`、`parseSrtText`、`parseSubtitleText`、`parseTime`、`plainText`、`serializeItems`、`type SubtitleItem`；`TranscribeSection.vue` 只导入 `estDur` 与 `type SubtitleItem`。其中 `estDur` 本身不是本页实现的公式，而是 helpers 对 `@shared/constants` 的 `estimateSubtitleDur` 的**再导出**——这两个导入方因此一行未改。页面自身另直接从 `@shared/constants` 引入 `EST_CHARS_PER_SEC`（提示行 / 按钮 `title` / toast 的语速数字都由它渲染，界面不写死数字）。helpers 自身不接触 `appState`、不调用任何 preload 方法，可被任意页面安全复用。
 
 ## 2. SubtitlePage/index.vue（页面）
 
@@ -41,7 +41,7 @@
 | 区块 | 关键元素 | 说明 |
 |------|----------|------|
 | 步骤条 | `<StepBar :page="'subtitle'" />` | 项目切换 / 步骤导航，切项目后重进当前页 |
-| 面板一「字幕编辑器」 | `.panel-title`、`.hgen-tip`、两个按钮 | 说明文案 + 「从音频生成字幕」「由脚本旁白生成」 |
+| 面板一「字幕编辑器」 | `.panel-title`、两行 `.hgen-tip`、两个按钮 | 说明文案 + 「从音频生成字幕」「由脚本旁白生成」；**按钮行下方另有一行 `.hgen-tip` 明说时间轴是估时**，原文（`<code>` / `<b>` 在文档里写作反引号 / 加粗）：「由脚本旁白生成」的时间轴是 `估时`：按 `{{ EST_CHARS_PER_SEC }} 字/秒` 推算（120 字的旁白排 30 秒），**不读配音音频**；要按真实语音对齐，请到「配音 · 字幕配音（逐句对齐）」量一次。「由脚本旁白生成」按钮的 `title` 是**绑定表达式**：`'依据内容脚本的场景旁白与时长提示生成逐条字幕，覆盖当前条目；时长是估时（' + EST_CHARS_PER_SEC + ' 字/秒），不读配音音频'` |
 | 面板二「字幕条目」 | `写入方式` 按钮组 | 「逐条编辑」`setMode(false)` / 「SRT」`setMode(true)`，`active` 类由 `textMode` 决定 |
 | 逐条列表 | `.sub-list`（`ref="listEl"`，`v-show="!textMode"`） | 空态 `.sub-empty`；每行 `.sub-row` 含序号、起始时间、`→`、结束时间、文本域、删除按钮 |
 | 每行时间输入与文本域 | `.sub-time` / `.sub-text` | 时间：`:value="fmtTimeTrim(it.start)"`、`@change="onTimeChange(i, 'start', $event)"`，结束时间非法 / 非有限值时显示空串；文本：`v-model="it.text"`、`@input="onTextInput(i)"` |
@@ -79,7 +79,7 @@
 | `copySubtitles()` | 先同步 SRT 模式 → `plainText(items)` → `window.appTools.copyText(txt)`；成功 toast「已复制 N 条字幕文本（不含时间线）」，失败置红色状态 |
 | `exportSrtFile()` | 先同步 SRT 模式 → `itemsToSrt(items)` → `window.projectTools.exportSrt(appState.currentName, srt)`；`res.ok` 时 toast「已导出：<savedPath>」，非 `canceled` 的失败弹 `message` |
 | `saveToProject(options?)` | `options.silent` 控制是否弹 toast；SRT 模式先回写条目；`serializeItems` 为空则拒绝；调 `window.projectTools.saveSubtitle(currentName, text, title.trim())` → `refreshProject()`；成功 toast 条数取 `res.project.subtitleCount` 兜底 `items.length` |
-| `fromContent()` | 读 `appState.project.content.scenes` 批量生成（见 2.4） |
+| `fromContent()` | 读 `appState.project.content.scenes` 批量生成（见 2.4）；界面侧的「时长是估时（4 字/秒）」由按钮 `title` + 按钮行下方的提示行说明（数字取自 `EST_CHARS_PER_SEC`） |
 | `openTranscribe()` | `transcribeEl.value?.open()`（打开转录弹窗） |
 
 ### 2.4 关键流程
@@ -90,7 +90,9 @@
 
 **两种写入方式互转**：① `逐条编辑 → SRT`：`itemsToSrt(items)` 写入 `srtText`。② `SRT → 逐条编辑`：`parseSrtText(srtText)` 覆盖 `items`。③ 复制 / 导出 / 保存三个出口都会先调 `applyTextMode()`，保证 SRT 文本域里的最新编辑不丢失。
 
-**由脚本旁白生成**（`fromContent`）：① 取 `appState.project.content.scenes`，非数组或为空则 toast 引导先去「内容脚本」页。② 逐场景取 `s.narration`（trim 后非空才用）。③ 时长优先取 `s.durHint`：要求非空串 / 非 `null` / 非 `undefined` 且 `Number` 有限且 > 0，命中则计入 `usedDur`；否则用 `estDur(narration)` 计入 `estimated`。④ 以 `time` 游标累加生成 `{ start: time, end: time + dur, text: narr }`，**覆盖**当前条目。⑤ SRT 模式下同步刷新 `srtText`。⑥ toast 汇报总数，并分别标注「按时长提示累计」与「按估时」的条数。
+**由脚本旁白生成**（`fromContent`）：① 取 `appState.project.content.scenes`，非数组或为空则 toast 引导先去「内容脚本」页。② 逐场景取 `s.narration`（trim 后非空才用）。③ 时长优先取 `s.durHint`：要求非空串 / 非 `null` / 非 `undefined` 且 `Number` 有限且 > 0，命中则计入 `usedDur`；否则用 `estDur(narration)` 计入 `estimated`。④ 以 `time` 游标累加生成 `{ start: time, end: time + dur, text: narr }`，**覆盖**当前条目。⑤ SRT 模式下同步刷新 `srtText`。⑥ toast 汇报总数：「已由脚本旁白生成 N 条字幕，可保存到项目」，并分别标注「（M 条按时长提示累计）」与「（N 条按 <语速> 字/秒估时）」——后者的语速由 `EST_CHARS_PER_SEC` 拼进文案，两个括注各自仅在对应条数 > 0 时出现。
+
+> 这里没有 `durHint` 的场景走的是 `estDur` 的**占位估时**（4 字/秒，`max(2.4, 1.6 + 字数 ÷ 4)`，**不读音频**）：93 字旁白约 **24.85 秒**（上一轮的旧口径 3 字/秒（已废弃）时 32.6 秒、最初 0.15 秒/字口径只有 15.55 秒，字幕根本读不完）。这件事在界面上也直说了——「字幕编辑器」卡里按钮行下方那行提示（见 2.1）写着「时间轴是 `估时`：按 `{{ EST_CHARS_PER_SEC }} 字/秒` 推算…**不读配音音频**」，按钮 `title` 与 `fromContent` 的 toast 括注同样由该常量拼出「4 字/秒」。要真实时长得走「配音」页的「字幕配音（逐句对齐）」，合成后按实测时长回写。
 
 **保存流程**：① SRT 模式先 `applyTextMode()`，再 `serializeItems`。② 文本为空：非静默时 toast「字幕内容为空，请先添加条目或生成字幕」，返回 `false`。③ 调 `window.projectTools.saveSubtitle(name, text, title)`，失败弹 `message`。④ 成功后 `refreshProject()`，toast 条数。
 
@@ -171,7 +173,7 @@
 | 导出名 | 类型 | 说明 |
 |--------|------|------|
 | `SubtitleItem` | `interface` | 条目结构：`start: number`、`end: number \| null`、`text: string` |
-| `estDur` | `(text: string) => number` | 按字数估算时长：`Math.max(2.4, 1.6 + t.length * 0.15)`，`t = String(text \|\| '')`，长度按 UTF-16 字符数（中英文同权）；与主进程 `parseSubtitle` 同公式 |
+| `estDur` | `(text: string) => number` | **`@shared/constants` 的 `estimateSubtitleDur` 的直接别名**（`export const estDur = estimateSubtitleDur`）：`max(2.4, 1.6 + 字数 ÷ 4)`，即 **4 字/秒**；字数按 UTF-16 字符数（中英文同权）。**占位估时、不读音频**；主进程 `parseSubtitle` 用的是同一个函数（唯一真源，别在此处另写系数） |
 | `parseTime` | `(str: string) => number \| null` | 解析 `分:秒` / `分:秒.毫秒` / 纯秒数，失败返回 `null` |
 | `fmtTimeTrim` | `(sec: number) => string` | 秒 → `分:秒[.去尾零毫秒]`，用于时间输入框回显 |
 | `fillEnds` | `(list: SubtitleItem[]) => SubtitleItem[]` | 原位补全缺失结束时间：取下一条起始，末条取 `start + estDur` |
@@ -184,19 +186,20 @@
 
 **逐函数要点**
 
+- `estDur`：**本文件不实现公式，只做再导出**——`export const estDur = estimateSubtitleDur`，函数体在 `src/shared/constants.ts`。保留 `estDur` 这个名字只为不改动页面内既有调用点（`index.vue` / `TranscribeSection.vue` 的 import 一行未改）：字幕页「由脚本旁白生成」、新增条目（`itemStartAfter` / `addItem` 相关）、粘贴纯文本与 SRT 解析（`parseSubtitleText` / `parseSrtText` / `fillEnds` / `itemsToSrt`）都走它。改语速只改 `@shared/constants` 的 `EST_CHARS_PER_SEC`，主进程与渲染层同时生效。
 - `parseTime`：先 trim，空串返回 `null`；匹配 `^(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?$` → `分 × 60 + 秒 + 小数`（小数按位数除以 `10^位数`，分钟 1~3 位、秒 1~2 位）；否则匹配 `^(\d+(?:\.\d+)?)$` → `parseFloat` 纯秒数；都不匹配返回 `null`（调用方据此提示格式错误并保留原值）。`fmtTimeTrim`：负数与非数字归零；取整秒 `s`、`ms = round((t - s) × 1000)`，`ms >= 1000` 进位到 `s + 1` 并返回不带小数的 `分:秒`；否则 `分:秒`，毫秒非零时追加 `'.' + String(ms).replace(/0+$/, '')`（`17.9` → `00:17.9`）。
 - `fillEnds`：遍历并**原位修改**条目，返回同一数组引用；已有有效结束时间（有限且大于 `start`）直接跳过；否则取下一行 `start`，无下一行取 `start + estDur(it.text)`；推导结果不大于 `start`（如下一行起始更早）时回落 `start + estDur(it.text)`。
 - `parseSubtitleText`：按 `/\r?\n/` 切行、trim 后过滤空行；正则 `^\[(\d{1,2}):(\d{1,2})(?:[:.](\d{1,3}))?(?:\s*-\s*(\d{1,2}):(\d{1,2})(?:[:.](\d{1,3}))?)?\]\s*(.*)$` 提取起止时间与文本，结束时间须严格大于起始才记录，否则置 `null` 交给 `fillEnds`；无时间戳行 `start = autoT`，随后 `autoT += estDur(txt)`，`autoT` 初值 `0.4`；结尾统一 `fillEnds(list)`。
 - `serializeItems` / `plainText`：都过滤空文本并把文本 `/\s+/g → ' '` 折叠后 trim；前者 `start` 缺失或非有限时只写纯文本行，否则 `'[' + fmtTimeMs(s) + (结束时间有限且大于 s ? '-' + fmtTimeMs(e) : '') + '] ' + txt`，`\n` 连接，**结束时间按真实值写入**（不是下一行起始时间）；后者仅输出文本、`\n` 连接。
 - `itemsToSrt` / `fmtSrt`：前者过滤空文本，`index + 1` 作序号（按过滤后顺序重排，故序号连续），结束时间缺失或 `<= start` 时用 `start + estDur(text)` 兜底，单块结构 `序号 \n 起 --> 止 \n 文本`、块间 `'\n\n'` 连接；后者输出 `时:分:秒,毫秒`，各段 `padStart`（2/2/2/3 位），负值归零。
 - `parseSrtText`：先把 `\r\n?` 归一为 `\n`，按 `/\n{2,}/` 分块，块内 trim 后过滤空行；首行匹配 `^\d+$` 视为序号并跳过；时间轴正则 `^(\d{1,2}):(\d{1,2}):(\d{1,2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{1,2}):(\d{1,2})[,.](\d{1,3})$`（支持 `,` 或 `.` 作毫秒分隔符），其后各行合并为一条文本（`join(' ')` 并折叠空白），结束时间非法或 `<= start` 时 `estDur` 兜底，并推进 `autoT = max(autoT, end)`；无时间轴块逐行估时（`start = autoT`、`end = start + estDur(txt)`，`autoT` 初值 `0.4`）；**结尾不调用 `fillEnds`**。
-- 常量化规则：估时公式 `max(2.4, 1.6 + 字数 × 0.15)`；纯文本起点 `autoT = 0.4`；时间小数按位数解释（`.9` 与 `.900` 均为 0.9s，三位即毫秒，与 `fmtTimeMs` 落盘对齐）。
+- 常量化规则：估时公式 `max(2.4, 1.6 + 字数 ÷ EST_CHARS_PER_SEC)`（语速 **4 字/秒**，实现只在 `@shared/constants` 的 `estimateSubtitleDur()` 一处）；纯文本起点 `autoT = 0.4`；时间小数按位数解释（`.9` 与 `.900` 均为 0.9s，三位即毫秒，与 `fmtTimeMs` 落盘对齐）。
 
 **被谁导入哪些成员**
 
 | 使用方 | 用到的导出 |
 |--------|------------|
-| `src/renderer/src/pages/SubtitlePage/index.vue` | `estDur`、`fillEnds`、`fmtTimeTrim`、`itemsToSrt`、`parseSrtText`、`parseSubtitleText`、`parseTime`、`plainText`、`serializeItems`、`type SubtitleItem` |
+| `src/renderer/src/pages/SubtitlePage/index.vue` | `estDur`、`fillEnds`、`fmtTimeTrim`、`itemsToSrt`、`parseSrtText`、`parseSubtitleText`、`parseTime`、`plainText`、`serializeItems`、`type SubtitleItem`（另从 `@shared/constants` 直接引入 `EST_CHARS_PER_SEC` 用于界面文案） |
 | `src/renderer/src/pages/SubtitlePage/TranscribeSection.vue` | `estDur`、`type SubtitleItem`（并在 `pageCtx` props 类型中声明 `estDur: (t: string) => number`） |
 
 ## 5. 依赖与协作
@@ -204,6 +207,7 @@
 | 来源 | 内容 | 使用方 |
 |------|------|--------|
 | `vue` | `computed`、`nextTick`、`onMounted`、`ref` / `computed`、`onBeforeUnmount`、`onMounted`、`ref`、`watch` | 页面 / 弹窗 |
+| `@shared/constants` | `estimateSubtitleDur`（helpers 以 `estDur` 再导出）：**估时公式唯一真源**，与主进程 `parseSubtitle` 共用同一份；`index.vue` 另直接引用 `EST_CHARS_PER_SEC`（提示行 / 按钮 `title` / toast 的语速数字） | helpers（页面 / 弹窗经 helpers 间接使用估时）；页面（界面文案） |
 | `@renderer/composables/useAppStore` | `appState`（`project` / `currentName`）、`refreshProject` | 页面；弹窗只用 `appState`（`currentName` 读项目音频与保存提示） |
 | `@renderer/composables/useToast` | `toast` | 页面、弹窗 |
 | `@renderer/utils/time` | `fmtTime`（`countTip` 总时长格式化为 `分:秒`）、`fmtTimeMs`（`serializeItems` 写毫秒精度，`fmtTime` / `fmtTimeMs` 已统一收敛到该文件） | 页面 / helpers |
@@ -228,7 +232,7 @@ helpers 不调用任何 preload 方法；弹窗不落盘字幕本身（主进程
 
 ## 6. 注意事项与实现要点
 
-- **估时公式是跨进程契约**：`estDur = max(2.4, 1.6 + 字数 × 0.15)` 必须与主进程 `parseSubtitle` 完全一致，任一侧改动都要同步，否则页内预览与实际落盘时间轴会出现时长漂移。
+- **估时规则只有一处真源**：公式 `max(2.4, 1.6 + 字数 ÷ 4)`（4 字/秒）**只写在 `@shared/constants` 的 `estimateSubtitleDur()` 里**，本页的 `estDur` 只是它的别名；主进程 `parseSubtitle` import 的是同一个函数。因此**改估时只改 `@shared/constants` 一处，两侧同时生效**——不再需要「改一边记得同步另一边」。语速常量是 `EST_CHARS_PER_SEC`，下限 2.4 秒 / 基数 1.6 秒是历史沿用值（与语速无关）。这是**占位估时、不读音频**（界面也明说了：「字幕编辑器」卡里按钮行下方的提示行、按钮 `title`、`fromContent` 的 toast 括注都由 `EST_CHARS_PER_SEC` 拼出「4 字/秒」，**界面不写死数字**）：要真实时长走配音页的「字幕配音（逐句对齐）」实测。
 - **`fillEnds` 是原位修改，且与 `parseSrtText` 不可叠加**：它直接改写传入数组元素并返回同一引用（调用方需保留原数据应先自行拷贝）；而 SRT 块内结束时间是显式信息或已估时，套用 `fillEnds` 会按下一条起始改写它，因此 `parseSrtText` 特意绕开（源码已标注）。
 - **落盘格式为 `[开始-结束] 文本`**：`serializeItems` 用 `fmtTimeMs` 毫秒精度写**真实结束时间**（而非下一行起始），供 HTML / 视频阶段严格按窗口显示；无有效 `start` 时退化为纯文本行。
 - **解析细节：小数按位数解释、无时间戳行从 0.4 秒起步、无时间轴块容错**：`.5` = 500ms、`.500` = 500ms，按数字位数除以 `10^位数`，避免把 `.5` 误读成 5ms，并与 `fmtTimeMs` 对齐；`parseSubtitleText` 与 `parseSrtText` 的 `autoT` 初值均为 `0.4`，为无时间戳字幕留起始缓冲；SRT 文本域中无时间轴的块不报错，按纯文本逐行估时处理，因此用户可直接粘贴整段文稿。

@@ -288,7 +288,7 @@ handler 的载荷类型全部取自 `src/shared/types.ts` ④ 节（本文件**�
 
 被调用方：
 
-- `src/main/index.ts:442` 执行 `voice.register(ctx)`（主进程装配，依赖图 `settings ← htmlAgent ← projects ← voice ← ttsAlign`）。
+- `src/main/index.ts:442` 执行 `voice.register(ctx)`（主进程装配，依赖图 `settings ← agent(chat ← html/script) ← projects ← voice ← ttsAlign`）。
 - `src/main/ttsAlign.ts` 导入 `synthOne` / `resolveVoiceModel` / `voiceFriendlyError`，用于 `voice:synth-aligned` 逐句合成。
 - `src/preload/index.ts` 暴露 `window.voiceTools`（`getConfig` / `getSaveDir` / `saveConfig` / `pickAudio` / `pickDir` / `listGenerated` / `create` / `list` / `listSystemVoices` / `listAll` / `listModels` / `getProfiles` / `saveProfile` / `deleteProfile` / `deleteCloudVoice` / `synth` 等）。
 - 渲染层：`src/renderer/src/pages/TextTtsPage/VoiceSection.vue`（克隆音色、映射管理）、`src/renderer/src/pages/TextTtsPage/SynthSection.vue`（保存位置、`synth`、`listGenerated`）、`src/renderer/src/pages/TextTtsPage/helpers.ts`（`list-all` 失败时的回退组装）。

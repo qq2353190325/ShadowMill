@@ -5,7 +5,7 @@
 //       以及 settings:get / settings:save / settings:save-render / settings:save-updater / settings:test IPC
 //       + whisper 当前模型档位与自定义模型列表（getWhisperModel / saveWhisperModel / getWhisperCustomModels / saveWhisperCustomModels）
 //       + 视频渲染档位的白名单校验（DEFAULT_RENDER / normalizeRenderOptions / pickRenderOverride，供 projects.ts / video.ts 复用）
-//       + OpenAI SDK 懒加载入口（loadOpenAI，供 settings:test 与 htmlAgent 共用）
+//       + OpenAI SDK 懒加载入口（loadOpenAI，供 settings:test 与 agent/chat.ts 共用）
 // 依赖：app / ipcMain / fs / path（openai 为懒加载，不在启动路径上）
 import { app, ipcMain, dialog } from 'electron'
 import path from 'node:path'
@@ -31,7 +31,7 @@ import type {
 } from '../shared/types'
 import { DEFAULT_PROVIDER_KEY, providerByKey, type VoiceProviderDef } from './voiceCatalog'
 
-// ===== OpenAI SDK 懒加载（settings:test 与 htmlAgent 共用）=====
+// ===== OpenAI SDK 懒加载（settings:test 与 agent/chat.ts 共用）=====
 // openai SDK 的模块图较大（require 实测 ~110ms，冷启动 + 杀软扫描时更久）。它只在**真正要发请求**的
 // 两处才需要（测试连接 / 生成或修改 HTML），而这两处都在用户动作之后，因此顶层不再 import：
 // 改成首次用到时 require，主进程启动路径（建窗 → 首屏）不再为它买单。

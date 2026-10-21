@@ -12,8 +12,8 @@
 本模块是主进程唯一的「全局设置」落盘入口，统一管理 `userData/settings.json` 的读取、合并与写入，并对外提供七类能力：
 
 1. **设置读写**：`readSettings` / `writeSettings`，以及按分区拆分的 getter / setter。
-2. **OpenAI 兼容客户端配置**：`customModel` 分区，供 HtmlAgent 等模块调用大模型。
-3. **OpenAI SDK 懒加载**：`loadOpenAI()` 是**全工程唯一的 openai SDK 加载入口**（`settings:test` 与 `htmlAgent` 共用），见 §2 与 §5。
+2. **OpenAI 兼容客户端配置**：`customModel` 分区，供 Agent 层（`src/main/agent/chat.ts`）等模块调用大模型。
+3. **OpenAI SDK 懒加载**：`loadOpenAI()` 是**全工程唯一的 openai SDK 加载入口**（`settings:test` 与 `src/main/agent/chat.ts` 共用），见 §2 与 §5。
 4. **视频渲染档位白名单**：`DEFAULT_RENDER` / `normalizeRenderOptions` / `pickRenderOverride`——**白名单只此一处**，`projects.ts`（项目级覆盖落盘）与 `video.ts`（渲染 CLI 参数）都复用，避免校验逻辑三处漂移。
 5. **应用自更新设置**：`updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`）由 `getUpdaterSettings` / `saveUpdaterSettings` 管理，`updater/` 目录（`actions.ts` 读更新源、`index.ts` 读启动检查开关）读它决定更新源与启动检查。
 6. **「出厂状态」判定**：`isPristineSettings(file)` 回答「用户在这个位置配过东西吗」，供 `index.ts` 的 `migrateFrom()` 迁移老数据时决定能否用老 `settings.json` 覆盖新文件（见 §3.5）。
@@ -160,7 +160,7 @@ function isPristineSettings(file: string): boolean
 | `src/main/index.ts` | `import * as settings`；`migrateFrom()` 用 `settings.isPristineSettings(dst)` 判定新 `settings.json` 是否还是出厂状态（决定能否被老配置覆盖），并在装配阶段最早调用 `settings.register(ctx)` |
 | `src/main/whisper.ts` | `getWhisperModel` / `saveWhisperModel` / `getWhisperCustomModels` / `saveWhisperCustomModels`（模型档位与自定义模型增删） |
 | `src/main/voice.ts` | `getVoiceSettings` / `getVoiceProviderConfig` / `saveVoiceProviderConfig` / `readSettings` / `writeSettings` / `DEFAULT_SETTINGS` / `getVoiceProfiles` / `saveVoiceProfile` / `deleteVoiceProfile` |
-| `src/main/htmlAgent.ts` | `getCustomModel`（取自定义模型配置发起对话）与 `loadOpenAI`（懒加载 SDK 构造函数） |
+| `src/main/agent/chat.ts` | `getCustomModel`（取自定义模型配置发起对话）与 `loadOpenAI`（懒加载 SDK 构造函数） |
 | `src/main/projects.ts` | `pickRenderOverride`——`project:set-render` 写 / 清除项目级渲染档位覆盖时做白名单过滤 |
 | `src/main/video.ts` | `pickRenderOverride`——把 `video:render` 载荷里显式给出的档位拼成 `--quality` / `--fps` 参数 |
 | `src/preload/index.ts` | 暴露 `window.settingsTools = { get, save, saveRender, saveUpdater, test, pickRuntimePack }`，分别 invoke `settings:get` / `settings:save` / `settings:save-render` / `settings:save-updater` / `settings:test` / `settings:pick-runtime-pack` |
@@ -185,7 +185,7 @@ function isPristineSettings(file: string): boolean
 - **`settings:save` 不做完整性校验**：即使三项为空也会写入，只有 `settings:test` 才校验配置完整性。
 - **渲染档位的两种规范化不可混用**：`normalizeRenderOptions`（补默认，得到完整档位）用于**读取**（`readSettings`）与保存默认档位（`settings:save-render`）；`pickRenderOverride`（只留显式合法值）用于**覆盖类**场景（项目覆盖、渲染参数）。用错会导致「没传档位」被静默升级成「显式默认档位」，覆盖掉上一级配置。
 - **`settings:test` 依赖 SDK 形态**：成功路径取决于 `loadOpenAI()` 是否返回可构造函数（内部按 `mod.default || mod` 取），SDK 的导出形态变化会静默切到 `fetch` 分支。
-- **openai SDK 必须保持懒加载**（2026-10）：它的模块图较大（`require` 实测 ~110ms，冷启动 / 杀软扫描时更久），而 `settings.ts` 是主进程**启动路径上的模块**（`index.ts` → `settings` → …）。顶层 `import OpenAI from 'openai'` 会让这段成本压在建窗 / 首屏之前，因此改成 `loadOpenAI()` 按需 `require`；`htmlAgent.ts` 也不再自行 `import`，统一经此入口。改回顶层 `import` 会直接拖慢首屏。
+- **openai SDK 必须保持懒加载**（2026-10）：它的模块图较大（`require` 实测 ~110ms，冷启动 / 杀软扫描时更久），而 `settings.ts` 是主进程**启动路径上的模块**（`index.ts` → `settings` → …）。顶层 `import OpenAI from 'openai'` 会让这段成本压在建窗 / 首屏之前，因此改成 `loadOpenAI()` 按需 `require`；`src/main/agent/chat.ts` 也不再自行 `import`，统一经此入口。改回顶层 `import` 会直接拖慢首屏。
 - **whisper 条目按 `file` 存活**：`file` 缺失的条目在下次读取时被丢弃；`id` 由文件名派生，因此同一文件名等价于同一 `id`。
 - **`isPristineSettings` 的判定是「白名单式」的**：只有源码里逐字列出的字段能把它判成 `false`。**将来新增「用户会投入成本」的字段（新的 API Key、新的外部地址、新的下载清单）时必须同步加进这个白名单**，否则迁移覆盖时会把用户刚配好的新字段连整份文件一起覆盖掉——这是本函数唯一需要维护的地方。
 - **`settings:test` 的失败文案统一走 `shared/errors`**（2026-10）：`friendlyError(e, { label: '连接失败', baseUrl: m.baseUrl })` 把英文原文翻成「人话 + 能做什么」，原始报文首行进 `detail`；配置类（Key 无效 / 地址填错 / 未配置完整）额外带 `needConfig`。**但设置页刻意不弹配置类弹窗**——按钮与失败状态行都在设置页上，弹「去设置」等于让用户从原地跳到原地；`needConfig` 只是照常返回、供别的入口使用。

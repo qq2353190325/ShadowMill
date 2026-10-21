@@ -1,6 +1,6 @@
 # 04 · 目录架构：`src/renderer/`（渲染层）
 
-> Vue 3 + TypeScript 的界面层，共 **52** 个文件（`index.html` 1 + 设计规范 `agents.md` 1 + `src/` 下 50：外壳 `App.vue` 1 + 入口 `main.ts` / `env.d.ts` 2 + 渲染层常量 1 + 样式 1 + 通用组件 4（`StepBar.vue` / `NewProjectDialog.vue` / `HfSelect.vue` / `LegacyDataDialog.vue`） + composables 9 + utils 6 + 页面 26（一页一目录，入口统一 `index.vue`，含注册表 `pages/index.ts`；**`HtmlGenPage/` 本轮由 1 个文件变 3 个**；设置页那一目录 = 外壳 + 3 个页面级 `.ts` + `components/` 下 6 个组件（5 个区块 + 更新日志弹窗 `ChangelogDialog.vue`））。刻意**不引入** vue-router 与 pinia：导航是一个注册表 + `goPage()` 函数，全局状态是模块级 `reactive` 单例。所有系统能力都经 `window.*`（preload 桥）访问。
+> Vue 3 + TypeScript 的界面层，共 **56** 个文件（`index.html` 1 + 设计规范 `agents.md` 1 + `src/` 下 54：外壳 `App.vue` 1 + 入口 `main.ts` / `env.d.ts` 2 + 渲染层常量 1 + 样式 1 + 通用组件 4（`StepBar.vue` / `NewProjectDialog.vue` / `HfSelect.vue` / `LegacyDataDialog.vue`） + composables 9 + utils 6 + 页面 30（一页一目录，入口统一 `index.vue`，含注册表 `pages/index.ts`；**`HtmlGenPage/` 由 1 个文件变 3 个**、**`ContentPage/` 由 1 个文件变 5 个（两个 Tab）**；设置页那一目录 = 外壳 + 3 个页面级 `.ts` + `components/` 下 6 个组件（5 个区块 + 更新日志弹窗 `ChangelogDialog.vue`））。刻意**不引入** vue-router 与 pinia：导航是一个注册表 + `goPage()` 函数，全局状态是模块级 `reactive` 单例。所有系统能力都经 `window.*`（preload 桥）访问。
 
 ---
 
@@ -45,8 +45,12 @@ src/renderer/
       │  └─ index.vue            #  86 行   首页（hero 角标与主标题均取 @shared/constants + 参数行 + 流水线 + 我的项目卡片）
       ├─ AboutPage/
       │  └─ index.vue            #  18 行   关于（静态）
-      ├─ ContentPage/
-      │  └─ index.vue            #  99 行   内容脚本（场景分镜；保存时把项目里已落盘的 `content.style` 原样带回，风格编辑入口在 HTML生成页）
+      ├─ ContentPage/             # 5 个文件（两个 Tab）
+      │  ├─ index.vue            #  35 行   外壳：StepBar + `.hf-tabs` 两个 Tab（**默认「场景编辑」**，空项目也一样；第二个是「AI 创作」），用 `v-show` 挂载 `SceneEditor` / `AiChatPanel`（切 Tab 不销毁组件）；`onMounted(loadScenes)` + **`onBeforeUnmount(flushPending)`**
+      │  ├─ SceneEditor.vue      #  63 行   「场景编辑」Tab：场景卡（旁白 / 画面分镜 / 时长提示 + 增删排序）+ **一行自动保存状态**（`保存中…` / `已自动保存 HH:mm:ss` / `保存失败：原因` + 「重试」）；**已删除「保存到项目」按钮与「● 有未保存改动」**
+      │  ├─ AiChatPanel.vue      # 373 行   「AI 创作」Tab：需求输入（Ctrl+Enter 发送）、场景数 / 目标时长、流式状态行、思考过程折叠、错误 + 模型原文折叠、**顶部红字 `chatError`**、`ScriptRoundCard` 列表；调 `window.scriptTools.generate`，进度走 `window.scriptTools.onProgress`；**挂载时只读索引（`loadChatIndex`）、生成成功后追加一版（`appendChatRound`，主进程写副本 + 更新索引）、展开时才读副本（`readChatVersion` + `versionCache`）、「应用此版本」、标题栏旁「清空对话」（`clearChatRecords`）；「当前」标记 = `r.versionId === activeVersionId`（索引说了算）**
+      │  ├─ ScriptRoundCard.vue  # 139 行   单轮结果卡：第 N 版 · 场景数（取 `round.sceneCount`）· 字数 · 估算时长（`totalChars / charsPerSecond` 经 `fmtTime`；`charsPerSecond` 由父组件传 `@shared/constants` 的 `EST_CHARS_PER_SEC`，4 字/秒）· 展开预览（`scenes` 由父组件懒加载后传入，`null` = 正在读）· **「应用此版本」**（`applying` 时「应用中…」）；props `round / index / current / expanded / scenes / charsPerSecond / applying`，emits `toggle` / `apply`，其中 **`round: ScriptChatRoundMeta` 来自 `@shared/types`**
+      │  └─ helpers.ts           # 271 行   **模块级共享状态 `scenes` / `dirty`**（两个 Tab 看到同一份）+ **自动保存调度**（`saveState` / `lastSavedAt` / `saveError` / `scheduleSave` / `flushSave` / `flushPending`：防抖 600ms、写入前抓快照、串行队列、失败可重试；快照里把项目里已落盘的 `content.style` 原样带回）+ **对话记录读写**（**`chatError`** / `plainScenes`（IPC 前把 scenes 转普通对象）/ `loadChatIndex` / `appendChatRound` / `readChatVersion` / `setActiveChatVersion` / `clearChatRecords`）+ `loadScenes` / `emptyScene` / `addScene` / `removeScene` / `moveScene` / `applyScenes`；**已无 `saveScenes`，也没有 `sameScenes` / `findCurrentRoundId` / `loadChatRounds` / `persistChatRounds`**
       ├─ TextTtsPage/
       │  ├─ index.vue            #  37 行   配音页外壳（三个 Tab：文字生音频 / 字幕配音 / 音色管理；Tab 值用 helpers 的 `activeTtsTab`）
       │  ├─ SynthSection.vue     # 379 行   文字生音频卡（音色/模型下拉受「Key 已配置」门控；**切回本 Tab 自动重拉音色**；合成失败时 `configPrompt.fromResult(res)` 弹「去设置」）
@@ -54,11 +58,11 @@ src/renderer/
       │  ├─ VoiceSection.vue     # 526 行   音色管理卡组（创建克隆音色弹窗——**`Teleport` 弹窗 2 处**；我的音色列表 4 列、不显示音色 ID、行尾「删云端」动作；音色映射；模型下拉按厂家分组；**切回本 Tab 自动重拉列表**）
       │  └─ helpers.ts           # 182 行   配音助手（三卡共用的 `activeTtsTab`、配置形状唯一读取入口 `readActiveCfg`、Key 就绪状态、音色载入/分组）
       ├─ SubtitlePage/
-      │  ├─ index.vue            # 253 行   字幕条目编辑
+      │  ├─ index.vue            # 256 行   字幕条目编辑（「由脚本旁白生成」下方一行提示明说时长是估时、按 `@shared/constants` 的 `EST_CHARS_PER_SEC`（4 字/秒）推算、不读配音音频；提示行 / 按钮 title / toast 都引用常量，界面不写死数字）
       │  ├─ TranscribeSection.vue# 365 行   转录弹窗（**缺 ffmpeg 运行环境包时经 `useEnvGate` 弹确认框**，`doTranscribe(skipEnvGuard)`）
       │  └─ helpers.ts           # 165 行   字幕助手（估时、条目类型等）
       ├─ HtmlGenPage/             # **本轮由「单文件」拆成三个文件（一个文件一件事）**
-      │  ├─ index.vue            # 478 行   页面入口：StepBar + 项目状态卡（`.proj-meta`，3 个纯数据格 + 标题右侧「用法」`?` 气泡）+ **字幕 / 画布下拉（同一个 `.hgen-row`）** + **全局视觉风格输入框（`content.style`，与画布同级的项目属性；失焦即 `saveContent` 落盘并把现有 scenes 原样带回）** + `<MaterialsSection />` + 需求描述 + 动作行上方统一的生成前提提示 + 四个动作按钮（生成 HTML / 按需求修改 / 下载 HTML / 转视频）+ `<PreviewSection />` + 转视频弹窗；生成流程只把 `{ subtitleProject, materialIds }` 交给主进程，渲染载荷为 `{ quality, fps, canvas }`
+      │  ├─ index.vue            # 490 行   页面入口：StepBar + 项目状态卡（`.proj-meta`，3 个纯数据格 + 标题右侧「用法」`?` 气泡）+ **字幕 / 画布下拉（同一个 `.hgen-row`）** + **全局视觉风格输入框（`content.style`，与画布同级的项目属性；失焦即 `saveContent` 落盘并把现有 scenes 原样带回）** + `<MaterialsSection />` + 需求描述 + 动作行上方统一的生成前提提示 + 四个动作按钮（生成 HTML / 按需求修改 / 下载 HTML / 转视频）+ `<PreviewSection />` + 转视频弹窗；生成流程只把 `{ subtitleProject, materialIds }` 交给主进程，渲染载荷为 `{ quality, fps, canvas }`
       │  ├─ MaterialsSection.vue # 167 行   「项目素材」区块：图片 / 视频两堵 `.mat-grid` 卡片墙（勾选 / 移除 / 添加），**无 props、无 emits**，状态就是 `appState.project.materials`；末尾有一段被注释下线的「提取原声为背景音频」实现
       │  └─ PreviewSection.vue   # 439 行   「预览」卡片：**背景音频行（一行只有一个控件：`sel-label` 56px + `HfSelect` `flex:1` 占满整行；**当前音频就是「已生成音频」里的选中项**——`currentAudioIndex` 把 `audioFile` 按 basename 匹配回列表，「不使用背景音频」也在下拉里；没有独立「移除」按钮、也不挂 `?`）** + 试听与语速（`onMounted` 按项目现有 `audioFile` 初始化试听源） + 状态行 + AI 思考过程 + **「视角比例」行**（`viewMode`：16:9 / 9:16 / 1:1，默认 = 页面天然比例 `pageMode`、不落盘，行尾 `.hgen-tip` 用 `v-show="viewHint"` 做 2 态说明；**不显示画布值**） + iframe 预览副本（**iframe 视口 = 页面自己声明的画布（`pageCanvas`，无声明回落项目画布）；容器尺寸由 `frameStyle` 决定：高度上限 800px、宽度 `min(100%, 800×比例)`、`aspect-ratio` 定高（宽窗口 16:9=1422×800 / 9:16=450×800 / 1:1=800×800），并由 `main.css` 的 `margin-inline:auto` 水平居中；`fitFrame()` 用 contain：`min(宽比, 高比)` + `translate` 居中**） + 播放控制条（**一个三态键**：暂停 / 播放 / 重新播放（`prevEnded` 判定） + 拖动 seek）；**props `{ status, statusClass, thinkText, rendering }` + `defineExpose({ reload })`**
       ├─ VideoPreviewPage/
@@ -79,7 +83,7 @@ src/renderer/
 
 > **行数口径**：与 [README](./README.md) §4 一致，用 `[IO.File]::ReadAllLines($f).Count`（等价于阅读工具显示的 total 行数）；**不要**用 `(Get-Content $f).Count`。
 >
-> **文件计数**：`index.html`(1) + `agents.md`(1) + `src/` 下 **50** 个（`main.ts` / `App.vue` / `env.d.ts` / `constants.ts` / `assets/main.css` / `components` 4 / `composables` 9 / `utils` **6** / `pages` **26**）= **52**。页面数由 23 增到 26：`HtmlGenPage/` 拆出了 `MaterialsSection.vue` 与 `PreviewSection.vue`（`HtmlGenPage.md` 一篇文档现在覆盖这 3 个文件），`SettingsPage/components/` 新增了更新日志弹窗 `ChangelogDialog.vue`；`utils` 由 4 增到 6，是新增了 `url.ts`（路径 → URL 的唯一出口）与 `changelog.ts`（随包 CHANGELOG 的解析）。
+> **文件计数**：`index.html`(1) + `agents.md`(1) + `src/` 下 **54** 个（`main.ts` / `App.vue` / `env.d.ts` / `constants.ts` / `assets/main.css` / `components` 4 / `composables` 9 / `utils` **6** / `pages` **30**）= **56**。页面文件数 30：`ContentPage/` 一个目录 **5 个文件**（`index.vue` 35 / `SceneEditor.vue` 63 / `AiChatPanel.vue` 373 / `ScriptRoundCard.vue` 139 / `helpers.ts` 271，**合计 881 行**）——拆的依据是「一个文件一件事」：外壳、两个 Tab 各一个组件、单轮结果卡、共享状态与保存 / 记录逻辑；`HtmlGenPage/` 另拆出 `MaterialsSection.vue` 与 `PreviewSection.vue`、`SettingsPage/components/` 含 `ChangelogDialog.vue`。`utils` 6 = 含 `url.ts`（路径 → URL 的唯一出口）与 `changelog.ts`（随包 CHANGELOG 的解析）。
 
 ---
 
@@ -137,7 +141,7 @@ export async function goPage(key: PageKey) {
 | PageKey | 组件 | 侧栏菜单 | 说明 |
 |---|---|---|---|
 | `home` | `HomePage/index.vue` | ✅ 首页 | 启动默认页 |
-| `content` | `ContentPage/index.vue` | ✅ 内容脚本 | 流水线起点（内容源） |
+| `content` | `ContentPage/`（入口 `index.vue` + `SceneEditor.vue` / `AiChatPanel.vue` / `ScriptRoundCard.vue` / `helpers.ts`） | ✅ 内容脚本 | 流水线起点（内容源）。**两个 Tab：场景编辑（默认，编辑即自动保存）/ AI 创作（对话式生成，结果写回编辑器并走同一条自动保存；对话记录 = `chat/index.json` 索引 + `chat/versions/<id>.json` 每版副本，展开 / 应用时才读）**；两个 Tab 共享 `helpers.ts` 的同一份 `scenes` |
 | `text-tts` | `TextTtsPage/index.vue` | ✅ 配音 | 内含三个 Tab：文字生音频 / 字幕配音 / 音色管理（原独立页 `SoundCopyPage` 已并入） |
 | `subtitle` | `SubtitlePage/index.vue` | ✅ 字幕生成 | 含转录弹窗子组件 |
 | `html-gen` | `HtmlGenPage/index.vue`（+ `MaterialsSection.vue` / `PreviewSection.vue`） | ✅ HTML生成 | **本轮拆成三个文件**：入口只剩状态卡（3 个纯数据格 + 标题右侧「用法」`?` 气泡）/ **字幕与画布同一行**（原先各占一个 `.hgen-block`，两条 `panel-title-sm` 已删除、名称交给行内标签；画布仍是全应用唯一选择点，画布说明**只在 `?` 气泡里**——正文是 `canvasNote`（随画布变）+ `canvasHint`（固定常量）两段拼接，「改完要重新生成」统一由动作行上方的 `.hgen-tip` 说） / **全局视觉风格输入框（`content.style`，该字段全应用唯一编辑点；失焦即落盘、把现有 scenes 原样带回；标题保留）** / 需求描述 / 动作行上方统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；**项目素材库（多图片 + 多视频，勾选参与生成）在 `MaterialsSection.vue`**；背景音频、状态行、AI 思考过程与预览播放控制在 `PreviewSection.vue`。**转视频入口与渲染档位仍在此页** |
@@ -159,6 +163,7 @@ export async function goPage(key: PageKey) {
 | 持久化键名 | 上次项目 `STORAGE_KEY_PROJECT_CTX`、设置页分类 `STORAGE_KEY_SETTINGS_SECTION`，都由 `STORAGE_PREFIX` 派生 | `constants.ts`（见 §4） |
 | 品牌文案与素材规则 | 中文名 / 英文名 / 口号 + **素材上限与扩展名白名单**一律取共享层常量 | `@shared/constants` |
 | 后端调用 | 一律 `window.<命名空间>.<方法>()`，结果按 `IpcResult`（`ok` / `message` / `canceled`）分支处理 | 各页面 |
+| **内容脚本的保存与记录** | **编辑即自动保存**（`ContentPage/helpers.ts` 的 `scheduleSave` / `flushSave` / `flushPending`：防抖 600ms、写入前抓「项目名 + 内容」快照、串行队列、失败置 `saveState='error'` 并可重试；卸载时只冲刷确有快照的改动）；**对话记录 = 索引 + 每版副本**（`chat/index.json` 只存元数据、`chat/versions/<id>.json` 每版脚本，展开 / 应用时才读；`scriptTools.loadChat` / `appendRound` / `readVersion` / `setActiveVersion` / `clearChat`；失败写进可见的 `chatError`） | `ContentPage/helpers.ts`、`ContentPage/AiChatPanel.vue` |
 | 进度推送 | 在 `onMounted` 调用 `onXxxProgress(cb)` 注册（preload 为单订阅，切页自动替换回调） | 各页面 / `App.vue` |
 | 提示反馈 | `toast(msg)`（2800ms 自动消失，`App.vue` 用 `TransitionGroup` 渲染） | 全局 |
 | 文本输出 | 需拼接 HTML 的场景一律用 `escTxt()` 转义 | `utils/escape.ts` |
@@ -182,8 +187,8 @@ export async function goPage(key: PageKey) {
 | 外壳 | `App.vue` | 自绘标题栏、运行环境横幅（三态）、**内联的「下载运行环境」确认框**、**内联的「配置类错误」弹窗**、侧栏菜单、`<component :is>` 页面容器、旧数据弹窗宿主、Toast 宿主、启动流程 |
 | 通用组件 | `components/StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue`、`LegacyDataDialog.vue` | `StepBar` props `page: PageKey`；`NewProjectDialog` 内部闭环 `create → refreshProject → switchProject`；`HfSelect` 全局自绘下拉（**调用点分布：`HtmlGenPage/index.vue` 4 处（含本次新增的「画布」下拉）+ `HtmlGenPage/PreviewSection.vue` 1 处 + `VideoPreviewPage/index.vue` 1 处，全库 21 个实例 / 11 个文件**，见 [components.md](./files/renderer/src/components.md) §5.10）；`LegacyDataDialog` 无 props / 无 emits |
 | 页面 | `pages/<PageName>/index.vue`（8 个，一个页面一个文件夹） | 一页一目录，`onMounted` 拉取当前项目数据 |
-| 页面子组件 | `SettingsPage/components/{ModelSection,VoiceSection,RenderSection,WhisperSection,UpdateSection,ChangelogDialog}.vue`、`SubtitlePage/TranscribeSection.vue`、`TextTtsPage/{SynthSection,AlignSection,VoiceSection}.vue`、**`HtmlGenPage/{MaterialsSection,PreviewSection}.vue`** | 由所属页面承载（与入口 `index.vue` 同目录，或同目录下的 `components/` 子目录）；**`HtmlGenPage` 的两个子组件本轮新增**：`MaterialsSection` 契约是「无 props / 无 emits」（状态取自 `appState`），`PreviewSection` 契约是「4 个 props + `defineExpose({ reload })`」（状态由父页传入）；**`ChangelogDialog` 契约是「无 props + 一个 `close` emit」**（`UpdateSection` 用 `v-if="changelogVisible"` 挂载，见 [SettingsPage.md](./files/renderer/src/pages/SettingsPage.md) §4.6） |
-| 页面助手 | `SubtitlePage/helpers.ts`、`TextTtsPage/helpers.ts` | 模块级共享纯逻辑与类型，被同目录的多个组件复用 |
+| 页面子组件 | `SettingsPage/components/{ModelSection,VoiceSection,RenderSection,WhisperSection,UpdateSection,ChangelogDialog}.vue`、`SubtitlePage/TranscribeSection.vue`、`TextTtsPage/{SynthSection,AlignSection,VoiceSection}.vue`、**`HtmlGenPage/{MaterialsSection,PreviewSection}.vue`**、**`ContentPage/{SceneEditor,AiChatPanel,ScriptRoundCard}.vue`** | 由所属页面承载（与入口 `index.vue` 同目录，或同目录下的 `components/` 子目录）；`HtmlGenPage` 的两个子组件：`MaterialsSection` 契约是「无 props / 无 emits」（状态取自 `appState`），`PreviewSection` 契约是「4 个 props + `defineExpose({ reload })`」；**`ContentPage` 的三个子组件**：`SceneEditor` / `AiChatPanel` 是两个并列 Tab（无 props，状态取自 `helpers.ts`），`ScriptRoundCard` 是纯展示卡（props `round / index / current / expanded / scenes / charsPerSecond / applying`，emits `toggle` / `apply`；`round` 只有元数据，展开内容由父组件懒加载后经 `scenes` 传入）；**`ChangelogDialog` 契约是「无 props + 一个 `close` emit」**（`UpdateSection` 用 `v-if="changelogVisible"` 挂载，见 [SettingsPage.md](./files/renderer/src/pages/SettingsPage.md) §4.6） |
+| 页面助手 | `SubtitlePage/helpers.ts`、`TextTtsPage/helpers.ts`、**`ContentPage/helpers.ts`** | 模块级共享纯逻辑与类型，被同目录的多个组件复用；**`ContentPage/helpers.ts`** 持有模块级 `scenes` / `dirty`（两个 Tab 必须看到同一份场景，AI 生成结果要立刻进编辑器、下一轮又要以编辑器内容为上下文）+ **自动保存调度**（防抖 / 快照 / 串行 / 重试）与**对话记录读写**（`chatError` / `loadChatIndex` / `appendChatRound` / `readChatVersion` / `setActiveChatVersion` / `clearChatRecords`）；页面挂载时由 `loadScenes()` 复位、卸载时 `flushPending()` 只冲刷确有快照的改动 |
 | 基础设施与常量 | `composables/*`（9 个）、`utils/*`（6 个）、`constants.ts` | 全局状态、Toast、渲染进度、运行环境状态与确认框、配置类错误弹窗、旧数据提示、渲染档位、语速、转义、时间、路径 → URL、随包 CHANGELOG 的解析；`constants.ts` 只放渲染层自己的约定（`localStorage` 键名），品牌文案与素材规则在共享层 |
 
 ---
@@ -194,7 +199,7 @@ export async function goPage(key: PageKey) {
 |---|---|---|
 | HomePage | 项目列表与进度标记、切换项目、跳转各节点 | `projectTools` |
 | AboutPage | 纯静态 | — |
-| ContentPage | 编辑并保存内容脚本（`scenes`；`save()` 把项目里已落盘的 `content.style` 原样带回，风格编辑入口已在 HTML生成页） | `projectTools` |
+| ContentPage（5 个文件） | **入口**：`StepBar` + 两个 Tab（默认「场景编辑」，`v-show` 挂载两个 Tab 不销毁）；卸载时 `flushPending()` 把还在防抖里的改动写掉。**`SceneEditor`**：编辑 `scenes`（旁白 / 画面分镜 / 时长提示）与增删排序——**编辑即自动保存，没有保存按钮**，只显示一行状态（保存中… / 已自动保存 HH:mm:ss / 保存失败：原因 + 重试）；**保存逻辑在 `helpers.ts`**（`scheduleSave` / `flushSave` / `flushPending`，防抖 600ms + 写入前抓快照 + 串行队列，快照里把已落盘的 `content.style` 原样带回）。**`AiChatPanel`**：调 `scriptTools.generate`（上下文 = 编辑器当前 `scenes`）并经 `applyScenes()` 把结果**整份写回编辑器 → 自动保存落 `content.json`**，进度走 `scriptTools.onProgress`；**对话记录 = 索引 + 每版副本**（`loadChat` 只读索引、`appendRound` 写副本并更新索引、`readVersion` 展开 / 应用时才读、`setActiveVersion` 改 `activeVersionId`、`clearChat` 删整个 `chat/`；「当前」标记读 `activeVersionId`，失败以 `chatError` 红字可见） | `projectTools`、**`scriptTools`** |
 | TextTtsPage | 壳：Tab 切换三个子卡 | — |
 | ├ SynthSection | 音色/模型选择、文字合成、试听（`ttsUrl()` → `hgpreview://tts/…?tts=1`）、设为背景音频、已生成音频列表；**合成失败且为配置类时弹「去设置」** | `voiceTools`、`projectTools`、`useConfigPrompt` |
 | ├ AlignSection | 逐句对齐（模式 A/B）、进度与取消、整轨与逐句试听（`ttsUrl()` → `hgpreview://tts/…?tts=1`）、结果写回；**失败分支先判配置类弹窗、再判缺 ffmpeg 包** | `voiceTools`、`projectTools`、`useEnvGate`、`useConfigPrompt` |
@@ -212,7 +217,7 @@ export async function goPage(key: PageKey) {
 ## 6. 样式策略
 
 - **全局设计系统**：`assets/main.css`（**当前实测 1893 行**；素材库那一轮由 1676 → 1796，此后随更新日志弹窗与画布改动继续增长；一度试过的「值胶囊 `.prop-chip*`」已连同样式整体删除）承载根变量、标题栏、布局、菜单、卡片、按钮、表单、表格、`step-bar` 以及各页面专有样式（按源码注释可划分为约 35 个样式节，较近几轮新增「HTML生成页：项目素材库（图片 / 视频卡片墙）」一节：`.mat-grid` / `.mat-card`(+`.off`) / `.mat-thumb`(+`.mat-play`) / `.mat-meta` / `.mat-name` / `.mat-path` / `.mat-check`(+`.on`) / `.mat-del` / `.mat-add` / `.mat-count` / `.panel-title .dot.dot-img`，使用方只有 `HtmlGenPage/MaterialsSection.vue`）；由 `main.ts` 全局导入。其中 `html, body` 另设**全局基准字号 `font-size: 14px`**。视觉规范写在 `src/renderer/agents.md`（根目录 `agents.md` 只是指针；列表面板结构约定见该文件 §5.6、**项目属性行见 §5.7**）。
-- **组件补充**：经核查，全部 `.vue` 中带 `<style>` 块的只有 **3 个文件、4 段**——`App.vue`（`<style scoped>`，Toast 宿主）、`components/HfSelect.vue`（`<style scoped>` 触发器 + **不带 `scoped`** 的弹层，因为弹层 Teleport 到 `body`）、`components/LegacyDataDialog.vue`（`<style scoped>`，`.path-line` / `.opt-list` / `.danger-text` / `.hf-btn.danger`）；其余页面与组件（含**本轮新增的两个 HtmlGenPage 子组件**）不含样式块，完全依赖 `main.css` 的类名 + 模板行内 `style`。**唯一例外是启动画面**（`index.html` 的内联 `<style>`），它必须自包含。
+- **组件补充**：经核查，全部 `.vue` 中带 `<style>` 块的只有 **6 个文件、7 段**——`App.vue`（`<style scoped>`，Toast 宿主）、`components/HfSelect.vue`（`<style scoped>` 触发器 + **不带 `scoped`** 的弹层，因为弹层 Teleport 到 `body`）、`components/LegacyDataDialog.vue`（`<style scoped>`，`.path-line` / `.opt-list` / `.danger-text` / `.hf-btn.danger`）、以及 `ContentPage/` 的三个组件（`SceneEditor.vue` 的 `.ct-save` 三态着色、`AiChatPanel.vue` 的 `.ct-*` 聊天面板样式、`ScriptRoundCard.vue` 的 `.ct-round` 等卡片样式，均 `<style scoped>`）；其余页面与组件（含 `HtmlGenPage` 的两个子组件、`ContentPage/index.vue`）不含样式块，完全依赖 `main.css` 的类名 + 模板行内 `style`。**唯一例外是启动画面**（`index.html` 的内联 `<style>`），它必须自包含。
 - 主题通过 CSS 变量切换；若要加亮色模式只需在 `:root[data-theme="light"]` 覆盖变量。
 
 ---

@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：全局类型声明（`.d.ts`，纯类型、无运行时代码）
-- **规模**：11 行（**本轮未改动**——素材三件套的方法签名换在 `PreloadApi` 里，本文件只做 `extends`，一个字都不用改）
+- **规模**：11 行（**命名空间增删时本文件不需要改**：它只做 `extends`，签名全在 `PreloadApi` 里。素材三件套那次如此，本轮新增 `scriptTools`（11 → 12 个命名空间）同样一个字都没改）
 - **对外导出**：`export {}`（仅使文件成为模块）；通过 `declare global` 声明 `interface Window extends PreloadApi {}`。**本文件不再定义任何自己的类型**，`IpcResult` 等结果类型已上移到 `src/shared/types.ts`
 
 ## 1. 作用与职责
@@ -14,7 +14,7 @@
 它不参与打包、不在产物中出现，但其声明决定了整个渲染层的开发体验：
 
 1. 让 `src/renderer/src/**` 中的 `window.electronAPI`、`window.projectTools` 等调用通过编译期检查，并在 VS Code 中获得自动补全与参数提示。
-2. 通过 `interface Window extends PreloadApi {}` 把 `PreloadApi` 声明的**全部命名空间**（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / `updateTools` / `runtimeTools` / `legacyTools`，共 11 个）一次性并入全局 `Window`，成员签名直接来自共享层的 ⑨ 节（成员数随契约演进，不在本文件写死）。
+2. 通过 `interface Window extends PreloadApi {}` 把 `PreloadApi` 声明的**全部命名空间**（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / **`scriptTools`** / `updateTools` / `runtimeTools` / `legacyTools`，共 **12** 个）一次性并入全局 `Window`，成员签名直接来自共享层的 ⑨ 节（成员数随契约演进，不在本文件写死）。
 3. 与 `src/preload/index.ts` 共用**同一份契约**：preload 实现侧用 `PreloadApi['<命名空间>']` 标注各 `contextBridge` 对象，本文件把同一契约交给渲染层，因此「实现」与「渲染层看到的签名」不会再各自漂移。
 
 ## 2. 导出与关键实现
@@ -37,7 +37,7 @@
 | 与 preload 实现的关系 | 「实现 + 声明」两份契约，需人工保持逐字一致 | 同一份契约：preload 实现标注 `PreloadApi['x']`，本文件把 `PreloadApi` 挂给渲染层 |
 | 成功载荷的字段访问 | `OkResult` 带 `[key: string]: any` 索引签名，拼错字段名不报错 | 成功分支是 `{ ok: true } & T` 交叉类型，字段名有精确类型（索引签名已取消） |
 
-### 2.2 `declare global` 内 Window 的 11 个命名空间
+### 2.2 `declare global` 内 Window 的 12 个命名空间
 
 各命名空间的成员一览（成员数以第三列为准，签名详见 [`shared/types.ts.md`](../shared/types.ts.md) 第 2.9 节）：
 
@@ -50,8 +50,9 @@
 | `settingsTools` | 6 | `get`、`save`、`saveRender`、`saveUpdater`、`test`、`pickRuntimePack` |
 | `voiceTools` | 19 | `getConfig`、`getSaveDir`、`saveConfig`、`pickAudio`、`pickDir`、`listGenerated`、`create`、`list`、`listSystemVoices`、`listAll`、`listModels`、`getProfiles`、`saveProfile`、`deleteProfile`、`deleteCloudVoice`、`synth`、`synthAligned`、`cancelAlign`、`onAlignProgress` |
 | `whisperTools` | 12 | `status`、`download`、`delete`、`setCurrent`、`addModel`、`updateModel`、`removeModel`、`openDir`、`pickAudio`、`projectAudio`、`transcribe`、`onProgress` |
-| `projectTools` | 25 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、**`pickMedia`、`addMaterials`、`saveMaterials`**、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、`onHtmlProgress`（**本轮 3 换 3：`pickVideo` / `setVideo` / `clearVideo` 出，`pickMedia` / `addMaterials` / `saveMaterials` 进，成员数仍是 25**） |
-| `updateTools` | 8 | `version`、`check`、`download`、`cancel`、`install`、`status`、`openLog`、`onProgress` |
+| `projectTools` | 26 | `list`、`create`、`load`、`saveSubtitle`、`saveContent`、`generateHtml`、`modifyHtml`、`downloadHtml`、`exportSrt`、`readHtml`、`saveHtml`、`previewHtml`、`pickAudio`、`setAudio`、`clearAudio`、**`pickMedia`、`addMaterials`、`saveMaterials`**、`extractVideoAudio`、`openFolder`、`openFolderOf`、`delete`、`saveVideo`、`setRender`、**`setCanvas`**、`onHtmlProgress`（素材那次是 **3 换 3**、成员数当时仍是 25；此后新增 `setCanvas` ⇒ **26**） |
+| **`scriptTools`** | **2** | **`generate(payload: ScriptGeneratePayload): Promise<ScriptGenerateReply>`**、**`onProgress(cb: (data: ScriptProgressPayload) => void)`**（内容脚本 Agent；`generate` 不经 `IpcResult`，成功 `{ ok:true, scenes, totalChars }`、失败 `{ ok:false, message, raw?, needConfig?, title? }`；`onProgress` 为单订阅） |
+| `updateTools` | 9 | `version`、`check`、`download`、`cancel`、`install`、`status`、`openLog`、`changelog`、`onProgress` |
 | `runtimeTools` | 4 | `status`、`prepare`、`cancel`、`onProgress` |
 | `legacyTools` | 2 | `status`、`resolve`（**无 `on*` 订阅**：旧数据是否存在由渲染层主动拉取，主进程不推送） |
 
@@ -121,7 +122,7 @@ tsconfig.web.json ── include: ["src/renderer/src/**/*.ts", "src/renderer/src
 | 被引用 | `tsconfig.web.json` | `include` 第 21 行显式引入，使声明进入渲染层编译上下文 |
 | 被校验 | `npm run typecheck` | `tsc --noEmit -p tsconfig.web.json` 会同时校验渲染层调用与本文声明 |
 | 契约来源 | `src/shared/types.ts` ⑨ 节 | `PreloadApi` 是唯一真源；本文件只转发 |
-| 契约对端 | `src/preload/index.ts` | 11 个命名空间、方法名、参数顺序、返回结构由同一份 `PreloadApi` 约束 |
+| 契约对端 | `src/preload/index.ts` | **12** 个命名空间、方法名、参数顺序、返回结构由同一份 `PreloadApi` 约束 |
 | 契约下游 | `src/renderer/src/**` | `pages/`（含 `HtmlGenPage/MaterialsSection.vue` 的素材三件套调用）、`composables/`、`App.vue` 等全部 `window.*` 调用 |
 
 ## 5. 注意事项与实现要点
