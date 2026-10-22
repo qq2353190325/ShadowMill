@@ -60,31 +60,76 @@ function declaredDuration(html: string): number {
   return isFinite(v) && v > 0 ? v : 0
 }
 
-// ===== 成片画布：把项目选定的画布写进 <html data-resolution> =====
-// 为什么必须由应用写：HyperFrames 的画布只从 HTML 里读（cli.js: parseResolutionFromHtml →
-// data-resolution 优先，其次 data-composition-width/height，再次页面里 `#stage` 的固定 px），
-// **一条都读不到时兜底 `portrait`**（cli.js 的 parseResolutionFromCss 末尾 `return "portrait"`）⇒
-// 成片变成 1080x1920 竖屏，宽屏版式被裁掉两侧、上下留大片黑边（本项目的真实故障，2026-10 实测）。
-// 注入 data-resolution 一举解决两件事：① 没声明画布的页面不再掉进 portrait；
-// ② 页面自己声明的画布/舞台尺寸也压不过它（解析优先级里 data-resolution 最高）⇒ 成片必与项目所选一致。
-// 传 --resolution 不能替代它：那个参数是「保持 composition 尺寸、用 DPR 上采样」，宽高比不符会直接报错。
+// ===== 成片画布：两个地方都要写，少一处就变竖屏 =====
+// 成片宽高由 CLI（0.8.33）的 producer 编译阶段决定：compileForRender 取文档里**第一个**带
+// data-composition-id 的元素（最外层舞台），读它的 data-width / data-height；读不到就分别兜底
+// **1080 / 1920** ⇒ 成片是竖屏。`<html data-resolution>` 在渲染链路里一次都不读（只有 `hyperframes info` 用）。
+// 所以项目所选画布要写两个地方，缺任何一处都不成立：
+//   ① 舞台元素的 data-width / data-height —— 真正决定成片宽高（applyCanvasSize）
+//   ② <html data-resolution> —— 让页面自描述，预览与 info 读得到（applyCanvasDeclaration）
+// 2026-10-21 实测：只写了 ② 时，video-duration.log 记着 landscape、成片却是 1080x1920（本项目的真实故障）。
+// 两处都由应用写、不靠模型：模型写的画布可能与该项目的选择不一致（甚至整份都不写），
+// 而"项目所选定下的画布说了算"是这一层唯一该保证的事。
+// 传 --resolution 不能替代：那个参数是「保持 composition 尺寸、用 DPR 上采样」，宽高比不符会直接报错。
+// 同一个「舞台元素才是渲染入口」的道理也适用于**成片时长**（见 applyStageDuration）：时长写 `<html>` 上也不生效。
+function applyCanvasSize(html: string, canvas: RenderCanvas): string | null {
+  const size = CANVAS_SIZES[canvas]
+  return rewriteStageTag(html, (attrs) =>
+    stripAttrs(attrs, ['data-width', 'data-height']) +
+    ' data-width="' + size.width + '" data-height="' + size.height + '"')
+}
+
+// 时长同理写在舞台上：CLI 编译阶段取第一个 data-composition-id 元素的
+// `data-duration` ?? `data-composition-duration`（cli.js 126320），<html> 上那条它不读。
+function applyStageDuration(html: string, seconds: number): string | null {
+  return rewriteStageTag(html, (attrs) =>
+    stripAttrs(attrs, ['data-duration', 'data-composition-duration']) +
+    ' data-duration="' + seconds + '"')
+}
+
+// 改写「最外层舞台」开标签上的属性：找到文档里第一个带 data-composition-id 的元素，交给 rewrite 决定写什么；
+// 找不到返回 null（调用方据此决定是否留痕说明）。画布宽高与成片时长都走这里，两处口径不会分叉。
+// 开标签整体匹配（属性值里的 `>` 由引号分支吃掉），逐个标签用属性分词器判「有没有 data-composition-id」，
+// 命中第一个就停 —— 与 CLI 的 document.querySelector("[data-composition-id]") 同口径（树序里祖先在前，
+// 所以命中的是最外层舞台，不是嵌套子 composition）。
+// 已知限制：CLI 的 DOM 查询不进入 `<template>` 内容，这里的正则不跳；但本应用的生成提示词不产出
+// data-composition-src 子 composition（含 <template> 包装），换提示词支持子 composition 时要一起改这里。
+function rewriteStageTag(html: string, rewrite: (attrs: string) => string): string | null {
+  const TAG = /<([a-zA-Z][-a-zA-Z0-9]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g
+  const ATTR = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/g
+  let done = false
+  const out = html.replace(TAG, (whole: string, name: string, attrs: string) => {
+    if (done) return whole
+    let isStage = false
+    attrs.replace(ATTR, (m: string, attrName: string) => {
+      if (/^data-composition-id$/i.test(attrName)) isStage = true
+      return m
+    })
+    if (!isStage) return whole
+    done = true
+    return '<' + name + rewrite(attrs) + '>'
+  })
+  return done ? out : null
+}
+
 function applyCanvasDeclaration(html: string, canvas: RenderCanvas): string {
   const tag = /<html\b([^>]*)>/i
   if (tag.test(html)) {
-    return html.replace(tag, (_m: string, attrs: string) => '<html' + stripDataResolution(attrs) + ' data-resolution="' + canvas + '">')
+    return html.replace(tag, (_m: string, attrs: string) => '<html' + stripAttrs(attrs, ['data-resolution']) + ' data-resolution="' + canvas + '">')
   }
   // 模型输出被截断到连 <html> 都没有（罕见）：前置一个带声明的 <html>，至少让画布是对的
   return '<html data-resolution="' + canvas + '">' + html
 }
 
-// 剥掉页面已有的 data-resolution（含**无值写法**），其余属性原样保留、只把开头空白收成一个空格。
-// 为什么不是一条简单正则：① 只匹配「带值」写法会漏掉 HTML 合法的无值 `<html data-resolution>`，
+// 剥掉指定属性（含**无值写法**），其余属性原样保留、只把开头空白收成一个空格。
+// 为什么不是一条简单正则：① 只匹配「带值」写法会漏掉 HTML 合法的无值写法（如 `<html data-resolution>`），
 // 注入后同一个标签上就有两个同名属性，而**HTML 解析规则取第一个**（正好是空值）⇒ 项目所选被默默压过；
 // ② 把 `=` 与值写成可选，又会命中**别的属性值里**的同名文本（如 `data-x="data-resolution"`），
 // 把那个属性值改坏。所以按属性逐个扫描：引号包住的值整段被消费，内部文本不会再被二次匹配。
-function stripDataResolution(attrs: string): string {
+function stripAttrs(attrs: string, names: string[]): string {
   const ATTR = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?/g
-  const left = attrs.replace(ATTR, (m: string, name: string) => (/^data-resolution$/i.test(name) ? '' : m)).trim()
+  const left = attrs.replace(ATTR, (m: string, name: string) =>
+    names.some((n) => n.toLowerCase() === name.toLowerCase()) ? '' : m).trim()
   return left ? ' ' + left : ''
 }
 
@@ -145,10 +190,17 @@ async function prepareEntry(opts: {
 }): Promise<string> {
   const { localized, entryHtml, tmpDir, projDir, env, chrome, canvas } = opts
   let entry = localized.replace(/\.\/gsap\.min\.js/gi, '../gsap.min.js')
-  // 画布声明放在最前：后面量时间轴时写盘的副本、最终留给 CLI 的入口都带上它
+  // 画布写两处，放在最前：后面量时间轴时写盘的副本、最终留给 CLI 的入口都带上它们。
+  // ① 舞台 data-width/data-height（成片宽高的真正来源）；② <html data-resolution>（页面自描述）。
   entry = applyCanvasDeclaration(entry, canvas)
+  const sized = applyCanvasSize(entry, canvas)
+  if (sized) entry = sized
   // 留痕：成片尺寸这类"为什么渲出来是这样"的问题必须可事后查（与时长裁定同一个日志文件）
-  writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + CANVAS_SIZES[canvas].width + 'x' + CANVAS_SIZES[canvas].height + '），已写入 <html data-resolution>')
+  const size = CANVAS_SIZES[canvas]
+  writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + size.height + '）：' +
+    (sized
+      ? '已写入舞台 data-width/data-height 与 <html data-resolution>'
+      : '页面里找不到带 data-composition-id 的舞台，只写了 <html data-resolution>（CLI 将兜底 1080x1920 竖屏）'))
 
   // ① 模型声明（零成本）
   let target = declaredDuration(localized)
@@ -201,11 +253,21 @@ async function prepareEntry(opts: {
   for (const j of jobs) entry = entry.split('"' + j.from + '"').join('"' + j.to + '"')
   if (jobs.length) writeTrimLog(projDir, '裁到 ' + target + 's：' + jobs.map((j) => path.basename(j.from)).join('、'))
 
-  // 把成片时长静态写进 <html>（CLI 静态解析这个属性；运行时 JS 写的不算，已实测）
+  // ① 页面自描述：写进 <html data-composition-duration>（预览、info 与下次生成都读它；**CLI 渲染不读**）
   if (target > 0 && !declaredDuration(entry)) {
     entry = /<html\b[^>]*>/i.test(entry)
       ? entry.replace(/<html\b([^>]*)>/i, '<html$1 data-composition-duration="' + target + '">')
       : '<html data-composition-duration="' + target + '">' + entry
+  }
+  // ② 真正生效的那处：写进舞台元素的 data-duration —— CLI 编译阶段只读第一个 data-composition-id 元素的
+  // data-duration ?? data-composition-duration（cli.js 126320），<html> 上那条它从来不读。只写 ① 时
+  // 「声明的时长」等于没有：成片长度由页面 GSAP 时间轴决定（实测那次声明 120s 恰好等于时间轴 120s，才看着像生效）。
+  if (target > 0) {
+    const durated = applyStageDuration(entry, target)
+    if (durated) entry = durated
+    writeTrimLog(projDir, durated
+      ? '成片时长声明已写到舞台 data-duration = ' + target.toFixed(2) + 's（CLI 编译阶段只读这一处）'
+      : '成片时长：页面里找不到带 data-composition-id 的舞台，只写了 <html data-composition-duration>（CLI 渲染不读它）')
   }
   writeTrimLog(projDir, '成片时长 = ' + target.toFixed(2) + 's（来源：' + source + '）')
   return entry
@@ -263,6 +325,21 @@ function register(ctx?: RegisterCtx): void {
       } as VideoRenderResult;
     }
 
+    // ===== 无限循环护栏：页面里有 GSAP 的 repeat: -1 就当场拒绝 =====
+    // GSAP 把 repeat:-1 的 tween 时长当成 1e10 秒（**不是** Infinity），父时间轴 duration() 就是
+    // 「1e10 + 该 tween 的起点」。而 HyperFrames 的成片时长 = max(页面声明, 时间轴实测)，应用写进舞台的
+    // data-duration 压不过它 ⇒ CLI 会按 1e10 秒去计划帧数，实际永远渲不完（2026-10 实测：预览总时长显示
+    // 166666668:12，即 1e10+92 秒）。与其让它排几个小时的队，不如在门口说清楚。
+    // 静态判据足够：GSAP 的无限循环只有 repeat: -1 / repeat: Infinity 两种写法；
+    // CSS 的 animation-iteration-count: infinite 不算——HF 的 CSS 适配器对 endTime 非有限的动画直接跳过。
+    if (/repeat\s*:\s*(?:-1|Infinity)\b/i.test(raw)) {
+      return {
+        ok: false,
+        message: '页面里有无限循环动画（GSAP 的 repeat: -1），成片时长没法确定，转视频会永远渲不完。' +
+          '请到「HTML生成」页让这些循环改成有限次数（例如 repeat: 12, repeatDelay: 0.4，次数按目标秒数算好）后再转视频。'
+      } as VideoRenderResult;
+    }
+
     const hfCli = hfEnv.findHyperframesCli();
     if (!hfCli) {
       return { ok: false, message: '未找到 hyperframes CLI（hyperframes.mjs）。可设置环境变量 HYPERFRAMES_CLI 指向其路径。' } as VideoRenderResult;
@@ -312,7 +389,7 @@ function register(ctx?: RegisterCtx): void {
 
     // 裁定成片时长（①模型声明 > ②现场量时间轴 > ③最长媒体）+ 裁超长媒体副本，详见 prepareEntry()
     // 成片画布同样在这里定：项目属性（载荷带下来），非法/缺省一律落 DEFAULT_CANVAS（绝不能"不传"——
-    // 不传的话 CLI 会在页面没声明画布时兜底 portrait，成片变竖屏，见 applyCanvasDeclaration）
+    // 不传就写不出舞台 data-width/data-height，CLI 兜底 1080x1920，成片变竖屏，见 applyCanvasSize）
     const wanted = payload && payload.canvas
     const canvas: RenderCanvas = wanted && RENDER_CANVASES.indexOf(wanted) >= 0 ? wanted : DEFAULT_CANVAS
     let entry = ''

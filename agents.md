@@ -34,7 +34,7 @@
 | 目录架构 · 独立 Agent 脚本 | [`wiki/06-目录架构-src-agent.md`](wiki/06-目录架构-src-agent.md) |
 | 逐文件说明（按 `src/` 路径镜像归档） | `wiki/files/` |
 
-其他项目级文档：`README.md`（面向使用者：功能、实现、流程、进度）、[`CHANGELOG.md`](CHANGELOG.md)（**更新日志：按版本记录每次修改**）、`REFACTOR_PLAN.md`（Vue3 + electron-vite + TS 重构计划与实施记录）。
+其他项目级文档：`README.md`（面向使用者：功能、实现、流程、进度，**中文**）+ `README.en.md`（同内容的**英文版**，两份要同步改）、[`CHANGELOG.md`](CHANGELOG.md)（**更新日志：按版本记录每次修改**）、`REFACTOR_PLAN.md`（Vue3 + electron-vite + TS 重构计划与实施记录）。
 
 ## 三、更新日志（CHANGELOG.md）
 

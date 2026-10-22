@@ -39,7 +39,7 @@
 | `src/main/hfEnv.ts` | [main/hfEnv.ts.md](./files/main/hfEnv.ts.md) |
 | `src/main/settings.ts` | [main/settings.ts.md](./files/main/settings.ts.md) |
 | `src/main/systemVoices.ts` | [main/systemVoices.ts.md](./files/main/systemVoices.ts.md) |
-| `src/main/agent/`（`index.ts` 15 行 / `chat.ts` 261 行 / `chatLog.ts` 155 行 / `html.ts` 80 行 / `script.ts` 323 行，目录级一篇：chat / chatLog / html / script / index） | [main/agent.md](./files/main/agent.md) |
+| `src/main/agent/`（`index.ts` 15 行 / `chat.ts` 261 行 / `chatLog.ts` 155 行 / `html.ts` 89 行 / `script.ts` 329 行，目录级一篇：chat / chatLog / html / script / index） | [main/agent.md](./files/main/agent.md) |
 | `src/main/projects.ts` | [main/projects.ts.md](./files/main/projects.ts.md) |
 | `src/main/voiceCatalog.ts` | [main/voiceCatalog.ts.md](./files/main/voiceCatalog.ts.md) |
 | `src/main/voice.ts` | [main/voice.ts.md](./files/main/voice.ts.md) |

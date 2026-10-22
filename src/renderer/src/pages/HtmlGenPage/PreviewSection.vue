@@ -57,6 +57,10 @@
       <!-- 预览默认不自动播放、合成又普遍以 opacity:0 开头 ⇒ 首帧是空的。这里说明一句，免得被当成"白屏故障" -->
       <span v-if="!prevPlaying && prevDur > 0 && prevTimeCur < 0.05" class="hg-prev-hint">已暂停在第 0 帧 · 起始帧本就是空的，点「播放」或拖动进度条</span>
     </div>
+    <!-- 时长不可信（页面里有 repeat: -1）：总时长显示 --:-- 并说明原因。
+         GSAP 把无限循环 tween 当成 1e10 秒，父时间轴因此报 1e10 量级的 duration，
+         以前会原样显示成「166666668:12」（317 年），进度条与拖动跳转一并废掉。 -->
+    <div v-if="prevDurUnknown" class="hgen-tip" style="margin:6px 0 0">页面里有无限循环动画（GSAP 的 repeat: -1），总时长无法确定，进度条与拖动跳转暂不可用；把循环改成有限次数（如 repeat: 12, repeatDelay: 0.4）后就会恢复。</div>
   </div>
 </template>
 
@@ -106,6 +110,8 @@ watch(() => props.thinkText, () => {
 const prevPlaying = ref(true);
 const prevDur = ref(0);
 const prevTimeCur = ref(0);
+// 总时长不可信（画面里的闸门判它超过「声明时长 10 倍」或 24 小时）：界面显示 --:-- 并说明原因
+const prevDurUnknown = ref(false);
 const prevFillPct = computed(() => (prevDur.value > 0 ? Math.min(100, (prevTimeCur.value / prevDur.value) * 100).toFixed(2) + '%' : '0%'));
 const prevTimeText = computed(() => fmtPrev(prevTimeCur.value) + ' / ' + (prevDur.value > 0 ? fmtPrev(prevDur.value) : '--:--'));
 // 播放键三态（原「暂停/继续」与「从头重新播放」两个按钮已合并成一个）：
@@ -167,6 +173,9 @@ function onSeekEnd(ev: PointerEvent): void {
 function onPrevMessage(ev: MessageEvent): void {
   const d = ev && ev.data;
   if (!d || !d.__hg || d.type !== 'progress') return;
+  // 画面里的 clock() 会把「不可信的超长时长」降级成 dur=0 + unknown=true（见主进程注入脚本），
+  // 这里只负责上屏：总时长走 --:--，并显示那行原因说明。
+  prevDurUnknown.value = d.unknown === true;
   const acked = d.ack === true;
   if (acked) {
     seekPending.value = false;
@@ -255,6 +264,7 @@ function onFrameLoad(): void {
   prevPlaying.value = false;
   prevDur.value = 0;
   prevTimeCur.value = 0;
+  prevDurUnknown.value = false;
   fitFrame();
 }
 function onPrevToggle(): void {

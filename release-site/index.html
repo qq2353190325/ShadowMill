@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>影坊 ShadowMill · 下载</title>
+<meta name="description" content="影坊（ShadowMill）：一站式音视频创作流水线。Windows 版下载。" />
+<!--
+  下载页 · 上传到 OSS 的 Bucket 根目录（文件名 index.html），配合静态网站托管的「默认首页」使用。
+
+  为什么页面自己读 latest.yml 而不是写死版本号：
+  latest.yml 是应用自动更新用的固定名清单（每版覆盖），里面已经有 version / path / size / releaseDate。
+  页面打开时 fetch 它，就能永远显示最新版、下载按钮永远指向当前版本的安装包——发新版不用改这个文件。
+
+  ⚠ 改这里：如果你的文件不在 shadowmill/ 前缀下，把 BASE 改成 '' 或对应前缀（结尾要带 /）。
+  ⚠ 静态网站托管 + OSS 默认域名时，浏览器会强制下载 HTML 而不是显示网页；要真正浏览需绑定已备案的自定义域名。
+-->
+<style>
+  :root{
+    --bg:#0b1220; --panel:rgba(18,28,46,.82); --line:rgba(0,212,255,.22);
+    --text:#e6f1ff; --muted:#8ba3bd; --accent:#00d4ff; --accent-2:#7c5cff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1100px 520px at 50% -12%, rgba(0,212,255,.18), transparent 60%),
+      radial-gradient(760px 420px at 88% 8%, rgba(124,92,255,.16), transparent 62%),
+      var(--bg);
+    color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:32px 20px;
+  }
+  .wrap{width:100%;max-width:720px}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+  .logo{
+    width:38px;height:38px;border-radius:11px;flex:0 0 auto;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    box-shadow:0 0 22px rgba(0,212,255,.45);
+  }
+  .brand h1{font-size:22px;margin:0;letter-spacing:.4px}
+  .brand .en{color:var(--muted);font-size:13px;margin-left:2px}
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:26px 26px 22px;backdrop-filter:blur(6px);
+    box-shadow:0 18px 50px rgba(0,0,0,.45);
+  }
+  .tagline{margin:0 0 6px;color:var(--muted);font-size:14px;line-height:1.7}
+  .ver{
+    display:inline-flex;align-items:center;gap:8px;margin:14px 0 20px;
+    font-size:13px;color:var(--accent);
+    border:1px solid var(--line);border-radius:999px;padding:5px 13px;
+  }
+  .ver .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  .btn{
+    display:flex;align-items:center;justify-content:space-between;gap:16px;
+    width:100%;padding:15px 18px;border-radius:12px;text-decoration:none;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    color:#04121c;font-weight:700;font-size:16px;letter-spacing:.3px;
+    box-shadow:0 10px 28px rgba(0,212,255,.28);
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .btn:hover{transform:translateY(-1px);box-shadow:0 14px 34px rgba(0,212,255,.4)}
+  .btn .size{font-weight:600;font-size:13px;opacity:.78}
+  .btn[aria-disabled="true"]{background:#22324a;color:var(--muted);box-shadow:none;cursor:not-allowed;transform:none}
+  .hint{margin:12px 0 0;font-size:12.5px;color:var(--muted);line-height:1.75}
+  .rules{margin:20px 0 0;padding:16px 0 0;border-top:1px solid rgba(139,163,189,.16);list-style:none}
+  .rules li{position:relative;padding-left:16px;margin:9px 0;font-size:13px;color:var(--muted);line-height:1.7}
+  .rules li::before{content:"";position:absolute;left:0;top:8px;width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.75}
+  .foot{margin-top:18px;display:flex;gap:18px;flex-wrap:wrap;font-size:13px}
+  .foot a{color:var(--accent);text-decoration:none;border-bottom:1px dashed rgba(0,212,255,.35)}
+  .foot a:hover{border-bottom-style:solid}
+  .err{color:#ff8a8a}
+  @media (max-width:520px){ .card{padding:20px 16px} .brand h1{font-size:19px} .btn{font-size:15px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="logo" aria-hidden="true"></div>
+    <h1>影坊 <span class="en">ShadowMill</span></h1>
+  </div>
+
+  <div class="card">
+    <p class="tagline">
+      一站式音视频创作流水线：内容脚本 → 配音 → 字幕 → HTML 动画 → 视频。
+      语音识别与视频渲染都在本机完成，不消耗 API 额度。
+    </p>
+
+    <div class="ver"><span class="dot" aria-hidden="true"></span><span id="verText">正在读取最新版本…</span></div>
+
+    <a id="dl" class="btn" href="#" aria-disabled="true">
+      <span id="dlText">下载 Windows 版</span>
+      <span class="size" id="dlSize"></span>
+    </a>
+    <p class="hint" id="hint">文件：—</p>
+
+    <ul class="rules">
+      <li>系统要求：<strong>Windows 10 / 11（64 位）</strong>。macOS 版本尚未发布。</li>
+      <li>安装包<strong>不含</strong>渲染运行环境（ffmpeg / hyperframes，两个包合计约 146 MB）：首次用到「转成视频 / 提取原声 / 逐句对齐」时，应用会先问你要不要下载，确认后才开始，可取消。</li>
+      <li>语音识别（whisper-cli.exe）随安装包，装完即可离线转录；<strong>识别模型</strong>需在应用内按需下载。</li>
+      <li>首次使用请到「设置」页填写自定义模型与千问语音 API Key。</li>
+    </ul>
+
+    <div class="foot">
+      <a href="https://gitee.com/huang-chaoming235/ai-creates-images" target="_blank" rel="noopener">Gitee 仓库</a>
+      <a href="https://gitee.com/huang-chaoming235/ai-creates-images/blob/master/CHANGELOG.md" target="_blank" rel="noopener">更新日志</a>
+      <a href="https://gitee.com/huang-chaoming235/ai-creates-images/blob/master/README.md" target="_blank" rel="noopener">使用说明</a>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // 与 index.html 同级的更新源目录前缀（文件放在 Bucket 根目录时，清单在 shadowmill/ 下）
+  var BASE = 'shadowmill/';
+
+  var verText = document.getElementById('verText');
+  var dl = document.getElementById('dl');
+  var dlText = document.getElementById('dlText');
+  var dlSize = document.getElementById('dlSize');
+  var hint = document.getElementById('hint');
+
+  function fmtSize(bytes) {
+    var n = Number(bytes);
+    if (!isFinite(n) || n <= 0) return '';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+
+  function fmtDate(raw) {
+    var s = String(raw || '').replace(/^['"]|['"]$/g, '').trim();
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    return m ? m[1] + '-' + m[2] + '-' + m[3] : '';
+  }
+
+  // latest.yml 是很小的固定格式清单，只取第一处出现的字段即可，不引入 YAML 解析库
+  function pick(text, key) {
+    var re = new RegExp('^\\s*' + key + ':\\s*(.+)$', 'm');
+    var m = re.exec(text);
+    return m ? m[1].replace(/^['"]|['"]$/g, '').trim() : '';
+  }
+
+  function fail(msg) {
+    verText.textContent = '暂时读不到版本信息';
+    verText.className = 'err';
+    dlText.textContent = '下载地址暂不可用';
+    hint.textContent = msg + '（可直接访问 ' + BASE + 'latest.yml 查看当前版本）';
+  }
+
+  fetch(BASE + 'latest.yml', { cache: 'no-store' })
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.text();
+    })
+    .then(function (text) {
+      var version = pick(text, 'version');
+      var file = pick(text, 'path');
+      var size = fmtSize(pick(text, 'size'));
+      var date = fmtDate(pick(text, 'releaseDate'));
+
+      if (!file) throw new Error('清单里没有 path 字段');
+
+      verText.textContent = '最新版本 v' + (version || '?') + (date ? ' · ' + date : '');
+      dl.href = BASE + encodeURI(file);
+      dl.setAttribute('aria-disabled', 'false');
+      dl.removeAttribute('aria-disabled');
+      dlText.textContent = '下载 Windows 版';
+      dlSize.textContent = size;
+      hint.textContent = '文件：' + file + (size ? '（' + size + '）' : '');
+    })
+    .catch(function (e) {
+      fail('读取清单失败：' + (e && e.message ? e.message : e));
+    });
+})();
+</script>
+</body>
+</html>

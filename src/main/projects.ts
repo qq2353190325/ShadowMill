@@ -472,6 +472,15 @@ const HG_PREVIEW_CTRL = [
   '      if (m && isFinite(m.duration) && m.duration > 0) { dur = m.duration; time = m.currentTime; }',
   '      try { if (window.gsap) { var gt = window.gsap.globalTimeline; if (gt.duration() > dur) dur = gt.duration(); if (gt.time() > time) time = gt.time(); } } catch (e) {}',
   '    }',
+  // ===== 时长可信度闸门：超长就报「无法确定」，别把 1e10 秒原样上屏 =====
+  // 页面里有 GSAP 的 repeat: -1 时，那个 tween 的时长是 1e10 秒量级（GSAP 的无限循环哨兵，不是 Infinity），
+  // 父时间轴 duration() = 1e10 + 起点 ⇒ 总时长会显示成「166666668:12」（317 年），进度条与 seek 一并废掉。
+  // 判据两条：① 超过页面自己声明的成片时长 10 倍（声明写在 <html data-composition-duration>）；
+  //         ② 超过 24 小时（页面没写声明时的兜底，与 HyperFrames 自己的渲染上限同口径）。
+  // 命中就回 dur=0 + unknown，父页显示「--:--」并说明原因（不猜一个假时长）。
+  '    var declared = 0;',
+  '    try { declared = Number(document.documentElement.getAttribute("data-composition-duration")) || 0; } catch (e) {}',
+  '    if ((declared > 0 && dur > declared * 10) || dur > 86400) return { time: time, dur: 0, unknown: true };',
   '    return { time: time, dur: dur };',
   '  };',
   // 拖动预览进度条 → 跳转播放位置：composition 时间轴、页面里的音频/视频、WAAPI 动画一起定位到第 s 秒。
@@ -498,7 +507,7 @@ const HG_PREVIEW_CTRL = [
   '  var userActed = false;',
   '  var report = function (ack) {',
   '    var c = clock();',
-  '    try { parent.postMessage({ __hg: true, type: "progress", time: c.time, dur: c.dur, playing: isPlaying(), ack: !!ack }, "*"); } catch (e) {}',
+  '    try { parent.postMessage({ __hg: true, type: "progress", time: c.time, dur: c.dur, unknown: !!c.unknown, playing: isPlaying(), ack: !!ack }, "*"); } catch (e) {}',
   '  };',
   '  var freeze = function () {',
   '    if (userActed) return;',
@@ -691,7 +700,15 @@ function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText
     // 根节点写死这个属性，成片就与动画等长；写错/漏写时应用会自己量一次时间轴兜底（见 video.ts）。
     '\n【成片时长】必须把**动画结束时间**写在根元素上：<html data-composition-duration="<秒数>">（可带小数，如 45.6）。' +
       '这个值要等于你写的时间轴总长度（最后一条 tl.to 的位置 + 它的 duration，取最大），不是素材时长。' +
-      '漏写的话渲染器会拿最长素材当片长，成片尾部会出现大段静止画面。',
+      '漏写的话渲染器会拿最长素材当片长，成片尾部会出现大段静止画面。' +
+      // 无限循环是「时长变成 1e10 秒」的唯一来源（2026-10 实测：13 处 repeat:-1 让预览总时长显示成
+      // 166666668:12，转视频直接渲不出来）。GSAP 对 repeat:-1 不返回 Infinity，而是把该 tween 的时长
+      // 当作 1e10 秒，父时间轴的 duration() 就是「1e10 + 起点」——这条必须在生成时按死。
+      '\n【禁止无限循环】任何 tl.to / tl.fromTo / gsap.to 都**不许**写 repeat: -1（也不许 repeat: Infinity）：' +
+      'GSAP 会把这种 tween 的时长当成 1e10 秒，整条时间轴的 duration() 立刻变成「1e10 + 起点」，' +
+      '预览的总时长会显示成 166666668:12 这种荒谬数字，转视频也渲染不出来。' +
+      '需要「一直在动」的效果（呼吸、闪烁、流光、数字雨、扫描线）一律用**有限次数**：按你要的总秒数算好次数，' +
+      '如 duration 1.1 + repeat 12 + repeatDelay 0.4；次数照抄成 -1 是明确禁止的。',
     buildMaterialBlock(mats.materials)
   ]);
 }

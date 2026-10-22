@@ -86,7 +86,7 @@
 | `RenderFps` | `type` | 渲染帧率字面量联合：`24 \| 30` |
 | `RenderOptions` | `interface` | **完整**渲染档位 `{ quality: RenderQuality; fps: RenderFps }`（`settings.json` 的 `render` 段与生效档位都用它） |
 | `RenderOverride` | `type` | `Partial<RenderOptions>`——**项目级覆盖**：字段可缺省，缺省项跟随全局默认 |
-| `RenderCanvas` | `type` | **成片画布方向**：`'landscape' \| 'portrait' \| 'square'`。源码注释明确它是**项目属性、不是渲染档位**——不走「项目覆盖 > 全局默认」那套层级，只在一处选（「HTML生成」页生成侧的「画布」下拉，生成 / 修改前定），落进 `project.json` 的 `canvas`，且同一个值同时决定三件事：① 生成提示词里给模型的版式尺寸（`projects.ts` 的 `【画布】` 块）② 预览 iframe 的画布（`pages/HtmlGenPage/PreviewSection.vue`）③ 渲染入口注入的 `<html data-resolution>`（`main/video.ts`）；因此「预览看到的画布」与「成片画布」必然是同一个尺寸。取值与尺寸的真源是 `shared/constants.ts`（`RENDER_CANVASES` / `CANVAS_SIZES` / `CANVAS_LABELS` / `DEFAULT_CANVAS`），与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 对齐（本项目只暴露 1080 三档） |
+| `RenderCanvas` | `type` | **成片画布方向**：`'landscape' \| 'portrait' \| 'square'`。源码注释明确它是**项目属性、不是渲染档位**——不走「项目覆盖 > 全局默认」那套层级，只在一处选（「HTML生成」页生成侧的「画布」下拉，生成 / 修改前定），落进 `project.json` 的 `canvas`，且同一个值同时决定三件事：① 生成提示词里给模型的版式尺寸（`projects.ts` 的 `【画布】` 块）② 预览 iframe 的画布（`pages/HtmlGenPage/PreviewSection.vue`）③ 渲染入口注入**舞台 `data-width`/`data-height`（成片宽高来源）+ `<html data-resolution>`**（`main/video.ts`）；因此「预览看到的画布」与「成片画布」必然是同一个尺寸。取值与尺寸的真源是 `shared/constants.ts`（`RENDER_CANVASES` / `CANVAS_SIZES` / `CANVAS_LABELS` / `DEFAULT_CANVAS`），与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 对齐（本项目只暴露 1080 三档） |
 | `SettingsSaveRenderPayload` | `interface` | `settings:save-render` 线上载荷：`{ render?: RenderOverride }`（只更新 `render` 段，不动 `customModel`） |
 
 | 归属 | 字段 | 类型 | 说明 |
@@ -332,7 +332,7 @@
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `VideoRenderPayload` | `interface` | `extends RenderOverride`，即 `{ htmlPath?: string; quality?: RenderQuality; fps?: RenderFps; canvas?: RenderCanvas }`——档位字段缺省/非法时主进程不拼对应 CLI 参数；**`canvas` 不是档位而是项目属性**：渲染层把当前项目的画布值一并传下来，`video.ts` 据此往渲染入口注入 `<html data-resolution>`，缺省 / 非法则落 `DEFAULT_CANVAS`（必须有个确定值，否则 HyperFrames 在「页面没声明画布」时兜底 `portrait`） |
+| `VideoRenderPayload` | `interface` | `extends RenderOverride`，即 `{ htmlPath?: string; quality?: RenderQuality; fps?: RenderFps; canvas?: RenderCanvas }`——档位字段缺省/非法时主进程不拼对应 CLI 参数；**`canvas` 不是档位而是项目属性**：渲染层把当前项目的画布值一并传下来，`video.ts` 据此往渲染入口注入**舞台 `data-width`/`data-height`（成片宽高来源）+ `<html data-resolution>`**，缺省 / 非法则落 `DEFAULT_CANVAS`（必须有个确定值，否则 CLI 读不到舞台宽高时兜底 1080×1920） |
 | `VideoRenderResult` | `type` | 渲染结果联合：成功 `{ ok: true; outputVideo: string; projectDir: string }`，失败 `{ ok: false; message: string; compatible?: boolean; needPacks?: RuntimePackName[] }` |
 
 > ⑦ 节只有上面两个类型：渲染载荷与渲染结果。渲染进度载荷 `VideoProgressPayload` 归 ⑧ 节（进度推送）。
@@ -538,7 +538,7 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | 被 import | `src/main/whisper.ts` | `RegisterCtx`、`WhisperCustomModel` 与全部 `Whisper*Payload`（含 `WhisperProgressPayload`） |
 | 被 import | `src/main/voice.ts` | `RegisterCtx`、**`ConfigTarget`**（`voiceNoKeyFail()` 的返回类型）、`SystemVoice`、`VoiceModel`、`VoiceProviderView`、`VoiceSettings`、`VoiceProfile`、`VoiceCreatePayload`、`VoiceProfileKeyPayload`、`VoiceProfilePayload`、`VoiceSaveConfigPayload`、`VoiceSaveDirPayload`、`VoiceSynthPayload` |
 | 被 import | `src/main/ttsAlign.ts` | `RegisterCtx`、`AlignProgressPayload`（取代原本地 `AlignProgressInfo`）、`VoiceAlignPayload` |
-| 被 import | `src/main/video.ts` | `RegisterCtx`、**`RenderCanvas`**（`applyCanvasDeclaration()` / `prepareEntry()` 的画布入参）、`VideoRenderPayload`、`VideoRenderResult`（取代原本地声明的 `RenderPayload` / `RenderResult`） |
+| 被 import | `src/main/video.ts` | `RegisterCtx`、**`RenderCanvas`**（`applyCanvasSize()` / `applyCanvasDeclaration()` / `prepareEntry()` 的画布入参）、`VideoRenderPayload`、`VideoRenderResult`（取代原本地声明的 `RenderPayload` / `RenderResult`） |
 | 被 import | `src/main/runtime.ts` | `RegisterCtx`、`IpcResult`、`RuntimePackName`、`RuntimePackState`、`RuntimeProgressPayload`（③.6 节） |
 | 被 import | `src/main/agent/html.ts` | `AgentProgressPayload`（以 `export type AgentProgress = AgentProgressPayload` 对外保留 `AgentProgress` 名） |
 | 被 import | `src/main/agent/chat.ts` | `AgentProgressPayload`（`onProgress` 载荷）、`ConfigTarget`（每档 `attemptCfg` 的类型） |
@@ -562,7 +562,7 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 - **素材接口的契约形状（`ProjectMaterial` 一族）**：`Project` 只新增**可选**字段 `materials`（老项目读回来 `undefined`，由主进程 `normalizeMaterials` 归为 `[]`），因此**不构成破坏性变更**；`ProjectHtmlMaterials.videoPath` 被 `materialIds?: string[]` 取代——它只被 `project:generate-html` / `project:modify-html` 两个频道消费，且渲染层与主进程同步改完，所以可以直接替换字段名。
 - **`ProjectMaterial.file` 是相对引用、`label` 是原始文件名**：前者必须落在本项目 `images/` / `video/` 下（跨进程契约 + 越权防护），后者只作展示与给模型读的说明；两者不要互相替代。
 - **`ProjectSaveMaterialsPayload.materials` 刻意是 `unknown`**：渲染层提交的是完整列表，主进程必须自己规范化后才能信任它（防脏数据与越权路径），写成 `ProjectMaterial[]` 会给人「已经校验过」的错觉。
-- **成片画布 `RenderCanvas` 是「项目属性」而不是「渲染档位」**：它**不参与** `RenderOverride` 的「项目级覆盖 > 全局默认」合并，也没有全局默认那一层，读写走独立的 `Project.canvas?` 与 `project:set-canvas`。这么做的理由：HyperFrames CLI 在页面没声明画布时**兜底 `portrait`**（成片变 1080×1920 竖屏，宽屏版式被裁掉两侧、上下留大片黑边——本项目实测故障），所以画布必须由项目给出一个**确定值**，并同时喂给生成提示词、预览 iframe 与渲染入口注入的 `<html data-resolution>`。`VideoRenderPayload.canvas?` 与 `quality?` / `fps?` 同路下发但语义不同：前者决定画布 / 成片尺寸，后者决定编码质量与帧率。
+- **成片画布 `RenderCanvas` 是「项目属性」而不是「渲染档位」**：它**不参与** `RenderOverride` 的「项目级覆盖 > 全局默认」合并，也没有全局默认那一层，读写走独立的 `Project.canvas?` 与 `project:set-canvas`。这么做的理由：HyperFrames CLI 的 producer 编译阶段只读文档里**第一个带 `data-composition-id` 的元素**的 `data-width`/`data-height`，**读不到就兜底 1080×1920（竖屏）**（宽屏版式被裁掉两侧、上下留大片黑边——本项目实测故障），而 `<html data-resolution>` 在渲染链路里一次都不读，所以画布必须由项目给出一个**确定值**，并同时喂给生成提示词、预览 iframe 与渲染入口注入的**舞台 `data-width`/`data-height`（成片宽高来源）+ `<html data-resolution>`**。`VideoRenderPayload.canvas?` 与 `quality?` / `fps?` 同路下发但语义不同：前者决定画布 / 成片尺寸，后者决定编码质量与帧率。
 - **`Project.videoMaterial` 是历史字段**：不再新写、素材列表也不读它；仅被暂时隐藏入口的 `project:extract-video-audio` handler 使用。**不要在新代码里读它**。
 - **`IpcFail.message` 是可选字段**：`voice:pick-dir` 的用户取消分支只回 `{ ok: false, canceled: true }`，因此读取 `message` 的代码要容忍 `undefined`（渲染层约定式写法 `(res as { message?: string })?.message || '默认文案'`）。
 - **`IpcFail.detail` 是「可选的技术详情」**：与 `message` 分工明确 —— `message` 说人话（用户能做什么）、`detail` 给排障（原始报错 / HTTP 状态 / 请求 URL），UI 用「查看详情」折叠展示。它同样是可选的，取消分支与部分简单失败分支不带它。

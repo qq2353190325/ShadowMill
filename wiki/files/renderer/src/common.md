@@ -523,7 +523,7 @@ export async function goPage(key: PageKey): Promise<void> {
 | `renderQualityLabel(quality)` | `(RenderQuality) => string` | 质量值 → 中文标签（找不到时回退原值字符串） |
 | `renderOptionsText(options)` | `(RenderOptions) => string` | 档位摘要文案，形如 `标准 · 30fps` |
 
-**成片画布（`RenderCanvas`，本次新增）—— 它不是渲染档位**：同一个文件里还有一组画布的选项表与规范化函数。画布是**项目属性**（`project.json` 的 `canvas`，缺省 `DEFAULT_CANVAS`），**不走**上面那套「项目覆盖 > 全局默认 > 内置默认」的层级——它只在「HTML生成」页的「画布」下拉里选一次，同一个值同时决定生成提示词的版式尺寸、预览 iframe 的画布与渲染入口注入的 `<html data-resolution>`。
+**成片画布（`RenderCanvas`，本次新增）—— 它不是渲染档位**：同一个文件里还有一组画布的选项表与规范化函数。画布是**项目属性**（`project.json` 的 `canvas`，缺省 `DEFAULT_CANVAS`），**不走**上面那套「项目覆盖 > 全局默认 > 内置默认」的层级——它只在「HTML生成」页的「画布」下拉里选一次，同一个值同时决定生成提示词的版式尺寸、预览 iframe 的画布与渲染入口写入的**舞台 `data-width`/`data-height`（成片宽高真正来源）+ `<html data-resolution>`（页面自描述，渲染链路不读）**。
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |

@@ -11,12 +11,21 @@ AIGC:
 
 # 影坊（ShadowMill）—— 一站式音视频创作流水线
 
+**简体中文** | [English](README.en.md)
+
 基于 **Electron + Vue 3 + electron-vite + TypeScript** 的桌面应用，以「项目」为粒度，把 **内容脚本 → 配音 → 字幕 → HTML 动画 → 视频** 五个创作节点串成一条完整流水线。每个项目对应本地一个目录，字幕既可由脚本旁白生成，也可用**内置 whisper.cpp 在本机把音频转录成字幕**；视频由 **HyperFrames + FFmpeg 在本机渲染**——语音识别与视频渲染都不消耗 API 额度。
 
 > 工程内知识库（源码级说明、IPC 契约、逐文件文档）见 [`wiki/README.md`](wiki/README.md)；
 > 更新日志（按版本记录每次修改，发布内容看这一份）见 [`CHANGELOG.md`](CHANGELOG.md)；
 > 界面设计规范（深空科技 / Cyber UI 配色与组件风格）见 [`src/renderer/agents.md`](src/renderer/agents.md)；
 > Vue3 + TS 重构的过程记录见 [`REFACTOR_PLAN.md`](REFACTOR_PLAN.md)。
+
+## 下载
+
+- **最新版本（v0.0.7）**：<https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/ShadowMill%20Setup%200.0.7.exe>
+- 平台：**Windows x64**，NSIS 安装包（`.exe`）；macOS 版本尚未发布。
+- 安装包里**不含**渲染运行环境（ffmpeg / hyperframes，两包合计约 146 MB）：首次启动只**探测**并显示「需要下载」，实际下载要等你在应用内确认后才开始（可取消）。语音识别（`whisper-cli.exe`）随安装包，装完即可离线转录。
+- 首次使用：在「设置」页填写自定义模型与千问语音 API Key。
 
 ---
 

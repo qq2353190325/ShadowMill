@@ -63,7 +63,7 @@ export type ProjectIndex = Omit<Project, 'subtitle' | 'content'> & {
 | `audioFile` | `string` | 是 | 背景音频相对引用（`audio/xxx`，空串表示无）；同时是注入 HTML 音轨（`<audio id="myv-bgm">`）的唯一来源，见 3.5 |
 | `materials` | `ProjectMaterial[]` | 否 | **项目素材库**（图片 / 视频），`ensureProject` 的初始对象为 `[]`；读盘与写盘都经 `normalizeMaterials()` 规范化（见 2.6 / 3.6） |
 | `render` | `RenderOverride` | 否 | 视频渲染档位的**项目级覆盖**：字段缺省即跟随全局默认（`settings.json` 的 `render`） |
-| `canvas` | `RenderCanvas` | 否 | **成片画布方向（项目属性）**：`'landscape'` / `'portrait'` / `'square'`，字段不存在即缺省 `DEFAULT_CANVAS` = `landscape`（1920×1080）；由 `project:set-canvas` 写入，**生成提示词 / 预览画布 / 渲染入口注入的 `<html data-resolution>` 三处都读它**（见 4 的 `project:set-canvas` 行与 5.13） |
+| `canvas` | `RenderCanvas` | 否 | **成片画布方向（项目属性）**：`'landscape'` / `'portrait'` / `'square'`，字段不存在即缺省 `DEFAULT_CANVAS` = `landscape`（1920×1080）；由 `project:set-canvas` 写入，**生成提示词 / 预览画布 / 渲染入口注入的舞台 `data-width`/`data-height` 与 `<html data-resolution>` 三处都读它**（见 4 的 `project:set-canvas` 行与 5.13） |
 | `videoMaterial` | `string` | 否 | **历史字段**：单视频素材时代的相对引用（`video/xxx`）。本轮起不再新写、素材列表也不读它；`writeProject` 只剥 `subtitle` / `content` 两个正文字段，因此老索引里若还留着它会被原样写回（仅 `project:extract-video-audio` 这个已下线入口的 handler 仍在读它，见 3.6 / 4 的 `project:extract-video-audio` 行）。`ttsAudio` 同属「只保留、不新写」的历史字段（由 `voice.ts` 的回执写，本文件不碰） |
 | `createdAt` | `string` | 是 | ISO 时间字符串 |
 | `updatedAt` | `string` | 否 | 每次 `writeProject` 自动刷新为 ISO 时间，列表按此倒序 |
@@ -576,9 +576,11 @@ function buildStyleBlock(content: ContentScript | undefined): string {
 | --- | --- |
 | 【成片时长】 | 必须把**动画结束时间**写在根元素上：`<html data-composition-duration="<秒数>">`（可带小数，如 `45.6`）。**这个值要等于你写的时间轴总长度（最后一条 `tl.to` 的位置 + 它的 `duration`，取最大），不是素材时长**。漏写的话渲染器会拿最长素材当片长，成片尾部会出现大段静止画面 |
 
-源码注释给出的动机（实测数据）：**不给这个数，渲染器只能取「页面里最长媒体」当片长——素材常比动画长得多**（动画 45 秒 + 素材原声 225 秒 ⇒ 成片 3 分 45 秒、后 3 分钟全是黑帧）。根节点写死这个属性，成片就与动画等长；**写错 / 漏写时应用会自己量一次时间轴兜底**（`video.ts` 的 `prepareEntry()`，见 [video.ts.md](./video.ts.md) §4）。
+**提示词为什么仍然要模型写 `<html data-composition-duration>`**：那是**应用读取模型声明的唯一入口**——`video.ts` 的 `declaredDuration()` 用正则从 `<html …>` 上取这个属性（见 [video.ts.md](./video.ts.md) §1.1）。**但 CLI 渲染链路不读它**：`compileForRender` 只读舞台元素的 `data-duration`（cli.js 第 **126320** 行），`rootEl` = 文档里第一个带 `data-composition-id` 的元素，而 `<html>` 既没有这个属性、也不是那个元素。旧文档以为 CLI 会在编译阶段直接读 `<html>` 上这个属性——**那是错的**，已按 cli.js 删除该说法。**真正生效靠 `video.ts`**：`prepareEntry()` 裁定出 `target` 后，用 `applyStageDuration()` 把同一个值写到舞台元素的 `data-duration`（先剥掉该元素上已有的 `data-duration` / `data-composition-duration`，避免同名两个），另外再写一份 `<html data-composition-duration>` 只作页面自描述（预览 / `info` / 下次生成读它，CLI 不读）。
 
-> 与 `video.ts` 的配合是「声明 → 实测 → 最长媒体」三级兜底：模型写了就用声明（零成本），没写就由主进程用无头 Chromium 现场量 GSAP 时间轴，两者都拿不到才交给 CLI 按最长媒体裁定。**但声明只能把成片拉长、拉不短**（规则是 `max(声明, 最长媒体)`），所以主进程还会按裁定值把超长媒体**裁成副本**再渲染——两件事合起来成片时长才真被顶住。
+源码注释给出的动机（实测数据）：**不给这个数，渲染器只能取「页面里最长媒体」当片长——素材常比动画长得多**（动画 45 秒 + 素材原声 225 秒 ⇒ 成片 3 分 45 秒、后 3 分钟全是黑帧）。声明经应用写到舞台上之后，成片就与声明等长；**写错 / 漏写时应用会自己量一次时间轴兜底**（`video.ts` 的 `prepareEntry()`，见 [video.ts.md](./video.ts.md) §4）。
+
+> 与 `video.ts` 的配合是「声明 → 实测 → 最长媒体」三级兜底：模型写了就用声明（零成本），没写就由主进程用无头 Chromium 现场量 GSAP 时间轴，两者都拿不到才交给 CLI 按最长媒体裁定。**但声明只能把成片拉长、拉不短**（规则是 `max(声明, 最长媒体)`），所以主进程还会按裁定值把超长媒体**裁成副本**再渲染——两件事合起来成片时长才真被顶住。**本轮口径变化（用户可见）**：声明写进舞台 `data-duration` 后真的生效——声明比时间轴长会把片子拉长到声明值、比时间轴短会按时长截断（裁超长媒体副本仍按同一个 `target`，未变）。
 
 ### 4.2 提示词里的【画布】块（`buildCanvasBlock(proj, forModify = false)`）
 
@@ -594,7 +596,7 @@ function buildStyleBlock(content: ContentScript | undefined): string {
 
 源码注释给出的动机：画布是**渲染时的实际视口尺寸**（HyperFrames composition 尺寸 = 成片尺寸），模型若按自己习惯的 `1600x900` 之类固定尺寸画，画布一变四周就会留大片黑边（本项目实测故障）；缺省画布 = `DEFAULT_CANVAS`（`landscape`），与老项目的原始观感一致。
 
-与 `video.ts` 的配合是「双保险」，**两道都必要**：提示词要求模型写死 `data-resolution`，但模型可能漏写或写错——渲染入口还会由 `video.ts` 的 `applyCanvasDeclaration()` 再写一次（CLI 的画布解析链里 `data-resolution` 优先级最高，压过页面自己声明的舞台尺寸；一条都读不到时 CLI 会**兜底 `portrait`**，成片变竖屏 + 黑边）。两处说法都取 `shared/constants.ts` 的 `CANVAS_LABELS` / `CANVAS_SIZES`（同源），因此「告诉模型的尺寸」与「界面选的、预览用的、渲染注入的」必然一致。
+与 `video.ts` 的配合是「提示词负责让页面**自描述**，成片尺寸由应用在渲染入口保证」，**两道都必要但职责不同**：提示词要求模型在 `<html>` 写死 `data-resolution`、把主舞台写成该画布尺寸的固定 px，作用只是让页面**自己说清楚**按哪块画布排的版（预览 iframe 与 `hyperframes info` 读得到）——**它不决定成片宽高**。成片宽高由 `video.ts` 在渲染入口给**第一个带 `data-composition-id` 的元素**（最外层舞台）写死 `data-width` / `data-height` 来保证（`applyCanvasSize()`，与 CLI 的 `document.querySelector('[data-composition-id]')` 同口径）：CLI 0.8.33 的 `compileForRender` 只读这对属性，读不到就直接兜底 **1080×1920（竖屏）**，而 `<html data-resolution>` 在渲染链路里**一次都不读**（`parseResolutionFromHtml()` 的唯一调用点是 `info` 命令）。因此**模型漏写 / 写错 `data-resolution` 或舞台尺寸都不影响成片尺寸**——提示词那部分只影响「模型是否按正确画布排版」（排错就会出现黑边 / 裁切），分辨率本身由应用兜住。两处说法都取 `shared/constants.ts` 的 `CANVAS_LABELS` / `CANVAS_SIZES`（同源），因此「告诉模型的尺寸」与「界面选的、预览用的、渲染注入的」必然一致。
 
 > **应用侧的另一种做法本轮没做**：让预览 / 渲染把旧页面**等比缩放、上下留黑带**（成片会永远带黑边，且必须同时改预览副本与渲染入口）属**待定事项**——渲染层与 `video.ts` 本轮一行未改，换画布后的重排完全靠上面这条提示词硬要求 + 用户重新「生成 HTML」/「按需求修改」。
 
@@ -779,13 +781,13 @@ function buildStyleBlock(content: ContentScript | undefined): string {
 
 ### 5.13 成片画布（`project:set-canvas`）
 
-渲染档位那条线（5.10）是「项目覆盖 > 全局默认 > 内置默认」的三层结构；**成片画布刻意不走这套层级**——它是**项目属性**（源码注释：不进 `settings.json`、没有全局默认那一层），只在一处选（「HTML生成」页生成侧的「画布」下拉），落进 `project.json` 的 `canvas`，并且同一个值同时决定三件事：生成提示词里的版式尺寸（4.2）、预览 iframe 的画布、渲染入口注入的 `<html data-resolution>`。
+渲染档位那条线（5.10）是「项目覆盖 > 全局默认 > 内置默认」的三层结构；**成片画布刻意不走这套层级**——它是**项目属性**（源码注释：不进 `settings.json`、没有全局默认那一层），只在一处选（「HTML生成」页生成侧的「画布」下拉），落进 `project.json` 的 `canvas`，并且同一个值同时决定三件事：生成提示词里的版式尺寸（4.2）、预览 iframe 的画布、渲染入口注入的**舞台 `data-width`/`data-height`（成片宽高真正来源）**与 `<html data-resolution>`。
 
 1. **取值**：`payload.canvas` 必须命中 `shared/constants.ts` 的 `RENDER_CANVASES`（`landscape` / `portrait` / `square`），否则 `{ ok: false, message: '画布取值非法' }`；缺 `name` → `{ ok: false, message: '缺少项目名' }`。
 2. **只在值真变了才写**：`if (proj.canvas !== next)` 成立时才 `proj.canvas = next`，并**把已有的 `proj.videoPath` 置空**——理由与「HTML 改动后旧成片失效」同构：画布一变，已渲好的成片尺寸就不再匹配当前项目设定，不能继续被当成当前产物（界面据此重新显示「未生成视频」）。
 3. **一定落盘**：无论值是否变化都 `writeProject(proj)` 并返回 `{ ok: true, project: proj }`（幂等，渲染层拿回执刷新全局状态；**对老项目的内联正文而言，这一次落盘也是一次迁移机会**，见 3.9）。
 4. **它不会自动重排已有版式**：画布只影响**下一次**生成/修改时的提示词与之后的渲染；已有 `index.html` 的版式仍是按旧画布排的。改完之后：**修改路径会硬性要求模型重排**（`project:modify-html` 传 `forModify = true`，画布块多带第 ⑤ 条，见 4.2 / 5.3）；**生成路径没有这条**（从零做一版，本来就按当前画布排）。界面上的提示分两处承接：`HtmlGenPage` 画布行 `?` 气泡的固定常量 `canvasHint` 说明「换画布不会自动重排已有页面：…切到竖屏 / 方形会留下黑边或裁切」，动作行上方的统一 `.hgen-tip` 要求「改完要重新「生成 HTML」或「按需求修改」才会体现在页面上」。**应用侧「等比缩放旧页面 + 上下留黑带」本轮没做**（会让成片永远带黑边，且要同时改预览副本与渲染入口），属待定事项。
-5. **渲染侧的对应值**：渲染时渲染层把 `appState.project.canvas` 随 `video:render` 载荷一起下发（`VideoRenderPayload.canvas`），`video.ts` 再白名单校验一次（非法 / 缺省落 `DEFAULT_CANVAS`）后写进入口 HTML。详见 [video.ts.md](./video.ts.md) §1.2。
+5. **渲染侧的对应值**：渲染时渲染层把 `appState.project.canvas` 随 `video:render` 载荷一起下发（`VideoRenderPayload.canvas`），`video.ts` 再白名单校验一次（非法 / 缺省落 `DEFAULT_CANVAS`）后写进入口 HTML——**舞台元素（第一个带 `data-composition-id` 的元素）的 `data-width`/`data-height` 是成片宽高的真正来源**，`<html data-resolution>` 只做页面自描述。详见 [video.ts.md](./video.ts.md) §1.2。
 
 ## 6. 依赖与协作
 

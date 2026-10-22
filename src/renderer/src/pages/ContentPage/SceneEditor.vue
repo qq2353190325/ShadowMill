@@ -13,7 +13,7 @@
         <div class="hgen-row"><label class="sel-label" style="flex:none;width:auto">旁白</label>
           <textarea v-model="s.narration" class="hgen-subtitle" spellcheck="false" style="height:84px" placeholder="该场景的旁白/配音文本，字幕将据此生成…"></textarea></div>
         <div class="hgen-row"><label class="sel-label" style="flex:none;width:auto">画面分镜</label>
-          <textarea v-model="s.visual" class="hgen-subtitle" spellcheck="false" style="height:64px" placeholder="描述该场景呈现的画面，如：深空背景，标题从上方浮入…"></textarea></div>
+          <textarea v-model="s.visual" class="hgen-subtitle ct-visual" spellcheck="false" placeholder="描述该场景呈现的画面，如：深空背景，标题从上方浮入…"></textarea></div>
         <div class="hgen-row">
           <label class="sel-label" style="flex:none;width:auto">时长提示(秒)</label>
           <input v-model="s.durHint" class="hgen-input" style="flex:none;width:110px" placeholder="可空" />
@@ -48,6 +48,17 @@ const saveText = computed(() => {
 </script>
 
 <style scoped>
+/* 画面分镜输入框：跟着内容自动长高，默认两行字的高度，长到 260px 后内部滚动。
+   高度交给 field-sizing: content，因此必须 height: auto 把 .hgen-subtitle 的固定 260px 压回去；
+   用户手动拖拽会重新变成一个固定高度、自动长高随之失效，故关掉 resize（有 max-height 兜底）。
+   兜底：若哪天 field-sizing 不生效，textarea 退回 HTML 默认的 rows=2 —— 恰好也是两行。 */
+.ct-visual {
+  height: auto;
+  field-sizing: content;
+  min-height: calc(2 * 1.7em + 30px); /* 两行文字（line-height 1.7）+ 上下内边距 28px + 上下描边 2px */
+  max-height: 260px;
+  resize: none;
+}
 .ct-save {
   font-size: 12px;
   color: var(--text-secondary);

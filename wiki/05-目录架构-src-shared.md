@@ -11,9 +11,9 @@
 | [ipc.ts](./files/shared/ipc.ts.md) | 150 | IPC 频道名常量（**11** 个分组、**94** 个频道）+ `IpcChannel` 类型 |
 | [types.ts](./files/shared/types.ts.md) | 1024 | 跨进程载荷类型（12 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情、`needConfig` / `title` 两个配置类字段）、`RegisterCtx`、设置（含**按厂家的 `VoiceSettings` / `VoiceProviderConfig`（只有 `apiKey`）**、渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境（**分包**：`RuntimePackName` / `RuntimePackState` / `RuntimePhase` / `RuntimeProgressPayload`；`IpcFail.needPacks` 与 `IpcResult` 成功分支的可选 `message`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音（含 `VoiceProviderView`；`VoiceCreatePayload.audioPath` 可为本地路径 / 公网 URL / `data:audio/...` URI）、语音识别、项目与字幕（**项目素材库 `ProjectMaterialKind` / `ProjectMaterial` 与素材三件套载荷 / `ProjectMaterialsResult`**、**内容脚本 Agent 的 `ScriptGeneratePayload` / `ScriptGenerateReply`**、**对话记录的 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`**）、预览/转视频、进度推送（**通用 `AgentStage` / `AgentProgressPayload` + 旧名别名 + `HtmlProgressPayload` / `ScriptProgressPayload` 都 `extends` 它**），以及 `PreloadApi`（`window.*` 契约唯一真源，**12 个命名空间**）；`ProjectHtmlMaterials` 的 `videoPath` 已换成 `materialIds?: string[]` 并删掉 `audioPath`（背景音轨由主进程注入 HTML），`Project.videoMaterial` 退化为**历史字段**，`ProjectSetVideoResult` 已删除；`ConfigTarget = 'model' \| 'voice'` 定义在 `RuntimePackName` 之后（**没有 `'billing'`**：余额类不弹窗） |
 | [errors.ts](./files/shared/errors.ts.md) | 225 | **全应用「原始报错 → 人话文案」唯一映射表**：`friendlyError(err, ctx)` / `configTargetOf(message)` / `configTitle(target)` + 类型 `FriendlyError` / `ErrorContext`；纯函数、无副作用、不 import electron；十档固定顺序判定，配置类带 `needConfig`（**余额 / 欠费不弹窗**，走内嵌状态行）（详见 `docs/error-mapping.md`） |
-| [constants.ts](./files/shared/constants.ts.md) | 88 | 应用级公共常量：品牌文案 `APP_NAME`（`'影坊'`）/ `APP_NAME_EN`（`'ShadowMill'`）/ `APP_SLOGAN` / `APP_SLOGAN_SHORT`、出网请求标识 `APP_USER_AGENT`（`APP_NAME_EN + '/1.0'`）、**项目素材三常量** `MAX_MATERIALS`（`20`，图片 + 视频合计上限）/ `IMAGE_MATERIAL_EXTS` / `VIDEO_MATERIAL_EXTS`、**成片画布四常量** `RENDER_CANVASES`（`['landscape', 'portrait', 'square']`）/ `CANVAS_SIZES`（横屏 `1920×1080`、竖屏 `1080×1920`、方形 `1080×1080`）/ `CANVAS_LABELS`（`'横屏 16:9'` / `'竖屏 9:16'` / `'方形 1:1'`）/ `DEFAULT_CANVAS`（`'landscape'`），以及**估时语速一常量 + 一纯函数** `EST_CHARS_PER_SEC`（`4`，字/秒；一个语速**三处消费方**）/ `estimateSubtitleDur(text)`（`max(2.4, 1.6 + 字数 ÷ 语速)`，**估时公式唯一真源**） |
+| [constants.ts](./files/shared/constants.ts.md) | 89 | 应用级公共常量：品牌文案 `APP_NAME`（`'影坊'`）/ `APP_NAME_EN`（`'ShadowMill'`）/ `APP_SLOGAN` / `APP_SLOGAN_SHORT`、出网请求标识 `APP_USER_AGENT`（`APP_NAME_EN + '/1.0'`）、**项目素材三常量** `MAX_MATERIALS`（`20`，图片 + 视频合计上限）/ `IMAGE_MATERIAL_EXTS` / `VIDEO_MATERIAL_EXTS`、**成片画布四常量** `RENDER_CANVASES`（`['landscape', 'portrait', 'square']`）/ `CANVAS_SIZES`（横屏 `1920×1080`、竖屏 `1080×1920`、方形 `1080×1080`）/ `CANVAS_LABELS`（`'横屏 16:9'` / `'竖屏 9:16'` / `'方形 1:1'`）/ `DEFAULT_CANVAS`（`'landscape'`），以及**估时语速一常量 + 一纯函数** `EST_CHARS_PER_SEC`（`4`，字/秒；一个语速**三处消费方**）/ `estimateSubtitleDur(text)`（`max(2.4, 1.6 + 字数 ÷ 语速)`，**估时公式唯一真源**） |
 
-> 前两个文件是**契约**（频道名与载荷格式禁止改动）；`errors.ts` 是**纯函数映射表**（不含业务状态，改它不影响任何频道名或载荷格式，但改文案会同时影响 main 与 renderer 的显示）；`constants.ts` 是**文案、请求标识、成片画布尺寸、素材规则与估时语速**，改它不影响任何频道名或载荷格式（但改素材常量 / 画布尺寸 / 估时语速等于改产品规则：素材常量同时约束主进程校验与界面提示，画布尺寸必须与 HyperFrames CLI 的画布预设对齐（对不上成片会退回 CLI 的兜底 `portrait`），估时语速同时改渲染层预览的字幕时长、主进程落盘 / 导出 / 逐句对齐用的时间轴、AI 面板的估算时长与脚本 Agent 提示词的字数预算）。
+> 前两个文件是**契约**（频道名与载荷格式禁止改动）；`errors.ts` 是**纯函数映射表**（不含业务状态，改它不影响任何频道名或载荷格式，但改文案会同时影响 main 与 renderer 的显示）；`constants.ts` 是**文案、请求标识、成片画布尺寸、素材规则与估时语速**，改它不影响任何频道名或载荷格式（但改素材常量 / 画布尺寸 / 估时语速等于改产品规则：素材常量同时约束主进程校验与界面提示，画布尺寸必须与 HyperFrames CLI 的画布预设对齐（对不上或被覆盖时成片会是 1080×1920，CLI 的兜底尺寸），估时语速同时改渲染层预览的字幕时长、主进程落盘 / 导出 / 逐句对齐用的时间轴、AI 面板的估算时长与脚本 Agent 提示词的字数预算）。
 
 ---
 
@@ -133,7 +133,7 @@ export interface ScriptAppendRoundPayload {
 
 ## 4. `constants.ts` —— 应用级公共常量（品牌文案 + 成片画布尺寸 + 素材白名单 + 估时语速唯一来源）
 
-纯字面量 + 一个纯函数模块（零副作用；顶部只有一处 `import type { RenderCanvas } from './types'`——纯类型导入不产生运行时代码），导出 **13 个常量 + 1 个纯函数**（6 个字符串 + 2 个数字 + 3 个字符串数组 + 2 个 `Record` + `estimateSubtitleDur()`），**共 88 行**：
+纯字面量 + 一个纯函数模块（零副作用；顶部只有一处 `import type { RenderCanvas } from './types'`——纯类型导入不产生运行时代码），导出 **13 个常量 + 1 个纯函数**（6 个字符串 + 2 个数字 + 3 个字符串数组 + 2 个 `Record` + `estimateSubtitleDur()`），**共 89 行**：
 
 | 常量 | 值 | 用途 |
 |---|---|---|
@@ -146,7 +146,7 @@ export interface ScriptAppendRoundPayload {
 | `IMAGE_MATERIAL_EXTS` | `['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg']` | 图片素材白名单：`project:pick-media` 的过滤项、`materialKindOf()` 判类型 |
 | `VIDEO_MATERIAL_EXTS` | `['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi']` | 视频素材白名单：同上（视频单选）；与原来的单个视频素材完全一致 |
 | `RENDER_CANVASES` | `['landscape', 'portrait', 'square']` | **成片画布三档**（本项目只暴露 1080 三档，CLI 另有 4k 三档）：主进程 `video.ts` / `projects.ts` 与渲染层 `utils/render.ts` 都拿它当**白名单**和下拉选项来源 |
-| `CANVAS_SIZES` | `landscape: {1920,1080}`、`portrait: {1080,1920}`、`square: {1080,1080}` | 每个画布的实际像素（= composition 尺寸 = 成片尺寸）：注入 `<html data-resolution>` 时留痕、写进生成提示词、预览 iframe 的内联宽高与缩放比都按它算 |
+| `CANVAS_SIZES` | `landscape: {1920,1080}`、`portrait: {1080,1920}`、`square: {1080,1080}` | 每个画布的实际像素（= composition 尺寸 = 成片尺寸）：写进渲染入口的**舞台 `data-width`/`data-height`**（成片宽高真正来源，CLI 读不到就兜底 1080×1920）与 `<html data-resolution>` 时留痕、写进生成提示词、预览 iframe 的内联宽高与缩放比都按它算 |
 | `CANVAS_LABELS` | `landscape: '横屏 16:9'`、`portrait: '竖屏 9:16'`、`square: '方形 1:1'` | 画布的界面 / 提示词文案：放这里而不是各处自己拼，否则「界面选的」与「告诉模型的」会对不上 |
 | `DEFAULT_CANVAS` | `'landscape'` | 项目没设 `canvas` 时用的画布（老项目因此保持原有 16:9 观感）；主进程白名单校验失败、渲染层 `normalizeCanvas()` 遇到脏数据都落到它 |
 | `EST_CHARS_PER_SEC` | `4` | **估时语速（字/秒）**，一个语速三处用：① `estimateSubtitleDur()` 的分母（渲染层字幕页经 `helpers.ts` 的 `estDur`、主进程 `parseSubtitle`）② 内容脚本页「AI 创作」结果卡的「估算时长」= `totalChars ÷ 它`（`AiChatPanel.vue` → `ScriptRoundCard.vue` 的 `charsPerSecond`）③ 脚本 Agent 提示词的字数预算（`agent/script.ts` 的「目标总时长 × 它」）。上一轮取 3、更早是 `0.15` 秒/字 ≈ 6.7 字/秒（老系数，套到整段场景旁白上快一倍） |
@@ -154,7 +154,7 @@ export interface ScriptAppendRoundPayload {
 
 素材三常量的取值理由（源码注释逐字）：上限按「图片 + 视频合计」算，因为素材会逐个写进 Agent 提示词并成为页面元素，数量一多提示词过长、生成质量与渲染耗时都会明显变差，**20 是权衡后的取值**；图片白名单收 `svg` 是因为矢量图做图标 / 装饰最省体积且不涉及解码器；视频白名单**与原来的单个视频素材一致**。
 
-成片画布四常量的取值理由（源码注释逐字）：取值与尺寸必须与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 对齐（本项目只暴露 1080 三档）；放在 shared 是因为**三个消费点必须用同一组数**——① 主进程往渲染入口注入 `<html data-resolution>`（`src/main/video.ts`）② 主进程把它写进生成提示词（`src/main/projects.ts` 的【画布】块）③ 渲染层选项表与预览 iframe（`renderer/utils/render.ts`、`pages/HtmlGenPage/PreviewSection.vue`）；`DEFAULT_CANVAS = 'landscape'` 的理由是应用内预览画布历来 16:9、首页也写着「1080P 导出」。
+成片画布四常量的取值理由（源码注释逐字）：取值与尺寸必须与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 对齐（本项目只暴露 1080 三档）；放在 shared 是因为**三个消费点必须用同一组数**——① 主进程往渲染入口注入**舞台 `data-width`/`data-height`（成片宽高真正来源；CLI 只认它，读不到就兜底 1080×1920）**与 `<html data-resolution>`（只做页面自描述，渲染链路不读；`src/main/video.ts`）② 主进程把它写进生成提示词（`src/main/projects.ts` 的【画布】块）③ 渲染层选项表与预览 iframe（`renderer/utils/render.ts`、`pages/HtmlGenPage/PreviewSection.vue`）；`DEFAULT_CANVAS = 'landscape'` 的理由是应用内预览画布历来 16:9、首页也写着「1080P 导出」。
 
 **估时语速一常量 + 一函数的取值理由**：同一条规则原先在**两个进程里各写了一遍**（渲染层 `SubtitlePage/helpers.ts` 的 `estDur`、主进程 `parseSubtitle` 里内联的 `0.15` 系数），而内容脚本页另写了一个 4.5 的本地语速常量（已删除）、脚本 Agent 提示词再写一遍 4.5——三套口径各自漂移。放到 shared 后三处 `import` 同一份，改一处三处同时生效。语速取 **4 字/秒**（一个语速三处用：字幕估时 / 面板估算时长 / 提示词字数预算）——口径变化实测：93 字单段 **24.85s**（上一轮取 3 时 32.6s、最初 `0.15` 秒/字时 15.55s）；用户项目 8 场景（85~100 字）合计 **195.8s（3:15.8）**（上一轮 256.8s / 4:16.8、最初 122.6s / 2:02.6）；AI 面板 732 字显示 **183s（3:03）**；提示词 60 秒的字数预算 **240 字**（按 4.5 时是 270 字，约 −11%）。它只是**估时、不读音频**，要真实时长得走配音页的「字幕配音（逐句对齐）」；**渲染层界面文案也引用该常量、不写死数字**（字幕页提示行 `{{ EST_CHARS_PER_SEC }} 字/秒`、按钮 `title` 与 toast 都是拼接）。
 

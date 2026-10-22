@@ -59,6 +59,31 @@ html, body {
   background: var(--bg-primary);
 }
 
+/* ===== 全局滚动条（唯一真源） =====
+   深色主题下 Chromium 默认的灰白滚动条很跳，这里把**所有**滚动容器统一成一套：
+   8px、圆角滑块、半透明主色、透明轨道（参数原本散在「我的音色」列表与字幕条目列表里，现归此处，
+   那两处已改为继承，别再局部重复定义——要调只改这里）。
+   只写 ::-webkit-* 伪元素：Chromium 里一旦写 scrollbar-width / scrollbar-color，标准属性会顶掉
+   伪元素自定义、退回默认滚动条，所以全局**不写**这两个属性。
+   个别容器要「完全隐藏滚动条但仍可滚动」，在该容器上单独写 scrollbar-width: none + ::-webkit-scrollbar { display: none }。 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(0, 212, 255, 0.25);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.45);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 body {
   display: flex;
   flex-direction: column;
@@ -211,10 +236,6 @@ body {
   padding: 32px;
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-width: none;
-}
-.content::-webkit-scrollbar {
-  display: none;
 }
 
 .content h1 {
@@ -769,7 +790,7 @@ body {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: var(--space-3);
+  margin: var(--space-3) 0;
 }
 
 /* 表单行标签（.hgen-row 内的 label.sel-label / span.sel-label）
@@ -1286,19 +1307,6 @@ body {
   overflow-y: auto;
   padding-right: 4px;
 }
-.sub-list::-webkit-scrollbar {
-  width: 8px;
-}
-.sub-list::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(0, 212, 255, 0.25);
-}
-.sub-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 212, 255, 0.45);
-}
-.sub-list::-webkit-scrollbar-track {
-  background: transparent;
-}
 .sub-empty {
   padding: 18px;
   font-size: 13px;
@@ -1441,9 +1449,6 @@ body {
 }
 /* 音色多时列表内部滚动，整页不跟着滚 */
 .voice-list-body { max-height: 360px; overflow-y: auto; }
-.voice-list-body::-webkit-scrollbar { width: 8px; }
-.voice-list-body::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(0, 212, 255, 0.25); }
-.voice-list-body::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.45); }
 
 .voice-list-row {
   font-size: 13px;

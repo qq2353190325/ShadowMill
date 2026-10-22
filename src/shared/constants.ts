@@ -46,10 +46,11 @@ export const VIDEO_MATERIAL_EXTS = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'];
 // 取值与尺寸必须与 HyperFrames CLI 的 CANVAS_DIMENSIONS 对齐（resources/hyperframes/.../dist/cli.js：
 //   landscape 1920x1080 / portrait 1080x1920 / square 1080x1080，另有 4k 三档——本项目只暴露 1080 三档）。
 // 为什么放在 shared：三个消费点必须用同一组数——
-//   ① 主进程往渲染入口注入 <html data-resolution="…">（src/main/video.ts）
+//   ① 主进程往渲染入口注入舞台 data-width/data-height（成片宽高的真正来源）与 <html data-resolution>
+//      （src/main/video.ts；CLI 只认前者，读不到就兜底 1080x1920）
 //   ② 主进程把它写进生成提示词，让模型按同一块画布排版式（src/main/projects.ts）
 //   ③ 渲染层选项表与预览 iframe 的画布尺寸（renderer/utils/render.ts、HtmlGenPage/PreviewSection.vue）
-// 改这里的尺寸/取值时，CLI 那边若对不上，成片会退回 CLI 自己的兜底 portrait（见 video.ts 的注释）。
+// 改这里的尺寸/取值时，CLI 那边若对不上，成片会退回 CLI 自己的兜底 1080x1920 竖屏（见 video.ts 的注释）。
 export const RENDER_CANVASES: RenderCanvas[] = ['landscape', 'portrait', 'square'];
 // 每个画布的实际像素（= composition 尺寸 = 成片尺寸；CLI 不传 --resolution 时输出就是它本身）
 export const CANVAS_SIZES: Record<RenderCanvas, { width: number; height: number }> = {

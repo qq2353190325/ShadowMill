@@ -5,14 +5,14 @@
 - **覆盖文件**：`assets/main.css`（本目录唯一文件，全局设计系统样式表）
 - **所在目录**：src/renderer/src/assets/
 - **类型**：全局样式表（设计系统）
-- **规模**：1893 行（单文件设计系统随迭代持续增长；当前体量见 `[IO.File]::ReadAllLines` 实测）
+- **规模**：1898 行（单文件设计系统随迭代持续增长；当前体量见 `[IO.File]::ReadAllLines` 实测）
 
 ## 1. 作用与职责
 
 | 职责 | 说明 |
 | --- | --- |
 | 主题变量源 | 在 `:root` 中集中定义背景、品牌色、文字色、辉光、圆角、间距刻度等 CSS 变量（清单见 §2），是全应用配色的唯一出口 |
-| 全局重置与骨架 | `*` 归零、`html, body` 的字体族 + **全局字号基准 `font-size: 14px`** + 背景、`#app` 与 `.layout` 的 flex 列布局，决定「标题栏 + 侧栏 + 内容区」三段式结构 |
+| 全局重置与骨架 | `*` 归零、`html, body` 的字体族 + **全局字号基准 `font-size: 14px`** + 背景、`#app` 与 `.layout` 的 flex 列布局，决定「标题栏 + 侧栏 + 内容区」三段式结构；并在其后定义**全应用唯一一套滚动条**（`*::-webkit-scrollbar*`，见 §3 样式分区地图与 §6） |
 | 通用组件样式 | 卡片、按钮（`.hf-btn`）、文本域、弹窗（`.hf-modal-*`）、进度条、空态提示等跨页面复用类（**下拉不在本文件**：自绘下拉 `HfSelect.vue` 自带 `.hf-sel*` 组件级样式） |
 | 页面专有样式 | 首页 Hero 与流水线、HTML 生成工作台（含**项目素材库卡片墙**）、字幕/配音、设置页模型卡片等按注释分节组织 |
 | 视觉特效库 | 毛玻璃（`backdrop-filter: blur(12px)`）、霓虹辉光（`text-shadow` / `box-shadow`）、渐变文字、扫描线动画 |
@@ -74,9 +74,10 @@
 | （无注释）基础重置 | `*` | `margin/padding` 归零，`box-sizing: border-box` 全局盒模型 |
 | 深空科技主题（Cyber UI） | `:root` | 全部设计令牌，含 4px 基准的间距刻度注释 |
 | （无注释）全局骨架 | `html, body`、`body`、`#app`、`.layout` | 字体族 + **全局字号基准 `font-size: 14px`**；`body` 叠两层径向渐变；`#app` 承接 flex 列布局，`.layout` 为 `flex:1; min-height:0` 的可滚动宿主 |
+| **全局滚动条（唯一真源）** | `*::-webkit-scrollbar`、`*::-webkit-scrollbar-track`、`*::-webkit-scrollbar-thumb`(+`:hover`)、`*::-webkit-scrollbar-corner` | 写在 `html, body` 之后、`body` 之前，全应用**唯一一套**：宽高 8px、轨道与角落透明、`border-radius: 999px` 的滑块 `rgba(0,212,255,.25)`、悬停 `rgba(0,212,255,.45)`。所有滚动容器一律靠 `*` 通配继承（含 Teleport 到 `<body>` 的弹层，以及 `.content` / `.sub-list` / `.voice-list-body`），**不再给任何单个容器写 `::-webkit-scrollbar`**；**全局不写 `scrollbar-width` / `scrollbar-color`**——Chromium 里这两个标准属性会顶掉伪元素效果、退回默认灰白条 |
 | 自绘标题栏（深空科技风格） | `.titlebar*`、`.win-btn`、`.win-close` | 40px 高；`-webkit-app-region: drag`；`.win-close:hover` 变警报红 |
 | 左侧菜单（文字菜单） | `.sidebar`、`.logo`、`.menu*` | 220px 宽墨蓝渐变；选中态 3px 电子蓝左边框 + 90° 渐隐高亮 |
-| 右侧内容区 | `.content*`、`.content h1`、`.content p` | `padding:32px`；隐藏滚动条；`h1` 24px 带辉光 |
+| 右侧内容区 | `.content*`、`.content h1`、`.content p` | `padding:32px`；滚动条继承全局那一套（8px 主色滑块，本容器不写 `::-webkit-scrollbar`）；`h1` 24px 带辉光 |
 | （无注释）卡片 / 面板（毛玻璃） | `.card` | `--bg-secondary` 底 + 半透明描边 + `--radius-card` + `backdrop-filter: blur(12px)` |
 | 首页 Hero 横幅 | `.hero*`、`@keyframes heroScan` / `heroFlow` | 双色渐变 + 扫描光带 + 渐变流光标题 |
 | 流水线节点卡片 | `.flow-pipeline`、`.flow-node*`、`.flow-arrow` | hover 上浮 4px 并叠加双层辉光 |
@@ -333,12 +334,12 @@
 - **变量是组件行内样式的桥梁**：多个组件直接在模板 `style` 属性中引用本文件变量（素材卡片、预览卡片都有大量行内 `style`，如 `.hgen-row` 里的 `style="flex:none;width:auto"`）。
 - **类名复用是主要协作方式**：`MaterialsSection.vue` 就是典型——除新增的 `.mat-*` 外，其余（`.hgen-block`、`.panel-head*`、`.panel-title*`、`.hgen-tip`、`.hf-btn*`）全部复用既有类；更新日志弹窗同理——`.hf-modal*` / `.hf-btn` / `.hf-status` / `.hf-error` / `.hf-detail` 全部复用，只自带 `.cl-*` 一组（宽度靠模板内联 `style="width:min(720px,92vw)"`，不新增类）。
 - **JS 与 CSS 的契约**：`.hgen-frame` 的缩放依赖 JS 写 `transform: translate(...) scale(...)`，**它的宽高与容器的尺寸也依赖组件内联样式**（`.hgen-frame-wrap` 与 `.hgen-frame` 上的 16:9 / 1920×1080 是默认值：挂载后容器按 **`frameStyle`**（高度上限 800、宽度按比例、`aspect-ratio` 定高、`paddingBottom:'0'`）覆盖、iframe 宽高按**页面声明的画布**（`pageBox`）覆盖）；`.hg-prev-bar-fill` / `.whisper-bar-fill` 的宽度依赖 JS 写 `style.width`；`.mat-check` 的 `✓` 与 `.mat-card.off` 由 Vue 按 `selected` 渲染；`.mat-add` 的 `:disabled` 由 `busy` 控制。
-- **与设计规范一致**：变量名与取值同 `src/renderer/agents.md` 逐条对应；字号刻度见该文件 §3.1 / §3.2，列表面板（`.panel-head*`）的结构约定见 §5.6。
+- **与设计规范一致**：变量名与取值同 `src/renderer/agents.md` 逐条对应；字号刻度见该文件 §3.1 / §3.2，列表面板（`.panel-head*`）的结构约定见 §5.6，滚动条约定见 §5.8。
 
 ## 6. 注意事项与实现要点
 
 - **`!important` 共两处**：`.hero-sub`（压过 `.hero p` 的 14px）与 `.whisper-bar.indeterminate .whisper-bar-fill`（压过 JS 写的行内宽度）；素材节与更新日志节**都没有**用 `!important`。
-- **滚动条策略分两级**：`.content` 彻底隐藏；`.sub-list` / `.voice-list-body` 保留自绘滚动条。
+- **滚动条只有一套、全局继承**：`main.css` 基础段（`html, body` 之后、`body` 之前）用 `*::-webkit-scrollbar` 系列定义唯一一套——宽高 8px、轨道与角落透明、`border-radius: 999px` 的滑块 `rgba(0,212,255,.25)`、悬停 `rgba(0,212,255,.45)`；`.content`（右侧整页内容区）、`.sub-list`（字幕条目列表）、`.voice-list-body`（我的音色列表）等所有滚动容器一律继承，不在任何容器上重复定义。**全局刻意不写 `scrollbar-width` / `scrollbar-color`**：Chromium（Electron 31 = Chromium 126）里这两个标准属性会顶掉 `::-webkit-*` 伪元素的自定义效果，写了就退回默认灰白滚动条。确需「不显示滚动条但仍可滚动」时，才在该容器上单独写 `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`（目前没有容器在用）；预览 iframe（`hgpreview://` 协议的 HTML 预览页）是独立文档，不受这条全局规则影响。
 - **毛玻璃写法固定为双写**：`backdrop-filter: blur(12px)` 后紧跟 `-webkit-backdrop-filter`（`.card`、`.flow-node`、`.metric-card`）。**素材卡片没有用毛玻璃**——它整卡 `overflow: hidden` 且深底不透明感更强。
 - **`.card` 的 `backdrop-filter` 会捕获后代的 `position: fixed`**：带 `backdrop-filter` 的元素会成为 `fixed` 后代的包含块 ⇒ 挂在卡片里的弹窗（`.hf-modal-mask` 是 `position: fixed`）会被卡片框住、顶部跑到窗口外。**解法是弹窗组件自己 `Teleport` 到 `<body>`**，落地见 `pages/SettingsPage/components/{UpdateSection,ChangelogDialog}.vue`（设置页的「自定义更新源」与「更新日志」弹窗）与配音页 `VoiceSection.vue` 的两个弹窗（各处都留了同样的注释）。渲染层现有 **5 处** `<Teleport to="body">` 里只有 `components/HfSelect.vue` 的弹层是为避开祖先 `overflow: hidden` 而挂，其余 4 处都是这个坑。本文件不改 `.card` 的双写写法。
 - **辉光三种实现**：文字 `text-shadow: var(--glow-primary)`；组件外发光 `box-shadow`；图标 `filter: drop-shadow(...)`。素材节用前两种（`.mat-play` / `.mat-add i` 用文字辉光，`.dot.dot-img` 用同色 `box-shadow`）。

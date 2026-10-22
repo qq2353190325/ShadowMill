@@ -2,10 +2,10 @@
 
 > 内容脚本页：**「场景编辑」+「AI 创作」两个 Tab**——前者手工编辑场景分镜，后者对话式让模型生成 / 修改同一份 `scenes`；**编辑即自动保存**（没有「保存到项目」按钮），AI 的产出与手工改动走同一条写盘通道。**对话记录改成「索引 + 每版副本」**：索引只存元数据，每版脚本单独一份副本，展开 / 应用时才读。
 
-- **覆盖文件**：`ContentPage/` 目录**共 5 个文件**——`index.vue`（35 行）、`SceneEditor.vue`（63 行）、`AiChatPanel.vue`（373 行）、`ScriptRoundCard.vue`（139 行）、`helpers.ts`（271 行）
+- **覆盖文件**：`ContentPage/` 目录**共 5 个文件**——`index.vue`（35 行）、`SceneEditor.vue`（74 行）、`AiChatPanel.vue`（373 行）、`ScriptRoundCard.vue`（139 行）、`helpers.ts`（271 行）
 - **所在目录**：`src/renderer/src/pages/ContentPage/`
 - **类型**：页面组件（外壳 + 2 个 Tab 组件 + 1 个子组件 + 共享助手）
-- **规模**：合计 **881 行**
+- **规模**：合计 **892 行**
 - **对外导出**：`index.vue` 默认导出页面组件（无 props）；`helpers.ts` 导出 `scenes` / `dirty` / `saveState` / `lastSavedAt` / `saveError` / `type SaveState` / `loadScenes` / `emptyScene` / `addScene` / `removeScene` / `moveScene` / `applyScenes` / `scheduleSave` / `flushSave` / `flushPending` / **`chatError`** / `interface ChatIndexState` / **`loadChatIndex` / `appendChatRound` / `readChatVersion` / `setActiveChatVersion` / `clearChatRecords`**
 
 ## 1. 作用与职责
@@ -15,7 +15,7 @@
 | 文件 | 行数 | 职责 |
 |------|------|------|
 | `index.vue` | 35 | **外壳**：`StepBar` + `.hf-tabs` 两个 Tab（**默认「场景编辑」，空项目也一样**）+ 用 `v-show` 挂载 `SceneEditor` / `AiChatPanel`；`onMounted(loadScenes)`、**`onBeforeUnmount(flushPending)`** |
-| `SceneEditor.vue` | 63 | **「场景编辑」Tab**：场景卡（旁白 / 画面分镜 / 时长提示 + 增删排序）+ **一行自动保存状态**（`保存中…` / `已自动保存 HH:mm:ss` / `保存失败：原因` + 「重试」）。**没有「保存到项目」按钮，也没有「● 有未保存改动」** |
+| `SceneEditor.vue` | 74 | **「场景编辑」Tab**：场景卡（旁白 / 画面分镜 / 时长提示 + 增删排序）+ **一行自动保存状态**（`保存中…` / `已自动保存 HH:mm:ss` / `保存失败：原因` + 「重试」）。**没有「保存到项目」按钮，也没有「● 有未保存改动」**；**画面分镜输入框随内容自动长高**（`field-sizing: content`，默认两行字高度、`max-height: 260px` 后内部滚动） |
 | `AiChatPanel.vue` | 373 | **「AI 创作」Tab**：需求输入（**Ctrl+Enter 发送**）、**标题下方一行「本轮上下文提示」（`.hgen-tip` + `contextHint`，本轮新增）**、场景数 / 目标时长、流式状态行、思考过程折叠、错误 + 模型原文折叠、**顶部红字 `chatError`**、`ScriptRoundCard` 列表；**挂载时只读索引**、**生成成功后追加一版（主进程写副本 + 更新索引）**、**展开时才读副本（懒加载 + `versionCache`）**、**「应用此版本」**、标题栏旁「清空对话」 |
 | `ScriptRoundCard.vue` | 139 | **单轮结果卡**：第 N 版 · 场景数 · 字数 · 估算时长 · 展开预览（`scenes` 由父组件懒加载后传入，`null` = 正在读）· **「应用此版本」**（`applying` 时显示「应用中…」）；轮次类型是共享层的 `ScriptChatRoundMeta` |
 | `helpers.ts` | 271 | **模块级共享状态与两套逻辑**：`scenes` / `dirty` + **自动保存调度**（快照 / 防抖 600ms / 串行队列 / 失败可重试）+ **对话记录读写**（`loadChatIndex` / `appendChatRound` / `readChatVersion` / `setActiveChatVersion` / `clearChatRecords`，失败一律写进可见的 `chatError`）；**所有发往 IPC 的 scenes 先经 `plainScenes()` 转普通对象**；**已无 `saveScenes`**，也没有「保存到项目」的入口 |
@@ -50,7 +50,7 @@
 | 卡片标题 | `.panel-title`「场景分镜（旁白 + 画面分镜 + 时长提示）」 |
 | 空态 | `v-if="!scenes.length"` 时 `.empty-hint`：「暂无场景。点「添加场景」自己写；也可以切到「AI 创作」让 AI 写一版。」 |
 | 场景块 | `v-for="(s, i) in scenes"` :key 为 `s.id`，`.hgen-block.ct-scene`（行内 style 给边框 / 圆角 / 内边距 / 背景）；标题 `场景 #{{ i + 1 }}` |
-| 三个字段 | 旁白 `<textarea v-model="s.narration">`（84px）、画面分镜 `<textarea v-model="s.visual">`（64px）、时长提示 `<input v-model="s.durHint">`（110px，placeholder「可空」） |
+| 三个字段 | 旁白 `<textarea v-model="s.narration">`（84px）、画面分镜 `<textarea v-model="s.visual">`（**随内容自动长高**：`field-sizing: content`，默认两行字高度、`max-height: 260px` 后内部滚动，无固定高度）、时长提示 `<input v-model="s.durHint">`（110px，placeholder「可空」） |
 | 行内操作 | 「上移」（`i === 0` 禁用）/「下移」（`i === scenes.length - 1` 禁用）/「删除」 |
 | 底部动作 | `.hgen-actions`：「添加场景」+ **`<span class="ct-save" :class="'is-' + saveState">{{ saveText }}</span>`** + **`v-if="saveState === 'error'"` 时的「重试」按钮（`@click="flushSave"`）** |
 | 底部说明 | `hgen-tip`：场景按顺序播放，`旁白` 作配音文本并派生字幕、`画面分镜` 供 HTML 生成引用、`时长提示` 可空；**「改动会自动保存到项目，无需手动保存」** |
@@ -64,7 +64,7 @@ if (saveState.value === 'saved') return '已自动保存 ' + lastSavedAt.value;
 return '编辑即自动保存';
 ```
 
-`.ct-save` 是 12px 的次要色文字；`.is-saved` 用 `--color-success`、`.is-error` 用 `--color-danger`（本文件带 `<style scoped>`；本页 5 个文件里只有它、`AiChatPanel.vue`、`ScriptRoundCard.vue` 有样式块，`index.vue` 与 `helpers.ts` 没有）。
+`.ct-visual` 是画面分镜输入框的规则：`height: auto`（把 `.hgen-subtitle` 的固定 260px 压回去）+ `field-sizing: content`（跟着内容长高）+ `min-height: calc(2 * 1.7em + 30px)`（两行字，line-height 1.7）+ `max-height: 260px`（到顶后内部滚动）+ `resize: none`（手动拖拽会让自动长高失效；`field-sizing` 万一不生效则退回 HTML 默认 `rows=2`，同样两行）；`.ct-save` 是 12px 的次要色文字；`.is-saved` 用 `--color-success`、`.is-error` 用 `--color-danger`（本文件带 `<style scoped>`；本页 5 个文件里只有它、`AiChatPanel.vue`、`ScriptRoundCard.vue` 有样式块，`index.vue` 与 `helpers.ts` 没有）。
 
 > 与早前版本相比**删掉了两样东西**：主按钮「保存到项目」（连同它的 `saving` 防重入）与 `<span v-if="dirty">● 有未保存改动</span>`。它们描述的是「草稿 vs 已保存」两态，而自动保存之后这个两态不再存在——现在只有一条状态行，成功时显示落盘时刻。
 

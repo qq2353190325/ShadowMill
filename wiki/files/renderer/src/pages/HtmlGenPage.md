@@ -1,16 +1,16 @@
 # src/renderer/src/pages/HtmlGenPage/（页面）
 
-> HTML 生成 / 修改 + **画布（成片尺寸，项目属性：只在本页生成侧选一次）** + **全局视觉风格（整片视觉基调，项目属性 `content.style`：也只在本页生成侧编辑）** + 项目素材库（多图片 / 多视频的增删与勾选）+ 背景音频选定（音轨由主进程注入 HTML）+ 实时预览（iframe 视口 = **页面自己声明的画布**，含**视角比例切换**、播放控制与拖动 seek）+ AI 思考过程展示 + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染；弹窗里没有画布）**。
+> HTML 生成 / 修改 + **画布（成片尺寸，项目属性：只在本页生成侧选一次）** + **全局视觉风格（整片视觉基调，项目属性 `content.style`：也只在本页生成侧编辑）** + 项目素材库（多图片 / 多视频的增删与勾选）+ 背景音频选定（音轨由主进程注入 HTML）+ 实时预览（iframe 视口 = **页面自己声明的画布**，含**视角比例切换**、播放控制与拖动 seek；**页面里有 GSAP 的 `repeat: -1` 时总时长显示 `--:--` 并在播放控制条下方多一行说明**）+ AI 思考过程展示 + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染；弹窗里没有画布）**。
 
 - **覆盖文件**（AGENTS.md 第五节 6：页面自己的子组件与助手并入同一篇）：
   | 文件 | 行数 | 角色 |
   |------|------|------|
   | `HtmlGenPage/index.vue` | 490 | 页面入口：状态条（3 个纯数据格 + 标题右侧「用法」`?`）/ **字幕 + 画布（同一行）** / **全局视觉风格输入框** / 需求描述 / 统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；生成与渲染两套动作链 |
   | `HtmlGenPage/MaterialsSection.vue` | 167 | 「项目素材」区块：图片组 / 视频组的卡片墙（勾选、移除、添加） |
-  | `HtmlGenPage/PreviewSection.vue` | 439 | 「预览」卡片：**背景音频行（一个占满整行的下拉：当前音频 = 「已生成音频」里的选中项 + 清空/本地两项动作）**、状态行、AI 思考过程、**「视角比例」行**（**不显示画布值**）、iframe 预览副本（**视口 = 页面声明的画布**；**容器高度上限 800px、宽度按比例、水平居中**，页面按 contain 缩放 + 居中）、播放控制条（**一个三态键** + 进度条 + 时间） |
+  | `HtmlGenPage/PreviewSection.vue` | 449 | 「预览」卡片：**背景音频行（一个占满整行的下拉：当前音频 = 「已生成音频」里的选中项 + 清空/本地两项动作）**、状态行、AI 思考过程、**「视角比例」行**（**不显示画布值**）、iframe 预览副本（**视口 = 页面声明的画布**；**容器高度上限 800px、宽度按比例、水平居中**，页面按 contain 缩放 + 居中）、播放控制条（**一个三态键** + 进度条 + 时间）、**控制条下方的「总时长无法确定」提示行（`v-if="prevDurUnknown"`，只在页面里有无限循环动画时出现）** |
 - **所在目录**：`src/renderer/src/pages/HtmlGenPage/`（一页一目录，入口 `index.vue`）
 - **类型**：页面组件（SFC，`<script setup lang="ts">`）
-- **规模**：3 个文件合计 1096 行（`index.vue` 490 + `MaterialsSection.vue` 167 + `PreviewSection.vue` 439）
+- **规模**：3 个文件合计 1106 行（`index.vue` 490 + `MaterialsSection.vue` 167 + `PreviewSection.vue` 449）
 - **对外导出**：`index.vue` 默认导出组件（无 props，模板内渲染 `StepBar` / `MaterialsSection` / `PreviewSection`）；两个子组件分别是「无 props / 无 emits」与「4 个 props + `reload()`」
 
 ## 1. 作用与职责
@@ -27,6 +27,8 @@
 
 **「转视频」也已并入本页**（渲染动作原在独立的视频页，现已整体搬到这里）：动作行多一个「转视频」按钮，**点它先弹出「转视频」弹窗**（`.hf-modal-mask`，内为「渲染档位」：质量 / 帧率 + 档位来源说明 + 画质说明 + 按需出现的「恢复默认档位」），在弹窗里点「开始渲染」才真正发起渲染；渲染成功后就地回写项目并 toast 引导去「视频预览」页看成片。这样做的原因是渲染需要 HTML 生成流程的上下文（`hasHtml` / `htmlPath`），放在同一页即可用同一个按钮闭环；而档位从「页面下方一行常驻控件」改成「弹窗内确认一次」，是为了让选档位 → 确认成为一次显式动作，也避免误改落盘。
 
+**预览卡会明说「总时长为什么是 `--:--`」**：如果这个页面里还有 GSAP 的无限循环（`repeat: -1`），GSAP 会把那条 tween 的时长当成 1e10 秒，父时间轴的总时长于是荒谬到没法用来做进度条。播放控制条下方因此多一行 12px 提示，说明「总时长无法确定、进度条与拖动跳转暂不可用，把循环改成有限次数（如 `repeat: 12, repeatDelay: 0.4`）后就会恢复」；同一时刻「转视频」也会被主进程拒掉（见 [main/video.ts.md](../../../main/video.ts.md) §1.3）。
+
 ### 1.1 三个文件的职责边界
 
 拆分按「一个文件一件事」切（源码注释在 `index.vue:101`、`MaterialsSection.vue:66`、`PreviewSection.vue:59`）：
@@ -35,7 +37,7 @@
 |------|----------------|------------|
 | `index.vue` | 「这一页要生成 / 修改 / 渲染什么」——项目状态条（3 个纯数据格）、标题右侧的「用法」`?` 气泡、**字幕素材 + 画布下拉（同一个 `.hgen-row`，本轮合并）**、**全局视觉风格输入框（`content.style`）**、需求描述、动作行上方统一的生成前提提示、四个动作按钮、转视频弹窗与渲染档位、两套动作的状态文案 | 素材的增删勾选（交 `MaterialsSection`）、预览与背景音频/试听（交 `PreviewSection`） |
 | `MaterialsSection.vue` | 「这次生成用哪些素材」——图片 / 视频素材库的展示与增删勾选 | 生成流程、预览、渲染；不碰文件系统，全部经主进程 |
-| `PreviewSection.vue` | 「产物长什么样」——预览副本 iframe（**按页面自己声明的画布渲染**）、**视角比例（换一种比例观察）**、播放控制与 seek、AI 思考过程展示、背景音频选定与试听 | 发起生成 / 渲染（按钮在父页），因此状态由父页以 props 传入；**也不显示「画布」值**（那属于「HTML · Agent」卡片） |
+| `PreviewSection.vue` | 「产物长什么样」——预览副本 iframe（**按页面自己声明的画布渲染**）、**视角比例（换一种比例观察）**、播放控制与 seek、**总时长不可信时的 `--:--` 与那行原因说明**、AI 思考过程展示、背景音频选定与试听 | 发起生成 / 渲染（按钮在父页），因此状态由父页以 props 传入；**也不显示「画布」值**（那属于「HTML · Agent」卡片） |
 
 ## 2. `index.vue`：模板结构
 
@@ -209,7 +211,7 @@ defineExpose({ reload: syncPreview });
 
 | 区块 | 说明 |
 |------|------|
-| `.card.hgen-panel`（`style="margin-top:16px"`） | 标题「预览」；卡片内顺序为**背景音频行（只有一个占满整行的下拉）→ 试听行（`v-show`）→ `.hf-status` → AI 思考过程 → `.empty-hint` → 「视角比例」行 → iframe 画布 → 播放控制条** |
+| `.card.hgen-panel`（`style="margin-top:16px"`） | 标题「预览」；卡片内顺序为**背景音频行（只有一个占满整行的下拉）→ 试听行（`v-show`）→ `.hf-status` → AI 思考过程 → `.empty-hint` → 「视角比例」行 → iframe 画布 → 播放控制条 → 总时长不可信时的说明行（`v-if="prevDurUnknown"`）** |
 | 背景音频行（`.hgen-row`，**一行一个控件；当前值落在列表的选中项上**） | 只有两个元素：`span.sel-label`（行内 `style="flex:none;width:56px"`）「背景音频」+ **`HfSelect` `v-model="audioPick"` `:groups="audioSelGroups"` 行内 `style="flex:1"`（**占满整行**）**；`:title` 动态——有音频 `'当前背景音频：' + audioFile + '（由应用注入 HTML，不进生成提示词）'`，无音频 `'还没有背景音频：可选「已生成音频」或本地文件；音轨由应用注入 HTML，不进生成提示词'`。源码注释：「这一行只有一个控件：下拉占满整行，**当前音频就是「已生成音频」里的选中项**（勾选 + 显示在该下拉上），清空走「不使用背景音频」那一项 —— 所以没有独立的「移除」按钮、也不挂 `?` 气泡（音轨的注入规则写在触发器 title 里，鼠标悬停即可看到）」。**注意弹层宽度**：`HfSelect` 的菜单宽度是 `max(触发器宽, 220px)`，触发器占满整行 ⇒ 弹层也跟着变宽——这是「占满一行」的直接结果 |
 | 试听行 `v-show="audioPreviewVisible"` | `<audio ref="audioEl" :src="audioSrc" controls>`（行内 `flex:1;max-height:44px`）+ `label.sel-label`「语速」+ `.rate-spinner`：`−`（`rateStep(-0.05)`）/ `<input ref="rateEl" :value="rateValue" inputmode="decimal" class="hgen-input">`（`@input="onRateInput"`）/ `+`（`rateStep(0.05)`），按钮各自带 `title`（「语速减 0.05」/「语速加 0.05」），输入框 `title`「播放语速 0.5~2.0（非法或空值自动回退 1x）」 |
 | `.hf-status` | `:class="statusDisplayClass"`，文本 `statusDisplay`（渲染中优先显示全局 trace，其余为本页传入的 `status`） |
@@ -219,6 +221,7 @@ defineExpose({ reload: syncPreview });
 | `.hgen-frame-wrap` `v-show="frameVisible"` | 预览画布容器（`ref="frameWrapEl"`）：**尺寸内联绑定 `:style="frameStyle"`**——高度上限 **800px**、宽度 = `min(100%, Math.round(800 × 宽/高)px)`、高度由 `aspect-ratio` 决定、`paddingBottom` 被内联设成 `'0'`。**宽窗口下的实际尺寸**：`16:9` → **1422×800**、`9:16` → **450×800**、`1:1` → **800×800**；**可用宽度不够时宽度退到 `100%`、高度按比例下降，永不裁切**。源码注释：`paddingBottom: '0'` 是**覆盖 `.hgen-frame-wrap` 的 `padding-bottom` 占位**（那是纯 CSS 时代的留位技巧，现在由 `aspect-ratio` 决定高度）。**容器水平居中**：`main.css` 的 `.hgen-frame-wrap` 有 **`margin-inline: auto`**——宽度小于可用宽度时左右均分余量（否则会贴左、右边空一大块，9:16 最明显），宽度吃满时 margin 为 0 等于没有 |
 | `iframe.hgen-frame` | `:src="frameSrc"`、`sandbox="allow-scripts allow-same-origin"`、`@load="onFrameLoad"`，**宽高内联绑定 `pageBox`** `:style="{ width: pageBox.width + 'px', height: pageBox.height + 'px' }"`——即 iframe 的**内部视口 = 页面自己声明的画布**（`<html data-resolution>`，由 `project:preview-html` 的 `pageCanvas` 带回；页面没声明时回落成**项目当前画布** = 旧行为）。外层容器按**视角比例**留位，再由 `fitFrame()` 把整块页面画布 **contain** 进去（居中 + 黑边），因此横屏页面按 1:1 看就是「等比缩小 + 上下黑边」，而不是右边被裁 |
 | `.hg-prev-ctl` `v-show="ctlVisible"` | **只有一个三态按钮**：`<button class="hf-btn" :title="prevToggleTitle" @click="onPrevToggle">{{ prevToggleText }}</button>`——播放中显示 `暂停`（title「暂停动画」）、已播完显示 `重新播放`（title「从头重新播放」）、其余显示 `播放`（title「播放 / 继续动画」）；**「从头重新播放」那个独立按钮已删除**（功能并入同一个键）。其后是进度条 `.hg-prev-bar`（`:class="{ seeking }"`、`title="点击或按住拖动进度条，可跳转到任意播放位置"`、`@pointerdown="onSeekStart"` / `@pointermove="onSeekMove"` / `@pointerup="onSeekEnd"` / `@pointercancel="onSeekEnd"`；内层 `.hg-prev-track` 再包 `.hg-prev-bar-fill`，宽度 `prevFillPct`——热区与视觉条分离）、`.hg-prev-time`（`prevTimeText`）、`.hg-prev-hint`（`v-if="!prevPlaying && prevDur > 0 && prevTimeCur < 0.05"`，文案「已暂停在第 0 帧 · 起始帧本就是空的，点「播放」或拖动进度条」） |
+| **总时长不可信的说明行**（`.hgen-tip`，`v-if="prevDurUnknown"`，行内 `style="margin:6px 0 0"`） | 位置在**播放控制条 `.hg-prev-ctl` 下面、仍在预览卡片内**（模板里就是卡片根 `div` 的最后一个子节点）。文案原文：「页面里有无限循环动画（GSAP 的 repeat: -1），总时长无法确定，进度条与拖动跳转暂不可用；把循环改成有限次数（如 repeat: 12, repeatDelay: 0.4）后就会恢复。」——它只在画面里的 `clock()` 判「时长不可信」（`unknown: true`）时出现；同时 `.hg-prev-time` 因为既有逻辑 `prevDur > 0 ? fmtPrev(prevDur) : '--:--'` 显示 `--:--`，进度条停在 0%，拖动 seek 因 `seekTo` / `onSeekStart` 要求 `prevDur > 0` 而不响应 |
 
 ### 4.3 状态
 
@@ -241,7 +244,8 @@ defineExpose({ reload: syncPreview });
 | `ctlVisible` | 等同 `frameVisible.value` |
 | `thinkPreEl` / `showThink` | `<pre>` 引用；`showThink` = `props.thinkText.length > 0`；`watch(() => props.thinkText)` 每次更新把 `<pre>` 滚到底部 |
 | `prevPlaying` | `ref(true)` 初值，但 `onFrameLoad()` 会置 `false`（预览**不自动播放**），之后由画面回报的 `playing` 校准 |
-| `prevDur` / `prevTimeCur` / `prevFillPct` / `prevTimeText` | 预览总时长、当前时间、进度条宽度百分比、`mm:ss / mm:ss` 文案 |
+| `prevDur` / `prevTimeCur` / `prevFillPct` / `prevTimeText` | 预览总时长、当前时间、进度条宽度百分比、`mm:ss / mm:ss` 文案。**`prevDur` 为 0 时总时长位置显示 `--:--`**（`prevTimeText` 里既有逻辑：`prevDur > 0 ? fmtPrev(prevDur) : '--:--'`），进度条宽度同样是 `prevDur > 0 ? … : '0%'` |
+| **`prevDurUnknown`** | `ref(false)`（**本轮新增**）：画面的时长是否被判定不可信。`onPrevMessage()` 里 `prevDurUnknown.value = d.unknown === true`（每个 `progress` 回报都覆盖一次），`onFrameLoad()` 里复位为 `false`（换项目 / 重载预览后回到「未知 = 假」）。它只驱动模板那行说明；`--:--` 与「拖动不可用」都是既有逻辑自然得出的结果，不靠它额外拦截 |
 | `prevEnded` | `computed<boolean>`（**本轮新增**）：`!prevPlaying && prevDur > 0 && prevTimeCur >= prevDur - 0.25`——「已自然播完」。它同时驱动按钮的第三态（`prevToggleText` / `prevToggleTitle`）与 `onPrevToggle` 的 restart 分支 |
 | `prevToggleText` / `prevToggleTitle` | 同一个按钮的文案与 `title`，三态：播放中 `暂停` / 「暂停动画」；已播完 `重新播放` / 「从头重新播放」；其余 `播放` / 「播放 / 继续动画」 |
 | `seeking` | `ref(false)`：是否正在拖动进度条（拖动期间本地跟手、忽略画面回报） |
@@ -263,16 +267,16 @@ defineExpose({ reload: syncPreview });
 |------|------|
 | `fmtPrev(sec)` | 秒 → `mm:ss`（`Math.floor`、`padStart(2,'0')`） |
 | `prevPost(type, seconds?)` | 向 iframe 的 `contentWindow` 发送 `{ __hg: true, type, seconds }`，目标源 `'*'`；`seconds` 只在 `'seek'` 时给值 |
-| `onSeekStart(ev)` | 无 `frameSrc` 或 `prevDur <= 0` 时忽略；置 `seeking = true`、`setPointerCapture(ev.pointerId)`，随即 `seekTo(ev)` |
+| `onSeekStart(ev)` | 无 `frameSrc` 或 `prevDur <= 0` 时忽略（**因此「时长不可信」时拖动自动不生效，不需要额外的禁用分支**）；置 `seeking = true`、`setPointerCapture(ev.pointerId)`，随即 `seekTo(ev)` |
 | `seekRatio(ev)` / `seekTo(ev)` | 按 `clientX` 相对进度条 `getBoundingClientRect()` 求比例（钳制 0~1）；`prevDur <= 0` 直接返回，否则**本地立即**写 `prevTimeCur` 并 `prevPost('seek', sec)` |
 | `onSeekMove(ev)` | 仅当 `seeking` 时 `seekTo(ev)` |
 | `onSeekEnd(ev)` | 置 `seeking = false`、`releasePointerCapture`，再置 `seekPending = true` 并起 800ms 兜底定时器（在收到画面 `ack` 之前不采信回报） |
-| `onPrevMessage(ev)` | 过滤 `d.__hg && d.type === 'progress'`；`d.ack === true` 时清 `seekPending` 与定时器；**拖动中、或 `seekPending` 且本条不是 ack** 时只更新 `prevDur` 并 `return`；否则写 `prevTimeCur` / `prevDur`，按 `d.playing` 校准 `prevPlaying`，播到 `prevDur - 0.25` 时视为自然播完 |
+| `onPrevMessage(ev)` | 过滤 `d.__hg && d.type === 'progress'`；**先按 `d.unknown === true` 写 `prevDurUnknown`**（画面里 `clock()` 判「时长不可信」时会是 `true`），再 `d.ack === true` 时清 `seekPending` 与定时器；**拖动中、或 `seekPending` 且本条不是 ack** 时只更新 `prevDur` 并 `return`；否则写 `prevTimeCur` / `prevDur`，按 `d.playing` 校准 `prevPlaying`，播到 `prevDur - 0.25` 时视为自然播完 |
 | `fitFrame()` | **contain（输入是 `pageBox`）**：`k = Math.min(wrap.clientWidth / pageBox.width, wrap.clientHeight / pageBox.height)`（把「页面原生视口」整体缩进视角比例形状，取宽 / 高两个方向缩放比的较小值）；`tx = (wrap.clientWidth - pageBox.width * k) / 2`、`ty = (wrap.clientHeight - pageBox.height * k) / 2`；最终 `frame.style.transform = 'translate(tx, ty) scale(k)'`（`transform-origin: 0 0` 不变） |
 | `watch(canvas, …)` | 画布变了（用户在「HTML · Agent」卡片里改）时**把 `viewMode.value = pageMode.value` 归位**（否则界面会留着别的比例），再 `void nextTick(fitFrame)`（`fitFrame` 读容器尺寸，等 DOM 更新后再算） |
 | `watch(viewMode, …)` | 换比例后**容器尺寸随 `frameStyle` 变**（高度上限 800、宽度按比例）、缩放比要在 DOM 更新后重算 → `void nextTick(fitFrame)`（源码注释原文） |
 | `watch([currentAudioIndex, genAudios], …, { immediate: true })` | **选中态的唯一来源**（本轮新增）：`audioPick.value = currentAudioIndex >= 0 ? String(currentAudioIndex) : ''`，源码注释：「当前音频变了（选中 / 清空 / 换项目 / 列表刚加载完）就把下拉的选中态同步过去」。因此**不要在别处再手动 set 一次 `audioPick`**（`onAudioPick` 只负责「读值 → 复位 → 派发动作」） |
-| `onFrameLoad()` | 每次载入完成（含 `restart` 引发的 reload）复位 `prevPlaying = false` / `prevDur = 0` / `prevTimeCur = 0` 并 `fitFrame()`；**刻意不主动起播** |
+| `onFrameLoad()` | 每次载入完成（含 `restart` 引发的 reload）复位 `prevPlaying = false` / `prevDur = 0` / `prevTimeCur = 0` / **`prevDurUnknown = false`** 并 `fitFrame()`；**刻意不主动起播** |
 | `onPrevToggle()` | **三态键的唯一处理**：无 `frameSrc` → `toast('暂无预览')`；`prevEnded` 为真（源码注释：「已自然播完：同一个键 = 从头重播（原来这是独立的「重新播放」按钮）」）→ 发 `'restart'` 并置播放态；否则切换 `prevPlaying` 并发 `'play'` / `'pause'`。**`onPrevReplay()` 已整个删除**（功能并入这里） |
 | `loadFrame()` | 调 `window.projectTools.previewHtml(appState.currentName)`；失败则关画布、`emptyText` 取 `res.message` 或「预览副本生成失败」；成功则**先记下旧的 `pageMode`**，再 `pageDeclared.value = res.pageCanvas \|\| ''`，**并且只在用户没手动改过比例时才跟随页面**：`const prevPageMode = pageMode.value; … if (viewMode.value === prevPageMode) viewMode.value = pageMode.value;`；随后由 `previewPath` 取文件名（兜底 `'index.preview.html'`），`frameSrc.value = previewUrl(appState.currentName, relFile, true)`——**`bust = true` 附 `?v=<Date.now()>` 强制重新加载**（走 `hgpreview://` 而不是 `file://`：dev 的 http 页面下 file:// iframe 会被 Chromium 拦截） |
 | `syncPreview()` | 状态联动：`!!(appState.project && appState.project.htmlExists && appState.project.htmlPath)` 成立 → `loadFrame()`；否则关画布、清 `frameSrc`、显示空态「尚未生成 HTML。」——**即对父页暴露的 `reload()`** |
@@ -298,7 +302,7 @@ defineExpose({ reload: syncPreview });
 | `prompt` | `ref<string>` | 需求描述（提示词），生成/修改的入参 |
 | `promptPlaceholder` | `computed<string>` | 提示词框的 `:placeholder` 文案，随 `hasHtml` 变（见第 2 节模板表对应行） |
 | `subSel` | `ref<string>` | 字幕素材选择值：`''`（不使用字幕）/ `'__current__'`（当前项目字幕）/ 其他项目名。**下拉与画布同处一行**（见第 2 节） |
-| `canvas` | `ref<RenderCanvas>` | **成片画布方向（项目属性不是渲染档位）**：初值 `normalizeCanvas(appState.project && appState.project.canvas)`（缺省横屏 1920×1080），挂载时由 `syncCanvas()` 同步；同一个值决定三件事——① 生成提示词里给模型的版式尺寸（主进程 `buildCanvasBlock()`）② 预览 iframe 的回落画布（`PreviewSection` 直接读 `appState.project.canvas`）③ 渲染入口注入的 `data-resolution`。**没有「设置页默认 → 项目覆盖」那种层级** |
+| `canvas` | `ref<RenderCanvas>` | **成片画布方向（项目属性不是渲染档位）**：初值 `normalizeCanvas(appState.project && appState.project.canvas)`（缺省横屏 1920×1080），挂载时由 `syncCanvas()` 同步；同一个值决定三件事——① 生成提示词里给模型的版式尺寸（主进程 `buildCanvasBlock()`）② 预览 iframe 的回落画布（`PreviewSection` 直接读 `appState.project.canvas`）③ 渲染入口的舞台 `data-width`/`data-height`（成片宽高真正来源）+ `<html data-resolution>`。**没有「设置页默认 → 项目覆盖」那种层级** |
 | `canvasGroups` | `computed<HfSelectGroup[]>` | 画布下拉选项：单组，`options` = `RENDER_CANVAS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))`，label 形如「横屏 16:9（1920×1080）」（取自 `@shared/constants`，与提示词同源） |
 | `canvasNote` | `computed<string>` | 画布 `?` 气泡的**前半句**（随当前画布变）：`'预览与成片都按「' + canvasLabel(canvas.value) + '」这块画布。'`（末尾补了句号）；与 `canvasHint` 拼在同一个气泡里（`{{ canvasNote }} {{ canvasHint }}`），**行内不再单独显示** |
 | `canvasHint` | 普通常量 `string`（**不是 computed**） | 画布 `?` 气泡的**后半句**（固定文案，内容一字未变）：`'换画布不会自动重排已有页面：版式是生成时按画布排的，模型若按横屏排过版，切到竖屏 / 方形会留下黑边或裁切。'`——只讲「换画布要付出什么代价」，「改完要重新生成」那句由动作行上方的统一 `.hgen-tip` 承担 |
@@ -389,15 +393,15 @@ const materials = {
 1. `loadFrame()` 调 `window.projectTools.previewHtml(appState.currentName)`；主进程读取项目 `index.html`，**先从原 HTML 的 `<html data-resolution>` 解析页面自己声明的画布**（`RENDER_CANVASES` 白名单校验，缺失 / 非法为 `''`），再注入播放控制脚本、写出同目录 `index.preview.html`（并为副本剥离 CSP），返回 `{ ok, previewPath, pageCanvas }`。**页面不调用 `projectTools.readHtml`**，读取发生在主进程内部。
 2. 失败（`!res || !res.ok`）：隐藏画布、清空 `frameSrc`、`emptyText` 取 `res.message` 或 `'预览副本生成失败'`。
 3. 成功：记下旧的 `pageMode` → `pageDeclared.value = res.pageCanvas || ''` → **只在用户没手动改过比例时**让 `viewMode` 跟随新的 `pageMode`；`relFile` 取 `previewPath` 的文件名（兜底 `'index.preview.html'`），再 `frameSrc.value = previewUrl(appState.currentName, relFile, true)`。源码注释说明两点原因：dev 的 http 页面下 `file://` iframe 会被 Chromium 拦截，故走自定义协议；`bust = true` 附的时间戳强制重新加载。
-4. `frameVisible = true`、`emptyVisible = false`；iframe `@load` 触发 `onFrameLoad()` 复位进度并按 **contain** 重新缩放（`fitFrame()`：`min(宽比, 高比)` + `translate` 居中，输入是 `pageBox`）。
+4. `frameVisible = true`、`emptyVisible = false`；iframe `@load` 触发 `onFrameLoad()` 复位进度（含 `prevDurUnknown`）并按 **contain** 重新缩放（`fitFrame()`：`min(宽比, 高比)` + `translate` 居中，输入是 `pageBox`）。
 
 ### 6.5 预览 postMessage 协议与 seek（`PreviewSection`）
 
 父页 → iframe：`prevPost(type, seconds?)` 发送 `{ __hg: true, type, seconds }`，`type` 取 `'pause'` / `'play'` / `'seek'` / `'restart'`；副本注入脚本收到 `'restart'` 时 `location.reload()`、收到 `'seek'` 时调 `setTime(d.seconds)`（只挪播放头、不改播放/暂停状态，并立刻回一条带 `ack` 的进度），见 [main/projects.ts.md](../../../main/projects.ts.md)。**载入完成后不再发 `'play'`**：预览默认静止。
 
-iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报 `{ __hg: true, type: 'progress', time, dur, playing, ack }`（`playing` 是真实播放状态、**已播完不算在播**；`ack` 只在收到 seek 后的那条上报里为 `true`）。
+iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报 `{ __hg: true, type: 'progress', time, dur, playing, ack, unknown }`（`playing` 是真实播放状态、**已播完不算在播**；`ack` 只在收到 seek 后的那条上报里为 `true`；**`unknown` 为真表示画面里的 `clock()` 判定「总时长不可信」——超过页面声明时长 10 倍或超过 24 小时**，此时 `dur` 是 0，父页不显示任何假时长）。
 
-本组件处理（`onPrevMessage`）：只接受 `d.__hg && d.type === 'progress'`；先看 `d.ack === true`——命中就清 `seekPending` 与兜底定时器；随后**拖动中、或「松手后还没等到 ack」时只更新 `prevDur`**，位置与播放状态一律不采信；正常回报则写 `prevTimeCur` / `prevDur`，`typeof d.playing === 'boolean'` 时校准 `prevPlaying`，最后当处于播放态且 `prevTimeCur >= prevDur - 0.25` 时把 `prevPlaying` 置回 false。**拖动本身不改变播放/暂停状态**。
+本组件处理（`onPrevMessage`）：只接受 `d.__hg && d.type === 'progress'`；**先写 `prevDurUnknown = d.unknown === true`**（这条不在 `return` 分支之后，拖动中也照样更新）；再先看 `d.ack === true`——命中就清 `seekPending` 与兜底定时器；随后**拖动中、或「松手后还没等到 ack」时只更新 `prevDur`**，位置与播放状态一律不采信；正常回报则写 `prevTimeCur` / `prevDur`，`typeof d.playing === 'boolean'` 时校准 `prevPlaying`，最后当处于播放态且 `prevTimeCur >= prevDur - 0.25` 时把 `prevPlaying` 置回 false。**拖动本身不改变播放/暂停状态**。
 
 ### 6.6 转视频：弹窗确认档位（`openRenderModal` / `confirmRenderVideo`）
 
@@ -418,7 +422,7 @@ iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报
 5. 返回后先 `resetRenderProgress()`：用本地完成/失败文案覆盖全局 trace 残留（渲染期间状态区优先显示 trace，见 5.4 的 `statusDisplay`）。
 6. **成功**：`status = '视频已生成（' + renderOptionsText(options) + ' · ' + canvasLabel(options.canvas) + '）：' + res.outputVideo`、`statusClass = 'hf-ok'`；随后 `await window.projectTools.saveVideo(appState.currentName, res.outputVideo)` → `await refreshProject()` → `toast('视频已生成，可到「视频预览」页查看')`。
 7. **缺包分支**（`res.needPacks` 非空）：写失败状态后 `void envGate.guard(res.needPacks, '转成视频', () => { void onRenderVideo(true); })`。
-8. **失败**：`status = res.message || '渲染失败'`、`statusClass = 'hf-error'`，并 toast 同一文案。
+8. **失败**：`status = res.message || '渲染失败'`、`statusClass = 'hf-error'`，并 toast 同一文案。**页面里有无限循环（`repeat: -1`）时走的就是这一条**：主进程在进 CLI 之前就返回 `{ ok: false, message: '页面里有无限循环动画（GSAP 的 repeat: -1）…请到「HTML生成」页让这些循环改成有限次数…后再转视频。' }`，本页把它原样写进状态行 + toast，同时「预览」卡下方的说明行与 `--:--` 已经在告诉用户同一件事。
 9. **异常分支**（`catch`）：同样先 `resetRenderProgress()`，再写 `status = '渲染失败：' + message`、`statusClass = 'hf-error'` 并 toast。
 10. `finally` 中复位 `rendering = false`。
 
@@ -517,7 +521,7 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 | `@renderer/composables/useRenderProgress`：`renderProgress` | 渲染中状态行改显全局 trace |
 | `@renderer/components/HfSelect.vue`：`HfSelect`（默认）、`type HfSelectGroup` | 背景音频的下拉 + 预览「视角比例」下拉 |
 
-> **导入面稳定**：`NONE_AUDIO` / `pageMode` / `audioBaseName` / `currentAudioIndex` 都只是本文件内的常量、函数与 computed，不新增任何 import；`escTxt` 与 `canvasLabel` 都已不再使用。
+> **导入面稳定**：`prevDurUnknown` 只是一个 `ref`（**本轮新增，没有引入任何新 import**）；`NONE_AUDIO` / `pageMode` / `audioBaseName` / `currentAudioIndex` 也都只是本文件内的常量、函数与 computed；`escTxt` 与 `canvasLabel` 都已不再使用。
 
 ### 7.4 调用的 preload / IPC
 
@@ -537,7 +541,7 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 | `setCanvas(name, canvas)` | 调 `project:set-canvas`，写**成片画布方向**（项目属性；白名单校验在主进程，值变化时主进程把 `videoPath` 置空） | `index.vue` 字幕 / 画布行里的画布下拉（`onCanvasChange`） |
 | `setRender(name, render \| null)` | 调 `project:set-render`（经 `saveProjectRenderOverride`），写 / 清除项目级渲染档位覆盖 | `index.vue` 档位下拉 |
 | `saveVideo(name, videoPath)` | 调 `project:save-video`，渲染成功后把产物路径回写到项目 `project.json` | `index.vue.onRenderVideo` |
-| `window.hfTools.renderVideo(htmlPath, { quality, fps, canvas })` | 调 `video:render`，把当前项目 HTML 渲染为 MP4（载荷含 `canvas`：主进程据此往渲染入口注入 `<html data-resolution>`——不传就会被 HyperFrames 兜底成竖屏） | `index.vue.onRenderVideo` |
+| `window.hfTools.renderVideo(htmlPath, { quality, fps, canvas })` | 调 `video:render`，把当前项目 HTML 渲染为 MP4（载荷含 `canvas`：主进程据此给渲染入口的舞台写 `data-width`/`data-height`（并写 `<html data-resolution>` 作页面自描述）——不传就写不出舞台宽高，CLI 兜底 1080×1920 竖屏）。**页面里有 `repeat: -1` 时主进程在进 CLI 之前就返回 `{ ok: false, message }`**（不新增频道、不加字段，见 6.7 第 8 步） | `index.vue.onRenderVideo` |
 | `window.voiceTools.listGenerated()` | 已生成音频列表，**仅用于填充「已生成音频」分组** | `PreviewSection.genLoad` |
 
 注册与挂载：`src/renderer/src/pages/index.ts` 中 `import HtmlGenPage from './HtmlGenPage/index.vue'`，注册为 `pages['html-gen']`；页面切换使用 `shallowRef` + 递增的 `pageNavKey` 强制重挂载，因此每次进入本页都会重新执行三个组件的 `onMounted`。
@@ -555,9 +559,11 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 - **哨兵只剩动作两个**：`NONE_AUDIO = '__none__'`（清空）与 `'__file__'`（选本地文件），都是**瞬时**的（`onAudioPick` 立刻复位成「当前项的选中态」）；`CURRENT_AUDIO = '__current__'` **已整个删除**。**不要把哨兵当成真实音频路径**。
 - **试听源必须在 `onMounted` 初始化**：`setAudioPreview(audioFile.value)`——`audioPreviewVisible` 原本只在设置 / 清空音频的收尾里被置位，重进页面时它是 `false`，试听那一行就整块消失；传空串时 `setAudioPreview` 会把行收起。
 - **画布说明全在一个 `?` 气泡里**（HTML · Agent 卡片那处）：正文是两段拼接——`canvasNote`（computed，随画布变）+ `canvasHint`（普通常量，固定文案）；行内那行 `.hgen-tip` 已删除，「改完要重新生成」统一在动作行上方说一次。**预览卡里不显示画布值**（只留「视角比例」行）。
+- **总时长不可信 = `--:--` + 一行说明，不是「猜一个数」**：页面里有 GSAP 的 `repeat: -1` 时，那条 tween 的时长是 1e10 秒量级（GSAP 的无限循环哨兵，不是 `Infinity`），父时间轴 `duration()` 会报出 1e10 量级；主进程注入的 `HG_PREVIEW_CTRL.clock()` 因此在两种情况下判「不可信」——超过页面自己声明的 `<html data-composition-duration>` 10 倍，或绝对超过 24 小时——并回报 `{ dur: 0, unknown: true }`。本卡只做三件事：`prevDurUnknown` 记下这个标记、模板在**播放控制条下方**多一行 12px `.hgen-tip` 说明原因、总时长因既有逻辑（`prevDur > 0 ? fmtPrev(prevDur) : '--:--'`）回落成 `--:--`；**进度条与拖动跳转不用额外禁用**（`prevFillPct` 要求 `prevDur > 0`、`seekTo` / `onSeekStart` 同样要求 `prevDur > 0`），换项目 / 重载预览（`onFrameLoad`）把它复位成 `false`。
+- **「转视频」被拦时用户看到的是同一件事**：主进程 `video:render` 在进 CLI 之前就拒绝（`{ ok: false, message: '页面里有无限循环动画（GSAP 的 repeat: -1）…' }`），本页把它写进状态行并 toast；修法只有一个——到本页把循环改成有限次数（如 `repeat: 12, repeatDelay: 0.4`）再生成 / 修改，预览与转视频会同时恢复。
 - **预览视口 = 页面自己声明的画布**：`pageDeclared` 由 `previewHtml()` 回执的 `pageCanvas` 写入，`pageBox = canvasSize(pageDeclared || canvas)` 决定 **iframe 的宽高**；页面没声明（老页面）或声明非法 ⇒ `''` ⇒ 回落成项目当前画布，**行为与旧实现完全一致**。主进程侧的解析在 `project:preview-html`（从**原 HTML** 取，发生在去 CSP / GSAP 本地化之前），见 [main/projects.ts.md](../../../main/projects.ts.md) §5.4。
 - **「视角比例」只影响观看、不落盘**：`viewMode` 只换外层容器的**尺寸形状**（`frameStyle`：高度上限 800、宽度按比例）并让 `fitFrame()` 把 `pageBox` **contain** 进去（居中 + 黑边），**iframe 视口与成片都不变**——预览只按**比例**缩放，像素由成片保证（横屏成片仍是 1920×1080）。默认值 = **`pageMode`（页面天然比例）**，此时不留黑边；没有「跟随画布」这一项。`watch(canvas)` 把 `viewMode` 归位到 `pageMode`；`loadFrame()` 只在**用户没手动改过**（`viewMode === 旧 pageMode`）时才跟随页面切换。**因此当页面版式与项目画布不匹配时，预览与成片仍可能不一致**（预览按页面原生画布裁/缩，成片按项目画布渲染）——要让成片也重排，只能靠主进程提示词（`buildCanvasBlock` 第 ⑤ 条）让模型重排后重新生成。
-- **`viewHint` 只剩两态、默认态为空**：① 视角比例 ≠ 页面比例（「模拟：按「16:9」观看（左右 / 上下 留黑边）；只影响预览」）；② 页面未声明画布（「本页未声明画布，按当前项目画布的比例显示」）；其余为空串 ⇒ `v-show="viewHint"` 不渲染。模板上**默认态不留任何提示**。
+- **`viewHint` 只剩两态、默认态为空**：① 视角比例 ≠ 页面比例（「模拟：按「16:9」观看（左右 / 上下 留黑边）；只影响预览」）；② 页面未声明画布（「本页未声明画布，按当前项目画布的比例显示」）；其余为空串 ⇒ `v-show="viewHint"` 不渲染。模板上**默认态不留任何提示**（那行「无限循环」说明是**另一个独立元素**、由 `prevDurUnknown` 控制，两者不要合并）。
 - **预览缩放实现**：**容器尺寸由 `frameStyle` 内联决定**——高度上限 `VIEW_MAX_HEIGHT = 800`、宽度 `min(100%, round(800 × 宽/高)px)`、高度由 `aspect-ratio` 撑、`paddingBottom: '0'` 覆盖 CSS 占位（**宽窗口：16:9 = 1422×800、9:16 = 450×800、1:1 = 800×800；窄窗口宽度退到 100%、高度按比例降，永不裁切**）；iframe 的宽高仍**内联绑定 `pageBox`**（视口 = 页面原生画布 + `transform-origin: 0 0`）；`fitFrame()` 用 **contain** —— `k = Math.min(wrap.clientWidth / pageBox.width, wrap.clientHeight / pageBox.height)`，`tx/ty = (容器尺寸 - pageBox 尺寸 × k) / 2`，最终 `transform: translate(tx, ty) scale(k)`；`watch(canvas)` 先归位 `viewMode` 再 `nextTick(fitFrame)`，`watch(viewMode)` 单独重算一次（容器尺寸随 `frameStyle` 变）。窗口 `resize`（`onMounted` 的 `addEventListener('resize', fitFrame)`）与每次 `load`（`@load="onFrameLoad"` 内调 `fitFrame()`）都会重新缩放。
 - **思考文本截断**：展示的是主进程 `thinkText.slice(-20000)` 的结果（仅末尾片段），完整原文写入 userData 下 `html-agent/chat.jsonl`。
 - **思考区样式与状态样式互斥**：进度回调每次设置 `status` 都会把 `statusClass` 清空，只有最终成功/失败分支才写入 `hf-ok` / `hf-error`。

@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量 + 一个纯函数（`estimateSubtitleDur`，零副作用；顶部只有一处 `import type { RenderCanvas } from './types'`，纯类型导入不产生运行时代码）
-- **规模**：**88 行**（30 → 41 是新增「项目素材」一节 3 个常量；41 → 70 是新增「成片画布」一节 4 个常量；70 → 86 是新增「字幕估时」一节 1 个常量 + 1 个函数；86 → 88 是把该节**整段重写**为「估时语速」——常量改名 `EST_CHARS_PER_SEC`、值改成 4、注释写明三处消费方，多 2 行）
+- **规模**：**89 行**（30 → 41 是新增「项目素材」一节 3 个常量；41 → 70 是新增「成片画布」一节 4 个常量；70 → 86 是新增「字幕估时」一节 1 个常量 + 1 个函数；86 → 88 是把该节**整段重写**为「估时语速」——常量改名 `EST_CHARS_PER_SEC`、值改成 4、注释写明三处消费方，多 2 行；88 → **89**：画布那节注释写明成片宽高来自舞台 `data-width`/`data-height`（CLI 只认它，缺省兜底 1080×1920），`data-resolution` 只做页面自描述）
 - **对外导出**：13 个常量 + 1 个函数（`APP_NAME`、`APP_NAME_EN`、`APP_SLOGAN`、`APP_SLOGAN_SHORT`、`APP_USER_AGENT`（5 个字符串常量）+ `MAX_MATERIALS`、`IMAGE_MATERIAL_EXTS`、`VIDEO_MATERIAL_EXTS`（3 个素材常量）+ `RENDER_CANVASES`、`CANVAS_SIZES`、`CANVAS_LABELS`、`DEFAULT_CANVAS`（4 个画布常量）+ **`EST_CHARS_PER_SEC`（估时语速 4 字/秒）** + **`estimateSubtitleDur(text)`（估时函数）**）——常量个数与上一轮相同，只是改名与改值
 
 ## 1. 作用与职责
@@ -13,7 +13,7 @@
 
 它存在的理由（源码头部注释写明）：品牌文案原先散落在 `src/renderer/index.html` 的窗口标题与启动画面、`App.vue` 标题栏、`HomePage` 首页、`whisper.ts` 的 User-Agent 等处，「改一处漏一处」，而且散落的字符串没有任何编译期提示。现在各处一律 `import` 本文件，改品牌名只需要动清单上的少数几处。
 
-**「成片画布」一节复用同一思路**：画布的取值与像素必须三端一致（主进程往渲染入口注入 `<html data-resolution>`、主进程写生成提示词、渲染层的下拉选项与预览 iframe），所以集中在本文件当**尺寸唯一真源**——取值与尺寸要与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 对齐（本项目只暴露 1080 三档），改尺寸时若与 CLI 对不上，成片会退回 CLI 自己的兜底 `portrait`。
+**「成片画布」一节复用同一思路**：画布的取值与像素必须三端一致（主进程往渲染入口注入**舞台 `data-width`/`data-height`（成片宽高真正来源）与 `<html data-resolution>`**、主进程写生成提示词、渲染层的下拉选项与预览 iframe），所以集中在本文件当**尺寸唯一真源**——取值与尺寸要与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 对齐（本项目只暴露 1080 三档），改尺寸时若与 CLI 对不上，成片会退回 CLI 自己的兜底 1080×1920。
 
 **「项目素材」一节复用同一思路**：素材的类型白名单与合计上限原先只可能写死在主进程 handler 里，现在集中在本文件，**主进程用它做准入与截断，渲染层用同一份常量做展示**（`n / 20` 计数与「支持哪些格式」的提示行），两端不会各写一套而悄悄漂移。
 
@@ -74,10 +74,11 @@ export const VIDEO_MATERIAL_EXTS = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'];
 // 取值与尺寸必须与 HyperFrames CLI 的 CANVAS_DIMENSIONS 对齐（resources/hyperframes/.../dist/cli.js：
 //   landscape 1920x1080 / portrait 1080x1920 / square 1080x1080，另有 4k 三档——本项目只暴露 1080 三档）。
 // 为什么放在 shared：三个消费点必须用同一组数——
-//   ① 主进程往渲染入口注入 <html data-resolution="…">（src/main/video.ts）
+//   ① 主进程往渲染入口注入舞台 data-width/data-height（成片宽高的真正来源）与 <html data-resolution>
+//      （src/main/video.ts；CLI 只认前者，读不到就兜底 1080x1920）
 //   ② 主进程把它写进生成提示词，让模型按同一块画布排版式（src/main/projects.ts）
 //   ③ 渲染层选项表与预览 iframe 的画布尺寸（renderer/utils/render.ts、HtmlGenPage/PreviewSection.vue）
-// 改这里的尺寸/取值时，CLI 那边若对不上，成片会退回 CLI 自己的兜底 portrait（见 video.ts 的注释）。
+// 改这里的尺寸/取值时，CLI 那边若对不上，成片会退回 CLI 自己的兜底 1080x1920 竖屏（见 video.ts 的注释）。
 export const RENDER_CANVASES: RenderCanvas[] = ['landscape', 'portrait', 'square'];
 // 每个画布的实际像素（= composition 尺寸 = 成片尺寸；CLI 不传 --resolution 时输出就是它本身）
 export const CANVAS_SIZES: Record<RenderCanvas, { width: number; height: number }> = {
@@ -99,9 +100,9 @@ export const DEFAULT_CANVAS: RenderCanvas = 'landscape';
 
 三条推论：
 
-1. **取值的真源在 CLI**：三档名字不是应用自己发明的，而是 HyperFrames `CANVAS_DIMENSIONS` 的键（另有 `landscape-4k` / `portrait-4k` / `square-4k` 三档未暴露）；`data-resolution` 只接受这几个值之一，写别的等于没写。
+1. **取值的真源在 CLI**：三档名字不是应用自己发明的，而是 HyperFrames `CANVAS_DIMENSIONS` 的键（另有 `landscape-4k` / `portrait-4k` / `square-4k` 三档未暴露）；但**CLI 渲染时不读 `data-resolution`**——成片尺寸来自渲染入口里**第一个带 `data-composition-id` 的舞台元素的 `data-width`/`data-height`**（`<html data-resolution>` 只被 `hyperframes info` 与预览读，写别的值只影响「页面自描述」，不影响成片分辨率）。
 2. **它是项目属性、不是渲染档位**：与 `AppSettings.render`（全局默认）和 `Project.render`（项目覆盖）那套层级无关——画布只有一处选择点（「HTML生成」页生成侧的「画布」下拉），存 `project.json` 的 `canvas`，缺省由 `DEFAULT_CANVAS` 兜底。
-3. **一个值管三处**：生成提示词里给模型的版式尺寸、预览 iframe 的画布、渲染入口注入的 `<html data-resolution>` 都读同一个值，所以「预览看到的画布」与「成片尺寸」必然一致。
+3. **一个值管三处**：生成提示词里给模型的版式尺寸、预览 iframe 的画布、渲染入口注入的**舞台 `data-width`/`data-height`（成片宽高真正来源）**与 `<html data-resolution>` 都读同一个值，所以「预览看到的画布」与「成片尺寸」必然一致。
 
 ### 2.3 「估时语速」一个常量 + 一个函数的取值理由（源码注释逐字）
 
@@ -189,7 +190,7 @@ export function estimateSubtitleDur(text: string): number {
 | 被 import | `src/renderer/src/pages/ContentPage/AiChatPanel.vue` | **`EST_CHARS_PER_SEC`**（本轮新增）：模板 `:chars-per-second="EST_CHARS_PER_SEC"` 传给 `ScriptRoundCard.vue`；本文件已无语速常量（旧实现曾写死 4.5） |
 | 被 import | `src/main/agent/script.ts` | **`EST_CHARS_PER_SEC`**（本轮新增）：`SCRIPT_AGENT_SYSTEM` 第 6 条（「中文口语约 N 字/秒」）与 `buildScriptPrompt()` 的字数预算 `Math.round(seconds * EST_CHARS_PER_SEC)`；本文件已无语速常量（旧实现曾写死 4.5） |
 | 被 import | `src/renderer/src/pages/HtmlGenPage/MaterialsSection.vue` | **`IMAGE_MATERIAL_EXTS` / `MAX_MATERIALS` / `VIDEO_MATERIAL_EXTS`**：`n / {{ MAX_MATERIALS }}` 计数、`extText` 支持格式提示、上限 `title` |
-| 被 import | `src/main/video.ts` | **`CANVAS_SIZES` / `DEFAULT_CANVAS` / `RENDER_CANVASES`**（画布那轮新增）：画布白名单校验、把 `data-resolution` 写进渲染入口、把「成片画布 = …」写进 `userData/video-duration.log` |
+| 被 import | `src/main/video.ts` | **`CANVAS_SIZES` / `DEFAULT_CANVAS` / `RENDER_CANVASES`**（画布那轮新增）：画布白名单校验、把**舞台 `data-width`/`data-height`（`applyCanvasSize`，成片宽高真正来源）与 `<html data-resolution>`（`applyCanvasDeclaration`，页面自描述）**写进渲染入口、把「成片画布 = …」写进 `userData/video-duration.log` |
 | 被 import | `src/renderer/src/utils/render.ts` | **`CANVAS_LABELS` / `CANVAS_SIZES` / `DEFAULT_CANVAS` / `RENDER_CANVASES`**（画布那轮新增）：再导出为 `RENDER_CANVAS_OPTIONS` / `canvasLabel()` / `canvasSize()` / `normalizeCanvas()` 给页面用 |
 | 被 import | `electron.vite.config.ts` | `APP_NAME` / `APP_NAME_EN` / `APP_SLOGAN_SHORT` → `brandHtmlPlugin()` 与 `checkBrandConsistency()` |
 | 被 include | `tsconfig.node.json` / `tsconfig.web.json` | 两份子工程都 `include: src/shared/**/*.ts`，故 main / preload / 渲染层三端都能引用 |
@@ -197,7 +198,7 @@ export function estimateSubtitleDur(text: string): number {
 
 ## 6. 注意事项与实现要点
 
-- **不是 IPC 契约**：`ipc.ts` / `types.ts` 的「禁止改动」约束不适用于本文件——改品牌名不需要动任何频道名或载荷格式。但**素材常量改的是产品规则**：`MAX_MATERIALS` 一改，主进程的准入 / 截断与界面的 `n / 20` 会同时变，提示词长度与生成质量也随之变。**画布常量同理且更硬**：`CANVAS_SIZES` 必须与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 保持一致，改错等于成片尺寸错（CLI 读不到合法 `data-resolution` 时兜底 `portrait`）。**估时语速同理**：`EST_CHARS_PER_SEC` 一改，页面里看到的字幕时长、落盘 / 导出的 `[起-止]` 时间轴、AI 面板的估算时长与脚本 Agent 提示词的字数预算会一起变（三处 import 同一份，不会各变各的）。
+- **不是 IPC 契约**：`ipc.ts` / `types.ts` 的「禁止改动」约束不适用于本文件——改品牌名不需要动任何频道名或载荷格式。但**素材常量改的是产品规则**：`MAX_MATERIALS` 一改，主进程的准入 / 截断与界面的 `n / 20` 会同时变，提示词长度与生成质量也随之变。**画布常量同理且更硬**：`CANVAS_SIZES` 必须与 HyperFrames CLI 的 `CANVAS_DIMENSIONS` 保持一致，改错等于成片尺寸错（CLI 只认舞台 `data-width`/`data-height`，读不到就兜底 1080×1920）。**估时语速同理**：`EST_CHARS_PER_SEC` 一改，页面里看到的字幕时长、落盘 / 导出的 `[起-止]` 时间轴、AI 面板的估算时长与脚本 Agent 提示词的字数预算会一起变（三处 import 同一份，不会各变各的）。
 - **上限只有一个来源**：不要在渲染层或主进程另写 `20`；渲染层只做展示（超限按钮不禁用，交给主进程回报跳过数），真正的截断发生在 `normalizeMaterials()` 与 `project:add-materials`。
 - **估时公式只有一个来源，语速也只有一个来源**：不要在渲染层或主进程再写 `0.15` / `1.6` / `2.4` 这类系数，也不要再写 `4` / `4.5` 这类语速字面量；要改语速只改 `EST_CHARS_PER_SEC`，要改公式只改 `estimateSubtitleDur()`。渲染层保留的 `estDur` 只是别名，不是第二份实现；**渲染层界面文案也引用该常量，不写死数字**（`SubtitlePage/index.vue` 的提示行 / 按钮 `title` / toast 都是模板拼接）。
 - **零运行时开销**：常量被各端打包器内联，main / preload / renderer 各自持有副本，不存在跨进程共享对象。
