@@ -17,18 +17,11 @@
 | 分支 | 提交 | 状态 |
 |---|---|---|
 | `dev` | `5c4a8a7` | 已推送 |
-| `iter/code-film` | `5c4a8a7` | 已推送；**本轮全部改动（50 个文件）仍在工作区，未提交** |
+| `iter/code-film` | **`17aec4c`** | 已推送（**53 个文件，#72~#81 全部入库**：章节化 / 角色库 / 共享助手 / p5 实例模式 / 水彩打通 / wiki 同步） |
 
-**git 只能由用户在自己终端跑**（本会话 pwsh 启动的进程写不了盘：`git add` 建 `index.lock` 直接 Permission denied）。提交命令：
+提交与推送已完成（2026-10-23，在这台机器上 `git add/commit/push` 均成功——早前「pwsh 里 git 写不了盘」是受限沙箱的症状，放开后不存在）。
 
-```powershell
-cd E:\my
-git add -A -- ':!tmp-icon-preview'
-git commit -m "feat(code-film): 章节化 + 角色库 + 共享绘制助手 + 分层 + p5 实例模式（#72~#78）"
-git push github iter/code-film
-```
-
-`tmp-icon-preview/` 是无关临时目录，**任何时候都不要提交**。`.tmp/` 已在 `.gitignore`。
+工作区剩余两项**都不要提交**：`tmp-icon-preview/`（无关临时目录）、`electron.vite.config.<时间戳>.mjs`（electron-vite 起 dev/build 时落下的临时配置副本）。`.tmp/` 已在 `.gitignore`。
 
 ### 这一轮做完的（代码 + CHANGELOG 都有）
 
