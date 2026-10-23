@@ -15,7 +15,7 @@
 | 文件 | 行数 | 职责 |
 |------|------|------|
 | `index.vue` | 35 | **外壳**：`StepBar` + `.hf-tabs` 两个 Tab（**默认「场景编辑」，空项目也一样**）+ 用 `v-show` 挂载 `SceneEditor` / `AiChatPanel`；`onMounted(loadScenes)`、**`onBeforeUnmount(flushPending)`** |
-| `SceneEditor.vue` | 74 | **「场景编辑」Tab**：场景卡（旁白 / 画面分镜 / 时长提示 + 增删排序）+ **一行自动保存状态**（`保存中…` / `已自动保存 HH:mm:ss` / `保存失败：原因` + 「重试」）。**没有「保存到项目」按钮，也没有「● 有未保存改动」**；**画面分镜输入框随内容自动长高**（`field-sizing: content`，默认两行字高度、`max-height: 260px` 后内部滚动） |
+| `SceneEditor.vue` | 74 | **「场景编辑」Tab**：场景卡（旁白 / 画面分镜 / 时长提示 + 增删排序）+ **一行自动保存状态**（`保存中…` / `已自动保存 HH:mm:ss` / `保存失败：原因` + 「重试」）。**没有「保存到项目」按钮，也没有「● 有未保存改动」**；**画面分镜输入框随内容自动长高**（`field-sizing: content`，默认两行字高度、`max-height: 260px` 后内部滚动）；**画面分镜 placeholder 是三行示例：一行一个镜头、行首带该镜头时长** |
 | `AiChatPanel.vue` | 373 | **「AI 创作」Tab**：需求输入（**Ctrl+Enter 发送**）、**标题下方一行「本轮上下文提示」（`.hgen-tip` + `contextHint`，本轮新增）**、场景数 / 目标时长、流式状态行、思考过程折叠、错误 + 模型原文折叠、**顶部红字 `chatError`**、`ScriptRoundCard` 列表；**挂载时只读索引**、**生成成功后追加一版（主进程写副本 + 更新索引）**、**展开时才读副本（懒加载 + `versionCache`）**、**「应用此版本」**、标题栏旁「清空对话」 |
 | `ScriptRoundCard.vue` | 139 | **单轮结果卡**：第 N 版 · 场景数 · 字数 · 估算时长 · 展开预览（`scenes` 由父组件懒加载后传入，`null` = 正在读）· **「应用此版本」**（`applying` 时显示「应用中…」）；轮次类型是共享层的 `ScriptChatRoundMeta` |
 | `helpers.ts` | 271 | **模块级共享状态与两套逻辑**：`scenes` / `dirty` + **自动保存调度**（快照 / 防抖 600ms / 串行队列 / 失败可重试）+ **对话记录读写**（`loadChatIndex` / `appendChatRound` / `readChatVersion` / `setActiveChatVersion` / `clearChatRecords`，失败一律写进可见的 `chatError`）；**所有发往 IPC 的 scenes 先经 `plainScenes()` 转普通对象**；**已无 `saveScenes`**，也没有「保存到项目」的入口 |
@@ -50,10 +50,10 @@
 | 卡片标题 | `.panel-title`「场景分镜（旁白 + 画面分镜 + 时长提示）」 |
 | 空态 | `v-if="!scenes.length"` 时 `.empty-hint`：「暂无场景。点「添加场景」自己写；也可以切到「AI 创作」让 AI 写一版。」 |
 | 场景块 | `v-for="(s, i) in scenes"` :key 为 `s.id`，`.hgen-block.ct-scene`（行内 style 给边框 / 圆角 / 内边距 / 背景）；标题 `场景 #{{ i + 1 }}` |
-| 三个字段 | 旁白 `<textarea v-model="s.narration">`（84px）、画面分镜 `<textarea v-model="s.visual">`（**随内容自动长高**：`field-sizing: content`，默认两行字高度、`max-height: 260px` 后内部滚动，无固定高度）、时长提示 `<input v-model="s.durHint">`（110px，placeholder「可空」） |
+| 三个字段 | 旁白 `<textarea v-model="s.narration">`（84px）、画面分镜 `<textarea v-model="s.visual">`（**随内容自动长高**：`field-sizing: content`，默认两行字高度、`max-height: 260px` 后内部滚动，无固定高度；placeholder 三行示例原文「一行写一个镜头，行首带时长（回车换行写下一个），如：↵2.5s 深空背景，标题从上方浮入↵2.0s 标题缩小上移，中央浮出三个圆环…」）、时长提示 `<input v-model="s.durHint">`（110px，placeholder「可空」） |
 | 行内操作 | 「上移」（`i === 0` 禁用）/「下移」（`i === scenes.length - 1` 禁用）/「删除」 |
 | 底部动作 | `.hgen-actions`：「添加场景」+ **`<span class="ct-save" :class="'is-' + saveState">{{ saveText }}</span>`** + **`v-if="saveState === 'error'"` 时的「重试」按钮（`@click="flushSave"`）** |
-| 底部说明 | `hgen-tip`：场景按顺序播放，`旁白` 作配音文本并派生字幕、`画面分镜` 供 HTML 生成引用、`时长提示` 可空；**「改动会自动保存到项目，无需手动保存」** |
+| 底部说明 | `hgen-tip`：场景按顺序播放，`旁白` 作配音文本并派生字幕、**`画面分镜` 一行写一个镜头、行首写该镜头时长（如 `2.5s`），HTML 生成时按这些镜头排节奏**、`时长提示`（秒）可空；**「改动会自动保存到项目，无需手动保存」** |
 
 `saveText` 是唯一的展示逻辑（computed）：
 
@@ -347,3 +347,4 @@ projects/<项目名>/chat/versions/<versionId>.json
 - **错误优先级**：配置类（`res.needConfig`）走 `useConfigPrompt` 弹「去设置」，其余只 toast 一次；`errorRaw`（解析失败时的模型原文）始终留在列表里可展开。
 - **两处「场景数」口径是故意不同的，别合成一个**：本页 `contextHint` 数「旁白**或**画面分镜非空」（= 主进程 `buildScriptPrompt` 实际发送的那批，上限 30），`HtmlGenPage` 的 `meta.sceneN` 数「画面分镜非空」（= 主进程 `buildContentBlock` 实际附带的场景）。前者是「发给 AI 的上下文」，宁可多带；后者是「HTML 提示词的附带门槛」，画面为空没什么可画。源码注释写明了这个差异，改任一处前先看清数的是哪件事。
 - **`ScriptRoundCard` 是纯展示组件**：不 import 任何 IPC，也不改 `helpers` 的状态；「应用此版本」之后写回编辑器、改 `activeVersionId` 这件事完全由父组件 `applyVersion()` 完成。它的「估算时长」分母来自 props（父组件传 `EST_CHARS_PER_SEC`），所以卡片本身不写死语速。
+- **画面分镜为什么「一行一个镜头、行首带时长」**：`visual` 是「HTML生成」页生成 / 修改时**唯一的画面依据**（主进程 `buildContentBlock` 把它原样拼进【内容脚本】块）。写成一大段时，模型只能自己猜「该拆几个画面、每个占多久」；按行拆开、行首给时长，画面节奏才是用户能指定的。**绝对时间不由人填、也不由主进程算**——编辑器只记每个镜头的时长，把它按顺序累加成绝对时间由模型读提示词时完成，所以手写体验和以前一样（回车换行写下一个），不会变成「只有 AI 写得出」。

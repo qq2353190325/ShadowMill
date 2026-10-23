@@ -1896,3 +1896,117 @@ body {
 }
 /* 图片组的点用辅色（量子紫），与视频组（主色）区分 */
 .panel-title .dot.dot-img { background: var(--color-secondary); box-shadow: 0 0 6px var(--color-secondary); }
+
+/* ===== HTML生成页：章节列表（章节化长片 / W3） =====
+   一行一章：序号 / 标题 / 起止 / 时长 / 文件 / 「改这一章」。
+   与「我的音色」列表同一套语言：主文字 13px、次要列 12px、行分隔线用主色 8% 透明。
+   行不做 hover 高亮——这一行本身不可点，只有末尾那个按钮可点，给整行加高亮会误导。
+   列宽必须写 minmax(0, Nfr)：1fr 的隐含下限是 min-content，标题一长就会把整行撑出容器。 */
+.ch-sub {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+}
+
+.ch-list { margin-top: var(--space-2); }
+
+.ch-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 2.4fr) minmax(0, 1.2fr) 56px minmax(0, 1.1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid rgba(0, 212, 255, 0.08);
+  border-bottom: 0;
+  background: rgba(10, 17, 32, 0.5);
+}
+.ch-row:first-child { border-radius: 10px 10px 0 0; }
+.ch-row:last-child { border-bottom: 1px solid rgba(0, 212, 255, 0.08); border-radius: 0 0 10px 10px; }
+.ch-row:only-child { border-radius: 10px; }
+
+/* 序号：等宽数字，弱化到次要色（它是索引不是内容） */
+.ch-idx {
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+.ch-title {
+  color: var(--text-primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 起止 / 时长 / 文件名：都属次要列，进度条式的信息不该抢标题；等宽数字让秒数对齐 */
+.ch-time, .ch-dur, .ch-file {
+  font-size: 12px;
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-pick { padding: 2px 10px; font-size: 12px; flex: none; }
+
+/* ===== HTML生成页：角色列表（章节模式的角色库） =====
+   一行一个角色：名字 / 描述 / 高几 u / 文件 / 「改这个角色」。
+   与上面的章节列表同一套语言（同一组 .ch-sub / .ch-pick 复用），只是列不同：
+   角色没有时间窗，多了「高几 u」这一列（身高比例是它能和别章对齐的唯一凭据）。 */
+.cast-list { margin-top: var(--space-2); }
+
+.cast-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1.2fr) minmax(0, 2.6fr) 48px minmax(0, 1.3fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid rgba(0, 212, 255, 0.08);
+  border-bottom: 0;
+  background: rgba(10, 17, 32, 0.5);
+}
+/* 未勾选（本次不注入）：整行压暗，与素材卡片的 .off 同一语言 */
+.cast-row.off { opacity: 0.55; }
+.cast-row:first-child { border-radius: 10px 10px 0 0; }
+.cast-row:last-child { border-bottom: 1px solid rgba(0, 212, 255, 0.08); border-radius: 0 0 10px 10px; }
+.cast-row:only-child { border-radius: 10px; }
+
+.cast-name {
+  color: var(--color-primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-desc, .cast-units, .cast-file {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-units, .cast-file { font-family: "JetBrains Mono", "Consolas", monospace; }
+.cast-units { text-align: right; }
+
+/* 角色行尾的两个动作（存为全局 / 改这个角色）：并排、靠右，不与文本列争宽 */
+.cast-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+
+/* 全局角色库弹窗里的一行：勾选框 + 名字 + 描述 + 高几 u（缺文件的整行压暗且不可选） */
+.lib-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1.2fr) minmax(0, 2.4fr) 48px auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+  cursor: pointer;
+}
+.lib-row:last-of-type { border-bottom: 0; }
+.lib-row.off { opacity: 0.5; cursor: not-allowed; }
+.lib-row input[type="checkbox"] { accent-color: var(--color-primary); width: 14px; height: 14px; }
+.lib-missing { font-size: 11px; color: var(--color-warning); }

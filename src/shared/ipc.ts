@@ -108,6 +108,16 @@ export const IPC = {
     ReadHtml: 'project:read-html',
     PreviewHtml: 'project:preview-html',
     SaveHtml: 'project:save-html',
+    // 全局角色库（main/castLibrary.ts）：库在 <userData>/cast-library/，与项目角色 cast/<id>.js 是两层。
+    // 只有这四件事需要跨进程：列库、把项目里的角色存为全局、把全局角色导入项目、从库删除。
+    CastLibrary: 'project:cast-library',
+    PromoteCast: 'project:promote-cast',
+    ImportCast: 'project:import-cast',
+    RemoveCastFromLibrary: 'project:remove-cast-from-library',
+    // 项目角色（角色是**项目资产**，与单文件 / 章节化无关）：
+    //   NewCast = 手动新建一个角色（调一次模型画 cast/<id>.js），SaveCast = 整份角色表回写（勾选 / 删除 / 改名）
+    NewCast: 'project:new-cast',
+    SaveCast: 'project:save-cast',
     HtmlProgress: 'project:html-progress'
   },
   // 内容脚本 Agent（main/agent/script.ts）：对话式生成 / 修改场景脚本。

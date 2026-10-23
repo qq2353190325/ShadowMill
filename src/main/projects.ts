@@ -14,21 +14,34 @@
 // 依赖：agent(chatWithCustomModel / extractHtmlFromReply) /
 //       hfEnv(isHyperframesComposition) / runtime(确保运行环境包已解包) / settings(渲染档位白名单) / dialog / shell
 import { app, ipcMain, dialog, shell } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
-import { chatWithCustomModel, extractHtmlFromReply, type AgentProgress } from './agent'
+import { chatWithCustomModel, chatWithChapterPlan, chatWithChapter, chatWithChapterEdit, chatWithCast, chatWithRoute, extractHtmlFromReply, type AgentProgress } from './agent'
 import { configTargetOf } from '../shared/errors'
 import { CANVAS_LABELS, CANVAS_SIZES, DEFAULT_CANVAS, IMAGE_MATERIAL_EXTS, MAX_MATERIALS, RENDER_CANVASES, VIDEO_MATERIAL_EXTS, estimateSubtitleDur } from '../shared/constants'
+import * as chapters from './chapters'
+import * as cast from './cast'
+import * as castLibrary from './castLibrary'
+import * as castInject from './castInject'
+import * as coreLib from './coreLib'
+import { parseRouteReply } from './editRoute'
 import * as hfEnv from './hfEnv'
 import * as runtime from './runtime'
 import { pickRenderOverride } from './settings'
 import { IPC } from '../shared/ipc'
 import type {
+  CastLibraryResult,
   ContentScript,
   Project,
   ProjectAddMaterialsPayload,
   ProjectAgentPayload,
+  ProjectCastMember,
+  ProjectCastResult,
+  ProjectNewCastPayload,
+  ProjectSaveCastPayload,
+  ProjectChapter,
   ProjectExportSrtPayload,
   ProjectIndex,
   ProjectMaterial,
@@ -375,7 +388,12 @@ function buildContentBlock(content: ContentScript | undefined): string {
   const scenes = Array.isArray(src.scenes) ? src.scenes : [];
   const valid = scenes.filter((s) => s && String(s.visual || '').trim());
   if (!valid.length) return '';
-  const parts = ['【内容脚本 · 本项目的整体内容源，请据此设计页面视觉风格与动画节奏；旁白写「（无，本场静音）」的场景没有配音，按画面分镜照常呈现即可】'];
+  const parts = [
+    '【内容脚本 · 本项目的整体内容源，请据此设计页面视觉风格与动画节奏；旁白写「（无，本场静音）」的场景没有配音，按画面分镜照常呈现即可】',
+    // 画面分镜是「一行一个镜头、行首带时长」的写法（见 agent/script.ts 第 3 条）。
+    // **主进程不解析这些时长**：原样交给模型，只在这里把约定讲清楚，让模型自己累加成绝对时间。
+    '画面分镜按「一行一个镜头」书写，行首形如「2.5s」的是该镜头的时长：请把这些时长按顺序累加成绝对时间（第 1 个镜头从 0 开始）再安排动画；行首没写时长的镜头按该场景的时长提示均分；镜头时长之和与该场景的时长提示冲突时，以镜头时长之和为准。'
+  ];
   valid.forEach((s, i) => {
     const dur = (s.durHint !== undefined && s.durHint !== null && String(s.durHint).trim() !== '')
       ? String(s.durHint).trim() + ' 秒'
@@ -385,7 +403,9 @@ function buildContentBlock(content: ContentScript | undefined): string {
     const narration = String(s.narration || '').trim();
     parts.push('场景 ' + (i + 1) + '（时长提示：' + dur + '）：');
     parts.push('- 旁白：' + (narration || '（无，本场静音）'));
-    parts.push('- 画面分镜：' + visual);
+    parts.push('- 画面分镜：');
+    // 一行一个镜头（行首带时长）；拆出来逐行缩进，免得第二个镜头起看起来像新的顶层字段
+    visual.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).forEach((l) => parts.push('  - ' + l));
   });
   return '\n' + parts.join('\n');
 }
@@ -639,7 +659,7 @@ function resolveMaterials(proj: Project, payload: ProjectAgentPayload): { subtit
 }
 
 // 素材块（图片 / 视频分开写）：给模型的是**项目内相对路径**——页面里直接 <img src="images/x.png">，
-// 预览走 hgpreview:// 协议、转视频时同目录相对引用同样成立（与背景音轨、gsap.min.js 同一套相对引用规则）。
+// 预览走 hgpreview:// 协议、转视频时同目录相对引用同样成立（与背景音轨、随包前端库文件同一套相对引用规则）。
 function buildMaterialBlock(materials: ProjectMaterial[]): string {
   const imgs = materials.filter((m) => m.kind === 'image');
   const vids = materials.filter((m) => m.kind === 'video');
@@ -714,6 +734,8 @@ function buildMaterialPrompt(prompt: string, proj: Project, mats: { subtitleText
 }
 
 // Agent 进度 → 渲染层可读文案（projects:* 进度推送共用）
+// 章节模式下带上「第 k/N 章」前缀：一条 3 分钟的片要发 1 + N 次请求，没有这个前缀用户看到的
+// 永远只是「AI 正在生成 HTML…」，判断不了还要等多久。
 function progressText(info: AgentProgress): string {
   const stage = info && info.stage;
   const text = stage === 'connecting' ? '正在连接模型…'
@@ -722,7 +744,444 @@ function progressText(info: AgentProgress): string {
     : stage === 'retry' ? '本次输出为空，正在升档重试…'
     : stage === 'done' ? '模型输出完成，正在写入文件…'
     : '';
+  const idx = info && info.chapterIndex;
+  const tot = info && info.chapterTotal;
+  if (text && idx && tot) return '第 ' + idx + '/' + tot + ' 章：' + text;
+  const ci = info && info.castIndex;
+  const ct = info && info.castTotal;
+  if (text && ci && ct) return '角色 ' + ci + '/' + ct + '：' + text;
   return text;
+}
+
+// ===== 章节化长片（W3）：规划 → 逐角色 → 逐章 → 装配骨架 =====
+// 分工：跨进程类型在 shared/types.ts（ProjectChapter / ProjectCastMember）、纯逻辑在 main/chapters.ts
+// 与 main/cast.ts（解析/校验/写盘/骨架）、改稿路由在 main/editRoute.ts、
+// 提示词在 agent/html.ts，本文件只做编排（谁先谁后、进度怎么报、落盘顺序）。
+// 一条硬规则：**模型永远不写 index.html**。骨架由 writeChapterSkeleton() 按当前清单生成，
+// 所以「改一章 / 改一个角色」不可能改坏画布、成片时长与 HyperFrames 合规结构。
+// 角色为什么要有共享层：章节是互相隔离的 IIFE，作用域不共享；不共享角色代码，同一角色会在每章被各画一遍。
+
+// 有效场景：与 buildContentBlock 同一口径（画面分镜非空才算一场），规划里的场景序号就是按这个顺序编的
+function validSceneList(content: ContentScript | undefined): Scene[] {
+  const scenes = (content && Array.isArray(content.scenes)) ? content.scenes : [];
+  return scenes.filter((s) => s && String(s.visual || '').trim());
+}
+
+// 项目画布（脏数据落回缺省，与 buildCanvasBlock 同一口径）
+function projectCanvas(proj: Project): RenderCanvas {
+  const raw = proj && proj.canvas;
+  return raw && RENDER_CANVASES.indexOf(raw) >= 0 ? raw : DEFAULT_CANVAS;
+}
+
+// ===== 全局角色库与共享绘制助手的根路径 =====
+// 角色库是**用户资产**（可备份、可迁移），落 userData 下；core.js 的真源在应用里（hfEnv.coreSource()）。
+function castLibraryRoot(): string {
+  return path.join(app.getPath('userData'), 'cast-library');
+}
+
+// 把共享绘制助手 core.js 同步进项目（按 CORE_VERSION 覆盖，见 coreLib.ts）并留痕。
+// 调用时机：生成/改稿写完骨架前、预览前、渲染前——三处都调，保证页面引用的 ./core.js 一定在。
+function syncCoreLib(projDir: string): void {
+  const src = hfEnv.coreSource();
+  if (!src) return;   // 应用里没有这份文件（不该发生）：页面会 404，但不该因此拦下生成
+  const r = coreLib.syncCoreTo(projDir, src);
+  if (!r.copied && !r.error) return;
+  try {
+    const line = new Date().toISOString() + ' [' + path.basename(projDir) + '] '
+      + (r.error ? ('core.js 同步失败：' + r.error) : ('core.js 版本 ' + (r.from || '无') + ' → ' + r.to))
+      + '\n';
+    fs.appendFileSync(path.join(app.getPath('userData'), 'core-lib.log'), line, 'utf8');
+  } catch (e) { /* 日志失败不影响生成 */ }
+}
+
+// 进度发送器：chapterIndex/chapterTotal、castIndex/castTotal 只在章节模式带
+// （渲染层据此拼「第 3/7 章」「角色 2/3」）
+function progressSender(event: IpcMainInvokeEvent, extra?: { chapterIndex?: number; chapterTotal?: number; castIndex?: number; castTotal?: number }) {
+  const sender = event.sender;
+  return (info: AgentProgress) => {
+    const merged = Object.assign({}, info, extra || {});
+    const text = progressText(merged);
+    if (text && !sender.isDestroyed()) sender.send(IPC.Project.HtmlProgress, Object.assign({}, merged, { text }));
+  };
+}
+
+// 一条直接的进度文案（不带模型阶段，用于「正在规划章节…」「规划失败改用单文件」这类提示）
+function pushStatus(event: IpcMainInvokeEvent, text: string, extra?: { chapterIndex?: number; chapterTotal?: number; castIndex?: number; castTotal?: number }): void {
+  const sender = event.sender;
+  if (!text || sender.isDestroyed()) return;
+  sender.send(IPC.Project.HtmlProgress, Object.assign({ stage: 'connecting', thinkChars: 0, contentChars: 0, thinkText: '', text }, extra || {}));
+}
+
+// 规划提示词：只喂判断结构所需的信息（需求 + 内容脚本 + 全片规模），不喂画布/素材/音轨这些与分章无关的块
+function buildPlanPrompt(requirement: string, proj: Project, sub: SubtitleLine[]): string {
+  const sceneN = validSceneList(proj.content).length;
+  const lastEnd = sub.reduce((m, l) => Math.max(m, l.time + (l.end || 0)), 0);
+  return [
+    '用户需求：' + requirement,
+    buildContentBlock(proj.content),
+    '\n【全片规模】有效场景 ' + sceneN + ' 个' +
+      (sub.length ? '；字幕 ' + sub.length + ' 条，最后一条结束于 ' + lastEnd.toFixed(2) + ' 秒' : '；没有字幕'),
+    '\n【任务】判断这支片子该写成一份 HTML（single），还是拆成若干章（chapters），' +
+      '并按系统提示词的规则给出每章的 id / title / scenes / duration / summary。只输出 JSON。'
+  ].filter(Boolean).join('\n');
+}
+
+// 字幕在某一时间窗内的条目（章节模式下只给本章窗内的字幕，模型才不会去画别章的内容）
+function subtitleWindowText(sub: SubtitleLine[], a: number, b: number): string {
+  const hit = sub.filter((l) => {
+    const t0 = l.time;
+    const t1 = l.end === null || l.end === undefined ? t0 + 2 : l.end;
+    return t1 > a + 0.001 && t0 < b - 0.001;
+  });
+  if (!hit.length) return '';
+  return hit.map((l) => '[' + l.time.toFixed(2) + (l.end === null || l.end === undefined ? '' : '-' + l.end.toFixed(2)) + '] ' + l.text).join('\n');
+}
+
+// 逐章生成的用户提示：共用部分（需求/风格/画布/素材）+ 全片大纲 + 本章自己的场景与字幕 + 本章角色
+function buildChapterPrompt(opts: {
+  proj: Project;
+  requirement: string;
+  list: ProjectChapter[];
+  index: number;
+  validScenes: Scene[];
+  mats: { subtitleText: string; materials: ProjectMaterial[] };
+  sub: SubtitleLine[];
+  cast: ProjectCastMember[];
+}): string {
+  const { proj, list, index, validScenes, mats, sub } = opts;
+  const ch = list[index];
+  const offs = chapters.chapterOffsets(list);
+  const a = offs[index];
+  const b = Math.round((a + ch.duration) * 100) / 100;
+  // 本章场景：buildContentBlock 会从 1 重新编号，所以必须显式说明「原文第几场」
+  const slice = ch.sceneFrom > 0 ? validScenes.slice(ch.sceneFrom - 1, ch.sceneTo) : [];
+  const sceneBlock = slice.length
+    ? buildContentBlock({ style: '', scenes: slice })
+    : '';
+  // 角色是**项目素材**（用户勾选），与拆不拆章无关：这里只列"勾选参与本次生成"的那些，
+  // 并说清它们在页面里已经就位（骨架 / 注入的 script 都已就位）。
+  const castList = opts.cast;
+  return [
+    '用户需求：' + opts.requirement,
+    '\n【本章任务】只写第 ' + (index + 1) + '/' + list.length + ' 章（id ' + ch.id + '，标题「' + ch.title + '」，时长 ' +
+      ch.duration + ' 秒，整片第 ' + a.toFixed(2) + '–' + b.toFixed(2) + ' 秒）。',
+    '\n【本章文件】' + chapters.chapterRelPath(ch.id) + '（文件块里的路径必须与这一行完全一致）',
+    // 随包库是「声明了才有」：没声明 p5 的章里 window.p5 是 undefined，模型必须知道这一点
+    '\n【本章随包库】' + (ch.uses && ch.uses.length ? ch.uses.join(' + ') + '（骨架已引入，可直接用）' : '只有 gsap + core.js（本章没有声明 p5，用不了 p5 / p5.brush）'),
+    // 角色：只给"这一版参与生成"的那些（含身高单位），并明确「必须调用共享角色库、不许重画」
+    castList.length
+      ? '\n【项目角色】页面上已经就位 ' + castList.length + ' 个角色（骨架已引入它们的 cast/*.js），**必须用它们画，不许在本章里重画**：\n'
+        + castList.map((m) => '- cast/' + m.id + '.js（' + m.name + '，高 ' + m.units + 'u）：' + (m.desc || '（未描述）')).join('\n')
+        + '\n调用方式：window.__cast["' + castList[0].id + '"](x, y, u, { ctx: ctx2d, … })；(x, y) 是脚底中点，u 是 1 个单位的像素数，'
+        + '**ctx 必须传**（本章 canvas 的 2D 上下文，角色就是往它上面画）。'
+        + '角色高 ' + castList[0].units + 'u ⇒ 希望它占画面高度 H 的三分之一，就把 u 设成 H/3/' + castList[0].units + '。'
+        + '\n本章用不到的角色不要调用（没出场的角色不必出现）。'
+      : '\n【项目角色】本项目没有勾选任何角色（不要调用 window.__cast）。',
+    // 时间轴从 0 开始是本契约里最容易出错的一条，单独说一次
+    '\n【时间口径】本章的时间轴从 0 开始、到 ' + ch.duration + ' 秒结束；不要写绝对时间，也不要引用别章的时间。',
+    '\n【全片大纲】（了解上下文即可，**不要画别章的内容**）',
+    chapters.chapterOutlineText(list),
+    sceneBlock ? '\n【本章内容脚本】下面只列本章覆盖的场景（原内容脚本第 ' + ch.sceneFrom + '–' + ch.sceneTo + ' 场，此处按本章顺序重新编号）：' + sceneBlock : '',
+    (() => {
+      const win = subtitleWindowText(sub, a, b);
+      return win ? '\n【本章字幕】只有这些条目落在本章时间窗内（时间为整片秒数，写进本章时要减去本章起点 ' + a.toFixed(2) + '）：\n' + win : '';
+    })(),
+    buildStyleBlock(proj.content),
+    buildCanvasBlock(proj),
+    buildMaterialBlock(mats.materials)
+  ].filter(Boolean).join('\n');
+}
+
+// 单个角色的生成提示：只给这个角色的设定 + 全片角色表（比例参照）+ 视觉风格 + 它会用到的库
+function buildCastPrompt(opts: {
+  proj: Project;
+  requirement: string;
+  list: ProjectCastMember[];
+  index: number;
+}): string {
+  const { proj, list, index } = opts;
+  const m = list[index];
+  return [
+    '用户需求：' + opts.requirement,
+    '\n【角色任务】只定义第 ' + (index + 1) + '/' + list.length + ' 个角色「' + m.name + '」（id ' + m.id + '）。',
+    '\n【角色文件】' + cast.castRelPath(m.id) + '（文件块里的路径必须与这一行完全一致）',
+    '\n【角色设定】' + (m.desc || '（没写描述，请按全片视觉风格自行拟定，并把画法要点写进文件注释）'),
+    '\n【身高】这个角色高 ' + m.units + 'u（u = 1 个单位的像素数，由调用方传）；同一画面里别的角色的身高见下面的角色表，'
+      + '比例要靠你们的 units 对齐，不要各画各的。',
+    '\n【全片角色表】（画的时候要让观众一眼分得清谁是谁）\n' + cast.castOutlineText(list),
+    '\n【本角色随包库】' + (m.uses && m.uses.length ? m.uses.join(' + ') + '（骨架已引入，可直接用）' : '只有 gsap（本角色没有声明 p5，只能用传进来的 o.ctx 画）'),
+    '\n【往哪画】章节调用时会传 o.ctx（Canvas 2D 上下文），默认就用它画；这样 DOM 章节与 Canvas 章节都能调用你。'
+      + (m.uses && m.uses.length ? '你声明了 p5，也可以改用 p5 全局绘制，但必须优先支持 o.ctx。' : ''),
+    buildStyleBlock(proj.content)
+  ].filter(Boolean).join('\n');
+}
+
+// 单文件模式落盘（生成与修改共用）：本地化随包引用 → 注入角色/助手 → 写 index.html → 更新索引 → 补音轨
+// 章节模式切回单文件时把 chapters 清空并删掉孤儿章节文件：留着只会让下次渲染的护栏扫到旧内容。
+// **角色不跟着清**：角色是项目素材，与"这一版用几个文件写"无关（见 types 里 ProjectCastMember 的说明）。
+function writeSingleHtml(opts: { name: string; proj: Project; reply: string }): { ok: boolean; htmlPath?: string; compatible?: boolean; message: string } {
+  const { name, proj } = opts;
+  let html = hfEnv.localizeVendorHtml(extractHtmlFromReply(opts.reply));
+  if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
+  const dir = projectDir(name);
+  fs.mkdirSync(dir, { recursive: true });
+  // 随包文件不可用（缺失 / 未随包）时退回 CDN 引用，避免页面引用了 ./gsap.min.js 却缺文件、动画完全不跑
+  if (!hfEnv.ensureVendorFiles(dir, html)) html = hfEnv.externalizeVendorHtml(html);
+  // 角色与共享助手注入（幂等）：模型写的单文件页面里没有 window.__cast，靠这里补上
+  html = applyCastToHtml(html, proj, dir);
+  const htmlPath = path.join(dir, 'index.html');
+  fs.writeFileSync(htmlPath, html, 'utf8');
+  proj.htmlPath = htmlPath;
+  proj.videoPath = ''; // HTML 刷新后旧视频失效
+  // 从章节模式切回单文件：章节文件是上一版产物，留着只会让渲染前的护栏扫到旧内容
+  if (proj.chapters && proj.chapters.length) {
+    chapters.removeChapterFiles(dir);
+    proj.chapters = [];
+  }
+  writeProject(proj);
+  applyBgmToHtml(name, proj);
+  const compatible = hfEnv.isHyperframesComposition(html);
+  return {
+    ok: true,
+    htmlPath,
+    compatible,
+    message: compatible ? '' : '（未通过 HyperFrames 合规检查：缺 data-composition-id / __timelines / gsap，预览可用，转视频前需调整）'
+  };
+}
+
+// 角色注入（单文件模式）：只注入**勾选参与本次生成**的角色 + core.js 助手。
+// 幂等（castInject 会先剥掉上次注入的整组标签）；没勾角色时只注入 core.js（页面里仍有 MC.* 可用）。
+function applyCastToHtml(html: string, proj: Project, dir: string): string {
+  const rels = cast.selectedMembers(proj.cast).map((m) => cast.castRelPath(m.id));
+  // 没有选中角色时**不动页面**（只把上次注入的剥掉）：模型写的单文件页面本来就不认识 MC.*，
+  // 硬塞一份 core.js 只是无谓的体积；章节模式不经过这里（骨架里本来就有 core.js）。
+  if (!rels.length) return castInject.injectCastTags(html, [], { withCore: false });
+  syncCoreLib(dir);   // 注入的是 ./core.js，文件必须先到位
+  return castInject.injectCastTags(html, rels, { withCore: true });
+}
+
+// 角色表变了（新建 / 导入 / 勾选 / 删除）之后，让页面立刻反映出来：
+//   · 章节模式：重写骨架（骨架里的 script 清单就是"谁参与"的真相）；
+//   · 单文件模式：把上一次注入剥掉、按新勾选重新注入 —— **不动模型写的内容**（castInject 幂等）。
+function refreshCastInPage(name: string, proj: Project): void {
+  if (proj.chapters && proj.chapters.length) {
+    writeChapterSkeleton(name, proj, proj.chapters, cast.selectedMembers(proj.cast));
+    return;
+  }
+  const htmlPath = projectFilePath(name, 'index.html');
+  if (fs.existsSync(htmlPath)) {
+    try {
+      const cur = fs.readFileSync(htmlPath, 'utf8');
+      const next = applyCastToHtml(cur, proj, projectDir(name));
+      if (next !== cur) fs.writeFileSync(htmlPath, next, 'utf8');
+    } catch (e) { /* 注入失败不拦保存：至少把索引写下去 */ }
+  }
+  writeProject(proj);
+}
+
+// 章节模式落盘：骨架 index.html 由应用按当前章节清单 / 角色表生成（模型不参与），再补音轨
+function writeChapterSkeleton(name: string, proj: Project, list: ProjectChapter[], castList: ProjectCastMember[]): { htmlPath: string; compatible: boolean } {
+  const dir = projectDir(name);
+  fs.mkdirSync(dir, { recursive: true });
+  // 页面引用了 ./core.js：写骨架前先把助手同步到位（按版本号覆盖，幂等）
+  syncCoreLib(dir);
+  const total = chapters.totalDuration(list);
+  let html = hfEnv.localizeVendorHtml(chapters.buildSkeleton({ chapters: list, canvas: projectCanvas(proj), total, cast: castList }));
+  if (!hfEnv.ensureVendorFiles(dir, html)) html = hfEnv.externalizeVendorHtml(html);
+  const htmlPath = path.join(dir, 'index.html');
+  fs.writeFileSync(htmlPath, html, 'utf8');
+  proj.htmlPath = htmlPath;
+  proj.videoPath = '';
+  proj.chapters = list;
+  proj.cast = castList;
+  writeProject(proj);
+  applyBgmToHtml(name, proj);
+  return { htmlPath, compatible: hfEnv.isHyperframesComposition(html) };
+}
+
+// 章节化生成：逐章 N 次，**全部成功才落盘**
+// （中途失败不会留下"半支片 + 旧骨架"的混合状态）
+// 角色不在这里生成：角色是项目素材（「新建角色」或全局库导入时产生），这里只把它们注入骨架。
+async function generateByChapters(opts: {
+  event: IpcMainInvokeEvent;
+  name: string;
+  proj: Project;
+  requirement: string;
+  list: ProjectChapter[];
+  castList: ProjectCastMember[];
+  mats: { subtitleText: string; materials: ProjectMaterial[] };
+}): Promise<{ ok: boolean; htmlPath?: string; compatible?: boolean; message: string }> {
+  const { event, name, proj, list, mats, castList } = opts;
+  const validScenes = validSceneList(proj.content);
+  const sub = mats.subtitleText ? parseSubtitle(mats.subtitleText) : [];
+  const dir = projectDir(name);
+
+  // 逐章
+  const files: { path: string; code: string }[] = [];
+  const total = list.length;
+  for (let i = 0; i < total; i++) {
+    const ch = list[i];
+    pushStatus(event, '正在生成第 ' + (i + 1) + '/' + total + ' 章（' + ch.title + '，' + ch.duration + ' 秒）…', { chapterIndex: i + 1, chapterTotal: total });
+    const prompt = buildChapterPrompt({ proj, requirement: opts.requirement, list, index: i, validScenes, mats, sub, cast: castList });
+    const reply = await chatWithChapter(prompt, {
+      onProgress: progressSender(event, { chapterIndex: i + 1, chapterTotal: total }),
+      meta: { project: name, action: 'chapter-' + ch.id }
+    });
+    const parsed = chapters.parseFileBlocks(reply, chapters.chapterRelPath(ch.id));
+    // 只要本章那一份（模型偶尔会把别章的也吐出来，别章由别章的调用负责）
+    const want = chapters.chapterRelPath(ch.id);
+    const hit = parsed.files.find((f) => f.path === want);
+    const code = hit ? hit.code : '';
+    const bad = chapters.validateChapterCode(code);
+    if (bad) {
+      return { ok: false, message: '第 ' + (i + 1) + ' 章（' + ch.id + '）生成失败：' + bad + '。可再点一次「生成 HTML」，或把这一章拆短后重试。' };
+    }
+    files.push({ path: want, code });
+  }
+
+  chapters.writeChapterFiles(dir, list, files);
+  const wrote = writeChapterSkeleton(name, proj, list, castList);
+  return {
+    ok: true,
+    htmlPath: wrote.htmlPath,
+    compatible: wrote.compatible,
+    message: '已生成 ' + total + ' 章' + (castList.length ? '（页面已引入 ' + castList.length + ' 个角色）' : '')
+      + '（共 ' + chapters.totalDuration(list).toFixed(1) + ' 秒），骨架 index.html 由应用生成'
+  };
+}
+
+// 章节模式下的「按需求修改」，分两段（用户 2026-10-23 定）：
+//   ① 路由：只发「大纲 + 角色表 + 用户的话」，让模型报这次要改哪几个文件（不读源码）；
+//   ② 定向编辑：只读它点名的那些文件，连同大纲一起发给模型改。
+// 为什么要分两段：长片源码合计几百 KB，一次全发会撞模型的上下文上限；分两段后模型只看到自己点名的
+// 那一两份源码（用户说「把第 3 章改慢点」就只发第 3 章）。路由失败则回退成「发全部源码」，保证能改。
+async function applyChapterEdit(opts: {
+  event: IpcMainInvokeEvent;
+  name: string;
+  proj: Project;
+  requirement: string;
+  mats: { subtitleText: string; materials: ProjectMaterial[] };
+  onProgress: (info: AgentProgress) => void;
+}): Promise<{ ok: boolean; htmlPath?: string; compatible?: boolean; message: string }> {
+  const { name, proj, mats, onProgress } = opts;
+  const dir = projectDir(name);
+  const cur = proj.chapters || [];
+  const curCast = proj.cast || [];
+  const validScenes = validSceneList(proj.content);
+  const outline = chapters.chapterOutlineText(cur);
+  const castText = cast.castOutlineText(curCast);
+  // 项目里当前存在的全部源码路径（路由只允许点名这些）
+  const allPaths = cur.map((c) => chapters.chapterRelPath(c.id)).concat(curCast.map((m) => cast.castRelPath(m.id)));
+
+  // ① 路由：只发大纲与需求
+  pushStatus(opts.event, '正在判断要改哪几个文件…');
+  const routePrompt = [
+    '用户需求：' + opts.requirement,
+    '\n【章节大纲】\n' + outline,
+    '\n【角色表】\n' + castText,
+    '\n【可改的文件】\n' + allPaths.join('\n'),
+    '\n【任务】指出为了让这条需求生效，模型需要读到哪几个文件的源码。只输出 JSON。'
+  ].filter(Boolean).join('\n');
+  const routeReply = await chatWithRoute(routePrompt, { onProgress, meta: { project: name, action: 'route' } });
+  const routed = parseRouteReply(routeReply, allPaths);
+  // 路由失败 → 回退成「发全部源码」（否则这条需求根本改不了）
+  const fallbackAll = !routed.route;
+  const targets = routed.route ? routed.route.paths.slice() : allPaths;
+  const restructure = !!(routed.route && routed.route.restructure);
+  if (fallbackAll) {
+    pushStatus(opts.event, '没能判断出改动范围（' + (routed.error || '未知原因') + '），改为带上全部源码…');
+  } else {
+    pushStatus(opts.event, '这次要改：' + (targets.length ? targets.join('、') : '（结构变更）') + (restructure ? '（含结构变更）' : ''));
+  }
+
+  // ② 定向编辑：只读被点名的文件
+  const targetChapters = cur.filter((c) => targets.indexOf(chapters.chapterRelPath(c.id)) >= 0);
+  const targetCast = curCast.filter((m) => targets.indexOf(cast.castRelPath(m.id)) >= 0);
+  const codeBlocks = [
+    ...chapters.readChapterCode(dir, targetChapters).map((c) => '<<<CURRENT ' + chapters.chapterRelPath(c.id) + '>>>\n' + c.code + '\n<<<END CURRENT>>>'),
+    ...cast.readCastCode(dir, targetCast).map((m) => '<<<CURRENT ' + cast.castRelPath(m.id) + '>>>\n' + m.code + '\n<<<END CURRENT>>>')
+  ].join('\n\n');
+  const editPrompt = [
+    '用户需求（改这一版）：' + opts.requirement,
+    '\n【章节大纲】改完若结构有变要给出新的 PLAN 块：\n' + outline,
+    '\n【角色表】' + (curCast.length ? '\n' + castText : '（本片暂无角色）'),
+    restructure ? '\n【注意】这条需求会改变结构（增删章 / 增删角色 / 改时长）：请**先给新的 PLAN 块**（含完整 chapters 与 cast），再给受影响的文件块。新增的章节 / 角色没有现有源码可参考，按大纲与用户需求直接写。' : '',
+    '\n【这次允许你改的文件】' + (targets.length ? targets.join('、') : '（无现有文件；只允许新增）'),
+    buildStyleBlock(proj.content),
+    buildCanvasBlock(proj, true),
+    mats.subtitleText ? '\n【项目字幕】每行格式为 [开始-结束] 文本（秒，可带小数）。章节里的时间从 0 开始，写进某章时要减去该章起点：\n' + mats.subtitleText : '',
+    buildMaterialBlock(mats.materials),
+    codeBlocks ? '\n【当前源码】（只给了这次允许改的文件）\n' + codeBlocks : ''
+  ].filter(Boolean).join('\n');
+
+  const reply = await chatWithChapterEdit(editPrompt, { onProgress, meta: { project: name, action: 'chapter-edit' } });
+
+  // ③ 新 PLAN / CAST（增删章 / 改时长 / 改角色表时才需要）
+  const planParsed = chapters.parsePlanReply(reply, validScenes.length);
+  let list = cur;
+  if (planParsed.plan && planParsed.plan.mode === 'chapters') list = planParsed.plan.chapters;
+  else if (planParsed.plan && planParsed.plan.mode === 'single') {
+    return { ok: false, message: '章节模式的修改不能把整片改回单文件：请先「生成 HTML」并让规划判成单文件，或只改章节内容。' };
+  }
+  // 角色表不解析：角色是项目素材（在素材区新建 / 勾选 / 导入），模型只可能被要求改某个角色的画法，
+  // 那走的是 cast/<id>.js 文件块，不涉及表结构。
+  const nextCast = curCast;
+  if (!planParsed.plan && planParsed.error) {
+    // 没有 PLAN 块是正常的（大多数修改只动画面不动结构）；但若连文件块都没有，就是真失败了
+    const probe = chapters.parseFileBlocks(reply);
+    if (!probe.files.length) return { ok: false, message: '模型的回复里既没有可用的文件块，也没有可解析的 PLAN：' + planParsed.error };
+  }
+
+  // ④ 拆出两类文件块并逐个校验
+  const chapterFiles: { path: string; code: string }[] = [];
+  const castFiles: { path: string; code: string }[] = [];
+  const touched: string[] = [];
+  const chapterBlocks = chapters.parseFileBlocks(reply);
+  const castBlocks = cast.parseCastFiles(reply);
+  for (const f of chapterBlocks.files) {
+    const id = path.basename(f.path).replace(/\.js$/i, '');
+    if (!list.some((c) => c.id === id)) {
+      return { ok: false, message: '模型返回了清单里没有的章节文件（' + f.path + '）：请在 PLAN 块里列出新增章节，或让它只改已有章节。' };
+    }
+    const bad = chapters.validateChapterCode(f.code);
+    if (bad) return { ok: false, message: '第 ' + id + ' 章改动不合法：' + bad };
+    chapterFiles.push({ path: f.path, code: f.code });
+    touched.push(id);
+  }
+  for (const f of castBlocks.files) {
+    const id = path.basename(f.path).replace(/\.js$/i, '');
+    if (!nextCast.some((m) => m.id === id)) {
+      return { ok: false, message: '模型返回了项目里没有的角色文件（' + f.path + '）：角色只能在「项目素材 · 角色」里新建或从全局库导入，不能靠改稿生成。' };
+    }
+    const bad = cast.validateCastCode(f.code);
+    if (bad) return { ok: false, message: '角色 ' + id + ' 改动不合法：' + bad };
+    castFiles.push({ path: f.path, code: f.code });
+    touched.push(id);
+  }
+  if (!touched.length) {
+    // 两类解析器都会把"对方的合法路径"记成坏路径，所以这里只报「既没有合法文件块」这个事实，不列路径以免误导
+    return { ok: false, message: '模型没有返回任何可用的文件块（可能只是解释性文字），请把要求写得更具体后重试' };
+  }
+
+  // ⑤ 新 PLAN 里新增的章节必须自带代码，否则骨架会引用一个空文件
+  for (const ch of list) {
+    if (cur.some((c) => c.id === ch.id)) continue;
+    if (!chapterFiles.some((f) => path.basename(f.path).replace(/\.js$/i, '') === ch.id)) {
+      return { ok: false, message: '新 PLAN 里新增了第 ' + ch.id + ' 章，但没有给出它的代码：请让它连代码一起输出。' };
+    }
+  }
+
+  if (chapterFiles.length) chapters.writeChapterFiles(dir, list, chapterFiles);
+  if (castFiles.length) cast.writeCastFiles(dir, nextCast, castFiles);
+  const wrote = writeChapterSkeleton(name, proj, list, cast.selectedMembers(nextCast));
+  return {
+    ok: true,
+    htmlPath: wrote.htmlPath,
+    compatible: wrote.compatible,
+    message: '已修改 ' + touched.length + ' 个文件（' + touched.join('、') + '）'
+      + (list !== cur ? '，章节结构已更新' : '')
+      + (fallbackAll ? '（路由失败，本次带上了全部源码）' : '')
+  };
 }
 
 function register(ctx?: RegisterCtx): void {
@@ -784,9 +1243,8 @@ function register(ctx?: RegisterCtx): void {
   });
 
   // ===== HTML 生成/修改：由 Agent 接口实现（应用侧不内置模板） =====
-  // 接入点：handler 收到 { name, prompt } 后调用自定义模型 Agent，
-  // Agent 产出/修改 HTML 并写入 projectFilePath(name,'index.html')，
-  // 应用侧随后更新 proj.htmlPath、置空 proj.videoPath 并刷新链路。
+  // 生成分两步：① 规划调用判「单文件还是拆章」② 按结果走单文件（一次写整份 HTML）或章节模式（逐章写 pages/cNN.js）。
+  // 规划失败不拦路：解析不出来就按单文件继续（老路径完全没变），只是少了章节化这一档。
   ipcMain.handle(IPC.Project.GenerateHtml, async (event, payload?: ProjectAgentPayload) => {
     const name = payload && payload.name as string;
     if (!name) return { ok: false, message: '缺少项目名' };
@@ -796,37 +1254,47 @@ function register(ctx?: RegisterCtx): void {
     const proj = ensureProject(name);
     const mats = resolveMaterials(proj, payload || {});
     const userPrompt = buildMaterialPrompt('用户需求：' + prompt.trim(), proj, mats, []);
+    const sub = mats.subtitleText ? parseSubtitle(mats.subtitleText) : [];
 
     try {
-      const sender = event.sender;
-      const onProgress = (info: AgentProgress) => {
-        const text = progressText(info);
-        if (text && !sender.isDestroyed()) sender.send(IPC.Project.HtmlProgress, Object.assign({}, info, { text }));
-      };
-      const reply = await chatWithCustomModel(userPrompt, { onProgress, meta: { project: name, action: 'generate' } });
-      // GSAP 本地化：模型若仍写了 CDN 地址则改写为 ./gsap.min.js，并把随包文件复制进项目（离线可渲染）
-      let html = hfEnv.localizeGsapHtml(extractHtmlFromReply(reply));
-      if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
-      const dir = projectDir(name);
-      fs.mkdirSync(dir, { recursive: true });
-      // 随包 gsap.min.js 不可用（缺失 / 未随包）时退回 CDN 引用，避免页面引用了 ./gsap.min.js 却缺文件、动画完全不跑
-      if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(dir)) html = hfEnv.externalizeGsapHtml(html);
-      const htmlPath = path.join(dir, 'index.html');
-      fs.writeFileSync(htmlPath, html, 'utf8');
-      proj.htmlPath = htmlPath;
-      proj.videoPath = ''; // HTML 刷新后旧视频失效
-      writeProject(proj);
-      // 新 HTML 落盘后按项目当前背景音频注入音轨（模型侧已明确不写 <audio>）
-      applyBgmToHtml(name, proj);
-      const compatible = hfEnv.isHyperframesComposition(html);
-      return {
-        ok: true,
-        htmlPath,
-        compatible,
-        message: compatible
-          ? 'HTML 已生成'
-          : 'HTML 已生成，但未通过 HyperFrames 合规检查（缺 data-composition-id / __timelines / gsap），预览可用，转视频前需调整。'
-      };
+      const onProgress = progressSender(event);
+      pushStatus(event, '正在判断整片结构（单文件 / 章节化）…');
+      const planReply = await chatWithChapterPlan(buildPlanPrompt(prompt.trim(), proj, sub), {
+        onProgress,
+        meta: { project: name, action: 'plan' }
+      });
+      const parsed = chapters.parsePlanReply(planReply, validSceneList(proj.content).length);
+      if (parsed.plan && parsed.plan.mode === 'chapters') {
+        // 角色不在规划结果里：角色是项目素材（用户在素材区新建 / 勾选 / 从全局库导入），
+        // 这里只取「勾选参与本次生成」的那几个，交给骨架按需引入。
+        return await generateByChapters({
+          event,
+          name,
+          proj,
+          requirement: prompt.trim(),
+          list: parsed.plan.chapters,
+          castList: cast.selectedMembers(proj.cast),
+          mats
+        });
+      }
+      // 规划判定为单文件 / 规划解析失败：都走老的「一次生成整份 HTML」
+      if (parsed.error) pushStatus(event, '章节规划未能解析（' + parsed.error + '），改用单文件模式生成…');
+      // 单文件模式同样要带角色：提示词里给出角色清单，落盘时注入 script（与章节化无关）
+      const selected = cast.selectedMembers(proj.cast);
+      const singlePrompt = selected.length
+        ? userPrompt + '\n【项目角色】下面这些角色**已经注入页面**（window.__cast 里就有），必须用它们画、不许重画：\n'
+          + cast.castOutlineText(selected)
+          + '\n调用方式：window.__cast["' + selected[0].id + '"](x, y, u, { ctx: ctx2d, … })——(x, y) 是脚底中点，u 是 1 个单位的像素数。'
+          + '\n【分层要求】角色画在**独立的透明 canvas** 上（铺满舞台、叠在 <video> / <img> / DOM 之上），'
+          + '可以直接用助手建层：var layer = MC.castLayer(stage, 宽, 高)；每帧先 MC.clearLayer(layer.ctx) 再画角色。'
+          + '**禁止在这张画布上填整屏底色**——那会把视频/图片背景整块盖住。'
+          + '只有整页都由代码画（下面没有任何素材）时，角色才可以画进主画布。角色没列出的不要调用。'
+        : '';
+      const reply = await chatWithCustomModel(singlePrompt || userPrompt, { onProgress, meta: { project: name, action: 'generate' } });
+      const wrote = writeSingleHtml({ name, proj, reply });
+      return wrote.ok
+        ? { ok: true, htmlPath: wrote.htmlPath, compatible: wrote.compatible, message: 'HTML 已生成' + (wrote.message || '') }
+        : wrote;
     } catch (e) {
       // chatWithCustomModel 抛出的已是人话文案；这里只补一次分类，把「配置类」标记带给界面（弹「去设置」）
       const msg = 'Agent 调用失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e));
@@ -845,44 +1313,30 @@ function register(ctx?: RegisterCtx): void {
     if (!fs.existsSync(htmlPath)) return { ok: false, message: '该项目还没有 HTML，请先生成' };
 
     const proj = ensureProject(name);
-    const curHtml = fs.readFileSync(htmlPath, 'utf8');
     const mats = resolveMaterials(proj, payload || {});
-    // forModify=true：画布块多带一条「旧页面版式与新画布不一致就必须重排」的硬要求
-    const userPrompt = buildMaterialPrompt(
-      '用户需求（在此基础上改造后输出完整新 HTML）：' + prompt.trim(),
-      proj,
-      mats,
-      ['当前项目的 index.html 源码如下：', '```html', curHtml, '```', ''],
-      true
-    );
+    const onProgress = progressSender(event);
 
     try {
-      const sender = event.sender;
-      const onProgress = (info: AgentProgress) => {
-        const text = progressText(info);
-        if (text && !sender.isDestroyed()) sender.send(IPC.Project.HtmlProgress, Object.assign({}, info, { text }));
-      };
+      // ===== 章节模式：两段式改稿（路由 → 定向编辑），见 applyChapterEdit 的注释 =====
+      // 不用再发 index.html：骨架由应用生成，模型改它没有意义（也不会被采用）。
+      if (proj.chapters && proj.chapters.length) {
+        return await applyChapterEdit({ event, name, proj, requirement: prompt.trim(), mats, onProgress });
+      }
+      // ===== 单文件模式（老路径，行为不变）=====
+      const curHtml = fs.readFileSync(htmlPath, 'utf8');
+      // forModify=true：画布块多带一条「旧页面版式与新画布不一致就必须重排」的硬要求
+      const userPrompt = buildMaterialPrompt(
+        '用户需求（在此基础上改造后输出完整新 HTML）：' + prompt.trim(),
+        proj,
+        mats,
+        ['当前项目的 index.html 源码如下：', '```html', curHtml, '```', ''],
+        true
+      );
       const reply = await chatWithCustomModel(userPrompt, { onProgress, meta: { project: name, action: 'modify' } });
-      // GSAP 本地化：同生成分支（改写 CDN 引用 + 随包文件落位；随包缺失则退回 CDN）
-      let html = hfEnv.localizeGsapHtml(extractHtmlFromReply(reply));
-      if (!html.trim()) return { ok: false, message: '模型未返回内容，请检查自定义模型配置' };
-      const projDir = path.dirname(htmlPath);
-      if (hfEnv.referencesLocalGsap(html) && !hfEnv.copyGsapIntoProject(projDir)) html = hfEnv.externalizeGsapHtml(html);
-      fs.writeFileSync(htmlPath, html, 'utf8');
-      proj.htmlPath = htmlPath;
-      proj.videoPath = '';
-      writeProject(proj);
-      // 修改后的 HTML 同样补回音轨（模型重写时可能整段丢掉注入标签）
-      applyBgmToHtml(name, proj);
-      const compatible = hfEnv.isHyperframesComposition(html);
-      return {
-        ok: true,
-        htmlPath,
-        compatible,
-        message: compatible
-          ? 'HTML 已修改'
-          : 'HTML 已修改，但未通过 HyperFrames 合规检查，转视频前需调整。'
-      };
+      const wrote = writeSingleHtml({ name, proj, reply });
+      return wrote.ok
+        ? { ok: true, htmlPath: wrote.htmlPath, compatible: wrote.compatible, message: 'HTML 已修改' + (wrote.message || '') }
+        : wrote;
     } catch (e) {
       // chatWithCustomModel 抛出的已是人话文案；这里只补一次分类，把「配置类」标记带给界面（弹「去设置」）
       const msg = 'Agent 调用失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e));
@@ -901,9 +1355,24 @@ function register(ctx?: RegisterCtx): void {
       filters: [{ name: 'HTML 文件', extensions: ['html'] }]
     }) : undefined;
     if (!save) return { ok: false, canceled: true };
-    // 导出的是「单个 HTML 文件」：把项目内的 ./gsap.min.js 相对引用换回 CDN 地址，
-    // 否则导出后在别处打开会缺 gsap.min.js（同目录没有该文件）导致动画完全不跑。
-    fs.writeFileSync(save, hfEnv.externalizeGsapHtml(fs.readFileSync(htmlPath, 'utf8')), 'utf8');
+    // 导出的是「单个 HTML 文件」，要处理两件事，否则导出后在别处打开就是空白页：
+    // ① 章节模式：把 <script src="./pages/cNN.js"> 与 <script src="./cast/x.js"> 换成内联脚本
+    //    （导出的文件旁边没有 pages/ 与 cast/ 目录）；
+    // ② 随包库：把 ./gsap.min.js / ./p5.min.js 换回固定版本 CDN 地址（旁边没有这些文件）。
+    let html = fs.readFileSync(htmlPath, 'utf8');
+    const proj = ensureProject(String(name || ''));
+    const dir = path.dirname(htmlPath);
+    // 角色与助手与"拆不拆章"无关：两种形态都要内联，否则导出的单文件在别处打开就没有 window.__cast / MC。
+    const sources: { path: string; code: string }[] = [];
+    if (proj.chapters && proj.chapters.length) {
+      for (const c of chapters.readChapterCode(dir, proj.chapters)) sources.push({ path: chapters.chapterRelPath(c.id), code: c.code });
+    }
+    for (const m of cast.readCastCode(dir, proj.cast || [])) sources.push({ path: cast.castRelPath(m.id), code: m.code });
+    if (!(proj.chapters && proj.chapters.length)) syncCoreLib(dir);   // 单文件模式导出前补一次助手文件
+    const coreCode = coreLib.readProjectCore(dir);
+    if (coreCode) sources.push({ path: coreLib.CORE_FILE, code: coreCode });
+    html = chapters.inlineChapters(html, sources);
+    fs.writeFileSync(save, hfEnv.externalizeVendorHtml(html), 'utf8');
     return { ok: true, savedPath: save };
   });
 
@@ -1155,6 +1624,118 @@ function register(ctx?: RegisterCtx): void {
     return { ok: true, html: fs.readFileSync(htmlPath, 'utf8') };
   });
 
+  // ===== 全局角色库（<userData>/cast-library/）=====
+  // 四个动作都是「库 ↔ 项目」之间搬角色文件；库本身是用户资产，不进安装包、也不进项目目录。
+  // 读库时把「索引有、文件不在」的条目标成 missing 一起回给界面（而不是静默消失）。
+  ipcMain.handle(IPC.Project.CastLibrary, () => {
+    const root = castLibraryRoot();
+    const lib = castLibrary.readLibrary(root);
+    if (lib.error) return { ok: false, message: lib.error };
+    const members = lib.members.map((m) => ({ ...m, missing: !castLibrary.libraryFileExists(root, m.id) }));
+    return { ok: true, members } as { ok: true; members: CastLibraryResult['members'] };
+  });
+
+  // 把当前项目里的某个角色存为全局（同 id 覆盖库里的那份）
+  ipcMain.handle(IPC.Project.PromoteCast, (_event, payload?: { name?: string; id?: string }) => {
+    const name = payload && payload.name;
+    const id = payload && payload.id;
+    if (!name || !id) return { ok: false, message: '缺少项目名或角色 id' };
+    const proj = ensureProject(name);
+    const member = (proj.cast || []).find((m) => m.id === String(id).toLowerCase());
+    if (!member) return { ok: false, message: '项目里没有这个角色：' + String(id) };
+    return castLibrary.promoteFromProject(castLibraryRoot(), projectDir(name), member);
+  });
+
+  // 把全局角色导入当前项目：复制进 <项目>/cast/，合并进 project.cast（默认勾选参与本次生成），
+  // 然后按当前产物形态把页面重刷一遍——章节模式重写骨架、单文件模式重新注入 script。
+  ipcMain.handle(IPC.Project.ImportCast, (_event, payload?: { name?: string; ids?: string[] }) => {
+    const name = payload && payload.name;
+    const ids = payload && Array.isArray(payload.ids) ? payload.ids : [];
+    if (!name) return { ok: false, message: '缺少项目名' };
+    if (!ids.length) return { ok: false, message: '没有选择要导入的角色' };
+    const proj = ensureProject(name);
+    const r = castLibrary.importToProject(castLibraryRoot(), projectDir(name), ids, proj.cast || []);
+    if (!r.ok) return { ok: false, message: r.message };
+    // 导入的角色默认参与本次生成（与新建一致）
+    const merged = r.cast.map((m) => ({ ...m, selected: m.selected === false ? false : true }));
+    proj.cast = merged;
+    refreshCastInPage(name, proj);
+    return { ok: true, message: r.message, cast: merged } as { ok: true; message: string; cast: ProjectCastResult['cast'] };
+  });
+
+  // 从全局库删掉一个角色（不动任何已经导入它的项目）
+  ipcMain.handle(IPC.Project.RemoveCastFromLibrary, (_event, payload?: { id?: string }) => {
+    const id = payload && payload.id;
+    if (!id) return { ok: false, message: '缺少角色 id' };
+    return castLibrary.removeFromLibrary(castLibraryRoot(), String(id));
+  });
+
+  // 手动新建一个角色：调一次模型画 cast/<id>.js（**与「生成 HTML」完全无关**），
+  // 然后按当前产物形态重刷页面（章节模式写骨架 / 单文件模式注入 script）。
+  ipcMain.handle(IPC.Project.NewCast, async (event, payload?: ProjectNewCastPayload) => {
+    const name = payload && payload.name;
+    if (!name) return { ok: false, message: '缺少项目名' };
+    const proj = ensureProject(name);
+    const title = String((payload && payload.title) || '').trim();
+    const desc = String((payload && payload.desc) || '').trim();
+    if (!title && !desc) return { ok: false, message: '请至少填角色名或一句描述' };
+    // id 用 slug：优先取标题里的英文/数字，取不到就按现有数量生成 hero / cast2 …
+    const existing = new Set((proj.cast || []).map((m) => m.id));
+    let id = String(title).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 20);
+    if (!/^[a-z]/.test(id)) id = '';
+    if (!id) {
+      let n = (proj.cast || []).length + 1;
+      while (existing.has('cast' + n)) n++;
+      id = 'cast' + n;
+    }
+    if (existing.has(id)) return { ok: false, message: '已经有同名角色（id ' + id + '），换个名字' };
+    const units = isFinite(Number(payload && payload.units)) && Number(payload && payload.units) > 0
+      ? Math.min(30, Number(payload && payload.units))
+      : 8;
+    const uses = (payload && payload.watercolor) ? ['p5', 'p5.brush'] : [];
+    const member: ProjectCastMember = { id, name: title || id, desc, units, selected: true, ...(uses.length ? { uses } : {}) };
+
+    try {
+      const onProgress = progressSender(event);
+      pushStatus(event, '正在画角色「' + member.name + '」…');
+      const prompt = buildCastPrompt({ proj, requirement: desc || title, list: [...(proj.cast || []), member], index: (proj.cast || []).length });
+      const reply = await chatWithCast(prompt, { onProgress, meta: { project: name, action: 'cast-new-' + id } });
+      const parsed = cast.parseCastFiles(reply, cast.castRelPath(id));
+      const want = cast.castRelPath(id);
+      const hit = parsed.files.find((f) => f.path === want);
+      const bad = cast.validateCastCode(hit ? hit.code : '');
+      if (bad) return { ok: false, message: '角色「' + member.name + '」生成失败：' + bad + '。把描述写得更具体或更简单后重试。' };
+      cast.writeCastFiles(projectDir(name), [...(proj.cast || []), member], [{ path: want, code: (hit as { code: string }).code }]);
+      const nextCast = [...(proj.cast || []), member];
+      proj.cast = nextCast;
+      refreshCastInPage(name, proj);
+      return { ok: true, member, cast: nextCast } as { ok: true; member: ProjectCastMember; cast: ProjectCastMember[] };
+    } catch (e) {
+      const msg = 'Agent 调用失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e));
+      return { ok: false, message: msg, ...configTargetOf(msg) };
+    }
+  });
+
+  // 整份角色表回写（勾选 / 删除 / 改名 / 改身高）：与 project:save-materials 同一套「整份覆盖」语义，
+  // 落盘后按当前产物形态重刷页面（勾掉的角色要从骨架/注入里消失）。
+  ipcMain.handle(IPC.Project.SaveCast, (_event, payload?: ProjectSaveCastPayload) => {
+    const name = payload && payload.name;
+    if (!name) return { ok: false, message: '缺少项目名' };
+    const proj = ensureProject(name);
+    const n = cast.normalizeCastList(payload && payload.cast);
+    if (n.error) return { ok: false, message: n.error };
+    // 只删掉"清单里没有的"角色文件；不改已有角色的代码文件
+    const keep = new Set(n.cast.map((m) => m.id));
+    for (const old of (proj.cast || [])) {
+      if (!keep.has(old.id)) {
+        try { fs.rmSync(path.join(projectDir(name), 'cast', old.id + '.js'), { force: true }); } catch (e) { /* ignore */ }
+      }
+    }
+    proj.cast = n.cast;
+    refreshCastInPage(name, proj);
+    return { ok: true, cast: n.cast } as { ok: true; cast: ProjectCastResult['cast'] };
+  });
+
   // 预览副本：index.html + 注入播放控制脚本 → 同目录 index.preview.html
   // （与原件同目录保证相对引用素材可用；预览副本仅用于应用内预览，下载/转视频始终用原件）
   ipcMain.handle(IPC.Project.PreviewHtml, (_event, name?: string) => {
@@ -1171,9 +1752,12 @@ function register(ctx?: RegisterCtx): void {
       : '';
     // 预览副本去除 CSP 限制（仅副本），保证注入的控制脚本可执行
     html = html.replace(/<meta[^>]*content-security-policy[^>]*>/gi, '');
-    // GSAP 本地化（仅副本，不动原件）：老项目仍引 CDN 时也能离线预览
-    html = hfEnv.localizeGsapHtml(html);
-    if (hfEnv.referencesLocalGsap(html)) hfEnv.copyGsapIntoProject(path.dirname(htmlPath));
+    // 随包库本地化（仅副本，不动原件）：老项目仍引 CDN 时也能离线预览
+    html = hfEnv.localizeVendorHtml(html);
+    hfEnv.ensureVendorFiles(path.dirname(htmlPath), html);
+    // 章节模式还引了 ./core.js（共享绘制助手）：预览前同样按版本同步一次，
+    // 否则应用升级后「旧项目预览仍是老助手、渲染却是新助手」，两边画面不一致
+    if (/src=["'](?:\.\/)?core\.js["']/i.test(html)) syncCoreLib(path.dirname(htmlPath));
     const ctrl = '<script>' + HG_PREVIEW_CTRL + '</scr' + 'ipt>';
     // 注入到 </body> 前；模型输出被截断缺 </body> 时落到 </head>（或文档最前）作为独立 script，
     // 否则会拼进未闭合的 <script>，令整段页面脚本 SyntaxError（fitStage/时间轴全失效）
@@ -1191,9 +1775,9 @@ function register(ctx?: RegisterCtx): void {
     if (!String(html).trim()) return { ok: false, message: 'HTML 内容为空' };
     const dir = projectDir(name);
     fs.mkdirSync(dir, { recursive: true });
-    // GSAP 本地化：手改/粘贴进来仍带 CDN 地址的 HTML 也统一改写为项目内引用（随包缺失则退回 CDN）
-    let localHtml = hfEnv.localizeGsapHtml(html);
-    if (hfEnv.referencesLocalGsap(localHtml) && !hfEnv.copyGsapIntoProject(dir)) localHtml = hfEnv.externalizeGsapHtml(localHtml);
+    // 随包库本地化：手改/粘贴进来仍带 CDN 地址的 HTML 也统一改写为项目内引用（随包缺失则退回 CDN）
+    let localHtml = hfEnv.localizeVendorHtml(html);
+    if (!hfEnv.ensureVendorFiles(dir, localHtml)) localHtml = hfEnv.externalizeVendorHtml(localHtml);
     const htmlPath = path.join(dir, 'index.html');
     fs.writeFileSync(htmlPath, localHtml, 'utf8');
     const proj = ensureProject(name);

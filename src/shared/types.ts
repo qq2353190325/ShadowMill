@@ -585,6 +585,13 @@ export interface Project {
   // 成片画布方向（项目属性）：缺省 = DEFAULT_CANVAS（landscape 1920x1080）。
   // 由 project:set-canvas 写入；生成提示词 / 预览画布 / 渲染入口三处都读它（见 RenderCanvas 的说明）。
   canvas?: RenderCanvas
+  // 章节化长片：空/缺省 = 这个项目是「单文件模式」（整份动画写在 index.html 里）。
+  // 非空 = 章节模式：动画拆在 pages/cNN.js，index.html 只是应用生成的骨架（见 ProjectChapter 的说明）。
+  // 两种模式由「生成 HTML」时模型在规划阶段选择，用户也可以在需求描述里指定。
+  chapters?: ProjectChapter[]
+  // 角色库（章节模式才用）：空/缺省 = 本片没有共享角色。非空时每个角色一份 cast/<id>.js，
+  // 骨架按各章 ProjectChapter.cast 的并集引入（见 ProjectCastMember 的说明）。
+  cast?: ProjectCastMember[]
   createdAt: string
   updatedAt?: string
 }
@@ -697,6 +704,50 @@ export interface ProjectOpenFolderOfResult {
   dir: string
 }
 
+// ===== 全局角色库（<userData>/cast-library/）=====
+// 与项目内的角色（Project.cast + cast/<id>.js）是**两层**：
+//   · 全局库是用户资产（可备份、可迁移、跨项目复用），不是安装包内容；
+//   · 导入 = 把库里那份**复制**进项目目录（预览协议与渲染静态服务器都只认项目目录内的文件），
+//     之后它就是这个项目的角色，全局库再改也不会自动动它（要更新就再导入一次）。
+export interface CastLibraryMember extends ProjectCastMember {
+  // 库里有索引但缺文件时为 true（界面据此显示「文件缺失」，而不是静默消失）
+  missing?: boolean
+}
+export interface CastLibraryResult {
+  members: CastLibraryMember[]
+}
+// 导入后的项目角色表（应用据此原地刷新 appState，不必整份重载项目）
+export interface ProjectCastResult {
+  cast: ProjectCastMember[]
+}
+
+// ===== 项目角色（「HTML生成」页 · 项目素材 · 角色）=====
+// 角色是**项目资产**，与图片/视频素材并列，但与「单文件 / 章节化」两种产物形态都无关：
+//   · 生成前在素材区勾选「参与本次生成」；
+//   · 生成时应用把 core.js + 被勾选角色的 cast/<id>.js 注入页面（单文件模式注入 index.html，章节模式写进骨架）；
+//   · 模型只负责「调用」角色（window.__cast["hero"](x, y, u, { ctx })），不再各自重画。
+// 角色代码由用户手动「新建角色」时调一次模型生成（也可从全局角色库导入），**不再由规划自动建表**。
+export interface ProjectNewCastPayload {
+  name?: string
+  // 角色名（中文，界面上显示；也可当 prompt 里的称呼）
+  title?: string
+  // 外形 / 配色 / 关键特征描述
+  desc?: string
+  // 高几个 u（缺省 8）
+  units?: number
+  // 是否要用水彩笔刷（true = 声明 p5 + p5.brush）
+  watercolor?: boolean
+}
+export interface ProjectNewCastResult {
+  // 新角色（已加入 project.cast，selected = true）
+  member: ProjectCastMember
+  cast: ProjectCastMember[]
+}
+export interface ProjectSaveCastPayload {
+  name?: string
+  cast?: ProjectCastMember[]
+}
+
 // ===== 项目素材（图片 / 视频素材库）=====
 // project:pick-media 载荷：kind 决定文件框的扩展名过滤（白名单见 shared/constants.ts）；
 // 图片允许一次多选（一屏素材），视频单选（单个文件常很大）。
@@ -740,6 +791,62 @@ export interface ProjectHtmlResult {
   compatible: boolean
   // 成功分支也可能带提示：合规校验未过 / 修改后旧视频已置空等
   message?: string
+}
+
+// ===== 章节化长片（W3）=====
+// 一个章节 = 影片里一段连续时间 + 一个 JS 文件（pages/cNN.js）。
+// **章节的时间一律从 0 开始**：文件里不写绝对起止，绝对偏移由应用装配骨架 index.html 时累加
+// （见 main/chapters.ts）。这样某一章时长变了，后面所有章的偏移自动跟着挪，模型不必回头改前面几个文件。
+export interface ProjectChapter {
+  // 章节 id，同时是文件名词干：c01 → pages/c01.js。**只接受纯序号**（c01 / c02…）：
+  // 模型自己起的语义名每次生成都会漂移，回改旧章节时就对不上文件名了。
+  id: string
+  // 章节标题（界面上显示，也给后续逐章生成当上下文）
+  title: string
+  // 本章时长（秒，可小数）。这是**本章自己的长度**，不是起止时间。
+  duration: number
+  // 本章覆盖的「内容脚本场景」序号（1 起、闭区间，序号口径与项目内容脚本块一致）。
+  // 它撑起那条硬规则「章边界必须落在场景切点上」：章节范围是连续场景，就不可能在场景中间切开。
+  // 没有内容脚本时两值都是 0。
+  sceneFrom: number
+  sceneTo: number
+  // 一句话概要（逐章生成时给模型当上下文，避免各章画重复的东西）
+  summary?: string
+  // 本章要用到哪些随包库（骨架据此在 index.html 里按需引入）：目前只认 'p5' 与 'p5.brush'。
+  // 为什么必须显式声明：章节脚本不允许写 <script> 标签（页面结构归骨架），所以「本章要用 p5」
+  // 这件事只能由规划/修改时声明、由骨架去引；没声明就没有 p5 可用。
+  // three.js 暂不支持（它要 importmap + module，加载是异步的，章节脚本可能先跑）。
+  uses?: string[]
+  // 本章用到哪些**项目内角色**（ProjectCastMember.id）：骨架按它把 cast/<id>.js 按需引入，
+  // 章节里直接 window.__cast["hero"](x, y, u, {…}) 调用。空 = 本章不出现角色。
+  cast?: string[]
+}
+
+// ===== 角色库（PDoom 式的参数化角色绘制代码）=====
+// 一个角色 = 一份**共享的绘制函数**，不是图片：`cast/<id>.js` 里登记
+//   window.__cast["hero"] = function (x, y, u, o) { … }
+// 约定（写死在提示词里，否则多角色比例与站位一定乱）：
+//   · (x, y) = 脚底中点；u = 1 个"单位"的像素高度（调用方给）；
+//   · units 声明这个角色"高几 u"（主角 8u、配角 6u），谁高谁矮是数据不是运气；
+//   · o 里可放表情 / 手势 / 翻转 / 颜色等参数（具体由角色自己定义）。
+// 为什么必须有这一层：章节是互相隔离的 IIFE，作用域不共享；没有共享角色层，同一角色在
+// 各章会被各画一遍，长相就散了（参考项目 PDoomVideo 也是把 clawd.js / cast.js 放在章节之前引入）。
+export interface ProjectCastMember {
+  // 角色 id（同时是文件名词干）：小写 slug，如 hero / researcher / cat → cast/hero.js
+  id: string
+  // 中文显示名（界面上给用户看的）
+  name: string
+  // 一句话描述：外形 / 配色 / 特征（逐章生成时给模型看，保证它画的时候认得这个角色）
+  desc: string
+  // 角色高度 = 多少个单位 u（如 8 表示 8u 高）
+  units: number
+  // 这个角色自己要用哪些随包库（同 ProjectChapter.uses，只认 'p5' / 'p5.brush'）。
+  // 骨架取「各章 uses ∪ 各角色 uses」，否则"只有角色用水彩、没有任何章声明 p5"时 p5 不会被引入。
+  uses?: string[]
+  // 是否参与本次生成（与 ProjectMaterial.selected 同一语义）：
+  // **只有勾选的角色才会被注入页面**（单文件模式注入 index.html、章节模式写进骨架），没勾的就只是躺在项目里。
+  // 不填按"参与"处理（老数据/新建时默认 true）。
+  selected?: boolean
 }
 
 // ===== 内容脚本 Agent（script:generate）=====
@@ -819,6 +926,13 @@ export interface AgentProgressPayload {
   thinkChars: number
   contentChars: number
   thinkText: string
+  // 章节模式逐章生成时的进度（单文件模式下两个字段都不出现）：
+  // 第 chapterIndex 章 / 共 chapterTotal 章。1 起，只用于拼「第 3/7 章」这类文案。
+  chapterIndex?: number
+  chapterTotal?: number
+  // 角色生成时的进度（章节模式且本片有角色库时才有）：第 castIndex 个角色 / 共 castTotal 个。
+  castIndex?: number
+  castTotal?: number
 }
 export type HtmlAgentStage = AgentStage
 export type HtmlAgentProgress = AgentProgressPayload
@@ -1003,6 +1117,16 @@ export interface PreloadApi {
     setRender(name: string, render: RenderOverride | null): Promise<IpcResult<ProjectSaveResult>>
     // 成片画布方向（项目属性，不是渲染档位）：非法值由主进程忽略
     setCanvas(name: string, canvas: RenderCanvas): Promise<IpcResult<ProjectSaveResult>>
+    // 全局角色库（<userData>/cast-library/）：跨项目复用同一份角色绘制代码。
+    // 与项目内的 cast/<id>.js 是两层——导入 = 把库里那份**复制**进项目（预览与渲染都只认项目目录内的文件）。
+    listCastLibrary(): Promise<IpcResult<CastLibraryResult>>
+    promoteCast(name: string, id: string): Promise<IpcResult>
+    importCast(name: string, ids: string[]): Promise<IpcResult<ProjectCastResult>>
+    removeCastFromLibrary(id: string): Promise<IpcResult>
+    // 项目角色（角色是项目资产，与单文件 / 章节化无关）：
+    // newCast 调一次模型画 cast/<id>.js（结果 selected = true）；saveCast 整份列表回写（勾选 / 删除 / 改名）
+    newCast(name: string, brief?: ProjectNewCastPayload): Promise<IpcResult<ProjectNewCastResult>>
+    saveCast(name: string, cast: ProjectCastMember[]): Promise<IpcResult<ProjectCastResult>>
     onHtmlProgress(callback: (data: HtmlProgressPayload) => void): void
   }
   // 内容脚本 Agent（main/agent/script.ts）：对话式生成/修改场景脚本。

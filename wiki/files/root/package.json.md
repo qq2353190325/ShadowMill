@@ -103,7 +103,7 @@
 | 模式 | 含义 |
 | --- | --- |
 | `out/**/*` | electron-vite 的三端构建产物（main/preload/renderer），应用代码主体 |
-| `vendor/**/*` | 随包携带的第三方运行时；当前只有 `vendor/gsap/gsap.min.js`（GSAP 3.14.2，72,779 字节 ≈ 71.07 KB），供 HTML composition 离线引用 `./gsap.min.js`，由 `src/main/hfEnv.ts` 的 `findLocalGsap()` 定位；导出的单个 HTML 则由 `hfEnv.externalizeGsapHtml()` 换回同版本的 CDN 地址（`GSAP_CDN_PINNED`） |
+| `vendor/**/*` | 随包携带的第三方前端库；当前有 `vendor/gsap/gsap.min.js`（GSAP 3.14.2，72,779 字节 ≈ 71.07 KB）与 `vendor/p5/`（`p5.min.js` 990,372 字节 / p5 2.3.3、`p5.brush.js` 71,792 字节 / p5.brush 2.2.3，各带许可证原文与 README），供 HTML composition 离线引用 `./gsap.min.js` / `./p5.min.js` / `./p5.brush.js`，由 `src/main/hfEnv.ts` 的 `VENDOR_LIBS` 登记、`vendorSource()` 定位；导出的单个 HTML 则由 `hfEnv.externalizeVendorHtml()` 换回各家 `pinned` 的同版本 CDN 地址 |
 | `README.md` | 说明文档，便于用户直接看到 |
 | `CHANGELOG.md` | **更新日志随包进 asar**：应用内「设置 → 应用更新 → 查看更新日志」要读它。主进程 `src/main/updater/base.ts` 的 `changelogPath()` 取 `path.join(app.getAppPath(), 'CHANGELOG.md')`——dev = 项目根、打包后 = `app.asar` 根，两种形态同一份路径逻辑（与 `hfEnv` 读 `vendor/gsap` 同口径）；`update:changelog` 只把原文交给渲染层，解析与排版在 `src/renderer/src/utils/changelog.ts`。**没有这一条，安装版就找不到文件**（dev 下无论如何都能读到，属「dev 正常、安装版失效」类问题） |
 | `!node_modules/@vue/**/*`、`!node_modules/@babel/**/*`、`!node_modules/vue/**/*` | 排除**构建期**工具链（约 12.6 MB）。这三个包只被 Vite/SFC 编译器用，运行时不需要：`vue` 已打进 `out/renderer/assets/index-*.js`，`@vue/*`、`@babel/*` 只在编译 SFC 时参与 |
@@ -133,7 +133,7 @@
 | `tsconfig.json` | 只是 solution 根，不被任何脚本直接使用（`tsc -b` 未被调用） |
 | `.gitignore` | 忽略 `node_modules/`、`dist/`、`out/`、`resources/`，与本文件的依赖目录、打包输出、extraResources 源一一对应 |
 | `resources/` | `extraResources` 的**局部**源目录（现在只取 `resources/whisper`）；`.gitignore` 排除它是因为里面是 ffmpeg / hyperframes / whisper 等大体积运行时。`ffmpeg` / `hyperframes` 由 `scripts/pack-runtime.mjs` 打成 7z 上传更新源，`resources/node` 已整体删除 |
-| `vendor/gsap/` | `files` 白名单中 `vendor/**/*` 的源目录；`vendor/gsap/README.md` 记录版本、来源、sha512/SHA256 与更新步骤。该目录**未被 `.gitignore` 忽略**（受版本控制），与 `resources/` 的处理方式正好相反 |
+| `vendor/gsap/`、`vendor/p5/` | `files` 白名单中 `vendor/**/*` 的源目录；两份 `README.md` 分别记录 GSAP 与 p5 / p5.brush 的版本、来源、校验值与更新步骤（p5 的许可证原文同目录）。这些目录**未被 `.gitignore` 忽略**（受版本控制），与 `resources/` 的处理方式正好相反 |
 | `src/preload/index.d.ts` | 渲染层类型契约，与 `dependencies.vue` 一起支撑 renderer 的类型检查 |
 
 ## 5. 注意事项与实现要点
@@ -182,5 +182,5 @@ findstr /C:"node_modules\debug\" list.txt    # 每个运行时依赖都要 >0
 - `pack` 与 `dist` 都带 `npm run build` 前置，但**不**包含 `typecheck`——类型检查需要单独执行。
 - **改品牌名要动本文件三处**：`build.productName`（安装包与 exe 名）、`description`、`build.appId`；`build.productName` 与 `src/shared/constants.ts` 的 `APP_NAME_EN` 必须一致（构建期由 `checkBrandConsistency()` 告警），而显示用的中文名 / 口号只改 `src/shared/constants.ts` 即可（`index.html` 走占位符注入、渲染层直接 import）。注意 `name`（`shadowmill`）**不在**品牌清单里，但**它决定 userData 目录名**（`%APPDATA%\<name>`，主进程不做 `setPath`）：改它必须把旧名字加进 `src/main/index.ts` 的 `LEGACY_DIR_NAMES`，否则启动时不会扫描到老目录、用户看到的就是「项目全没了」（扫描后还会先做归属证明，见 [main/index.ts.md](../main/index.ts.md) §3.1）。`build.appId` 则必须与 `index.ts` 的 `APP_ID` 保持一致——它是归属证明里比对的那个 `appId`。
 - `build.files` 只收应用代码与随包资源（`out/**/*`、`vendor/**/*`、`README.md`、`CHANGELOG.md` + 排除项）；用户项目数据一律在 `userData/projects/` 下，不随包分发。
-- **`vendor/**/*` 进 asar，而不是走 `extraResources`**：`vendor/gsap/gsap.min.js` 只被主进程**按字节读取与复制**（`fs.readFileSync` / `fs.copyFileSync`），不需要 `spawn` 执行，因此放进 asar 即可；`hfEnv.findLocalGsap()` 用 `app.getAppPath()` 定位它（dev = 项目根，打包后 = `app.asar` 根），两种形态都能命中。配套的一对改写：项目内 `index.html` 用 `./gsap.min.js` 本地引用（`localizeGsapHtml`），**导出/下载单个 HTML 时**用 `externalizeGsapHtml` 换回固定版本 CDN——因此随包文件只服务打包后的离线预览/渲染，导出物本身不携带它。
-- **`vendor/` 未被 `.gitignore` 忽略且不应忽略**：它是分发给最终用户的运行资源，必须随源码入库（否则新环境克隆后 GSAP 本地化会静默退化为 CDN 加载）。更新步骤见 `vendor/gsap/README.md`；升级时 `hfEnv.ts` 的 `GSAP_CDN_PINNED` 必须同步改版本号。
+- **`vendor/**/*` 进 asar，而不是走 `extraResources`**：这些库文件只被主进程**按字节读取与复制**（`fs.readFileSync` / `fs.copyFileSync`），不需要 `spawn` 执行，因此放进 asar 即可；`hfEnv` 的 `vendorSource()` 用 `app.getAppPath()` 定位它们（dev = 项目根，打包后 = `app.asar` 根），两种形态都能命中。配套的一对改写：项目内 `index.html` 用 `./gsap.min.js` / `./p5.min.js` / `./p5.brush.js` 本地引用（`localizeVendorHtml`），**导出/下载单个 HTML 时**用 `externalizeVendorHtml` 换回各家固定版本 CDN——因此随包文件只服务打包后的离线预览/渲染，导出物本身不携带它们。
+- **`vendor/` 未被 `.gitignore` 忽略且不应忽略**：它是分发给最终用户的运行资源，必须随源码入库（否则新环境克隆后随包库本地化会静默退化为 CDN 加载）。更新步骤见 `vendor/gsap/README.md` 与 `vendor/p5/README.md`；升级时 `hfEnv.ts` 的 `VENDOR_LIBS.pinned`（每库一条）必须同步改版本号。

@@ -59,6 +59,10 @@
       </div>
       <!-- 项目素材库（图片 / 视频）：增删与勾选都在子组件里完成，落盘后刷新全局项目状态 -->
       <MaterialsSection />
+      <!-- 角色也是素材（与图片/视频并列）：项目资产、勾选参与本次生成，与「单文件 / 章节化」无关 -->
+      <CastSection v-model:prompt="prompt" />
+      <!-- 章节列表（仅章节化产物才有）：只读列表，点「改这一章」把范围写回下面的需求描述 -->
+      <ChapterSection v-model:prompt="prompt" />
       <div class="hgen-block">
         <div class="panel-title-sm">需求描述（提示词）</div>
         <textarea v-model="prompt" class="hgen-subtitle" spellcheck="false" :placeholder="promptPlaceholder"></textarea>
@@ -154,6 +158,8 @@ import { effectiveRenderOptions, renderDefaults, saveProjectRenderOverride } fro
 import StepBar from '@renderer/components/StepBar.vue'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import MaterialsSection from './MaterialsSection.vue'
+import ChapterSection from './ChapterSection.vue'
+import CastSection from './CastSection.vue'
 import PreviewSection from './PreviewSection.vue'
 
 // ===== 生成/修改 =====

@@ -11,5 +11,6 @@
 export { chatWithModel, MAX_TOKEN_TRIES } from './chat'
 export type { ChatMessage, AgentChatOptions } from './chat'
 export { HTML_AGENT_SYSTEM, extractHtmlFromReply, chatWithCustomModel } from './html'
+export { HTML_PLAN_SYSTEM, HTML_CHAPTER_SYSTEM, HTML_CHAPTER_EDIT_SYSTEM, HTML_CAST_SYSTEM, HTML_ROUTE_SYSTEM, chatWithChapterPlan, chatWithChapter, chatWithChapterEdit, chatWithCast, chatWithRoute } from './html'
 export type { AgentOpts, AgentProgress } from './html'
 export { SCRIPT_AGENT_SYSTEM, buildScriptPrompt, parseScriptReply, registerScript } from './script'

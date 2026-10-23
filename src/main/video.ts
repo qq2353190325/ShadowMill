@@ -8,6 +8,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import * as hfEnv from './hfEnv'
+import * as coreLib from './coreLib'
 import * as runtime from './runtime'
 import { pickRenderOverride } from './settings'
 import { CANVAS_SIZES, DEFAULT_CANVAS, RENDER_CANVASES } from '../shared/constants'
@@ -133,22 +134,25 @@ function stripAttrs(attrs: string, names: string[]): string {
   return left ? ' ' + left : ''
 }
 
-// 现场量时间轴：用无头 Chromium 加载「页面副本 + 量测脚本」，把 GSAP 时间轴长度读回来
+// 现场量时间轴：用无头 Chromium 加载「页面 + 量测脚本」，把 GSAP 时间轴长度读回来
 // 口径与预览控制脚本的 clock() 一致（多个时间轴取最大；没有时间轴返回 0 ⇒ 调用方退回媒体时长）。
-// 为什么不用 iframe 套一层：套了就取不到内层 GSAP；所以直接把 HTML 复制出来追加一段量测脚本，
+// 为什么不用 iframe 套一层：套了就取不到内层 GSAP；所以直接把 HTML 追加一段量测脚本，
 // 用 --dump-dom 把写进 DOM 的结果读回（本机已实测可用：量出 45 秒，与预览显示完全一致）。
-async function measureTimelineDuration(entryHtml: string, tmpDir: string, chrome: string, cwd: string, env: Record<string, string | undefined>): Promise<number> {
-  const probePath = path.join(tmpDir, 'duration-probe.html')
+// ⚠ 副本落在**项目根**（probeDir），不是 .render-tmp/：章节化长片的 ./pages/cNN.js、素材的 audio/…
+// 全是按项目根写的相对引用，放在 .render-tmp/ 里会 404 ⇒ 章节脚本不执行 ⇒ 时间轴量回 0，
+// 然后静默退回「按最长媒体裁片长」（成片被截短，且没有任何报错）。这也是为什么传进来的是
+// **未抬级原文**（不带 ../）：抬级是给 .render-tmp/ 里的渲染入口用的。
+async function measureTimelineDuration(html: string, probeDir: string, chrome: string, cwd: string, env: Record<string, string | undefined>): Promise<number> {
+  const probePath = path.join(probeDir, '.duration-probe.html')
   const marker = 'HF_DUR_MARKER_'
   try {
-    const raw = fs.readFileSync(entryHtml, 'utf8')
     const probeScript = '<script>(function(){try{setTimeout(function(){' +
       'var list=[];try{var r=window.__timelines;if(r){for(var k in r){list.push(r[k])}}}catch(e){}' +
       'if(!list.length&&window.gsap){for(var k2 in window.gsap){try{var v=window.gsap[k2];if(v&&typeof v.duration==="function")list.push(v)}catch(e){}}}' +
       'var d=0;for(var i=0;i<list.length;i++){try{var x=list[i].duration();if(typeof x==="number"&&isFinite(x)&&x>d)d=x}catch(e){}}' +
       'var el=document.createElement("pre");el.id="hf-dur-out";el.textContent="' + marker + '"+d+"_END";document.body.appendChild(el);' +
       '},1500)}catch(e){}})();</scr' + 'ipt>'
-    fs.writeFileSync(probePath, raw + probeScript, 'utf8')
+    fs.writeFileSync(probePath, String(html || '') + probeScript, 'utf8')
     const url = 'file:///' + probePath.replace(/\\/g, '/').replace(/ /g, '%20')
     const dom = await runCapture(chrome, ['--headless', '--disable-gpu', '--no-sandbox', '--autoplay-policy=no-user-gesture-required',
       '--virtual-time-budget=5000', '--dump-dom', url], cwd, env, 30000)
@@ -181,15 +185,14 @@ function writeTrimLog(projDir: string, line: string): void {
 // 抽成独立 async 函数的原因：调用点在一个 `new Promise(...)` 的同步执行器里，那里不能出现 await。
 async function prepareEntry(opts: {
   localized: string
-  entryHtml: string
   tmpDir: string
   projDir: string
   env: Record<string, string | undefined>
   chrome: string
   canvas: RenderCanvas
 }): Promise<string> {
-  const { localized, entryHtml, tmpDir, projDir, env, chrome, canvas } = opts
-  let entry = localized.replace(/\.\/gsap\.min\.js/gi, '../gsap.min.js')
+  const { localized, tmpDir, projDir, env, chrome, canvas } = opts
+  let entry = hfEnv.hoistVendorRefs(localized, '../')
   // 画布写两处，放在最前：后面量时间轴时写盘的副本、最终留给 CLI 的入口都带上它们。
   // ① 舞台 data-width/data-height（成片宽高的真正来源）；② <html data-resolution>（页面自描述）。
   entry = applyCanvasDeclaration(entry, canvas)
@@ -205,11 +208,15 @@ async function prepareEntry(opts: {
   // ① 模型声明（零成本）
   let target = declaredDuration(localized)
   let source = '声明'
-  // ② 没声明就现场量一次 GSAP 时间轴（量测脚本要读页面文件，所以先把入口落盘）
+  // ② 没声明就现场量一次 GSAP 时间轴
   if (target <= 0) {
     if (chrome) {
-      try { fs.writeFileSync(entryHtml, entry, 'utf8') } catch (e) { /* 量测会失败，走兜底 */ }
-      target = await measureTimelineDuration(entryHtml, tmpDir, chrome, projDir, env)
+      // 量测副本从「未抬级」的原文重新拼：它要落在项目根，才能让 ./pages/cNN.js、audio/… 这些
+      // 按项目根写的相对引用解析成功（见 measureTimelineDuration 的注释）
+      let probeHtml = applyCanvasDeclaration(localized, canvas)
+      const probeSized = applyCanvasSize(probeHtml, canvas)
+      if (probeSized) probeHtml = probeSized
+      target = await measureTimelineDuration(probeHtml, projDir, chrome, projDir, env)
       source = '实测时间轴'
     } else {
       source = ''
@@ -332,7 +339,19 @@ function register(ctx?: RegisterCtx): void {
     // 166666668:12，即 1e10+92 秒）。与其让它排几个小时的队，不如在门口说清楚。
     // 静态判据足够：GSAP 的无限循环只有 repeat: -1 / repeat: Infinity 两种写法；
     // CSS 的 animation-iteration-count: infinite 不算——HF 的 CSS 适配器对 endTime 非有限的动画直接跳过。
-    if (/repeat\s*:\s*(?:-1|Infinity)\b/i.test(raw)) {
+    // 章节化长片：动画代码在 pages/cNN.js 里，入口 index.html 只是应用生成的骨架。
+    // 只扫入口会漏掉章节脚本里的无限循环（#61 那个「317 年」故障的复发路径），所以一起扫。
+    let guardText = raw
+    try {
+      const pagesDir = path.join(path.dirname(htmlPath), 'pages')
+      if (fs.existsSync(pagesDir)) {
+        for (const f of fs.readdirSync(pagesDir)) {
+          if (!/^c\d{2,3}\.js$/i.test(f)) continue
+          guardText += '\n' + fs.readFileSync(path.join(pagesDir, f), 'utf8')
+        }
+      }
+    } catch (e) { /* 章节目录读不到就只扫入口，不影响单文件模式 */ }
+    if (/repeat\s*:\s*(?:-1|Infinity)\b/i.test(guardText)) {
       return {
         ok: false,
         message: '页面里有无限循环动画（GSAP 的 repeat: -1），成片时长没法确定，转视频会永远渲不完。' +
@@ -355,12 +374,22 @@ function register(ctx?: RegisterCtx): void {
     // 为什么以前要复制：CLI 的素材解析一律按「项目根（cwd）+ HTML 里的相对路径」（见 cli.js 的
     // rewriteAssetPath / join(projectDir, src)），而渲染前要改写 GSAP 引用、注入 BGM，不能动用户原件。
     // 现在两者都不需要复制：
-    //   · GSAP 本地化幂等（本文件下面那步），产物就是项目目录里的 gsap.min.js；
+    //   · 随包前端库本地化幂等（本文件下面那步），产物就是项目目录里的 gsap.min.js / p5.min.js 等；
     //   · BGM 注入本来只写 index.html（projects.ts 的 applyBgmToHtml），渲染时不需要再动；
     //   · 渲染入口写在项目内一个临时子目录里（CLI 要求入口必须在项目根之内），媒体用 ../ 回退引用，
     //     实测 CLI 能正常解析（2026-10 验证：4 秒合成就地渲染成功、素材与 gsap 均从项目内读到）。
     // 好处：不再复制 200MB+ 素材、不再留几百 MB 的 hf-projects 工作目录、成品直接生成在项目里。
     const projDir = path.dirname(htmlPath);
+    // 章节模式的页面引了 ./core.js（共享绘制助手）：渲染前按版本同步一次。
+    // 与 projects.ts 的 syncCoreLib 同一份逻辑（这里只同步、不写日志），保证「应用升级后第二次渲染就吃到新版」。
+    try {
+      const coreSrc = hfEnv.coreSource();
+      if (coreSrc && /src=["'](?:\.\/)?core\.js["']/i.test(raw)) {
+        const r = coreLib.syncCoreTo(projDir, coreSrc);
+        if (r.copied) writeTrimLog(projDir, 'core.js 版本 ' + (r.from || '无') + ' → ' + r.to + '（渲染前按版本同步）');
+        else if (r.error) writeTrimLog(projDir, 'core.js 同步失败：' + r.error);
+      }
+    } catch (e) { /* 同步失败不拦渲染：项目里那份旧版仍能用 */ }
     const tmpDir = path.join(projDir, '.render-tmp');
     const entryHtml = path.join(tmpDir, 'entry.html');
     const outMp4 = path.join(projDir, 'video', 'output.mp4');
@@ -372,9 +401,9 @@ function register(ctx?: RegisterCtx): void {
       return { ok: false, message: '准备渲染目录失败：' + ((e as Error).message || String(e)) } as VideoRenderResult;
     }
 
-    // GSAP 本地化（幂等；仅当原件仍引 CDN 时才真正改写）：入口在子目录里，引用写成 ../gsap.min.js
-    const localized = hfEnv.localizeGsapHtml(raw)
-    if (hfEnv.referencesLocalGsap(localized)) hfEnv.copyGsapIntoProject(projDir)
+    // 随包库本地化（幂等；仅当原件仍引 CDN 时才真正改写）：入口在子目录里，引用写成 ../<库文件>
+    const localized = hfEnv.localizeVendorHtml(raw)
+    hfEnv.ensureVendorFiles(projDir, localized)
 
     const env: Record<string, string | undefined> = { ...process.env, ...nodeRt.env };
     const ffBin = hfEnv.findFfmpegBin();
@@ -396,7 +425,6 @@ function register(ctx?: RegisterCtx): void {
     try {
       entry = await prepareEntry({
         localized,
-        entryHtml,
         tmpDir,
         projDir,
         env,

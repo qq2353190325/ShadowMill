@@ -1,7 +1,7 @@
 // src/main/hfEnv.ts
-// 环境探测 + HyperFrames 资源定位 + GSAP 本地化（无 IPC 注册，无业务状态）
+// 环境探测 + HyperFrames 资源定位 + 随包前端库本地化（无 IPC 注册，无业务状态）
 // 依赖：electron(app) / path / fs / child_process
-// 注：本模块不再是「纯函数」—— GSAP 本地化那组会读写文件（只复制随包的 gsap.min.js，不碰业务数据）。
+// 注：本模块不再是「纯函数」—— 本地化那组会读写文件（只复制随包的前端库文件，不碰业务数据）。
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -257,71 +257,126 @@ function isHyperframesComposition(raw: string): boolean {
   return /data-composition-id/i.test(raw) && /__timelines/i.test(raw) && /\bgsap\b/i.test(raw);
 }
 
-// ===== GSAP 本地化（离线可用） =====
-// 背景：生成的 HTML 原先按提示词从 CDN 引 GSAP，离线或 CDN 抖动时 gsap 未定义、时间轴不存在，
-//       预览静止、转视频可能失败。故随包携带一份 vendor/gsap/gsap.min.js（版本与来源见 vendor/gsap/README.md），
-//       在生成 / 保存 / 预览 / 渲染四个环节把 CDN 引用改写为项目内相对引用 ./gsap.min.js，并把文件复制到位。
+// ===== 随包前端库（vendor/）本地化（离线可用） =====
+// 背景：生成的 HTML 原先从 CDN 引 GSAP（现在还要引 p5 + p5.brush），离线或 CDN 抖动时脚本未定义、时间轴不存在，
+//       预览静止、转视频可能失败。故随包携带 vendor/{gsap,p5}/，在生成 / 保存 / 预览 / 渲染四个环节把
+//       CDN 与 node_modules 引用改写为项目内相对引用（./gsap.min.js、./p5.min.js、./p5.brush.js），并把文件复制到位。
 // 路径基准：app.getAppPath() 在 dev = 项目根、打包后 = app.asar 根，两种形态都能命中（只读字节，无需 extraResources）。
-const GSAP_LOCAL_CANDIDATES: (() => string)[] = [
-  () => path.join(app.getAppPath(), 'vendor', 'gsap', 'gsap.min.js'),
-  () => path.join(process.resourcesPath || '', 'vendor', 'gsap', 'gsap.min.js')
+// 各库的版本、来源与许可证见 vendor/gsap/README.md 与 vendor/p5/README.md。
+interface VendorLib {
+  dir: string;        // vendor/ 下的子目录
+  file: string;       // 复制进项目后的文件名，同时也是页面里的相对引用名
+  patterns: RegExp[]; // 命中即改写为 ./<file>（只匹配「路径本身」，不含两侧引号）
+  pinned: string;     // 导出单文件时换回的固定版本地址 —— 必须与随包文件版本一致
+}
+
+const VENDOR_LIBS: VendorLib[] = [
+  {
+    dir: 'p5', file: 'p5.brush.js',
+    patterns: [
+      /(?:https?:)?\/\/(?:cdn\.jsdelivr\.net\/npm\/p5\.brush|unpkg\.com\/p5\.brush|cdnjs\.cloudflare\.com\/ajax\/libs\/p5\.brush)[^"'<>()\s]*/gi,
+      /(?:\.\/)?node_modules\/p5\.brush\/dist\/[^"'<>()\s]*/gi
+    ],
+    pinned: 'https://cdn.jsdelivr.net/npm/p5.brush@2.2.3/dist/p5.brush.js'
+  },
+  {
+    dir: 'p5', file: 'p5.min.js',
+    patterns: [
+      /(?:https?:)?\/\/(?:cdn\.jsdelivr\.net\/npm\/p5(?:@|\/)|unpkg\.com\/p5(?:@|\/)|cdnjs\.cloudflare\.com\/ajax\/libs\/p5\.js)[^"'<>()\s]*/gi,
+      /(?:\.\/)?node_modules\/p5\/lib\/[^"'<>()\s]*/gi
+    ],
+    pinned: 'https://cdn.jsdelivr.net/npm/p5@2.3.3/lib/p5.min.js'
+  },
+  {
+    dir: 'gsap', file: 'gsap.min.js',
+    patterns: [
+      /(?:https?:)?\/\/(?:cdn\.jsdelivr\.net\/npm\/gsap|unpkg\.com\/gsap|cdnjs\.cloudflare\.com\/ajax\/libs\/gsap)[^"'<>()\s]*/gi
+    ],
+    pinned: 'https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js'
+  }
 ];
 
-// 随包 gsap.min.js 的绝对路径（不存在返回 null）
-function findLocalGsap(): string | null {
-  for (const c of GSAP_LOCAL_CANDIDATES) {
+// 随包文件的绝对路径（不存在返回 null）
+function vendorSource(lib: VendorLib): string | null {
+  for (const base of [path.join(app.getAppPath(), 'vendor'), path.join(process.resourcesPath || '', 'vendor')]) {
     try {
-      const p = c();
-      if (p && fs.existsSync(p)) return p;
+      const p = path.join(base, lib.dir, lib.file);
+      if (fs.existsSync(p)) return p;
     } catch (e) { /* ignore */ }
   }
   return null;
 }
 
-// 常见 CDN 引入地址（jsDelivr / unpkg / cdnjs，任意版本），用于改写为本地相对引用
-const GSAP_CDN_RE = /(?:https?:)?\/\/(?:cdn\.jsdelivr\.net\/npm\/gsap|unpkg\.com\/gsap|cdnjs\.cloudflare\.com\/ajax\/libs\/gsap)[^"'<>()\s]*/gi;
-// 项目内相对引用（生成侧约定的写法）
-const GSAP_LOCAL_REF = './gsap.min.js';
-// 导出用：固定版本的 CDN 地址 —— 与 vendor/gsap/gsap.min.js 的版本必须一致（更新随包文件时这里一起改）
-const GSAP_CDN_PINNED = 'https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js';
-
-function hasGsapCdnRef(html: string): boolean {
-  GSAP_CDN_RE.lastIndex = 0;
-  return GSAP_CDN_RE.test(String(html || ''));
-}
-
-// HTML 是否引用了项目内的 gsap.min.js（用于决定要不要把随包文件复制进项目目录）
-function referencesLocalGsap(html: string): boolean {
-  return /["'(]\.?\/?gsap\.min\.js/i.test(String(html || ''));
-}
-
-// 把 HTML 里的 GSAP CDN 引用改写为 ./gsap.min.js；随包文件缺失时原样返回（退化为在线加载，不破坏现状）
-function localizeGsapHtml(html: string): string {
-  const raw = String(html || '');
-  if (!raw || !hasGsapCdnRef(raw) || !findLocalGsap()) return raw;
-  GSAP_CDN_RE.lastIndex = 0;
-  return raw.replace(GSAP_CDN_RE, GSAP_LOCAL_REF);
-}
-
-// 导出（下载为单个 HTML 文件）用：把 ./gsap.min.js 换回固定版本 CDN 地址。
-// 理由：导出物只有一个文件，随手放到别处会缺同目录的 gsap.min.js，动画会完全不跑；换回 CDN 后联网即可独立打开。
-function externalizeGsapHtml(html: string): string {
-  return String(html || '').replace(/(["'])(?:\.\/|\/)?gsap\.min\.js\1/gi, '$1' + GSAP_CDN_PINNED + '$1');
-}
-
-// 把随包 gsap.min.js 复制进指定目录（幂等：已存在且体积一致即跳过）；返回该目录是否可用于 ./gsap.min.js 引用
-function copyGsapIntoProject(dir: string): boolean {
-  const src = findLocalGsap();
-  if (!src) return false;
-  const dest = path.join(dir, 'gsap.min.js');
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    if (fs.existsSync(dest) && fs.statSync(dest).size === fs.statSync(src).size) return true;
-    fs.copyFileSync(src, dest);
-    return true;
-  } catch (e) {
-    return false;
+// 共享绘制助手 core.js 的真源路径（应用内置、与 vendor 同一套定位规则；不存在返回 null）。
+// 它**不进 VENDOR_LIBS**：那张表里的库在「导出单个 HTML」时会被换回公共 CDN 地址，
+// 而 core.js 是我们自己的文件、没有 CDN 形态，导出时必须**内联**（见 projects.ts 的 DownloadHtml）。
+function coreSource(): string | null {
+  for (const base of [path.join(app.getAppPath(), 'vendor'), path.join(process.resourcesPath || '', 'vendor')]) {
+    try {
+      const p = path.join(base, 'shadowmill', 'core.js');
+      if (fs.existsSync(p)) return p;
+    } catch (e) { /* ignore */ }
   }
+  return null;
+}
+
+const escFile = (f: string) => f.replace(/\./g, '\\.');
+
+// HTML 里是否引用了项目内的某个随包文件（`../x` 不算，避免渲染入口把上一级引用误判成本级）
+function referencesLocalFile(html: string, file: string): boolean {
+  return new RegExp('(?<![.\\w])\\./' + escFile(file), 'i').test(String(html || ''));
+}
+
+// 把 HTML 里的 CDN / node_modules 引用改写为项目内相对引用；随包文件缺失的库跳过（退化为在线加载，不破坏现状）
+function localizeVendorHtml(html: string): string {
+  let out = String(html || '');
+  if (!out) return out;
+  for (const lib of VENDOR_LIBS) {
+    if (!vendorSource(lib)) continue;
+    for (const re of lib.patterns) out = out.replace(re, './' + lib.file);
+  }
+  return out;
+}
+
+// 页面引用了哪些随包文件（按 HTML 里的 ./<file> 判断）
+function referencedVendorFiles(html: string): string[] {
+  return VENDOR_LIBS.filter((lib) => referencesLocalFile(html, lib.file)).map((lib) => lib.file);
+}
+
+// 把页面引用到的随包文件复制进 dir（幂等：已存在且体积一致即跳过）。
+// 返回 true = 引用到的文件都已就位（页面没引用任何随包库时也算 true）；false = 有库缺失或复制失败。
+function ensureVendorFiles(dir: string, html: string): boolean {
+  let ok = true;
+  for (const file of referencedVendorFiles(html)) {
+    const lib = VENDOR_LIBS.find((l) => l.file === file);
+    const src = lib ? vendorSource(lib) : null;
+    if (!src) { ok = false; continue; }
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const dest = path.join(dir, file);
+      if (!(fs.existsSync(dest) && fs.statSync(dest).size === fs.statSync(src).size)) fs.copyFileSync(src, dest);
+    } catch (e) { ok = false; }
+  }
+  return ok;
+}
+
+// 导出（下载为单个 HTML 文件）用：把项目内的 ./<随包库> 相对引用换回固定版本地址。
+// 理由：导出物只有一个文件，随手放到别处会缺同目录的库文件，动画会完全不跑；换回 CDN 后联网即可独立打开。
+function externalizeVendorHtml(html: string): string {
+  let out = String(html || '');
+  for (const lib of VENDOR_LIBS) {
+    out = out.replace(new RegExp('(["\'])(?:\\.\\/|\\/)?' + escFile(lib.file) + '\\1', 'gi'), '$1' + lib.pinned + '$1');
+  }
+  return out;
+}
+
+// 渲染入口写在项目的 .render-tmp/ 子目录里，引用要比项目根多一级：./x → ../x（prefix 传 '../'）
+function hoistVendorRefs(html: string, prefix: string): string {
+  let out = String(html || '');
+  for (const lib of VENDOR_LIBS) {
+    out = out.replace(new RegExp('(?<![.\\w])\\./' + escFile(lib.file), 'gi'), prefix + lib.file);
+  }
+  return out;
 }
 
 export {
@@ -334,10 +389,10 @@ export {
   findNode,
   findFfmpegBin,
   isHyperframesComposition,
-  findLocalGsap,
-  hasGsapCdnRef,
-  referencesLocalGsap,
-  localizeGsapHtml,
-  externalizeGsapHtml,
-  copyGsapIntoProject
+  localizeVendorHtml,
+  externalizeVendorHtml,
+  referencedVendorFiles,
+  ensureVendorFiles,
+  hoistVendorRefs,
+  coreSource
 };

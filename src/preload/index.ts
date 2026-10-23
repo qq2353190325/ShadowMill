@@ -163,6 +163,15 @@ const projectTools: PreloadApi['projectTools'] = {
   setRender: (name: string, render: RenderOverride | null) => ipcRenderer.invoke(IPC.Project.SetRender, { name, render }),
   // 成片画布方向（项目属性）：白名单校验在主进程（RENDER_CANVASES）
   setCanvas: (name: string, canvas: RenderCanvas) => ipcRenderer.invoke(IPC.Project.SetCanvas, { name, canvas }),
+  // 全局角色库（跨项目复用）：列库 / 把项目里的角色存为全局 / 把全局角色导入项目 / 从库删除。
+  // 库是**用户资产**，落在 <userData>/cast-library/，与项目里的 cast/<id>.js 是两层（见 main/castLibrary.ts）。
+  listCastLibrary: () => ipcRenderer.invoke(IPC.Project.CastLibrary),
+  promoteCast: (name: string, id: string) => ipcRenderer.invoke(IPC.Project.PromoteCast, { name, id }),
+  importCast: (name: string, ids: string[]) => ipcRenderer.invoke(IPC.Project.ImportCast, { name, ids }),
+  removeCastFromLibrary: (id: string) => ipcRenderer.invoke(IPC.Project.RemoveCastFromLibrary, { id }),
+  // 项目角色（角色是项目资产，与单文件 / 章节化无关）：新建一个（调一次模型画 cast/<id>.js）、整份列表回写（勾选/删除/改名）
+  newCast: (name: string, brief) => ipcRenderer.invoke(IPC.Project.NewCast, { name, ...(brief || {}) }),
+  saveCast: (name: string, cast) => ipcRenderer.invoke(IPC.Project.SaveCast, { name, cast }),
   // HTML 生成/修改过程进度（单订阅：重复注册仅替换回调，避免页面切换叠加监听）
   onHtmlProgress: (callback) => {
     _htmlProgressCb = callback;

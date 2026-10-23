@@ -11,13 +11,13 @@
 | # | 文档 | 内容 | 适合谁 |
 |---|---|---|---|
 | 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构、`src/` 完整目录树、构建与打包、运行时数据目录、全局约定 | 第一次接触项目的人 |
-| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（94 个频道总表）**、以「项目」为中心的数据流、五条关键业务链路（含内容脚本 Agent 与对话记录）、主进程依赖图、安全边界 | 想理解整体设计的人 |
-| 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程（21 个 `.ts` 源文件 = 12 个顶层文件 + `agent/` 目录 5 个文件 + `updater/` 目录 4 个文件）的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
+| 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（100 个频道总表）**、以「项目」为中心的数据流、五条关键业务链路（含内容脚本 Agent 与对话记录）、主进程依赖图、安全边界 | 想理解整体设计的人 |
+| 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程（27 个 `.ts` 源文件 = 18 个顶层文件 + `agent/` 目录 5 个文件 + `updater/` 目录 4 个文件）的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
 | 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：12 个命名空间、7 路进度通道的「单订阅」语义（其中 6 路有单订阅标志）、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
 | 4 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) | Vue 渲染层：启动链路、无 router 的注册表导航、状态与通信约定、组件分层、页面↔主进程域对照、样式策略 | 改界面 / 加页面 |
-| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（11 组 **94** 个）、跨进程载荷类型、**错误文案映射（`errors.ts`）**、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
+| 5 | [05-目录架构-src-shared](./05-目录架构-src-shared.md) | 频道常量（11 组 **100** 个）、跨进程载荷类型、**错误文案映射（`errors.ts`）**、**应用级常量（品牌文案）**、消费方与编译期归属、维护约定 | 动契约前必读 |
 | 6 | [06-目录架构-src-agent](./06-目录架构-src-agent.md) | 独立实验脚本：为什么不进构建图、5 个工具、工作区防护、运行方式 | 想跑 Agent 样例 |
-| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，`files/` 下共 **44** 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue` 与 `LegacyDataDialog.vue` 四个组件，`main/updater.md` 一篇覆盖 `src/main/updater/` 下的 `index.ts` / `base.ts` / `actions.ts` / `install.ts` 四个文件，`main/agent.md` 一篇覆盖 `src/main/agent/` 下的 `chat.ts` / `chatLog.ts` / `html.ts` / `script.ts` / `index.ts` 五个文件） | 需要具体实现细节时查阅 |
+| 7 | [files/](./files/) | **说明文档**（按下方 3.x 的粒度组织，`files/` 下共 **50** 篇；其中 `renderer/src/components.md` 一篇覆盖 `components/` 下的 `StepBar.vue`、`NewProjectDialog.vue`、`HfSelect.vue` 与 `LegacyDataDialog.vue` 四个组件，`main/updater.md` 一篇覆盖 `src/main/updater/` 下的 `index.ts` / `base.ts` / `actions.ts` / `install.ts` 四个文件，`main/agent.md` 一篇覆盖 `src/main/agent/` 下的 `chat.ts` / `chatLog.ts` / `html.ts` / `script.ts` / `index.ts` 五个文件） | 需要具体实现细节时查阅 |
 
 ---
 
@@ -31,7 +31,7 @@
 
 > **粒度约定**（与根目录 `AGENTS.md` 的规则 6 一致）：渲染层按「**每页一篇**（该页面自己的子组件与助手并入同一篇；代码侧对应 `src/renderer/src/pages/<PageName>/` 一页一目录、入口 `index.vue`）、**`assets.md` / `components.md` 目录级各一篇**、**`common.md` 公共方法与工具一篇**」组织；主进程、preload、shared、agent 与工程根配置按源文件逐篇——**例外**是主进程里两个按「同名目录 + `index.ts` 统一出口」拆成的模块，各按**目录级一篇**说明：`src/main/updater/`（4 个文件：`index.ts` / `base.ts` / `actions.ts` / `install.ts`）→ [main/updater.md](./files/main/updater.md)（旧名 [main/updater.ts.md](./files/main/updater.ts.md) 只留过渡指针）、`src/main/agent/`（5 个文件：`chat.ts` / `chatLog.ts` / `html.ts` / `script.ts` / `index.ts`）→ [main/agent.md](./files/main/agent.md)。
 
-### 3.1 `src/main/`（主进程，15 篇：12 个顶层源文件各一篇 + `agent/` 目录一篇 + `updater/` 目录一篇 + 旧名过渡指针一篇）
+### 3.1 `src/main/`（主进程，21 篇：18 个顶层源文件各一篇 + `agent/` 目录一篇 + `updater/` 目录一篇 + 旧名过渡指针一篇）
 
 | 源文件 | 说明文档 |
 |---|---|
@@ -39,8 +39,14 @@
 | `src/main/hfEnv.ts` | [main/hfEnv.ts.md](./files/main/hfEnv.ts.md) |
 | `src/main/settings.ts` | [main/settings.ts.md](./files/main/settings.ts.md) |
 | `src/main/systemVoices.ts` | [main/systemVoices.ts.md](./files/main/systemVoices.ts.md) |
-| `src/main/agent/`（`index.ts` 15 行 / `chat.ts` 261 行 / `chatLog.ts` 155 行 / `html.ts` 89 行 / `script.ts` 329 行，目录级一篇：chat / chatLog / html / script / index） | [main/agent.md](./files/main/agent.md) |
+| `src/main/agent/`（`index.ts` 16 行 / `chat.ts` 261 行 / `chatLog.ts` 155 行 / `html.ts` 485 行 / `script.ts` 331 行，目录级一篇：chat / chatLog / html / script / index） | [main/agent.md](./files/main/agent.md) |
 | `src/main/projects.ts` | [main/projects.ts.md](./files/main/projects.ts.md) |
+| `src/main/chapters.ts`（章节化长片的纯逻辑：解析 / 校验 / 读写 `pages/cNN.js` / 装配骨架 / 导出内联） | [main/chapters.ts.md](./files/main/chapters.ts.md) |
+| `src/main/cast.ts`（**角色表的纯逻辑：`selectedMembers` 过滤 / 角色文件块解析与校验 / 读写 `cast/<id>.js` / 角色大纲**） | [main/cast.ts.md](./files/main/cast.ts.md) |
+| `src/main/castInject.ts`（**单文件模式的角色注入（本轮新增）：`core.js` + 被勾选角色的脚本整组插在模型第一个 `<script>` 之前，带 `data-myv-*` 标记、幂等；纯字符串变换**） | [main/castInject.ts.md](./files/main/castInject.ts.md) |
+| `src/main/editRoute.ts`（**「按需求修改」第一段的纯逻辑：解析改稿路由回复、白名单过滤、失败回退**） | [main/editRoute.ts.md](./files/main/editRoute.ts.md) |
+| `src/main/castLibrary.ts`（**全局角色库的纯逻辑：读库 / 存为全局 / 导入项目 / 从库删；库在 `<userData>/cast-library/`，是用户资产**） | [main/castLibrary.ts.md](./files/main/castLibrary.ts.md) |
+| `src/main/coreLib.ts`（**共享绘制助手 `core.js` 的版本同步：读 `CORE_VERSION` / 按版本覆盖进项目 / 导出内联**） | [main/coreLib.ts.md](./files/main/coreLib.ts.md) |
 | `src/main/voiceCatalog.ts` | [main/voiceCatalog.ts.md](./files/main/voiceCatalog.ts.md) |
 | `src/main/voice.ts` | [main/voice.ts.md](./files/main/voice.ts.md) |
 | `src/main/ttsAlign.ts` | [main/ttsAlign.ts.md](./files/main/ttsAlign.ts.md) |
@@ -78,7 +84,7 @@
 | `src/pages/ContentPage/`（入口 `index.vue` **+** `SceneEditor.vue` / `AiChatPanel.vue` / `ScriptRoundCard.vue` / `helpers.ts`；两个 Tab：场景编辑（**编辑即自动保存**）/ AI 创作（**对话记录按项目持久化**）） | [renderer/src/pages/ContentPage.md](./files/renderer/src/pages/ContentPage.md) |
 | `src/pages/TextTtsPage/`（入口 `index.vue` **+** `SynthSection.vue` / `AlignSection.vue` / `VoiceSection.vue` / `helpers.ts`） | [renderer/src/pages/TextTtsPage.md](./files/renderer/src/pages/TextTtsPage.md) |
 | `src/pages/SubtitlePage/`（入口 `index.vue` **+** `TranscribeSection.vue` / `helpers.ts`） | [renderer/src/pages/SubtitlePage.md](./files/renderer/src/pages/SubtitlePage.md) |
-| `src/pages/HtmlGenPage/`（入口 `index.vue` **+** `MaterialsSection.vue` / `PreviewSection.vue`） | [renderer/src/pages/HtmlGenPage.md](./files/renderer/src/pages/HtmlGenPage.md) |
+| `src/pages/HtmlGenPage/`（入口 `index.vue` **+** `ChapterSection.vue` / **`CastSection.vue`** / `MaterialsSection.vue` / `PreviewSection.vue`） | [renderer/src/pages/HtmlGenPage.md](./files/renderer/src/pages/HtmlGenPage.md) |
 | `src/pages/VideoPreviewPage/index.vue` | [renderer/src/pages/VideoPreviewPage.md](./files/renderer/src/pages/VideoPreviewPage.md) |
 | `src/pages/SettingsPage/`（入口 `index.vue` **+** `types.ts` / `constants.ts` / `helpers.ts` **+** `components/` 下的 5 个区块组件：`ModelSection.vue` / `VoiceSection.vue` / `RenderSection.vue` / `WhisperSection.vue` / `UpdateSection.vue`） | [renderer/src/pages/SettingsPage.md](./files/renderer/src/pages/SettingsPage.md) |
 
@@ -134,6 +140,8 @@
 | 某个版本改了什么 / 记一次修改 | [root/changelog.md](./files/root/changelog.md) + 根目录 [`../CHANGELOG.md`](../CHANGELOG.md) |
 | 搞清楚「项目」在磁盘上长什么样 | [00-项目结构 §7](./00-项目结构.md) + [main/projects.ts.md](./files/main/projects.ts.md) |
 | 明白 HTML 是怎么被 Agent 生成的 | [01-架构总览 §5.1](./01-架构总览.md) + [main/agent.md](./files/main/agent.md)（`html.ts` 薄封装 + `chat.ts` 传输层） |
+| 明白「章节模式 / 角色库」是怎么落盘的 | [main/chapters.ts.md](./files/main/chapters.ts.md)（章节 + 骨架）+ [main/cast.ts.md](./files/main/cast.ts.md)（角色表与 `cast/<id>.js`）+ [main/agent.md](./files/main/agent.md)（五份提示词） |
+| 明白「按需求修改」为什么先路由再发源码 | [main/editRoute.ts.md](./files/main/editRoute.ts.md) + [main/projects.ts.md](./files/main/projects.ts.md)（`applyChapterEdit`） |
 | 明白「AI 创作」怎么改内容脚本 / 对话记录存在哪 | [01-架构总览 §5.5](./01-架构总览.md) + [main/agent.md](./files/main/agent.md)（`script.ts` + `chatLog.ts`）+ [renderer/src/pages/ContentPage.md](./files/renderer/src/pages/ContentPage.md) |
 | 查 whisper 模型档位与转录流程 | [main/whisper.ts.md](./files/main/whisper.ts.md) |
 | 搞清 ffmpeg / hyperframes 分包怎么按需下载与解包 | [main/runtime.ts.md](./files/main/runtime.ts.md) + [01-架构总览 §3.3](./01-架构总览.md)（`runtime:*`） |

@@ -109,6 +109,6 @@
 - **`out/` 与 `dist/` 职责不同**：`out/` 是 electron-vite 的三端编译产物（应用代码），`dist/` 是 electron-builder 的安装包/解包目录（含 `out/` 与 `resources/` 的最终形态）。
 - **无 `!` 否定规则**：如果将来需要把 `resources/` 里的**小体积必要文件**（如某个配置或脚本）纳入版本库，必须新增 `!resources/xxx` 这样的否定规则，并注意 git 的「已忽略目录内的文件无法用 `!` 重新包含」限制——需要先不忽略该目录本身。
 - **用户项目数据不在仓库内**：项目只落在 `userData/projects/`（Electron 用户数据目录），既不进 git 跟踪，也不涉及 `build.files`，因此本文件无需为项目数据写任何规则。
-- **`vendor/` 未被忽略，且刻意如此**：`vendor/gsap/gsap.min.js` 是随包分发的 GSAP 运行时（不进 asar 之外的 extraResources，而是经 `build.files` 的 `vendor/**/*` 进 asar）。它与 `resources/` 的处理方式相反：`resources/` 是可由命令准备的大体积二进制（忽略 + 部分 `extraResources`），`vendor/` 是体积小、必须随源码入库的分发资源——**不要**给它加忽略规则，否则新环境克隆后 GSAP 本地化会静默退化为 CDN 加载。
+- **`vendor/` 未被忽略，且刻意如此**：`vendor/gsap/gsap.min.js` 与 `vendor/p5/`（p5 / p5.brush）是随包分发的第三方前端库（不进 asar 之外的 extraResources，而是经 `build.files` 的 `vendor/**/*` 进 asar）。它与 `resources/` 的处理方式相反：`resources/` 是可由命令准备的大体积二进制（忽略 + 部分 `extraResources`），`vendor/` 是体积小、必须随源码入库的分发资源——**不要**给它加忽略规则，否则新环境克隆后随包库本地化会静默退化为 CDN 加载。
 - **无锁文件规则**：本文件**没有**忽略 `package-lock.json` 之类的锁文件，即锁文件应当入库以保证依赖可复现。
 - **`.tmp/` 与 `*.tmp` 成对出现**：前者管目录、后者管文件，删掉任一条都会留下漏网之鱼。

@@ -5,7 +5,7 @@
 - **覆盖文件**：`assets/main.css`（本目录唯一文件，全局设计系统样式表）
 - **所在目录**：src/renderer/src/assets/
 - **类型**：全局样式表（设计系统）
-- **规模**：1898 行（单文件设计系统随迭代持续增长；当前体量见 `[IO.File]::ReadAllLines` 实测）
+- **规模**：2012 行（单文件设计系统随迭代持续增长；当前体量见 `[IO.File]::ReadAllLines` 实测；上一版 2010 行，本轮 **+2 行**：`.cast-row` 的网格加了勾选列 `24px` 与状态类 `.cast-row.off`）
 
 ## 1. 作用与职责
 
@@ -27,6 +27,8 @@
 | `pages/HtmlGenPage/index.vue` | `.hgen-*`、`.panel-title` / `.panel-title-sm`、`.proj-*`、`.hg-help*`（行内帮助 `?` 共 4 处：两个动作按钮**内部**各 1 个 + 卡片标题「用法」+ 画布行）、`.hf-*`（动作行按钮、「转视频」弹窗里的档位控件与状态条）；「转视频」弹窗的外壳复用通用弹窗类 `.hf-modal*`；**本页下拉 4 处：字幕（260px）与画布（188px）同一行 + 弹窗里的「质量 / 帧率」2 处**（样式随 `components/HfSelect.vue`） |
 | **`pages/HtmlGenPage/MaterialsSection.vue`（本项目素材库，本轮新增）** | **新增节「HTML生成页：项目素材库（图片 / 视频卡片墙）」**：`.mat-grid` / `.mat-card`(+`.off`) / `.mat-thumb`(+`.mat-play`) / `.mat-meta` / `.mat-name` / `.mat-path` / `.mat-check`(+`.on`) / `.mat-del` / `.mat-add` / `.mat-count` / `.panel-title .dot.dot-img`；另复用 `.hgen-block`、`.panel-head` / `.panel-head-actions`、`.panel-title` / `.panel-title-sm`、`.hgen-tip`、`.hf-btn` / `.hf-btn-danger` |
 | **`pages/HtmlGenPage/PreviewSection.vue`（预览卡片）** | `.card.hgen-panel` 外壳、`.panel-title`、`.hgen-row`、`.sel-label`、`.hgen-input`（语速输入框）、`.hf-status`（+`.hf-ok` / `.hf-error`）、`.hf-btn`（语速 ± 两个小按钮；**「移除」按钮已删除**）、`.hg-help*`（**只剩「视角比例」行一处 `?`**；背景音频行的已删除）、`.hgen-tip`（`v-show="viewHint"`）、`.empty-hint`、`.hgen-frame-wrap` / `.hgen-frame`、`.hg-prev-*`（播放控制条三件套）、`.rate-spinner`（包裹，本文件无对应规则、样式由内联 `style` 提供）；**背景音频的占满整行下拉（`flex:1`）与「视角比例」下拉**都走 `components/HfSelect.vue`（前者触发器占满整行 ⇒ 弹层也随 `max(触发器宽, 220px)` 变宽）；AI 思考过程块用的是**行内 `style`**（无专有类）。**本组件不用 `.hf-file`、也没有值胶囊类**（值由下拉自己承载），也没有独立的「本地文件…」按钮（并入下拉分组） |
+| **`pages/HtmlGenPage/ChapterSection.vue`（章节列表，只读）** | 「HTML生成」页的章节行样式（`.ch-*` 一节）：一行 = 序号 / 标题 / 起止 / 时长 / `pages/cNN.js` / 「改这一章」；列宽 `minmax(0, Nfr)`；另复用 `.hgen-block`、`.panel-head*`、`.panel-title-sm`、`.hgen-tip`、`.ch-sub`、`.hf-btn.ch-pick` |
+| **`pages/HtmlGenPage/CastSection.vue`（「项目素材 · 角色」区 + 两个弹窗）** | **节「HTML生成页：角色列表（章节模式的角色库）」**：`.cast-list` / `.cast-row`（**本轮加勾选列 `24px` 与状态类 `.off`**） / `.cast-name` / `.cast-desc` / `.cast-units` / `.cast-file` / `.cast-actions`（行尾三个按钮的容器）+ `.lib-row` / `.lib-row.off` / `.lib-row input[type=checkbox]` / `.lib-missing`（「从全局库添加」弹窗的行）；**复用素材卡片那一组 `.mat-check`（勾选框）+ `.ch-sub` / `.hf-btn.ch-pick`（行内动作按钮）**，另复用 `.hgen-block`、`.panel-head` / `.panel-head-actions`、`.panel-title-sm`、`.hgen-tip` 与 `.hf-modal*`（两个弹窗的外壳） |
 | `pages/VideoPreviewPage/index.vue`（视频预览） | `.hf-toolbar`、`.hf-btn*`、`.hf-file`、`.hf-status`、`.hf-video*`、`.hf-tip`、`.card.hgen-panel` 外壳与 `.panel-title`；「预览项目」下拉走 `components/HfSelect.vue` |
 | `pages/SubtitlePage/index.vue` / `TranscribeSection.vue` | `.model-*`、`.whisper-*`、`.sub-list` / `.sub-row` 等字幕编辑器类、`.hf-modal-*` |
 | `pages/TextTtsPage/index.vue` / `{SynthSection,AlignSection,VoiceSection}.vue` | `.hf-tabs` / `.hf-tab`、`.align-*`、`.sub-textarea`、`.hgen-tip`、`.panel-head*` / `.voice-list*`（音色列表）；各处下拉走 `components/HfSelect.vue` |
@@ -108,6 +110,8 @@
 | （注释）转录无百分比进度：不确定态条纹滑动 | `.whisper-bar.indeterminate .whisper-bar-fill` | 宽度锁定 38%（`!important`）+ 1.1s 往返平移 |
 | 字幕配音（逐句对齐）：结果明细 | `.align-row*`、`.align-*`、`@keyframes whisper-slide` | 单行结果行 + 正常/告警徽标 |
 | **HTML生成页：项目素材库（图片 / 视频卡片墙）（本轮新增，排在文件末尾）** | **`.mat-grid`、`.mat-card`(+`.off`)、`.mat-thumb`(+`.mat-play`)、`.mat-meta`、`.mat-name`、`.mat-path`、`.mat-check`(+`.on`)、`.mat-del`、`.mat-add`、`.mat-count`、`.panel-title .dot.dot-img`** | 缩略图卡片墙：勾选框与「移除」叠在卡片两角；未勾选整卡压暗（`.off`）但仍可操作；列宽 `auto-fill + minmax(158px, 1fr)`，窄窗自动减列。**使用方只有 `pages/HtmlGenPage/MaterialsSection.vue`**（详见 3.2） |
+| **HTML生成页：章节列表行（`.ch-*`，本轮新增，排在文件末尾）** | **`.ch-*`（章节列表行样式）** | 「HTML生成」页的只读章节列表：一行 = 一章（序号 / 标题 / 起止 / 时长 / `pages/cNN.js` / 「改这一章」）；**列宽用 `minmax(0, Nfr)`**。使用方只有 `pages/HtmlGenPage/ChapterSection.vue`（详见 3.4） |
+| **HTML生成页：角色区 + 全局角色库弹窗（`.cast-*` / `.lib-*`，排在文件末尾）** | **`.cast-list`、`.cast-row`（+ 状态类 `.off`）、`.cast-name`、`.cast-desc`、`.cast-units`、`.cast-file`、`.cast-actions`；`.lib-row`、`.lib-row.off`、`.lib-missing`** | 「HTML生成」页的「项目素材 · 角色」块与它的两个弹窗（从全局库添加 / 新建角色）：一行 = 一个角色（**勾选框** / 名字 / 描述 / 高几 u / `cast/<id>.js` / **三个动作**）；**列宽 `24px minmax(0, 1.2fr) minmax(0, 2.6fr) 48px minmax(0, 1.3fr) auto`**（第一列是勾选框、定宽 24px；「高几 u」定宽 48px 右对齐）。**未勾选整行加 `.off`（`opacity: .55`）**，与素材卡片的 `.off` 同一语言。**与章节列表同一套语言**：复用 `.ch-sub` / `.hf-btn.ch-pick`；勾选框直接复用素材卡的 `.mat-check`（`.mat-check.on`）。使用方只有 `pages/HtmlGenPage/CastSection.vue`（详见 3.5） |
 
 > **toast**（`.toast-host` / `.toast-item`）定义在 `App.vue` 的 `<style scoped>` 中，不在本文件。下拉控件 `.hf-sel*` 在 `components/HfSelect.vue` 内（含一个**非 scoped** 的 `<style>` 块，因为弹层经 Teleport 挂到 `body`），本文件无下拉选择器。
 
@@ -302,6 +306,108 @@
 
 > `.cl-*` 与 `Clang` 之类无关，是「changelog」的缩写；它只服务设置页的更新日志弹窗，**一行几条、折叠与否、箭头字符全部由 `ChangelogDialog.vue` 的模板与 `utils/changelog.ts` 的解析结果驱动**（`v-show` + `historyOpen` / `histOpen` 控制展开，实例见 [SettingsPage.md](./pages/SettingsPage.md) §4.6）。本组样式**不含 `code` / 链接 / 富文本相关规则**——条目是纯文本渲染，没有 `v-html`。
 
+### 3.4 章节列表行（`.ch-*`）
+
+「HTML生成」页的只读章节列表（`pages/HtmlGenPage/ChapterSection.vue`）专用的一节，排在本文件末尾：
+
+- 一行 = 一章：序号 / 标题 / 起止场景 / 时长 / `pages/cNN.js` + 一个「改这一章」按钮；
+- **列宽用 `minmax(0, Nfr)`**——与素材网格 / 音色列表同一取舍（写 `minmax` 而不是纯 `fr`）；
+- 只读列表：点「改这一章」只是把「只改第 N 章（pages/cNN.js）：」填进「需求描述」，列表本身不发起生成 / 修改；
+- 使用方只有 `ChapterSection.vue`。
+
+### 3.5 「角色」区与全局角色库弹窗（`.cast-*` / `.lib-*`）
+
+「HTML生成」页的「项目素材 · 角色」区（`pages/HtmlGenPage/CastSection.vue`）与它的两个弹窗专用的一节，排在本文件**最末尾**（紧接章节列表 `.ch-*` 之后，是全文件的最后 **58** 行）：
+
+节的注释头与行网格（源码原文）：
+
+```css
+/* ===== HTML生成页：角色列表（章节模式的角色库） =====
+   一行一个角色：名字 / 描述 / 高几 u / 文件 / 「改这个角色」。
+   与上面的章节列表同一套语言（同一组 .ch-sub / .ch-pick 复用），只是列不同：
+   角色没有时间窗，多了「高几 u」这一列（身高比例是它能和别章对齐的唯一凭据）。 */
+.cast-list { margin-top: var(--space-2); }
+
+.cast-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1.2fr) minmax(0, 2.6fr) 48px minmax(0, 1.3fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid rgba(0, 212, 255, 0.08);
+  border-bottom: 0;
+  background: rgba(10, 17, 32, 0.5);
+}
+/* 未勾选（本次不注入）：整行压暗，与素材卡片的 .off 同一语言 */
+.cast-row.off { opacity: 0.55; }
+.cast-row:first-child { border-radius: 10px 10px 0 0; }
+.cast-row:last-child { border-bottom: 1px solid rgba(0, 212, 255, 0.08); border-radius: 0 0 10px 10px; }
+.cast-row:only-child { border-radius: 10px; }
+```
+
+单元格与字号（源码原文）：
+
+```css
+.cast-name {
+  color: var(--color-primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-desc, .cast-units, .cast-file {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-units, .cast-file { font-family: "JetBrains Mono", "Consolas", monospace; }
+.cast-units { text-align: right; }
+```
+
+**角色库那一轮新增的两组（源码原文，本轮未改）**：
+
+```css
+/* 角色行尾的两个动作（存为全局 / 改这个角色）：并排、靠右，不与文本列争宽 */
+.cast-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+
+/* 全局角色库弹窗里的一行：勾选框 + 名字 + 描述 + 高几 u（缺文件的整行压暗且不可选） */
+.lib-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1.2fr) minmax(0, 2.4fr) 48px auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+  cursor: pointer;
+}
+.lib-row:last-of-type { border-bottom: 0; }
+.lib-row.off { opacity: 0.5; cursor: not-allowed; }
+.lib-row input[type="checkbox"] { accent-color: var(--color-primary); width: 14px; height: 14px; }
+.lib-missing { font-size: 11px; color: var(--color-warning); }
+```
+
+其余要点：
+
+| 选择器 | 要点 |
+| --- | --- |
+| `.cast-row` | 一行一个角色的 grid：**勾选框 24px** / 名字 1.2fr / 描述 **2.6fr** / **`units` 48px 定宽** / 文件 **1.3fr** / 动作 `auto`（按钮不被压缩）；13px 正文 |
+| **`.cast-row.off`（本轮新增）** | 未勾选（本次不注入）：`opacity: .55` 整行压暗——**不是禁用**（还能点勾选框、还能点动作按钮），与素材卡片 `.mat-card.off` 的 `.5` 同一语言（角色行稍浅一点，因为行内还有动作按钮要读得清） |
+| `.cast-row` 的首 / 末 / 唯一行 | `first-child` / `last-child` 给上下圆角、`only-child` 单独给 10px 全圆角——**行之间靠 `border-bottom: 0` 拼成一张表**，末行再补回下描边 |
+| `.cast-name` | 角色名：主色 + 字重 600 + 单行省略（`text-overflow: ellipsis`） |
+| `.cast-desc` / `.cast-units` / `.cast-file` | 次要列：12px 雾蓝 + 单行省略；`units` 与文件路径走等宽字体，`units` 右对齐 |
+| **`.cast-actions`** | 行尾**三个**按钮（「存为全局」/「改这个角色」/「移除」）的容器：`flex` + `gap: 6px` + **`flex: none`**（不被文本列挤扁）。最初这里只有**一个**按钮，`auto` 那一列直接放 `.ch-pick`；两个按钮时加了包裹层，本轮到三个按钮仍是同一个包裹层 |
+| **`.lib-row`（本轮新增）** | 全局角色库弹窗的一行（`label`）：`18px` 放复选框 + 名字 1.2fr + 描述 2.4fr + `units` 48px + `auto`（放「文件缺失」标记）；`cursor: pointer`（整行可点 = 勾选）；行分隔线 `rgba(0,212,255,.08)`，末行去掉 |
+| **`.lib-row.off`（本轮新增）** | 库里「索引有、文件不在」的条目：`opacity: .5` + `cursor: not-allowed`，配合模板里 `:disabled="!!m.missing"` 的复选框——**压暗但不出列表**（用户得看见库里有坏记录） |
+| **`.lib-row input[type="checkbox"]`** | `accent-color: var(--color-primary)`（系统复选框染成主色）+ 14×14 |
+| **`.lib-missing`（本轮新增）** | 「文件缺失」标记：11px（设计规范 §3.1 的「最小」档）+ `var(--color-warning)` 信号橙 |
+| 复用的类 | **`.mat-check`（+ `.on`）**——行首勾选框直接复用素材卡片那个 18×18 圆角方块（本轮新增的复用，**不新造勾选样式**）；`.ch-sub`（章节 / 角色共用的副标题小字）与 `.hf-btn.ch-pick`（行内动作按钮）；两个弹窗复用 `.hf-modal*` 一整套 |
+
+> **为什么列宽写 `minmax(0, Nfr)`**：`1fr` 的隐含下限是 `min-content`，描述或文件路径一长就会把列撑爆、`text-overflow: ellipsis` 直接失效——与 `.voice-list-*` / `.ch-*` / `.mat-grid` 是同一条取舍。
+
 ## 4. 命名与约定
 
 | 前缀 / 命名族 | 出现节 | 含义 |
@@ -310,6 +416,9 @@
 | `hgen-*` | HTML 生成页与工作台 | `hgen-grid`、`hgen-panel`、`hgen-subtitle`、`hgen-input`、`hgen-row`、`hgen-actions`、`hgen-tip`、`hgen-source`、`hgen-block`、`hgen-check`、`hgen-frame-wrap`、`hgen-frame` |
 | **`mat-*`** | **HTML生成页素材库（本轮新增）** | **素材卡片墙**：`mat-grid`、`mat-card`（状态类 `.off`）、`mat-thumb`、`mat-play`、`mat-meta`、`mat-name`、`mat-path`、`mat-check`（状态类 `.on`）、`mat-del`、`mat-add`、`mat-count`；图片组的点靠 `.dot.dot-img` 而非新前缀 |
 | **`cl-*`** | **设置页更新日志弹窗** | **随包 `CHANGELOG.md` 的展示**：`cl-ver`（版本 + 时间抬头）、`cl-list`、`cl-item`、`cl-item-title`、`cl-date`、`cl-count`、`cl-tag`（配色档 `.cl-tag-ok` / `.cl-tag-err` / `.cl-tag-warn`）、`cl-more`、`cl-hist`、`cl-hist-head`、`cl-hist-body`、`cl-hist-block`、`cl-hist-ver`、`cl-hist-name`、`cl-caret` |
+| **`ch-*`** | **HTML生成页章节列表（本轮新增）** | **只读章节列表的行样式**：一行一章（序号 / 标题 / 起止 / 时长 / `pages/cNN.js` / 「改这一章」）；列宽用 `minmax(0, Nfr)`，使用方只有 `HtmlGenPage/ChapterSection.vue` |
+| **`cast-*`** | **HTML生成页「项目素材 · 角色」块** | **角色行的单元格样式**：`cast-list`、`cast-row`（状态类 **`.off`** = 本次不注入）、`cast-name`、`cast-desc`、`cast-units`、`cast-file`、**`cast-actions`（行尾三个按钮的容器）**；勾选框复用 `.mat-check`，行内动作按钮复用 `.hf-btn.ch-pick`，说明小字复用 `.ch-sub`，使用方只有 `HtmlGenPage/CastSection.vue` |
+| **`lib-*`** | **HTML生成页「从全局库添加」弹窗（本轮新增）** | **全局角色库弹窗的行样式**：`lib-row`（勾选框 + 名字 + 描述 + `u` + `auto`）、状态类 `.off`（缺文件压暗不可选）、`lib-missing`（「文件缺失」11px 信号橙）；弹窗外壳复用 `.hf-modal*`，使用方只有 `HtmlGenPage/CastSection.vue` |
 | `hg-prev-*` | 预览播放控制条 | `hg-prev-ctl`、`hg-prev-bar`（状态类 `.seeking`）、`hg-prev-track`、`hg-prev-bar-fill`、`hg-prev-time`、`hg-prev-hint` |
 | `hg-help*` | HTML 生成页（**动作按钮内部 2 处 + 卡片标题「用法」+ 画布行**） | 行内帮助 `?`：`hg-help`、`hg-help-icon`、`hg-help-pop`；显隐靠 `.hg-help:hover` 后代选择器。设计系统本身未变：后两处是**非按钮锚点**，靠模板内联覆盖——`letter-spacing:0`（锚在带 2px 字距的 `.panel-title` 里）与 `top:calc(100% + 8px);bottom:auto`（**向下**展开，避免顶出滚动容器 `.content` 的 `overflow-y:auto` 被整块裁掉） |
 | `step-*` / `project-bar*` | 项目链路状态条 | `project-bar*`、`step-chain`、`step-node`、`step-dot`、`step-arrow`；状态用修饰类 `.done` / `.active-now` / `.clickable` |
@@ -324,7 +433,7 @@
 - **状态一律用修饰类**（`.active`、`.done`、`.current`、`.selected`、`.downloaded`、`.ok`、`.warn`、`.error`、**`.off` / `.on`**），不引入新的前缀族。
 - **未启用 BEM**，采用「前缀 + 短横线 + 语义词」的扁平命名；**全局通用类不再套页面前缀**（`.panel-title` / `.panel-title .dot` 可直接给任何卡片使用）。
 - 颜色几乎不写死，统一走 `var(...)`；少数渐变与半透明描边直接写 `rgba(0,212,255,…)` 字面量（素材节同样如此）。
-- **列宽用 `minmax` 而非纯 `fr`**：素材网格用 `repeat(auto-fill, minmax(158px, 1fr))`，与 `.model-grid` / `.proj-meta` / `.voice-list-*` 同一取舍。
+- **列宽用 `minmax` 而非纯 `fr`**：素材网格用 `repeat(auto-fill, minmax(158px, 1fr))`，与 `.model-grid` / `.proj-meta` / `.voice-list-*` / 章节列表行同一取舍。
 
 ## 5. 依赖与协作
 
@@ -333,12 +442,12 @@
 - **与 scoped 样式的配合**：本文件是全局样式，不受 `data-v-*` 影响；反过来也命中不了 scoped 组件内部结构。
 - **变量是组件行内样式的桥梁**：多个组件直接在模板 `style` 属性中引用本文件变量（素材卡片、预览卡片都有大量行内 `style`，如 `.hgen-row` 里的 `style="flex:none;width:auto"`）。
 - **类名复用是主要协作方式**：`MaterialsSection.vue` 就是典型——除新增的 `.mat-*` 外，其余（`.hgen-block`、`.panel-head*`、`.panel-title*`、`.hgen-tip`、`.hf-btn*`）全部复用既有类；更新日志弹窗同理——`.hf-modal*` / `.hf-btn` / `.hf-status` / `.hf-error` / `.hf-detail` 全部复用，只自带 `.cl-*` 一组（宽度靠模板内联 `style="width:min(720px,92vw)"`，不新增类）。
-- **JS 与 CSS 的契约**：`.hgen-frame` 的缩放依赖 JS 写 `transform: translate(...) scale(...)`，**它的宽高与容器的尺寸也依赖组件内联样式**（`.hgen-frame-wrap` 与 `.hgen-frame` 上的 16:9 / 1920×1080 是默认值：挂载后容器按 **`frameStyle`**（高度上限 800、宽度按比例、`aspect-ratio` 定高、`paddingBottom:'0'`）覆盖、iframe 宽高按**页面声明的画布**（`pageBox`）覆盖）；`.hg-prev-bar-fill` / `.whisper-bar-fill` 的宽度依赖 JS 写 `style.width`；`.mat-check` 的 `✓` 与 `.mat-card.off` 由 Vue 按 `selected` 渲染；`.mat-add` 的 `:disabled` 由 `busy` 控制。
+- **JS 与 CSS 的契约**：`.hgen-frame` 的缩放依赖 JS 写 `transform: translate(...) scale(...)`，**它的宽高与容器的尺寸也依赖组件内联样式**（`.hgen-frame-wrap` 与 `.hgen-frame` 上的 16:9 / 1920×1080 是默认值：挂载后容器按 **`frameStyle`**（高度上限 800、宽度按比例、`aspect-ratio` 定高、`paddingBottom:'0'`）覆盖、iframe 宽高按**页面声明的画布**（`pageBox`）覆盖）；`.hg-prev-bar-fill` / `.whisper-bar-fill` 的宽度依赖 JS 写 `style.width`；`.mat-check` 的 `✓` 与 `.mat-card.off` / `.cast-row.off` 由 Vue 按 `selected` 渲染；`.mat-add` 的 `:disabled` 由 `busy` 控制。
 - **与设计规范一致**：变量名与取值同 `src/renderer/agents.md` 逐条对应；字号刻度见该文件 §3.1 / §3.2，列表面板（`.panel-head*`）的结构约定见 §5.6，滚动条约定见 §5.8。
 
 ## 6. 注意事项与实现要点
 
-- **`!important` 共两处**：`.hero-sub`（压过 `.hero p` 的 14px）与 `.whisper-bar.indeterminate .whisper-bar-fill`（压过 JS 写的行内宽度）；素材节与更新日志节**都没有**用 `!important`。
+- **`!important` 共两处**：`.hero-sub`（压过 `.hero p` 的 14px）与 `.whisper-bar.indeterminate .whisper-bar-fill`（压过 JS 写的行内宽度）；素材节、更新日志节与**角色列表节都没有**用 `!important`。
 - **滚动条只有一套、全局继承**：`main.css` 基础段（`html, body` 之后、`body` 之前）用 `*::-webkit-scrollbar` 系列定义唯一一套——宽高 8px、轨道与角落透明、`border-radius: 999px` 的滑块 `rgba(0,212,255,.25)`、悬停 `rgba(0,212,255,.45)`；`.content`（右侧整页内容区）、`.sub-list`（字幕条目列表）、`.voice-list-body`（我的音色列表）等所有滚动容器一律继承，不在任何容器上重复定义。**全局刻意不写 `scrollbar-width` / `scrollbar-color`**：Chromium（Electron 31 = Chromium 126）里这两个标准属性会顶掉 `::-webkit-*` 伪元素的自定义效果，写了就退回默认灰白滚动条。确需「不显示滚动条但仍可滚动」时，才在该容器上单独写 `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`（目前没有容器在用）；预览 iframe（`hgpreview://` 协议的 HTML 预览页）是独立文档，不受这条全局规则影响。
 - **毛玻璃写法固定为双写**：`backdrop-filter: blur(12px)` 后紧跟 `-webkit-backdrop-filter`（`.card`、`.flow-node`、`.metric-card`）。**素材卡片没有用毛玻璃**——它整卡 `overflow: hidden` 且深底不透明感更强。
 - **`.card` 的 `backdrop-filter` 会捕获后代的 `position: fixed`**：带 `backdrop-filter` 的元素会成为 `fixed` 后代的包含块 ⇒ 挂在卡片里的弹窗（`.hf-modal-mask` 是 `position: fixed`）会被卡片框住、顶部跑到窗口外。**解法是弹窗组件自己 `Teleport` 到 `<body>`**，落地见 `pages/SettingsPage/components/{UpdateSection,ChangelogDialog}.vue`（设置页的「自定义更新源」与「更新日志」弹窗）与配音页 `VoiceSection.vue` 的两个弹窗（各处都留了同样的注释）。渲染层现有 **5 处** `<Teleport to="body">` 里只有 `components/HfSelect.vue` 的弹层是为避开祖先 `overflow: hidden` 而挂，其余 4 处都是这个坑。本文件不改 `.card` 的双写写法。

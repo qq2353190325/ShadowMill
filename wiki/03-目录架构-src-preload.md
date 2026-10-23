@@ -1,6 +1,6 @@
 # 03 · 目录架构：`src/preload/`（桥接层）
 
-> 预加载脚本是渲染层通往系统的**唯一门面**：它把 **94** 个 IPC 频道收敛成 **12** 个命名空间的方法，并用「单订阅」语义转发 **7 路**进度推送（其中 6 路有模块级单订阅标志）。渲染层永远不直接接触 `ipcRenderer`。
+> 预加载脚本是渲染层通往系统的**唯一门面**：它把 **100** 个 IPC 频道收敛成 **12** 个命名空间的方法，并用「单订阅」语义转发 **7 路**进度推送（其中 6 路有模块级单订阅标志）。渲染层永远不直接接触 `ipcRenderer`。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 文件 | 行数 | 角色 | 是否进运行时 |
 |---|---|---|---|
-| [index.ts](./files/preload/index.ts.md) | 259 | `contextBridge` 暴露 **12** 个命名空间 + 7 路进度通道的订阅转发（6 路为单订阅）；每个对象用 `PreloadApi['<命名空间>']` 标注 | 是（构建为 `out/preload/index.js`，CJS） |
+| [index.ts](./files/preload/index.ts.md) | 265 | `contextBridge` 暴露 **12** 个命名空间 + 7 路进度通道的订阅转发（6 路为单订阅）；每个对象用 `PreloadApi['<命名空间>']` 标注。**本轮 `projectTools` 新增 4 个角色库方法（`listCastLibrary` / `promoteCast` / `importCast` / `removeCastFromLibrary`），命名空间数仍是 12 个** | 是（构建为 `out/preload/index.js`，CJS） |
 | [index.d.ts](./files/preload/index.d.ts.md) | 11 | 只做 `interface Window extends PreloadApi {}`，把共享层契约挂到全局 `Window` | 否（仅类型，被 `tsconfig.web.json` include，为渲染层提供智能提示） |
 
 ---
@@ -38,7 +38,7 @@
 | `runtimeTools` | 4 | `runtime:*` | 运行环境（分包 ffmpeg / hyperframes）：状态查询 / 主动准备（`prepare(packs?)`）/ **取消（`cancel`）** / 进度订阅 |
 | `legacyTools` | 2 | `legacy:*` | 旧版本数据：状态查询 / 回传选择（`migrate` \| `delete` \| `later`）；**无进度订阅**——旧数据是否存在由渲染层主动问一次，主进程不推送、不弹界面 |
 
-> 渲染层对主进程的全部依赖面就是这 12 个命名空间，因此它们被定义为**不可漂移的契约**：方法签名唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi`，频道名一一对应 `src/shared/ipc.ts`（11 个分组 / 94 个频道）。
+> 渲染层对主进程的全部依赖面就是这 12 个命名空间，因此它们被定义为**不可漂移的契约**：方法签名唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi`，频道名一一对应 `src/shared/ipc.ts`（11 个分组 / 100 个频道）。
 
 ---
 

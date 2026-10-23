@@ -1,10 +1,10 @@
 # src/main/video.ts
 
-> HyperFrames 转视频：注册 3 个 IPC 频道（含 1 路进度推送），**就地渲染**到 `<项目目录>/video/output.mp4`——先裁定成片时长（模型声明 / 实测时间轴 / 最长媒体三档）并裁掉超长媒体副本，再在项目内临时子目录写渲染入口。**画布和时长都是「写两处、只有一处生效」**：画布 = 舞台元素的 `data-width` / `data-height`（**成片宽高的真正来源**，`applyCanvasSize`）+ 入口 `<html>` 的 `data-resolution`（**页面自描述**，`applyCanvasDeclaration`）；时长 = 舞台元素的 `data-duration`（**CLI 编译阶段唯一读的地方**，`applyStageDuration`）+ `<html data-composition-duration>`（**页面自描述**，预览 / `info` / 下次生成读它）。`<html>` 上那两样渲染链路都**不读**。全程把 CLI 子进程日志流式回推渲染层。**动手渲染之前还有一道无限循环静态守卫**：页面原文里出现 GSAP 的 `repeat: -1`（或 `repeat: Infinity`）就当场拒绝、不进 CLI（GSAP 把这种 tween 当成 1e10 秒，不拦的话成片时长没法确定、CLI 会按 1e10 秒排帧、永远渲不完）。
+> HyperFrames 转视频：注册 3 个 IPC 频道（含 1 路进度推送），**就地渲染**到 `<项目目录>/video/output.mp4`——先裁定成片时长（模型声明 / 实测时间轴 / 最长媒体三档）并裁掉超长媒体副本，再在项目内临时子目录写渲染入口。**画布和时长都是「写两处、只有一处生效」**：画布 = 舞台元素的 `data-width` / `data-height`（**成片宽高的真正来源**，`applyCanvasSize`）+ 入口 `<html>` 的 `data-resolution`（**页面自描述**，`applyCanvasDeclaration`）；时长 = 舞台元素的 `data-duration`（**CLI 编译阶段唯一读的地方**，`applyStageDuration`）+ `<html data-composition-duration>`（**页面自描述**，预览 / `info` / 下次生成读它）。`<html>` 上那两样渲染链路都**不读**。全程把 CLI 子进程日志流式回推渲染层。**动手渲染之前还有一道无限循环静态守卫**：`index.html` 或章节脚本 `pages/cNN.js` 里出现 GSAP 的 `repeat: -1`（或 `repeat: Infinity`）就当场拒绝、不进 CLI（GSAP 把这种 tween 当成 1e10 秒，不拦的话成片时长没法确定、CLI 会按 1e10 秒排帧、永远渲不完）。量时间轴的探针副本落在项目根、用未抬级原文（否则章节脚本 `./pages/cNN.js` 会 404、时间轴量回 0）。
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（IPC 注册 + 子进程编排）
-- **规模**：457 行（实测 `[IO.File]::ReadAllLines`；上一轮画布修复时 416 行、再上一轮修成片时长后 442 行，本轮 +15 行：`Video.Render` handler 里新增无限循环静态守卫——7 行注释 + 7 行代码 + 1 行分隔空行，见 §1.3）
+- **规模**：485 行（实测 `[IO.File]::ReadAllLines`；上一版 474 行，本轮 **+11 行**：渲染前按版本同步共享绘制助手 `./core.js`，见 §3.3 第 7.5 步）
 - **对外导出**：`register`（唯一导出）
 
 ## 1. 作用与职责
@@ -14,7 +14,7 @@
 | 能力 | 说明 |
 |------|------|
 | 选 HTML 文件 | 弹系统文件选择框挑 HTML（`dialog:open-html`，**保留但渲染层当前无调用方**） |
-| 转视频（准备阶段） | 校验 HyperFrames 合规性 → **无限循环静态守卫（页面里有 GSAP 的 `repeat: -1` / `repeat: Infinity` 直接拒绝，见 §1.3）** → 定位 hyperframes CLI 与 Node（`{ cmd, env }` 一对）→ **就地确定渲染根（HTML 所在的项目目录）** → GSAP 本地化（幂等）→ 注入环境变量 → **取画布（白名单校验，缺省落 `DEFAULT_CANVAS`）** → **把画布写两处（舞台 `data-width`/`data-height` + `<html data-resolution>`）、裁定成片时长、把裁定出的时长写进舞台 `data-duration`（`applyStageDuration`——**CLI 编译阶段唯一读的地方**；`<html data-composition-duration>` 只为页面自描述）、裁掉超长媒体的副本、写渲染入口** |
+| 转视频（准备阶段） | 校验 HyperFrames 合规性 → **无限循环静态守卫（页面里有 GSAP 的 `repeat: -1` / `repeat: Infinity` 直接拒绝，见 §1.3）** → 定位 hyperframes CLI 与 Node（`{ cmd, env }` 一对）→ **就地确定渲染根（HTML 所在的项目目录）** → 随包前端库本地化（幂等；GSAP / p5 / p5.brush）→ 注入环境变量 → **取画布（白名单校验，缺省落 `DEFAULT_CANVAS`）** → **把画布写两处（舞台 `data-width`/`data-height` + `<html data-resolution>`）、裁定成片时长、把裁定出的时长写进舞台 `data-duration`（`applyStageDuration`——**CLI 编译阶段唯一读的地方**；`<html data-composition-duration>` 只为页面自描述）、裁掉超长媒体的副本、写渲染入口** |
 | 转视频（渲染阶段） | 按载荷里的渲染档位拼 `--quality` / `--fps`（**不拼 `--resolution`**：画布已经写进入口的舞台 `data-width` / `data-height` 了），`spawn` 子进程在项目内渲染出 `video/output.mp4`，全程把 stdout/stderr 回推渲染进程，收尾删除临时入口目录 |
 
 **最大的形态变化是「就地渲染」**（取代旧的临时工作目录方案）：
@@ -25,9 +25,9 @@
 | 素材 | 整目录 `cpSync` 复制进工作目录 | **不复制**；入口 HTML 里仍按**相对项目根**写（如 `video/x.mp4`），CLI 也按项目根解析 |
 | 成品 | 留在临时工作目录里（几百 MB） | 直接生成在 `<项目目录>/video/output.mp4` |
 | 渲染入口 | 工作目录的 `index.html` | 项目内的临时子目录 `<项目目录>/.render-tmp/entry.html`（CLI 硬要求：`-c` 的入口必须落在项目根之内），**渲完即删**（`fs.rmSync(tmpDir)`） |
-| GSAP | 对工作目录里的副本**再做一次本地化** | 本文件**不再**做「面向渲染副本」的本地化改写，只调用一次幂等的 `hfEnv.localizeGsapHtml()`（老项目 HTML 仍引 CDN 时才真正改写）；入口在子目录里，因此把 `./gsap.min.js` 引用改写为 `../gsap.min.js` |
+| 随包前端库 | 对工作目录里的副本**再做一次本地化** | 本文件**不再**做「面向渲染副本」的本地化改写，只调用一次幂等的 `hfEnv.localizeVendorHtml()`（老项目 HTML 仍引 CDN 时才真正改写），再用 `hfEnv.ensureVendorFiles(projDir, localized)` 把库文件落进项目目录；入口在子目录里，因此 `prepareEntry()` 用 `hfEnv.hoistVendorRefs(localized, '../')` 把 `./gsap.min.js` / `./p5.min.js` / `./p5.brush.js` 引用改成 `../…` |
 
-为什么不复制也能跑（源码注释给出的三条理由）：① GSAP 本地化是幂等的、产物就是项目目录里的 `gsap.min.js`（`projects.ts` 的保存/生成流程已在做）；② BGM 注入本来只写 `index.html`（`projects.ts` 的 `applyBgmToHtml`），渲染时不需要再动；③ 入口放在项目内的临时子目录、媒体用相对项目根的引用，实测 CLI 能正常解析（2026-10 验证）。好处是**不再复制 200 MB+ 素材、不再留几百 MB 的 `hf-projects` 工作目录、成品直接长在项目里**。
+为什么不复制也能跑（源码注释给出的三条理由）：① 随包前端库本地化是幂等的、产物就是项目目录里的 `gsap.min.js` / `p5.min.js` / `p5.brush.js`（`projects.ts` 的保存/生成流程已在做，`ensureVendorFiles` 按需补位）；② BGM 注入本来只写 `index.html`（`projects.ts` 的 `applyBgmToHtml`），渲染时不需要再动；③ 入口放在项目内的临时子目录、媒体用相对项目根的引用，实测 CLI 能正常解析（2026-10 验证）。好处是**不再复制 200 MB+ 素材、不再留几百 MB 的 `hf-projects` 工作目录、成品直接长在项目里**。
 
 模块**不再自行声明载荷/结果类型**：仅本文件使用的 `RenderPayload` / `RenderResult` 已删除，统一改用 `src/shared/types.ts` ⑦ 节的 `VideoRenderPayload`（`extends RenderOverride`，即 `{ htmlPath?: string; quality?: RenderQuality; fps?: RenderFps; canvas?: RenderCanvas }`——`canvas` 是**项目属性**（成片画布方向）、不是渲染档位）、`VideoRenderResult`（成功 `{ ok: true; outputVideo: string; projectDir: string }`，失败 `{ ok: false; message: string; compatible?: boolean; needPacks?: RuntimePackName[] }`），并从共享层引入 `RegisterCtx`、`RuntimePackName`。渲染档位的**白名单校验复用** `./settings` 的 `pickRenderOverride()`（与 `projects.ts` 同一处实现）。`video:progress` 推送仍就地构造 `{ text }`（该形状即共享层 ⑧ 节的 `VideoProgressPayload`，但本文件没有单独 import 它）。
 
@@ -134,7 +134,7 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 
 **为什么必须拦**（源码注释里的根因链，全部实测）：GSAP 把 `repeat:-1` 的 tween 时长当成 **1e10 秒**（**不是** `Infinity`），父时间轴 `duration()` 就是「1e10 + 该 tween 的起点」；而 HyperFrames 的成片时长 = `max(页面声明, 时间轴实测)`，应用写进舞台的 `data-duration` 压不过它 ⇒ CLI 会按 1e10 秒去计划帧数，实际永远渲不完（2026-10 实测：预览总时长显示 `166666668:12`，即 1e10+92 秒）。与其让它排几个小时的队，不如在门口说清楚。
 
-**判据是静态的**（`video:render` handler 里，`isHyperframesComposition(raw)` 兼容性检查**之后**、`rmSync(tmpDir)` / `prepareEntry()` **之前**），源码逐字：
+**判据是静态的**（`video:render` handler 里，`isHyperframesComposition(raw)` 兼容性检查**之后**、`rmSync(tmpDir)` / `prepareEntry()` **之前**）。**扫描范围是整份页面的脚本**：`index.html` 与章节模式下的 `pages/cNN.js`（同一正则一起扫）。核心那一次判断源码逐字：
 
 ```ts
     // ===== 无限循环护栏：页面里有 GSAP 的 repeat: -1 就当场拒绝 =====
@@ -159,6 +159,7 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 |---|---|
 | 命中后做什么 | 直接 `return { ok: false, message }`——**不进 CLI、不写 `.render-tmp`、不裁媒体、不定位 CLI / Node**（这段位置刻意在那一切之前） |
 | 认哪些写法 | 只认 GSAP 的 `repeat: -1` / `repeat: Infinity`（`/repeat\s*:\s*(?:-1|Infinity)\b/i`，忽略大小写、冒号两侧可有空白） |
+| 扫哪些文件 | `index.html` + 章节模式下的 `pages/cNN.js`（同一正则一起扫——章节脚本也是页面的一部分，只扫 `index.html` 会漏掉章节里的无限循环） |
 | **不**拦什么 | CSS 的 `animation-iteration-count: infinite` **不拦**——HF 的 CSS 适配器只收 `endTime` 有限的动画，无限 CSS 动画本来就不会把时长撑大 |
 | 修完之后 | 用户到「HTML生成」页把循环改成有限次数（如 `repeat: 12, repeatDelay: 0.4`）再点「转视频」即可；提示词侧也已要求模型不许写无限循环（见 [projects.ts.md](./projects.ts.md) 的【禁止无限循环】块） |
 
@@ -200,7 +201,7 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 | `rewriteStageTag(html, rewrite)` | `string \| null` | 共用助手：找到文档里第一个带 `data-composition-id` 的元素（与 CLI 的 `querySelector("[data-composition-id]")` 同口径），把它开标签的属性串交给 `rewrite(attrs)` 决定写什么；找不到返回 `null`。**`applyCanvasSize()` 与 `applyStageDuration()` 都走它**，两条已知限制（不进入 `<template>`、不产出 `data-composition-src` 子 composition）也搬到它的注释上（见 §1.2） |
 | `applyCanvasDeclaration(html, canvas)` | `string` | **把项目选定的画布写成入口的 `<html data-resolution="…">`**（页面自描述，CLI 的渲染链路不读它）：先调 `stripAttrs(attrs, ['data-resolution'])` 剥掉页面里已有的同名属性再写；整篇连 `<html>` 标签都没有时前置一个带声明的 `<html>`。行为与上一版一致（见 §1.2） |
 | `stripAttrs(attrs, names)` | `string` | **逐属性扫描，摘掉 `names` 里列出的属性（忽略大小写、含无值写法）**，其余属性原样保留、开头空白收成一个空格。`<html>` 与舞台两处共用（取代原来的 `stripDataResolution(attrs)`）。正则原文：`/([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"[^"]*"\|'[^']*'\|[^\s"'>]+))?/g`（定义在 `applyCanvasDeclaration()` 之后，见 §1.2） |
-| `measureTimelineDuration(entryHtml, tmpDir, chrome, cwd, env)` | `Promise<number>` | 无头 Chromium 加载「页面副本 + 量测脚本」，用 `--dump-dom` 读回 GSAP 时间轴长度；拿不到返回 `0` |
+| `measureTimelineDuration(html, probeDir, …)` | `Promise<number>` | 无头 Chromium 加载「量测副本 + 量测脚本」，用 `--dump-dom` 读回 GSAP 时间轴长度；拿不到返回 `0`。**副本落在项目根**（`probeDir`），内容用**未抬级原文**——章节脚本按 `./pages/cNN.js` 写，副本在 `.render-tmp/` 下会 404、时间轴量回 0，成片时长就静默退回按最长媒体裁定 |
 | `probeDuration(file, ffprobe, cwd, env)` | `Promise<number>` | `ffprobe -show_entries format=duration` 量媒体时长（秒）；失败返回 `0` |
 | `writeTrimLog(projDir, line)` | `void` | 追加一行到 `userData/video-duration.log`（带 ISO 时间与项目目录名）；日志失败不影响渲染 |
 | `prepareEntry(opts)` | `Promise<string>` | **画布两处注入 + 时长裁定 + 裁超长媒体副本 + 写入口**：返回最终要渲染的入口 HTML 文本（见 §4） |
@@ -227,7 +228,7 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 1. **缺包校验（最先做）**：`const lack = runtime.missingPacks(RENDER_PACKS)`——非空立刻返回 `{ ok: false, needPacks: lack, message: '转视频需要先下载运行环境（' + runtime.packSizeText(lack) + '）' }`：**不下载、不阻塞**，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），用户点「继续」才用原参数重发本操作（见 `docs/runtime-pack-split.md`）。
 2. **入口校验**：`payload.htmlPath` 缺失或文件不存在 → `{ ok: false, message: 'HTML 文件不存在' }`；读取原文。
 3. **合规校验**：`hfEnv.isHyperframesComposition(raw)`（要求同时含 `data-composition-id`、`__timelines`、`gsap`）；不合规则返回 `{ ok: false, compatible: false, message: … }`，提示先用 HyperFrames 引导生成合规模板。
-4. **无限循环静态守卫**（本轮新增，§1.3）：`if (/repeat\s*:\s*(?:-1|Infinity)\b/i.test(raw))` 命中就返回 `{ ok: false, message: '页面里有无限循环动画（GSAP 的 repeat: -1）…' }`——**此时还没建 `.render-tmp`、没定位 CLI / Node、也没写 `video-duration.log`**。
+4. **无限循环静态守卫**（本轮新增，§1.3）：`if (/repeat\s*:\s*(?:-1|Infinity)\b/i.test(raw))` 命中就返回 `{ ok: false, message: '页面里有无限循环动画（GSAP 的 repeat: -1）…' }`——**此时还没建 `.render-tmp`、没定位 CLI / Node、也没写 `video-duration.log`**。章节模式下同一正则连 `pages/cNN.js` 一起扫（章节模式没有新增频道，守卫仍在这一个 handler 里）。
 5. **定位 CLI**：`hfEnv.findHyperframesCli()`（内置 `hyperframes.mjs` 优先，回退环境变量 `HYPERFRAMES_CLI`）；找不到返回「未找到 hyperframes CLI（hyperframes.mjs）。可设置环境变量 HYPERFRAMES_CLI 指向其路径。」
 6. **定位 Node**：`hfEnv.findNode()` —— 返回 `{ cmd, env }`（**两级优先**：① Electron 内嵌 Node，即 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`；② 系统 Node，要求主版本 >= 22）；`null` 时给出「未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 系统两种途径均不可用）」。`env` **必须**合进下面 `spawn` 的环境，否则 `electron.exe` 会把自己当应用来启动。
 7. **就地确定渲染根与路径**（取代「建临时工作目录 + 复制素材」）：
@@ -240,7 +241,26 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
    | `outMp4` | `path.join(projDir, 'video', 'output.mp4')` —— 成品路径 |
 
    `try` 里先 `rmSync(tmpDir, { recursive: true, force: true })`（清掉上次残留）→ `mkdirSync(tmpDir)` → `mkdirSync(path.dirname(outMp4))`；异常返回「准备渲染目录失败：…」。
-8. **GSAP 本地化（幂等）**：`const localized = hfEnv.localizeGsapHtml(raw)`；`hfEnv.referencesLocalGsap(localized)` 为真时 `hfEnv.copyGsapIntoProject(projDir)` 把随包 `gsap.min.js` 放进**项目目录**（入口在子目录里，所以下面 `prepareEntry()` 会把引用改写成 `../gsap.min.js`）。本文件**没有** `try/catch` 包裹、也**不判断**返回值（在线时仍可由 CDN 加载；与 `projects.ts` 作者态三处的兜底策略不同）。
+
+7.5 **渲染前同步共享绘制助手 `./core.js`（本轮新增，`projDir` 定完、`tmpDir` 之前）**：
+
+   ```ts
+   try {
+     const coreSrc = hfEnv.coreSource()
+     if (coreSrc && /src=["'](?:\.\/)?core\.js["']/i.test(raw)) {
+       const r = coreLib.syncCoreTo(projDir, coreSrc)
+       if (r.copied) writeTrimLog(projDir, 'core.js 版本 ' + (r.from || '无') + ' → ' + r.to + '（渲染前按版本同步）')
+       else if (r.error) writeTrimLog(projDir, 'core.js 同步失败：' + r.error)
+     }
+   } catch (e) { /* 同步失败不拦渲染：项目里那份旧版仍能用 */ }
+   ```
+
+   - **只当页面确实引了 `./core.js` 才同步**（正则同 `projects.ts` 的 `PreviewHtml`）：单文件模式的页面没有这个引用，不该因此多写一份文件、多刷一行日志。
+   - **与 `projects.ts` 的 `syncCoreLib()` 同一份逻辑**（`coreLib.syncCoreTo`，按 `CORE_VERSION` 覆盖、版本一致 + 文件在就什么都不做）：区别只在这里**不写 `userData/core-lib.log`**，而是把 `core.js 版本 a → b（渲染前按版本同步）` 写进 `video-duration.log`——渲染侧的留痕跟「这次成片」放在一起。
+   - **为什么渲染前还要同步一次**：`projects.ts` 的同步发生在写骨架 / 预览 / 导出，而项目可能很久没重新生成就被人直接转视频；这一处保证「应用升级后，第二次渲染就吃到新版助手」，不会出现「预览是新助手、成片是老助手」。
+   - **同步失败不拦渲染**：整个块包在 `try/catch` 里（`syncCoreTo` 自己也只回 `error` 不抛），项目里那份旧版仍能用——把片子渲出来比「助手版本对不对」重要。
+
+8. **随包前端库本地化（幂等）**：`const localized = hfEnv.localizeVendorHtml(raw)` + `hfEnv.ensureVendorFiles(projDir, localized)`——把 CDN / `node_modules` 引用改写为 `./gsap.min.js` / `./p5.min.js` / `./p5.brush.js`，并把页面引用到的随包文件复制进**项目目录**（入口在子目录里，所以下面 `prepareEntry()` 用 `hfEnv.hoistVendorRefs(localized, '../')` 把它们抬一级）。本文件**没有** `try/catch` 包裹、也**不判断** `ensureVendorFiles` 的返回值（在线时仍可由 CDN 加载；与 `projects.ts` 作者态三处的兜底策略不同）。
 9. **构造环境变量**：
    - `env = { ...process.env, ...nodeRt.env }` —— 把 `findNode()` 给的附加环境合并进来；
    - `hfEnv.findFfmpegBin()` 命中时把该 bin 目录前置到 `env.PATH`（`ffBin + path.delimiter + env.PATH`）；
@@ -282,7 +302,7 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 
 `prepareEntry(opts: { localized, entryHtml, tmpDir, projDir, env, chrome, canvas }): Promise<string>` 的返回值就是最终写盘、并交给 CLI 的入口 HTML 文本。**`canvas` 是画布入参**（`RenderCanvas`）：它决定成片画布，由调用方白名单校验后传入。
 
-下面编号从 GSAP 改写开始；**在 GSAP 改写之后、时长裁定之前，是画布的两步注入**（源码注释：画布写两处、放在最前，后面量时间轴时写盘的副本、最终留给 CLI 的入口都带上它们）：
+下面编号从随包前端库的引用改写开始；**在库引用改写之后、时长裁定之前，是画布的两步注入**（源码注释：画布写两处、放在最前，后面量时间轴时写盘的副本、最终留给 CLI 的入口都带上它们）：
 
 ```ts
 entry = applyCanvasDeclaration(entry, canvas)   // ② <html data-resolution>（页面自描述）
@@ -302,10 +322,11 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 
 `sized === null`（页面里没有带 `data-composition-id` 的舞台）时只写了 `<html data-resolution>`，成片会退回 CLI 自己的兜底 1080×1920。步骤：
 
-1. **GSAP 引用改写**：`let entry = localized.replace(/\.\/gsap\.min\.js/gi, '../gsap.min.js')`——入口在 `.render-tmp/` 下，`gsap.min.js` 在项目根，故回退一层。
+1. **随包库引用抬级**：`let entry = hfEnv.hoistVendorRefs(localized, '../')`——入口在 `.render-tmp/` 下，库文件（`gsap.min.js` / `p5.min.js` / `p5.brush.js`）在项目根，故统一回退一层；已是 `../` 的引用不会被再次加前缀（重复调用安全）。
 2. **① 模型声明**：`let target = declaredDuration(localized)`，`let source = '声明'`。
-3. **② 没声明就现场量一次**（量测脚本要读页面文件，所以先把入口落盘）：
-   - `chrome` 非空时 `fs.writeFileSync(entryHtml, entry, 'utf8')`（写失败只影响量测，`catch` 里忽略）→ `target = await measureTimelineDuration(entryHtml, tmpDir, chrome, projDir, env)`，`source = '实测时间轴'`；
+3. **② 没声明就现场量一次**（量测脚本要读页面文件，所以先把量测副本落盘）：
+   - `chrome` 非空时把**未抬级原文**（`localized`，即抬级前的 `entry`）写成**项目根**下的量测副本（写失败只影响量测，`catch` 里忽略）→ `await measureTimelineDuration(localized, projDir, …)`（`probeDir` = 项目根），`source = '实测时间轴'`；
+   - **副本不能放 `.render-tmp/`**：章节脚本是按 `./pages/cNN.js` 写的，副本在 `.render-tmp/` 下会 404 ⇒ 时间轴量回 0 ⇒ 成片时长静默退回「按最长媒体裁定」；
    - `chrome` 为空时 `source = ''`（不去量）。
 4. **③ 都拿不到**：`target <= 0` 时写一条日志（`'成片时长：模型未声明且时间轴量不到（chrome=有/无）→ 交给 CLI 按最长媒体裁定'`）并**原样返回** `entry`——保持旧行为。
 5. **裁超长媒体**：用 `/(<(?:video|audio)\b[^>]*?\bsrc\s*=\s*["'])([^"']+)(["'])/gi` 扫入口 HTML 里的 `<video>` / `<audio>` 的 `src`：
@@ -326,11 +347,11 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 
 `measureTimelineDuration()` 的量测口径（与预览脚本 `clock()` 一致）：
 
-1. 读 `entryHtml` 原文，追加一段量测脚本后写成 `<tmpDir>/duration-probe.html`（**为什么要复制一份：用 iframe 套一层就取不到内层 GSAP**）。
+1. 读**未抬级原文**，追加一段量测脚本后写成**项目根**下的量测副本（**为什么要复制一份：用 iframe 套一层就取不到内层 GSAP**）。**副本落在项目根、且用未抬级原文**：章节脚本按 `./pages/cNN.js` 写，副本若放进 `.render-tmp/` 会 404，时间轴量回 0、成片时长就静默退回按最长媒体裁定。
 2. 脚本在 `setTimeout(…, 1500)` 之后：先收 `window.__timelines` 里的所有时间轴；为空时退而遍历 `window.gsap`，收 `typeof v.duration === "function"` 的对象；对每条取 `duration()`，**取最大值**；把结果写进一个 `<pre id="hf-dur-out">`，文本形如 `<marker><d>_END`。
 3. `runCapture(chrome, ['--headless', '--disable-gpu', '--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--virtual-time-budget=5000', '--dump-dom', url], cwd, env, 30000)` 把 DOM dump 回来，用 `<marker>([\d.]+)_END` 正则取出数值；量到 0 / 解析失败 / 异常都返回 `0`（调用方据此退回媒体时长）。
 4. `url` 由绝对路径手工拼成 `file:///` 形式（`\\` → `/`、空格 → `%20`）——本文件**不 import `node:url`**。
-5. 量测用的 `duration-probe.html` 在 `finally` 里 `fs.rmSync(…, { force: true })` 删除；`entry.html` 本身（渲染入口）则由渲染阶段收尾时连同整个 `.render-tmp/` 一起删除。
+5. 量测副本在 `finally` 里 `fs.rmSync(…, { force: true })` 删除（落在项目根、用完即删）；`entry.html` 本身（渲染入口）则由渲染阶段收尾时连同整个 `.render-tmp/` 一起删除。
 
 ## 5. 渲染产物路径的语义变化（`project:save-video` 的配合）
 
@@ -349,7 +370,8 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 | `node:path` | `path`（默认导入） | 路径拼接、`path.dirname` / `path.resolve` / `path.basename` / `path.delimiter` |
 | `node:fs` | `fs`（默认导入） | 存在性判断、目录创建与删除、读写入口 HTML、裁剪产物大小校验 |
 | `node:child_process` | `spawn` | 启动 hyperframes CLI 渲染子进程；也被 `runCapture()` 用于量时间轴 / ffprobe / ffmpeg |
-| `./hfEnv` | `* as hfEnv` | `BUILTIN_RESOURCES`（`ffmpeg` / `ffprobe` / `chromeShell`）、`findHyperframesCli`、`findNode`（返回 `{ cmd, env }`）、`findFfmpegBin`、`isHyperframesComposition`，以及 GSAP 本地化的 `localizeGsapHtml` / `referencesLocalGsap` / `copyGsapIntoProject` |
+| `./hfEnv` | `* as hfEnv` | `BUILTIN_RESOURCES`（`ffmpeg` / `ffprobe` / `chromeShell`）、`findHyperframesCli`、`findNode`（返回 `{ cmd, env }`）、`findFfmpegBin`、`isHyperframesComposition`、**`coreSource`（本轮新增：`./core.js` 的真源路径）**，以及随包前端库本地化的 `localizeVendorHtml` / `ensureVendorFiles` / `hoistVendorRefs` |
+| `./coreLib` | `* as coreLib` | **本轮新增**：`syncCoreTo(projDir, coreSrc)` —— 渲染前把共享绘制助手按 `CORE_VERSION` 同步进项目（只同步、不写 `core-lib.log`） |
 | `./runtime` | `* as runtime` | `missingPacks(RENDER_PACKS)` / `packSizeText(lack)` 做缺包纯校验 |
 | `./settings` | `pickRenderOverride` | 渲染档位（质量 / 帧率）白名单校验，与 `projects.ts` 复用同一实现 |
 | `../shared/constants` | `CANVAS_SIZES`、`DEFAULT_CANVAS`、`RENDER_CANVASES` | 成片画布：`RENDER_CANVASES` 做白名单校验、`DEFAULT_CANVAS` 做缺省、`CANVAS_SIZES` 里的宽高写进舞台 `data-width` / `data-height` 并进日志留痕 |
@@ -371,20 +393,21 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 ## 7. 注意事项与实现要点
 
 - **渲染根 = HTML 所在的项目目录**：`cwd = path.dirname(htmlPath)`。因此「HTML 必须放在项目目录里」从「约定」升级为「渲染能工作的前提」——`-c` 的入口必须落在项目根之内、媒体 `src` 也按项目根解析。传一个项目外的 HTML 路径进来，行为（尤其是媒体解析）不再有保证。
-- **`.render-tmp/` 是项目内的临时目录**：渲染前先 `rmSync` 清残留、渲染入口写在 `<tmpDir>/entry.html`、裁剪产物写在 `<tmpDir>/media/`，渲染收尾（`close` 事件，无论成败）整体删除。若删除失败（文件被占用）会留着，下次渲染前会被先删掉。**它不在 `index.ts` 迁移老数据的白名单 `OWN_DATA_ENTRIES` 里**（那是 Chromium profile 之外的业务条目清单，与旧 `hf-projects` 的处置相同）。
+- **`.render-tmp/` 是项目内的临时目录**：渲染前先 `rmSync` 清残留、渲染入口写在 `<tmpDir>/entry.html`、裁剪产物写在 `<tmpDir>/media/`，渲染收尾（`close` 事件，无论成败）整体删除。若删除失败（文件被占用）会留着，下次渲染前会被先删掉。**量时间轴的探针副本不在它里面**——落在项目根、用完即删（章节脚本 `./pages/cNN.js` 只有在项目根下才解析得到）。**它不在 `index.ts` 迁移老数据的白名单 `OWN_DATA_ENTRIES` 里**（那是 Chromium profile 之外的业务条目清单，与旧 `hf-projects` 的处置相同）。
 - **`hf-projects` 已下线**：`userData/hf-projects/` 这条渲染临时目录**不再产生**（磁盘上残留的 244 MB 旧目录已人工删除）；`index.ts` 的 `OWN_DATA_ENTRIES` 注释里也只把它当作历史遗留提及。
-- **无限循环的判据只在入口拦、不改页面**：那道守卫是一行静态正则（`/repeat\s*:\s*(?:-1|Infinity)\b/i`），命中就返回一句话拒绝，**不修 HTML、不改项目文件、不写任何日志目录**；要真正修好只能让用户在「HTML生成」页把循环改成有限次数（或重新生成）。**不要**把它挪到 `prepareEntry()` 里或改成「自动把 `-1` 替换成某个次数」——次数该由内容与目标秒数决定，应用无从猜（提示词侧只负责让模型别写出这种循环）。
+- **无限循环的判据只在入口拦、不改页面**：那道守卫是一组静态正则（`/repeat\s*:\s*(?:-1|Infinity)\b/i`，同一表达式扫 `index.html` 与章节脚本 `pages/cNN.js`），命中就返回一句话拒绝，**不修 HTML、不改项目文件、不写任何日志目录**；要真正修好只能让用户在「HTML生成」页把循环改成有限次数（或重新生成）。**不要**把它挪到 `prepareEntry()` 里或改成「自动把 `-1` 替换成某个次数」——次数该由内容与目标秒数决定，应用无从猜（提示词侧只负责让模型别写出这种循环）。
 - **成片时长要「写对地方」才生效，规则仍是 `max(声明, 最长媒体)`**：CLI 的 `compileForRender` 只读**舞台元素的 `data-duration`**（读不到就向浏览器探时间轴，见 §1.1）——所以「把时长写进 `<html>`」等于没写，`prepareEntry()` 必须用 `applyStageDuration()` 写到**第一个带 `data-composition-id` 的元素**上才算真声明。生效后还有两条推论：① 声明（或实测值）比最长媒体长时，仍要**同时**把超长媒体裁到同长（声明 5 秒而素材 225 秒，成片仍是 225.4 秒——声明被最长媒体顶掉；声明 120 秒则精确渲成 120.000 秒，本项目实测）；② **声明比时间轴长会把片子拉长到声明值、比时间轴短会按时长截断**——这是上一轮的口径变化，用户能直接看到（以前没写到舞台时，成片长度其实由页面 GSAP 时间轴决定）。
 - **裁剪是「只裁副本」**：`ffmpeg -c copy -t <target>` 写进 `.render-tmp/media/`，项目里的原始素材一动不动，入口 HTML 里把 `src` 改写成 `./media/<文件名>`。**`-c copy` 不会消除 CLI 的 sparse keyframes 警告**（关键帧间隔原样保留，本项目实测 8.3 秒）——要真正解决得重编码，本轮没做。
 - **`0.25` 秒容差**：`dur <= target + 0.25` 就跳过裁剪（容器时长与关键帧对齐会有小误差，差这一点不值得重裁）。
 - **裁媒体失败只降级、不阻断**：单条媒体失败写日志继续，整个 `prepareEntry()` 抛错才会让 `video:render` 直接返回「准备渲染入口失败：…」。
-- **量时间轴依赖 chrome-headless-shell，且共用一个解析结果**：`chrome` 参数取 `env.PRODUCER_HEADLESS_SHELL_PATH`（来自 `hfEnv.BUILTIN_RESOURCES.chromeShell`）。拿不到（`null`）时装不出这个环境变量，`prepareEntry()` 就跳过 ②、直接走 ③，日志写「chrome=无」。**历史故障正是「`chromeShell` 被缓存的 `null` 永久钉住」**（见 [hfEnv.ts.md](./hfEnv.ts.md) 的 `findChromeShell()`），修正缓存语义后此处才能量到时间轴。
+- **量时间轴依赖 chrome-headless-shell，且共用一个解析结果**：`chrome` 参数取 `env.PRODUCER_HEADLESS_SHELL_PATH`（来自 `hfEnv.BUILTIN_RESOURCES.chromeShell`）。拿不到（`null`）时装不出这个环境变量，`prepareEntry()` 就跳过 ②、直接走 ③，日志写「chrome=无」。**历史故障正是「`chromeShell` 被缓存的 `null` 永久钉住」**（见 [hfEnv.ts.md](./hfEnv.ts.md) 的 `findChromeShell()`），修正缓存语义后此处才能量到时间轴。**探针副本落在项目根、用未抬级原文**：章节脚本按 `./pages/cNN.js` 写，副本放进 `.render-tmp/` 会 404、时间轴量回 0。
 - **量测入口的写法必须常量**：`measureTimelineDuration()` 把量测脚本拆成 `'…</scr' + 'ipt>'` 拼接，避免这段字符串里出现真正的 `</script>` 提前闭合外层脚本。
-- **`writeTrimLog()` 的落点是 `userData/video-duration.log`**（不是项目目录、也不是 `runtime.log`）：「片子为什么这么长」这类问题必须留痕可查——裁定结果、媒体裁剪、跳过原因、失败原文都往这里写；**写日志失败被静默忽略**，不影响渲染。
+- **渲染前会按版本同步 `./core.js`（本轮新增）**：页面引了共享绘制助手时，`hfEnv.coreSource()` 取真源、`coreLib.syncCoreTo(projDir, src)` 按 `CORE_VERSION` 覆盖项目里那份，覆盖 / 失败都写进 `video-duration.log`（`core.js 版本 a → b（渲染前按版本同步）`）。**它不改入口 HTML、不参与本地化**：`./core.js` 的引用形态固定，页面直接用项目根那份，抬级只针对 `./gsap.min.js` 这类随包库。同步失败不拦渲染（旧版仍可用）。
+- **`writeTrimLog()` 的落点是 `userData/video-duration.log`**（不是项目目录、也不是 `runtime.log`）：「片子为什么这么长」这类问题必须留痕可查——裁定结果、媒体裁剪、跳过原因、失败原文都往这里写；**写日志失败被静默忽略**，不影响渲染。**本轮起 `core.js` 的同步留痕也走这里**（它是「这次成片用了哪个版本的助手」的唯一记录；`projects.ts` 那边另有一份 `userData/core-lib.log`）。
 - **渲染入口是临时物、成品不是**：`close` 里只清 `.render-tmp/`；成品 `video/output.mp4` 直接长在项目里，**不存在「从工作目录搬回来」这一步**（旧实现才有）。
 - **画布与档位是两套东西、下发路径也不同**：`canvas`（`landscape` / `portrait` / `square`）是**项目属性**，决定 composition / 成片尺寸，由 `applyCanvasSize()` 写进舞台的 `data-width` / `data-height`（成片宽高的真正来源）、由 `applyCanvasDeclaration()` 写进入口的 `<html data-resolution>`（页面自描述，CLI 渲染链路不读）；`quality` / `fps` 是**渲染档位**，经 `pickRenderOverride()` 拼成 `--quality` / `--fps`。两者一起随载荷下发，但**画布绝不「缺省不传」**（缺省即落 `DEFAULT_CANVAS`；不传就写不出舞台宽高、CLI 兜底 1080×1920 竖屏），而档位缺省就是不传、交给 CLI 默认。**也不要改用 `--resolution` 去改画布**：它只做 DPR 上采样，要求宽高比与 composition 一致且缩放为整数倍。
 - **档位只透传白名单值**：`pickRenderOverride(payload)` 过滤掉缺省与非法字段，两个参数都只在**显式给出**时才拼进 CLI 命令，因此「不传档位」与「传默认档位」在 CLI 侧等价（都走 `standard` / `30`）；白名单取值（`draft/standard/high`、`24/30`）与 `shared/types.ts` 的 `RenderQuality` / `RenderFps` 及渲染层 `utils/render.ts` 必须保持一致。
-- **本文件不做 GSAP 本地化的兜底判断、也不做 BGM 注入**：本地化那一步只改文本、按需复制到项目目录，**不判断 `copyGsapIntoProject()` 的返回值**（与 `projects.ts` 作者态三处「复制失败即退回 CDN」不同）；`<audio id="myv-bgm">` 完全由 `projects.ts` 的 `applyBgmToHtml()` 在生成 / 修改 / 保存 / 设置音频时写进 `index.html`，渲染时随项目内的 HTML 一起被 CLI 读到，**音轨提取与混入 MP4 全部发生在 HyperFrames CLI 内部**（trace 阶段 `audio_process`）。因此「页面有音轨但成片没声音」应查注入标签是否存在，而不是查本模块。
+- **本文件不做随包库本地化的兜底判断、也不做 BGM 注入**：本地化那一步只改文本（`localizeVendorHtml`）、按需复制到项目目录（`ensureVendorFiles`），**不判断 `ensureVendorFiles()` 的返回值**（与 `projects.ts` 作者态三处「文件未就位即退回 CDN」不同）；`<audio id="myv-bgm">` 完全由 `projects.ts` 的 `applyBgmToHtml()` 在生成 / 修改 / 保存 / 设置音频时写进 `index.html`，渲染时随项目内的 HTML 一起被 CLI 读到，**音轨提取与混入 MP4 全部发生在 HyperFrames CLI 内部**（trace 阶段 `audio_process`）。因此「页面有音轨但成片没声音」应查注入标签是否存在，而不是查本模块。
 - **`dialog:open-html` 是保留能力、当前无调用方**：`hfTools.openHtml()` 仍暴露在 preload 上，但渲染层已不再调用；不要据此以为存在「手动选 HTML 渲染」的界面入口。
 - **合规校验是硬门槛**：`data-composition-id`、`__timelines`、`gsap` 三者缺一不可，失败时额外回传 `compatible: false` 供界面区分「环境错误」与「HTML 不合规」。**无限循环守卫排在它之后**（先把「不是 composition」这种更根本的问题报出去，再看循环写法）。
 - **Node 的解析与「怎么跑」都交给 `hfEnv.findNode()`**：模块自身不拼 node 路径、不假定可执行文件叫什么名字。`cmd` 在复用 Electron 内嵌 Node 时就是 `process.execPath`（绝对路径，天然规避 nvm shim / WindowsApps alias 下 `spawn('node')` 的 ENOENT），`env` 里带 `ELECTRON_RUN_AS_NODE=1` 并**必须**用 `{ ...process.env, ...nodeRt.env }` 合并；系统 Node 途径 `env` 为空对象。`child.on('error')` 文案里也会带上 `nodeRt.cmd` 便于排查。

@@ -13,7 +13,7 @@
         <div class="hgen-row"><label class="sel-label" style="flex:none;width:auto">旁白</label>
           <textarea v-model="s.narration" class="hgen-subtitle" spellcheck="false" style="height:84px" placeholder="该场景的旁白/配音文本，字幕将据此生成…"></textarea></div>
         <div class="hgen-row"><label class="sel-label" style="flex:none;width:auto">画面分镜</label>
-          <textarea v-model="s.visual" class="hgen-subtitle ct-visual" spellcheck="false" placeholder="描述该场景呈现的画面，如：深空背景，标题从上方浮入…"></textarea></div>
+          <textarea v-model="s.visual" class="hgen-subtitle ct-visual" spellcheck="false" placeholder="一行写一个镜头，行首带时长（回车换行写下一个），如：&#10;2.5s 深空背景，标题从上方浮入&#10;2.0s 标题缩小上移，中央浮出三个圆环…"></textarea></div>
         <div class="hgen-row">
           <label class="sel-label" style="flex:none;width:auto">时长提示(秒)</label>
           <input v-model="s.durHint" class="hgen-input" style="flex:none;width:110px" placeholder="可空" />
@@ -29,7 +29,7 @@
       <span class="ct-save" :class="'is-' + saveState">{{ saveText }}</span>
       <button v-if="saveState === 'error'" class="hf-btn" @click="flushSave">重试</button>
     </div>
-    <div class="hgen-tip">场景按顺序播放：<code>旁白</code> 将作为配音文本、并派生字幕；<code>画面分镜</code> 描述该场景对应的视觉画面（供 HTML 生成引用）；<code>时长提示</code>（秒）可空。改动会自动保存到项目，无需手动保存。</div>
+    <div class="hgen-tip">场景按顺序播放：<code>旁白</code> 将作为配音文本、并派生字幕；<code>画面分镜</code> 一行写一个镜头、行首写该镜头时长（如 <code>2.5s</code>），HTML 生成时按这些镜头排节奏；<code>时长提示</code>（秒）可空。改动会自动保存到项目，无需手动保存。</div>
   </div>
 </template>
 
