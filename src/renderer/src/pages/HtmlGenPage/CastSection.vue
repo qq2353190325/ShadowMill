@@ -110,6 +110,22 @@
             用水彩笔刷（p5.brush；不勾则用 Canvas 2D 平涂）
           </label>
         </div>
+
+        <!-- 画角色的过程与失败原因就放在弹窗里：页面那条状态条在弹窗**后面**，看不见；
+             而 onHtmlProgress 在 preload 里是单订阅（重复注册只替换回调），本组件不能再订一遍，
+             所以由父页把 status / thinkText 传下来 -->
+        <div v-if="busy || createError" class="hf-status" :class="{ 'hf-error': !!createError }">
+          <template v-if="createError">
+            <div>{{ createError }}</div>
+            <div class="hgen-tip" style="margin-top:6px">
+              完整调用记录（含模型的原始回复）：<code>userData/html-agent/cast.jsonl</code>
+            </div>
+          </template>
+          <template v-else>
+            <div>正在画角色…{{ thinkText ? '（模型思考中，已收到 ' + thinkText.length + ' 字）' : '' }}</div>
+            <div v-if="status">{{ status }}</div>
+          </template>
+        </div>
       </div>
       <div class="hf-modal-foot">
         <button class="hf-btn" @click="closeCreate">取消</button>
@@ -131,8 +147,10 @@ import type { CastLibraryMember, ProjectCastMember } from '@shared/types'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 
-// prompt 是 v-model:prompt 的接收端：本组件只写不读（需求描述由父页维护）
-defineProps<{ prompt?: string }>()
+// prompt 是 v-model:prompt 的接收端：本组件只写不读（需求描述由父页维护）；
+// status / thinkText 是父页那份「HTML 生成进度」的只读投影——弹窗里的进度与失败原因靠它显示
+// （onHtmlProgress 是单订阅，本组件自己再订一次会把父页那条顶掉）
+defineProps<{ prompt?: string; status?: string; thinkText?: string }>()
 const emit = defineEmits<{ (e: 'update:prompt', v: string): void }>()
 
 const list = computed<ProjectCastMember[]>(() => (appState.project && appState.project.cast) || [])
@@ -218,19 +236,25 @@ async function onPromote(m: ProjectCastMember): Promise<void> {
 // ===== 新建角色（一次模型调用，与生成 HTML 无关） =====
 const createOpen = ref(false)
 const draft = ref({ title: '', desc: '', units: 8, watercolor: false })
+// 失败原因常驻在弹窗里：原来只发一条 2.8 秒的 toast，用户看不到就等于没有反馈
+// （现网实测：校验的假阳性把一次成功的生成判成失败，用户只看到按钮变回原样）
+const createError = ref('')
 const canCreate = computed(() => !!(draft.value.title.trim() || draft.value.desc.trim()))
 
 function openCreate(): void {
   createOpen.value = true
+  createError.value = ''
   draft.value = { title: '', desc: '', units: 8, watercolor: false }
 }
 function closeCreate(): void {
   createOpen.value = false
+  createError.value = ''
 }
 
 async function onCreate(): Promise<void> {
   if (busy.value || !canCreate.value) return
   busy.value = true
+  createError.value = ''
   const res = await window.projectTools.newCast(appState.currentName, {
     title: draft.value.title.trim(),
     desc: draft.value.desc.trim(),
@@ -239,7 +263,7 @@ async function onCreate(): Promise<void> {
   }).catch(() => null)
   busy.value = false
   if (!res || !res.ok) {
-    toast((res as { message?: string } | null)?.message || '新建角色失败')
+    createError.value = (res as { message?: string } | null)?.message || '新建角色失败（主进程没有返回原因，看 userData/html-agent/cast.jsonl）'
     return
   }
   await refreshProject()

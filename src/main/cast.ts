@@ -114,13 +114,19 @@ export function parseCastFiles(reply: string, fallbackId?: string): { files: { p
   return parseFileBlocksWith(reply, isCastPath, fallbackId ? castRelPath(fallbackId) : undefined)
 }
 
+// 真的 HTML 形状才拒：闭合标签（`</div>` / `</script`）与常见多字母标签名。
+// ⚠ 以前这里写的是 `/<`（出现一个小于号就算），于是 `side < 0`、`i < 3` 这类比较全被误判成
+// 「出现了 HTML 标签」——现网实测踩过一次（模型写的角色代码里有 4 处 `side < 0`，直接判失败）。
+// 比较运算的 `<` 后面跟的是数字/空格/变量名，不会形成 `</xxx>` 或 `<(div|span|…)\b` 这种形状。
+const HTML_TAG_RE = /<\/[a-z][a-z0-9-]*\s*>|<!doctype|<(?:html|head|body|div|span|script|style|canvas|svg|img|video|audio|button|input|table|ul|ol|li)\b/i
+
 // 角色代码的硬校验（写盘前）：必须是"往 __cast 上挂一个函数"，别的形式章节用不了。
 export function validateCastCode(code: string): string | null {
   const c = String(code || '')
   if (!c.trim()) return '角色代码是空的'
   if (!/__cast/.test(c)) return '角色代码没有登记到 window.__cast 上：需要 window.__cast["hero"] = function (x, y, u, o) { … }'
   if (!/function\s*\(|=>/.test(c)) return '角色代码里没有可调用的绘制函数'
-  if (/</.test(c.replace(/<\/script/gi, ''))) {
+  if (HTML_TAG_RE.test(c)) {
     // 角色是纯绘制代码，出现标签基本就是模型把 HTML 混进来了（</script 会截断页面）
     return '角色代码里出现了 HTML 标签（角色文件只能是 JS）'
   }
