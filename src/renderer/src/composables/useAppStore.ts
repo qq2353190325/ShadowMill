@@ -2,7 +2,7 @@
 // 模块级 reactive 单例；localStorage 键名见 @renderer/constants（STORAGE_KEY_PROJECT_CTX，
 // 结构不变，prod file:// 同源，上下文自动延续）。
 import { computed, reactive, ref } from 'vue'
-import type { ProjectMaterial, ProjectMeta, RenderCanvas, RenderOverride } from '@shared/types'
+import type { ProjectCastMember, ProjectChapter, ProjectMaterial, ProjectMeta, RenderCanvas, RenderOverride } from '@shared/types'
 import { STORAGE_KEY_PROJECT_CTX } from '@renderer/constants'
 import { normalizeCanvas, pickRenderOverride } from '@renderer/utils/render'
 
@@ -21,6 +21,10 @@ export interface ProjectState {
   audioFile: string
   // 项目素材库（图片 / 视频）：HTML 生成时勾选参与，结构见 @shared/types 的 ProjectMaterial
   materials: ProjectMaterial[]
+  // 项目角色（角色即项目素材，与单文件 / 章节化无关）：索引字段，代码在 <项目>/cast/<id>.js
+  cast: ProjectCastMember[]
+  // 章节化清单（章节模式下才有）：索引字段，代码在 <项目>/pages/cNN.js
+  chapters: ProjectChapter[]
   htmlExists: boolean
   videoExists: boolean
   subtitleCount: number
@@ -94,6 +98,10 @@ export async function refreshProject(): Promise<void> {
     videoPath: loaded.videoPath || '',
     audioFile: loaded.audioFile || '',
     materials: Array.isArray(loaded.materials) ? loaded.materials : [],
+    // 角色与章节是**索引字段**（主进程 project.json 里有就带回来）：不拷这两个，
+    // 「HTML生成」页的角色列表与章节列表会永远显示 0 个 / 空 —— 主进程写了盘、界面也不认
+    cast: Array.isArray(loaded.cast) ? loaded.cast : [],
+    chapters: Array.isArray(loaded.chapters) ? loaded.chapters : [],
     htmlExists: !!(entry && entry.hasHtml),
     videoExists: !!(entry && entry.hasVideo),
     subtitleCount: loaded.subtitleCount || 0,
