@@ -1,4 +1,4 @@
-// src/main/vad.ts —— 能量 VAD 起止静音裁剪（纯函数、零依赖，供 whisper 转录与 test/vad-test.js 共用）
+// src/main/voice/vad.ts —— 能量 VAD 起止静音裁剪（纯函数、零依赖，供 whisper 转录与 test/vad-test.js 共用）
 // 原实现自 src/main/whisper.js 逐字抽取（Phase 3 转 TS 后 whisper.ts 改从这里 import）。
 // 约束：本模块只允许 erasable-only 语法（无 enum/namespace/参数属性），
 // 以便 Node 22+ 原生 type-stripping 直接运行（test/vad-test.js 动态 import）。

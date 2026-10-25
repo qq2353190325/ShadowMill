@@ -15,7 +15,7 @@ import * as projects from './projects'
 import * as settings from './settings'
 import * as runtime from './runtime'
 import { BUILTIN_RESOURCES } from './hfEnv'
-import { readWavSamples, vadTrimSegments, type VadSegment } from './vad'
+import { readWavSamples, vadTrimSegments, type VadSegment } from './voice'
 import { IPC } from '../shared/ipc'
 import { APP_USER_AGENT } from '../shared/constants'
 import type {
@@ -47,7 +47,10 @@ const WHISPER_MODELS: WhisperBuiltinModel[] = [
   { id: 'tiny-q8_0',  file: 'ggml-tiny-q8_0.bin',  label: 'tiny-q8_0',  sizeMB: 43.5, speed: '最快', desc: '极小体积量化模型（q8_0），速度最快，适合快速出稿、长音频粗剪与低配机器' },
   { id: 'base',       file: 'ggml-base.bin',       label: 'base',       sizeMB: 148,  speed: '快',   desc: '多语言基础模型（未量化），识别质量优于 tiny 档，适合日常转录' },
   { id: 'base-q5_1',  file: 'ggml-base-q5_1.bin',  label: 'base-q5_1',  sizeMB: 59.7, speed: '快',   desc: 'base 的 q5_1 量化版，体积约为 base 的四成，质量接近，适合常规字幕生成' },
-  { id: 'small-q8_0', file: 'ggml-small-q8_0.bin', label: 'small-q8_0', sizeMB: 264,  speed: '较慢', desc: 'small 的 q8_0 量化版，中文识别准确率明显提升，长音频推荐' }
+  { id: 'small-q8_0', file: 'ggml-small-q8_0.bin', label: 'small-q8_0', sizeMB: 264,  speed: '较慢', desc: 'small 的 q8_0 量化版，中文识别准确率明显提升，长音频推荐' },
+  { id: 'medium-q8_0',     file: 'ggml-medium-q8_0.bin',     label: 'medium-q8_0',     sizeMB: 823,  speed: '慢',   desc: 'medium 的 q8_0 量化版，粤语/中文识别明显优于 small，适合高精度字幕生成' },
+  { id: 'large-v3-turbo',  file: 'ggml-large-v3-turbo.bin',  label: 'large-v3-turbo',  sizeMB: 1611, speed: '较慢', desc: 'large-v3 蒸馏加速版，识别质量接近完整版但速度快约 3 倍，中文粤语首选' },
+  { id: 'large-v3-turbo-q8_0', file: 'ggml-large-v3-turbo-q8_0.bin', label: 'large-v3-turbo-q8_0', sizeMB: 875, speed: '较慢', desc: 'turbo 的 q8_0 量化版，体积近半而质量几乎无损，粤语识别最佳性价比' }
 ];
 // 下载源：优先国内可达镜像（hf-mirror.com，HuggingFace 官方仓库的国内镜像），规避 GitHub 直链超时
 const MODEL_BASE_URL = 'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/';
@@ -326,7 +329,7 @@ function fmtTsMs(sec: number): string {
 }
 
 // ===== 起止静音裁剪（VAD）=====
-// readWavSamples / vadTrimSegments 已抽至 src/main/vad.ts（纯函数，测试脚本直接复用）。
+// readWavSamples / vadTrimSegments 已抽至 src/main/voice/vad.ts（纯函数，测试脚本直接复用）。
 // 这里保留 toVadSamples（依赖 hfEnv.ffmpeg + userData 临时目录 + spawn）。
 
 // 取 16k 单声道 PCM 样本：原文件已是该格式直接读，否则经 ffmpeg 转临时 wav 再读；失败返回 null

@@ -1,8 +1,8 @@
-// src/main/systemVoices.ts
+// src/main/voice/systemVoices.ts
 // Qwen-TTS 非实时语音合成预设系统音色表（内置，来源于官方 voice 参数清单）
 // 字段：voice（作为合成接口的 voice 参数）/ desc（描述）/ langs（特色语种）/ series（支持模型系列）
 // 渲染层据此把音色下拉分为「系统音色」与「自定义音色」两类。
-import type { SystemVoice } from '../shared/types'
+import type { SystemVoice } from '../../shared/types'
 
 const SYSTEM_VOICES: SystemVoice[] = [
   { voice: 'Cherry', desc: '阳光积极、亲切自然小姐姐（女性）', langs: '普通话', series: ['instruct-flash', 'flash', 'tts'] },
@@ -55,7 +55,7 @@ const SYSTEM_VOICES: SystemVoice[] = [
   { voice: 'Kiki', desc: '甜美的港妹闺蜜（女性）', langs: '粤语', series: ['flash'] }
 ];
 
-// 按 voice 参数快速校验是否内置系统音色 —— 已移交给 voiceCatalog 的 providerOfSystemVoice()：
+// 按 voice 参数快速校验是否内置系统音色 —— 已移交给 catalog 的 providerOfSystemVoice()：
 // 音色现在是挂在厂家下面的，判断「是不是内置音色」等于判断「有没有哪个厂家认领它」，
 // 多厂家后这里按名字硬查一份全局表就会漏判别家的音色。
 

@@ -4,7 +4,7 @@
 //       saveVoiceProviderConfig / getUpdaterSettings
 //       以及 settings:get / settings:save / settings:save-render / settings:save-updater / settings:test IPC
 //       + whisper 当前模型档位与自定义模型列表（getWhisperModel / saveWhisperModel / getWhisperCustomModels / saveWhisperCustomModels）
-//       + 视频渲染档位的白名单校验（DEFAULT_RENDER / normalizeRenderOptions / pickRenderOverride，供 projects.ts / video.ts 复用）
+//       + 视频渲染档位的白名单校验（DEFAULT_RENDER / normalizeRenderOptions / pickRenderOverride，供 projects/ / video.ts 复用）
 //       + OpenAI SDK 懒加载入口（loadOpenAI，供 settings:test 与 agent/chat.ts 共用）
 // 依赖：app / ipcMain / fs / path（openai 为懒加载，不在启动路径上）
 import { app, ipcMain, dialog } from 'electron'
@@ -15,6 +15,7 @@ import { friendlyError } from '../shared/errors'
 import type {
   AppSettings,
   CustomModelConfig,
+  ReasoningEffort,
   RegisterCtx,
   RenderFps,
   RenderOptions,
@@ -29,7 +30,7 @@ import type {
   VoiceTTSConfig,
   WhisperCustomModel
 } from '../shared/types'
-import { DEFAULT_PROVIDER_KEY, providerByKey, type VoiceProviderDef } from './voiceCatalog'
+import { DEFAULT_PROVIDER_KEY, providerByKey, type VoiceProviderDef } from './voice/catalog'
 
 // ===== OpenAI SDK 懒加载（settings:test 与 agent/chat.ts 共用）=====
 // openai SDK 的模块图较大（require 实测 ~110ms，冷启动 + 杀软扫描时更久）。它只在**真正要发请求**的
@@ -54,7 +55,7 @@ function loadOpenAI(): any {
 const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.json')
 
 // ===== 视频渲染档位（普通用户只有质量 + 帧率两项）=====
-// 白名单只此一处：projects.ts（项目覆盖落盘）、video.ts（渲染参数）都复用这里，避免校验三处漂移。
+// 白名单只此一处：projects/（项目覆盖落盘）、video.ts（渲染参数）都复用这里，避免校验三处漂移。
 const DEFAULT_RENDER: RenderOptions = { quality: 'standard', fps: 30 };
 const RENDER_QUALITIES: RenderQuality[] = ['draft', 'standard', 'high'];
 const RENDER_FPS: RenderFps[] = [24, 30];
@@ -95,8 +96,9 @@ const defaultVoiceProviders = (): Record<string, VoiceProviderConfig> => ({
 });
 
 const DEFAULT_SETTINGS = (): AppSettings => ({
-  customModel: { baseUrl: '', modelId: '', apiKey: '', enabled: false },
-  // 语音服务（按厂家）：只有 API Key；模型与音色的对应关系写死在 voiceCatalog 的厂家目录里
+  // reasoningEffort 默认 high：与 DeepSeek 的接口默认一致，也保证「显式下发」而不是依赖端点的缺省行为
+  customModel: { baseUrl: '', modelId: '', apiKey: '', enabled: false, reasoningEffort: 'high' },
+  // 语音服务（按厂家）：只有 API Key；模型与音色的对应关系写死在 voice/catalog.ts 的厂家目录里
   voice: { active: DEFAULT_PROVIDER_KEY, providers: defaultVoiceProviders(), saveDir: '' },
   voiceProfiles: {}, // 本地音色映射：key 形如 "system:Cherry" / "custom:<voice_id>"，值为 { key, name, voice, targetModel, type }
   whisper: { modelId: '', customModels: [] }, // 语音识别（whisper.cpp）：modelId 为当前使用档位，customModels 为用户自定义模型条目
@@ -104,6 +106,19 @@ const DEFAULT_SETTINGS = (): AppSettings => ({
   // 应用自更新：feedUrl 留空即用打包时 app-update.yml 里的地址；autoCheck 为启动后静默检查
   updater: { feedUrl: '', autoCheck: true, skippedVersion: '' }
 });
+
+// customModel 规范化（白名单只此一处，settings:save 与 readSettings 共用）：
+//   ① 老 settings.json 没有 reasoningEffort 字段 → 落回默认 high（零迁移）；
+//   ② 手改文件写进不认识的值 → 也落回默认，免得把非法值当 reasoning_effort 发给端点（部分网关会直接 400）。
+const REASONING_EFFORTS: ReasoningEffort[] = ['none', 'low', 'high', 'max'];
+function normalizeCustomModel(raw: unknown): CustomModelConfig {
+  const base = DEFAULT_SETTINGS().customModel;
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw as Record<string, unknown> : {};
+  const effort = typeof src.reasoningEffort === 'string' ? src.reasoningEffort : '';
+  return Object.assign({}, base, src, {
+    reasoningEffort: REASONING_EFFORTS.includes(effort as ReasoningEffort) ? effort as ReasoningEffort : base.reasoningEffort
+  });
+}
 
 // 语音服务设置规范化 + 旧结构迁移。
 // 旧版是单厂家、无厂家字段的 voiceTTS: { apiKey, targetModel, saveDir }；这里把 **apiKey** 搬进
@@ -145,7 +160,7 @@ function readSettings(): AppSettings {
     const raw = JSON.parse(fs.readFileSync(settingsFile(), 'utf8'));
     const base = DEFAULT_SETTINGS();
     const out: AppSettings = {
-      customModel: Object.assign({}, base.customModel, (raw && raw.customModel) || {}),
+      customModel: normalizeCustomModel(raw && raw.customModel),
       voice: normalizeVoiceSettings(raw && raw.voice, raw && raw.voiceTTS),
       voiceProfiles: Object.assign({}, (raw && raw.voiceProfiles) || {}),
       whisper: Object.assign({}, base.whisper, (raw && raw.whisper) || {}),
@@ -325,11 +340,13 @@ function register(ctx?: RegisterCtx): void {
   ipcMain.handle(IPC.Settings.Save, (_event, payload?: { customModel?: Partial<CustomModelConfig> }) => {
     const raw = readSettings();
     const incoming = (payload && payload.customModel) || {};
-    raw.customModel = Object.assign({}, raw.customModel, {
+    raw.customModel = normalizeCustomModel({
       baseUrl: typeof incoming.baseUrl === 'string' ? incoming.baseUrl : '',
       modelId: typeof incoming.modelId === 'string' ? incoming.modelId : '',
       apiKey: typeof incoming.apiKey === 'string' ? incoming.apiKey : '',
-      enabled: !!incoming.enabled
+      enabled: !!incoming.enabled,
+      // 老界面（不带这个字段）保存时不把已选的思考强度冲回默认
+      reasoningEffort: typeof incoming.reasoningEffort === 'string' ? incoming.reasoningEffort : raw.customModel.reasoningEffort
     });
     writeSettings(raw);
     return { ok: true, settings: raw };

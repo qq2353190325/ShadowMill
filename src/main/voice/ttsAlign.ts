@@ -1,22 +1,22 @@
-// src/main/ttsAlign.ts
+// src/main/voice/ttsAlign.ts
 // 字幕配音（逐句对齐）：逐句 TTS 合成 → ffprobe 量时长 → 按模式对齐时间轴 → ffmpeg 装配整轨
 // 两种模式：
 //   audio-driven（重排字幕）：以实测每句时长重建字幕时间线，句间停顿按字幕原有时间间隔推算（放不下时用最小停顿），音频原样拼接
 //   timeline-driven（修正音频）：保持字幕时间，每句配音摆放到其字幕时间戳（句间补静音）；
 //     超时先 atempo 加速（上限 MAX_RATE），仍超则顺延后续句子并同步平移后续字幕时间
 // 提供：planModeA / planModeB / buildTrack + voice:synth-aligned / voice:align-cancel IPC
-// 依赖：voice(synthOne / resolveVoiceModel / voiceFriendlyError) / projects(parseSubtitle) /
+// 依赖：api(synthOne / resolveVoiceModel / voiceFriendlyError) / projects(parseSubtitle) /
 //       hfEnv(BUILTIN_RESOURCES.ffmpeg / ffprobe) / runtime(确保运行环境包已解包) / electron(app / ipcMain)
 import { app, ipcMain } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
-import { synthOne, resolveVoiceModel, voiceFriendlyError } from './voice'
-import { parseSubtitle, type SubtitleLine } from './projects'
-import { BUILTIN_RESOURCES } from './hfEnv'
-import * as runtime from './runtime'
-import { IPC } from '../shared/ipc'
-import type { AlignProgressPayload, RegisterCtx, VoiceAlignPayload } from '../shared/types'
+import { synthOne, resolveVoiceModel, voiceFriendlyError } from './api'
+import { parseSubtitle, type SubtitleLine } from '../projects'
+import { BUILTIN_RESOURCES } from '../hfEnv'
+import * as runtime from '../runtime'
+import { IPC } from '../../shared/ipc'
+import type { AlignProgressPayload, RegisterCtx, VoiceAlignPayload } from '../../shared/types'
 
 const MAX_RATE = 1.15; // atempo 加速上限（超过则顺延后续）
 const EPS = 0.05;      // 槽位判定容差（秒，吸收 atempo 帧粒度误差）

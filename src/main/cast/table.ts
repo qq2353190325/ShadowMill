@@ -1,14 +1,14 @@
-// src/main/cast.ts
+// src/main/cast/table.ts
 // 角色库（PDoomVideo 式「共享的绘制函数层」）：一章一个 JS 文件解决的是时间切分，
 // 而角色要解决的是**同一副长相在多章之间保持一致**——章节是互相隔离的 IIFE，作用域不共享，
 // 所以角色必须由骨架在章节脚本之前引入（与参考项目把 clawd.js / cast.js 放在 ch/*.js 之前同理）。
 //
-// 本文件只做：解析角色表 / 解析角色文件块 / 校验 / 读写 cast/<id>.js / 给提示词用的大纲文案。
-// 不调模型、不 import projects.ts（分工同 chapters.ts）。
+// 本文件只做：解析角色表 / 解析角色文件块 / 校验 / 读项目里的角色副本 / 给提示词用的大纲文案。
+// 不调模型、不 import projects/（分工同 chapters.ts）；**不写**角色代码（真源在全局角色库，见 library.ts）。
 import path from 'node:path'
 import fs from 'node:fs'
-import { parseFileBlocksWith } from './chapters'
-import type { ProjectCastMember } from '../shared/types'
+import { parseFileBlocksWith } from '../chapters'
+import type { ProjectCastMember } from '../../shared/types'
 
 const CAST_DIR = 'cast'
 // 角色 id 是**可读 slug**（不是序号）：角色是命名实体，「改这个角色」要能叫出名字。
@@ -82,8 +82,8 @@ const TABLE_PLAN_RE = /<<<PLAN>>>([\s\S]*?)<<<END\s*PLAN>>>/i
 const TABLE_FENCE_RE = /```(?:json)?\s*([\s\S]*?)```/i
 
 // 从回复里读角色表（认 CAST 块 / PLAN 块 / ```json 围栏 / 裸 JSON 四种写法，都要求里面是个带 cast 数组的对象）。
-// **生成流程已经不再使用它**：角色改为「项目素材」（手动新建 / 全局库导入，见 projects.ts 的 NewCast 与
-// castLibrary.ts），规划调用也不再产角色表。保留它是为了两条退路：① 将来允许模型在改稿里「顺手交一份角色表」；
+// **生成流程已经不再使用它**：角色改为「项目素材」（手动新建 / 全局库导入，见 projects/ 的 NewCast 与
+// library.ts），规划调用也不再产角色表。保留它是为了两条退路：① 将来允许模型在改稿里「顺手交一份角色表」；
 // ② 离线断言与人工排查要能解析历史回复。改动它时注意别把校验规则（normalizeCastList）写松。
 export function parseCastTable(reply: string): { cast: ProjectCastMember[] | null; error?: string } {
   const text = String(reply || '')
@@ -137,43 +137,9 @@ export function validateCastCode(code: string): string | null {
   return null
 }
 
-// ===== 读写角色文件 =====
-function castFilesOnDisk(dir: string): string[] {
-  try {
-    const d = path.join(dir, CAST_DIR)
-    if (!fs.existsSync(d)) return []
-    return fs.readdirSync(d).filter((f) => FILE_RE.test(CAST_DIR + '/' + f))
-  } catch (e) { return [] }
-}
-
-export function writeCastFiles(dir: string, cast: ProjectCastMember[], files: { path: string; code: string }[]): { written: string[]; removed: string[] } {
-  const castDir = path.join(dir, CAST_DIR)
-  fs.mkdirSync(castDir, { recursive: true })
-  const want = new Set(cast.map((m) => m.id + '.js'))
-  const written: string[] = []
-  for (const f of files) {
-    const name = path.basename(f.path)
-    if (!want.has(name)) continue
-    fs.writeFileSync(path.join(castDir, name), String(f.code).trim() + '\n', 'utf8')
-    written.push(name)
-  }
-  const removed: string[] = []
-  for (const name of castFilesOnDisk(dir)) {
-    if (want.has(name)) continue
-    try { fs.rmSync(path.join(castDir, name), { force: true }); removed.push(name) } catch (e) { /* ignore */ }
-  }
-  return { written, removed }
-}
-
-export function removeCastFiles(dir: string): string[] {
-  const castDir = path.join(dir, CAST_DIR)
-  const removed: string[] = []
-  for (const name of castFilesOnDisk(dir)) {
-    try { fs.rmSync(path.join(castDir, name), { force: true }); removed.push(name) } catch (e) { /* ignore */ }
-  }
-  return removed
-}
-
+// ===== 读项目里的角色副本 =====
+// 项目里的 <项目>/cast/<id>.js 是**产物副本**（由 library.ts 的 syncProjectCast 从全局角色库同步），
+// 所以这里只有"读"，**没有写**：角色代码的真源是库，「改画法」走 cast:recreate。
 export function readCastCode(dir: string, cast: ProjectCastMember[]): { id: string; name: string; code: string }[] {
   return cast.map((m) => {
     let code = ''

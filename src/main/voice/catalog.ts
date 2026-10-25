@@ -1,14 +1,14 @@
-// src/main/voiceCatalog.ts
+// src/main/voice/catalog.ts
 // 语音服务目录：**按厂家（厂商）组织**的模型表与系统音色表，是「主进程 + 渲染层」共用的唯一数据来源。
 //
 // 为什么单独一个文件：模型与音色天然属于某个厂家（千问的模型只能配千问的 Key、跑千问的端点），
-// 散在 voice.ts（模型表）与 systemVoices.ts（音色表）里时看不出这层归属，界面上也就只能给一个
+// 散在语音接口层（模型表）与 systemVoices.ts（音色表）里时看不出这层归属，界面上也就只能给一个
 // 平铺的「目标模型」下拉。这里把它们收进 VoiceProviderDef：一家 = 一条记录，含自己的
 // Key 提示 / 端点 / 克隆模型 / 默认合成模型 / 模型数组 / 音色数组。
 //
 // 加一家（比如字节、MiniMax 的 TTS）：在 VOICE_PROVIDERS 里加一条即可；各请求函数都按
-// 「模型或音色所属的厂家」取 apiBase 与 apiKey（见 voice.ts 的 providerOf* 用法），不写死单一端点。
-import type { SystemVoice, VoiceModel } from '../shared/types'
+// 「模型或音色所属的厂家」取 apiBase 与 apiKey（见 api.ts 的 providerFor / synthOne 用法），不写死单一端点。
+import type { SystemVoice, VoiceModel } from '../../shared/types'
 import { SYSTEM_VOICES } from './systemVoices'
 
 export interface VoiceProviderDef {

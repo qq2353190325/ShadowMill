@@ -13,7 +13,7 @@ const { spawnSync } = require('child_process');
 
 (async () => {
   // ===== 1. 加载 VAD 纯函数模块 =====
-  const vad = await import('../src/main/vad.ts');
+  const vad = await import('../src/main/voice/vad.ts');
 
   // ===== 2. 工具 =====
   const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'vadtest-'));

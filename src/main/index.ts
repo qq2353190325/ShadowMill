@@ -4,14 +4,14 @@
 //   hfEnv.ts     环境探测与 HyperFrames 资源定位（纯函数）
 //   settings.ts  设置存储（settings.json）+ settings:* IPC
 //   agent/       Agent 层（目录，5 文件）：chat.ts 通用对话传输 / chatLog.ts 对话记录读写 / html.ts HTML Agent / script.ts 内容脚本 Agent / index.ts 统一出口
-//   projects.ts  项目化流水线 + project:* IPC（含 copyAudioIntoProject，供 voice 引用）
-//   voice.ts     千问语音（音色管理/文字生音频）+ voice:* IPC
-//   ttsAlign.ts  字幕配音逐句合成与时间对齐 + voice:synth-aligned / voice:align-cancel IPC
+//   projects/  项目化流水线 + project:* IPC（含 copyAudioIntoProject，供 voice 引用）
+//   voice/       语音域（目录，10 文件）：catalog 厂家目录 / api 接口层 / cloneAudio 参考音频 / vad 静音裁剪 /
+//                ttsAlign 逐句对齐 / ipc 两组 voice:* 频道 / register 装配 / index 统一出口
 //   video.ts     预览 / HyperFrames 转视频 + dialog:open-html / video:* IPC
 //   whisper.ts   whisper.cpp 字幕转录 + whisper:* IPC
 //   updater.ts   应用自更新（electron-updater generic provider）+ update:* IPC
 //   runtime.ts   运行环境包（ffmpeg/hyperframes/whisper 解包到 userData）+ runtime:* IPC
-// 依赖图：settings ← agent(chat ← html/script) ← projects ← voice ← ttsAlign；hfEnv ← projects, voice, whisper, ttsAlign, video, runtime；updater ← settings；无环。
+// 依赖图：settings ← agent(chat ← html/script) ← projects ← voice(catalog ← api ← ipc)；hfEnv ← projects, voice, whisper, video, runtime；updater ← settings；无环。
 // 打包输出 out/main/index.js；preload 输出 out/preload/index.js；渲染层输出 out/renderer/。
 import { app, BrowserWindow, Menu, ipcMain, clipboard, protocol } from 'electron'
 import path from 'node:path'
@@ -23,7 +23,6 @@ import * as settings from './settings'
 import * as projects from './projects'
 import * as agent from './agent'
 import * as voice from './voice'
-import * as ttsAlign from './ttsAlign'
 import * as video from './video'
 import * as whisper from './whisper'
 import * as updater from './updater'
@@ -287,7 +286,7 @@ function resolveLegacy(action?: LegacyResolveAction): LegacyResolveResult {
 // 每行：ISO 时间 + 距**进程启动**的毫秒数 + 阶段；写盘用 appendFileSync（每次启动几行，<1ms），
 // 文件超过 64KB 自动清一次，避免长期使用无限增长。打点失败一律静默——它不能影响启动。
 // 路径在这里解析一次并缓存：userData 位置只跟随 package.json 的 name，运行期不会变，缓存是安全的
-// （projects.ts 里 projectsRoot() 之所以仍写成函数，是防将来有人重新引入 setPath 之类的改动）。
+// （projects/ 里 projectsRoot() 之所以仍写成函数，是防将来有人重新引入 setPath 之类的改动）。
 const BOOT_AT = Date.now() - Math.round(process.uptime() * 1000) // 进程启动时刻（用 uptime 反推，含 Electron 自身引导耗时）
 const STARTUP_LOG = path.join(USER_DATA_DIR, 'startup.log');
 function bootLog(stage: string): void {
@@ -304,16 +303,18 @@ bootLog('main module loaded');
 // ===== 预览文件协议 hgpreview://p/<encodeURIComponent(项目名)>/<相对路径> =====
 // dev 下渲染层来自 http://localhost，Chromium 会拦截 file:// iframe（Not allowed to load local resource），
 // 故 HTML 预览统一走本协议：主进程把 URL 路径映射回 userData\projects 下对应项目目录内文件。
-// 另有 `hgpreview://tts/<相对路径>` 一条路由，服务**项目外**的语音产物（见处理器的注释与 TTS_PREVIEW_DIRS）。
+// 另有 `?user=1` 一条路由（旧写法 `?tts=1` 仍认），服务**项目外**的 userData 产物
+// （语音合成结果 / 逐句对齐 / 角色预览页，见 USER_PREVIEW_DIRS）。
 // 须在 app ready 前声明特权（standard 保证相对路径解析、secure 对齐 file:// 的安全上下文行为）。
 protocol.registerSchemesAsPrivileged([
   { scheme: 'hgpreview', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
 ])
 
-// `hgpreview://tts/...` 允许读的 userData 子目录（白名单，只增不改语义）：
-//   tts-output —— 语音合成结果与「生成记录」列表里的历史音频
-//   voice      —— 逐句对齐的产物（voice/align-<时间戳>/xxx_aligned_*.wav 与 raw/*.wav）
-const TTS_PREVIEW_DIRS = ['tts-output', 'voice']
+// `?user=1` 允许读的 userData 子目录（白名单，只增不改语义）：
+//   tts-output   —— 语音合成结果与「生成记录」列表里的历史音频
+//   voice        —— 逐句对齐的产物（voice/align-<时间戳>/xxx_aligned_*.wav 与 raw/*.wav）
+//   cast-preview —— 角色预览页（角色只有全局一份，与项目无关，所以预览页不能落在项目目录里）
+const USER_PREVIEW_DIRS = ['tts-output', 'voice', 'cast-preview']
 
 // 预览协议用 MIME 表（直接读字节构造 Response 时必须显式给出，缺省 octet-stream 会被 Chromium 严格 MIME 检查拦下脚本）
 function previewMime(p: string): string {
@@ -448,22 +449,23 @@ function createWindow(): void {
 // hgpreview 的路由解析：把「一段路径」翻译成「一个允许读的绝对路径」，不允许就返回 null。
 // 抽成独立函数的两个原因：① 处理器里那段 try/catch 已经很挤；② 路由判定必须**只看 pathname 的段序**，
 //    而 `hgpreview://tts/...` 那种写法里 `tts` 落在 **host 位**（`new URL(url).pathname` 里根本没有它），
-//    拿 host 当段判会静默走错分支 ⇒ 这里改成显式查询标记 `?tts=1`，并保留 `p/tts/...` 旧写法兼容。
+//    拿 host 当段判会静默走错分支 ⇒ 这里改成显式查询标记 `?user=1`，并保留 `?tts=1` / `p/tts/...` 旧写法兼容。
 function resolveHgPreviewPath(rawUrl: string): { full: string; why: string } | null {
   let u: URL;
   try { u = new URL(rawUrl); } catch (e) { return null; }
   const segs = u.pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
   if (!segs.length) return null;
 
-  // `?tts=1` 是渲染层现用的写法；`/tts/...` 是当初设想的写法（`tts` 落在 host 位时 pathname 首段也是它），
-  // 留着兼容：两种都识别，免得将来有人手写 URL 时掉进项目分支找不着文件。
-  const isTts = u.searchParams.get('tts') === '1' || segs[0] === 'tts';
-  if (isTts) {
-    // 语音产物：`<userData 子目录>/<相对路径>`（对齐产物是多级的：voice/align-*/raw/*.wav）
+  // `?user=1` 是渲染层现用的写法（角色预览 / 语音产物）；`?tts=1` 是这条路由早期的写法，
+  // `/tts/...` 则是当初设想的路径写法（`tts` 落在 host 位时 pathname 首段也是它）——三种都识别，
+  // 免得将来有人手写 URL 时掉进项目分支找不着文件。
+  const isUserData = u.searchParams.get('user') === '1' || u.searchParams.get('tts') === '1' || segs[0] === 'tts';
+  if (isUserData) {
+    // userData 产物：`<userData 子目录>/<相对路径>`（对齐产物是多级的：voice/align-*/raw/*.wav）
     const rel = (segs[0] === 'tts' ? segs.slice(1) : segs).join('/');
     const cwd = app.getPath('userData');
     const top = rel.split('/')[0];
-    if (TTS_PREVIEW_DIRS.indexOf(top) < 0) return { full: '', why: 'not-in-whitelist:' + top };
+    if (USER_PREVIEW_DIRS.indexOf(top) < 0) return { full: '', why: 'not-in-whitelist:' + top };
     const dir = path.join(cwd, top);
     const full = path.resolve(cwd, rel);
     if (full !== dir && !full.startsWith(dir + path.sep)) return { full: '', why: 'traversal' };
@@ -521,7 +523,7 @@ app.whenReady().then(() => {
   // 对话记录要写项目目录，故把 projects.projectDir 注入进去（agent 不反向 import projects）
   agent.registerScript(projects.projectDir)
   voice.register(ctx)
-  ttsAlign.register(ctx)
+  voice.registerAlign(ctx)
   video.register(ctx)
   whisper.register(ctx)
   updater.register(ctx)

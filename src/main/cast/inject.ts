@@ -1,4 +1,4 @@
-// src/main/castInject.ts
+// src/main/cast/inject.ts
 // 把「共享绘制助手 + 项目角色」注入到**模型写的单文件 index.html** 里。
 //
 // 为什么需要注入：章节模式的骨架由应用生成，直接写 script 标签就行；而单文件模式的 HTML 是模型

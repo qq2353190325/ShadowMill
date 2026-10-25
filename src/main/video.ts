@@ -375,13 +375,13 @@ function register(ctx?: RegisterCtx): void {
     // rewriteAssetPath / join(projectDir, src)），而渲染前要改写 GSAP 引用、注入 BGM，不能动用户原件。
     // 现在两者都不需要复制：
     //   · 随包前端库本地化幂等（本文件下面那步），产物就是项目目录里的 gsap.min.js / p5.min.js 等；
-    //   · BGM 注入本来只写 index.html（projects.ts 的 applyBgmToHtml），渲染时不需要再动；
+    //   · BGM 注入本来只写 index.html（projects/ 的 applyBgmToHtml），渲染时不需要再动；
     //   · 渲染入口写在项目内一个临时子目录里（CLI 要求入口必须在项目根之内），媒体用 ../ 回退引用，
     //     实测 CLI 能正常解析（2026-10 验证：4 秒合成就地渲染成功、素材与 gsap 均从项目内读到）。
     // 好处：不再复制 200MB+ 素材、不再留几百 MB 的 hf-projects 工作目录、成品直接生成在项目里。
     const projDir = path.dirname(htmlPath);
     // 章节模式的页面引了 ./core.js（共享绘制助手）：渲染前按版本同步一次。
-    // 与 projects.ts 的 syncCoreLib 同一份逻辑（这里只同步、不写日志），保证「应用升级后第二次渲染就吃到新版」。
+    // 与 projects/ 的 syncCoreLib 同一份逻辑（这里只同步、不写日志），保证「应用升级后第二次渲染就吃到新版」。
     try {
       const coreSrc = hfEnv.coreSource();
       if (coreSrc && /src=["'](?:\.\/)?core\.js["']/i.test(raw)) {

@@ -309,7 +309,7 @@ function vendorSource(lib: VendorLib): string | null {
 
 // 共享绘制助手 core.js 的真源路径（应用内置、与 vendor 同一套定位规则；不存在返回 null）。
 // 它**不进 VENDOR_LIBS**：那张表里的库在「导出单个 HTML」时会被换回公共 CDN 地址，
-// 而 core.js 是我们自己的文件、没有 CDN 形态，导出时必须**内联**（见 projects.ts 的 DownloadHtml）。
+// 而 core.js 是我们自己的文件、没有 CDN 形态，导出时必须**内联**（见 projects/ 的 DownloadHtml）。
 function coreSource(): string | null {
   for (const base of [path.join(app.getAppPath(), 'vendor'), path.join(process.resourcesPath || '', 'vendor')]) {
     try {

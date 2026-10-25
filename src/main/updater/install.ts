@@ -126,7 +126,18 @@ export function bindBusyTracking(): void {
   ipcMain.on(IPC.Whisper.Progress, (_e, d: any) => { flags.busy = !!(d && (d.stage === 'downloading' || d.stage === 'loading' || d.stage === 'transcribing')) })
   ipcMain.on(IPC.Video.Progress, () => { flags.busy = true })
   ipcMain.on(IPC.Voice.AlignProgress, (_e, d: any) => { flags.busy = !!(d && (d.stage === 'synth' || d.stage === 'assemble')) })
-  ipcMain.on(IPC.Project.HtmlProgress, (_e, d: any) => { flags.busy = !!(d && d.stage !== 'done') })
+  // HTML 生成 / 修改 / 画角色现在**可以并行**（一条频道 + 按 taskId 分发，见 preload 的 onTaskProgress），
+  // 所以不能再用「最后一条进度是不是 done」判忙——先结束的那个会把忙清掉、安装器就会在生成中途动手。
+  // 改成「活动任务集合非空」才算忙：某个任务 done 只从集合里摘掉它自己。
+  // 没带 taskId 的推送（不该再有）退回老语义，免得漏一条就永远忙。
+  const htmlTasks = new Set<string>()
+  ipcMain.on(IPC.Project.HtmlProgress, (_e, d: any) => {
+    const id = d && typeof d.taskId === 'string' ? d.taskId : ''
+    if (!id) { flags.busy = !!(d && d.stage !== 'done'); return }
+    if (d.stage === 'done') htmlTasks.delete(id)
+    else htmlTasks.add(id)
+    flags.busy = htmlTasks.size > 0
+  })
 }
 
 // 供 register() 与主进程 index.ts 读的两个只读出口

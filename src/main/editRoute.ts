@@ -7,7 +7,7 @@
 // 它自己点名的那一两份源码，用户说「把第 3 章改慢点」时就只发第 3 章。
 // 代价是多一次调用（路由调用输出很短、很便宜）。
 //
-// 本文件只做解析与校验：不调模型、不读文件（读文件由 projects.ts 做）。
+// 本文件只做解析与校验：不调模型、不读文件（读文件由 projects/ 做）。
 export interface EditTargets {
   // 要改的项目内相对路径（pages/cNN.js 或 cast/<id>.js），已过滤成 allowed 里的合法项
   paths: string[]
