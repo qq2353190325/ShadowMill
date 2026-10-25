@@ -4,7 +4,7 @@
 
 - **所在目录**：src/main/
 - **类型**：设置存储模块（settings.json）
-- **规模**：452 行
+- **规模**：469 行（上一版 452 行，本轮 **+17 行**：`customModel` 默认值补 `reasoningEffort`、新增 `REASONING_EFFORTS` 白名单与 `normalizeCustomModel` 规范化函数、`settings:save` 的入参改为五个字段）
 - **对外导出**：`register`、`readSettings`、`writeSettings`、`loadOpenAI`、`isPristineSettings`、`DEFAULT_RENDER`、`normalizeRenderOptions`、`pickRenderOverride`、`getCustomModel`、`getVoiceSettings`、`getVoiceProviderConfig`、`saveVoiceProviderConfig`、**`saveVoiceSaveDir`**、`getUpdaterSettings`、`saveUpdaterSettings`、`getWhisperModel`、`saveWhisperModel`、`getWhisperCustomModels`、`saveWhisperCustomModels`、`getVoiceProfiles`、`saveVoiceProfile`、`deleteVoiceProfile`、`DEFAULT_SETTINGS`（原 `getVoiceConfig` 已删除）
 
 ## 1. 作用与职责
@@ -35,13 +35,15 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | `DEFAULT_RENDER` | `RenderOptions` | 内置默认渲染档位常量 `{ quality: 'standard', fps: 30 }`；导出供其它模块对齐默认值（`projects.ts` / `video.ts` 经 `pickRenderOverride` 使用） |
 | `normalizeRenderOptions` | `(raw: unknown, fallback?: RenderOptions) => RenderOptions` | **完整档位**规范化：非法/缺省字段回退 `fallback`（默认 `DEFAULT_RENDER`），返回 `{ quality, fps }` 两项齐全的对象 |
 | `pickRenderOverride` | `(raw: unknown) => RenderOverride` | **覆盖**规范化：只保留显式给出的合法字段（`quality` ∈ `draft/standard/high`、`fps` ∈ `24/30`），没给 ≠ 要默认值 |
-| `readSettings` | `() => AppSettings` | 读取并解析 settings.json，与默认值做浅合并；任何异常都回退默认值 |
+| `REASONING_EFFORTS` | `ReasoningEffort[]` | **`['none', 'low', 'high', 'max']`**——思考强度白名单（**不导出**）；`normalizeCustomModel` 用它校验，取值真源在 `src/shared/types.ts` 的 `ReasoningEffort` |
+| `normalizeCustomModel` | `(raw: unknown) => CustomModelConfig` | **`customModel` 唯一的白名单**（**不导出**，`settings:save` 与 `readSettings` 共用）：以默认值为底、以文件 / 入参内容覆盖，`reasoningEffort` 不在 `REASONING_EFFORTS` 里就落回默认 `high` |
+| `readSettings` | `() => AppSettings` | 读取并解析 settings.json，与默认值做浅合并（`customModel` 过 `normalizeCustomModel` 白名单）；任何异常都回退默认值 |
 | `loadOpenAI` | `() => any \| null` | **openai SDK 懒加载入口**：首次调用才 `require('openai')` 并取 `mod.default \|\| mod`；成功返回可 `new` 的构造函数，失败/形态不对返回 `null`（调用方落到 fetch 兜底分支）。带 `openaiLoadTried` 一次性标志，失败不重试 |
 | `writeSettings` | `(s: AppSettings) => void` | 先 `mkdirSync(userData, { recursive: true })`，再以 `JSON.stringify(s, null, 2)` 写盘 |
 | `isPristineSettings` | `(file: string) => boolean` | 判定**指定**的 settings.json 是否还是「出厂状态」（用户在这个位置什么都没配过）：`true` = 可以安全被老配置覆盖。文件不存在 / JSON 损坏 / 顶层不是对象一律 `true`。判定字段与取舍见 §3.5 |
 | `getCustomModel` | `() => CustomModelConfig` | 返回 `settings.customModel`，缺失时退回默认值 |
 | `getVoiceSettings` | `() => VoiceSettings` | 返回归一化后的 `voice` 段（`{ active, providers, saveDir }`） |
-| `getVoiceProviderConfig(key?)` | `(string?) => { key, config, def }` | 取某个厂家的配置：`config` 是该厂家已保存的 **`{ apiKey }`**（**已无 `defaultModel`**）、`def` 是 `voiceCatalog` 里的厂家定义；`key` 缺省 = active 厂家 |
+| `getVoiceProviderConfig(key?)` | `(string?) => { key, config, def }` | 取某个厂家的配置：`config` 是该厂家已保存的 **`{ apiKey }`**（**已无 `defaultModel`**）、`def` 是 `voice/catalog.ts` 里的厂家定义；`key` 缺省 = active 厂家 |
 | `saveVoiceProviderConfig(provider, patch, saveDir?)` | `(string?, Partial<VoiceProviderConfig>, string?) => VoiceSettings` | **只更新传入字段**（只有 `apiKey` 可存）并把 `active` 切到该厂家，然后整文件回写；**可选的第三个参数 `saveDir` 给了就一并更新全局保存目录**，不给则保持原值 |
 | `saveVoiceSaveDir(dir)` | `(string) => VoiceSettings` | **只改全局 `voice.saveDir`**（不动任何厂家的 Key、也不切换 `active`）——「保存到 → 自定义目录 / 恢复默认」这条路径用它，是本轮修的静默 bug（以前走 `saveVoiceProviderConfig` 只认 `config`，`saveDir` 被忽略 ⇒ 选了目录但没持久化） |
 | `getUpdaterSettings` | `() => UpdaterSettings` | 返回规范化后的 `updater` 分区（`feedUrl` / `autoCheck` / `skippedVersion`） |
@@ -67,6 +69,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | | `modelId` | `''` | 模型 ID |
 | | `apiKey` | `''` | 接口密钥（明文落盘） |
 | | `enabled` | `false` | 是否启用自定义模型 |
+| | `reasoningEffort` | `'high'` | **思考强度**（`none` / `low` / `high` / `max`）。源码注释：与 DeepSeek 的接口默认一致，也保证「显式下发」而不是依赖端点的缺省行为 |
 | `voice` | `active` | `'qwen'`（`DEFAULT_PROVIDER_KEY`） | 当前厂家键 |
 | `voice` | `providers` | `{ qwen: { apiKey: '' } }` | **按厂家的配置**：每家只有一份 `{ apiKey }`；出厂值由 `defaultVoiceProviders()` 按 `VOICE_PROVIDERS` 生成（**已无 `defaultModel` 字段**——不再有「厂家默认模型」这种全局设置） |
 | `voice` | `saveDir` | `''` | 自定义 TTS 保存目录（仍**全局一份**，不按厂家分） |
@@ -85,7 +88,8 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 
 `readSettings()` 的合并策略是**逐分区浅合并（Object.assign）**：
 
-- `customModel`、`voice`、`whisper`：以默认值为底、以文件内容覆盖，因此新增字段能自动带上默认值；`voice` 还要先过 `normalizeVoiceSettings(raw.voice, raw.voiceTTS)`（**旧的 `voiceTTS.apiKey` 迁进 `providers.qwen`（只填空缺），旧的 `voiceTTS.targetModel` 直接丢弃**；`active` 指向未知厂家时回落默认厂家；`saveDir` 新旧都认）。
+- `customModel`：**不再走「以默认值为底、以文件内容覆盖」的裸 `Object.assign`**，而是走 `normalizeCustomModel(raw && raw.customModel)`——以默认值为底、以文件内容覆盖，再过 `REASONING_EFFORTS` 白名单：老 settings.json 没有 `reasoningEffort` 字段 → 落回默认 `high`（零迁移）；手改文件写进不认识的值 → 也落回默认（免得把非法值当 `reasoning_effort` 发给端点，部分网关会直接 400）。
+- `voice`、`whisper`：以默认值为底、以文件内容覆盖，因此新增字段能自动带上默认值；`voice` 还要先过 `normalizeVoiceSettings(raw.voice, raw.voiceTTS)`（**旧的 `voiceTTS.apiKey` 迁进 `providers.qwen`（只填空缺），旧的 `voiceTTS.targetModel` 直接丢弃**；`active` 指向未知厂家时回落默认厂家；`saveDir` 新旧都认）。
 - `voiceProfiles`：**不做默认值合并**，只取文件中的值，缺失即 `{}`。
 - `render`：**不在 `Object.assign` 之列**，而是走 `normalizeRenderOptions(raw && raw.render)`——旧 settings.json（无 `render` 字段）落回 `standard` / `30`，已写入的脏值经白名单规范化，保证返回值恒为合法的 `{ quality, fps }`。
 - `updater`：同样走专用规范化函数 `normalizeUpdaterSettings(raw && raw.updater)`——旧 settings.json（无 `updater` 字段）落回 `{ feedUrl: '', autoCheck: true, skippedVersion: '' }`；`feedUrl` 只接受空串或 `http(s)://` 开头的地址，非法值**回退到 `fallback` 而不是清空**（避免用户手填的地址被一次误读抹掉），`autoCheck` 非布尔则回退，`skippedVersion` 非字符串则回退。
@@ -105,7 +109,7 @@ const settingsFile = (): string => path.join(app.getPath('userData'), 'settings.
 | 频道 | 处理函数要点 | 返回 |
 | --- | --- | --- |
 | `settings:get` | 直接 `readSettings()` | 完整 `AppSettings` |
-| `settings:save` | 先 `readSettings()`，**只覆盖 `customModel`**；四个字段逐个做类型校验（`baseUrl`/`modelId`/`apiKey` 非字符串则置 `''`，`enabled` 用 `!!` 强转）；其余分区原样保留 | `{ ok: true, settings: raw }` |
+| `settings:save` | 先 `readSettings()`，**只覆盖 `customModel`**；**五个字段**逐个做类型校验（`baseUrl`/`modelId`/`apiKey` 非字符串则置 `''`，`enabled` 用 `!!` 强转，**`reasoningEffort` 缺省 / 非字符串时保留原值**——老界面保存时不会把已选的思考强度冲回默认），随后整体过 `normalizeCustomModel` 白名单（白名单外的值落回默认）；其余分区原样保留 | `{ ok: true, settings: raw }` |
 | `settings:save-render` | 先 `readSettings()`，**只覆盖 `render`**：`cur.render = normalizeRenderOptions(Object.assign({}, cur.render, payload.render))`——在现有值上合并本次传入的字段后再整体规范化，因此只改质量不会把帧率顶掉 | `{ ok: true, settings: cur }` |
 | `settings:save-updater` | **只覆盖 `updater`**：调 `saveUpdaterSettings(payload.updater)`（内部对现有值做字段级合并 + 规范化 + 写盘），再 `readSettings()` 回读整份设置返回。因此「保存更新源」不会影响 `autoCheck`，反之亦然 | `{ ok: true, settings: readSettings() }` |
 | `settings:test` | 见下 | 失败 `{ ok: false, message, detail?, needConfig? }`；成功 `{ ok: true, message }` |
@@ -151,7 +155,7 @@ function isPristineSettings(file: string): boolean
 
 ## 4. 依赖与协作
 
-依赖：`electron`（`app` / `ipcMain`）、`node:path`、`node:fs`、`../shared/ipc`（`IPC.Settings` 频道常量）、**`../shared/errors`（`friendlyError`——`settings:test` 的失败文案与配置类分类）**、`../shared/types`（`AppSettings`、`RenderOptions` / `RenderOverride` / `RenderQuality` / `RenderFps` / `SettingsSaveRenderPayload` / `SettingsSaveUpdaterPayload` / `UpdaterSettings` 等类型）；**`openai` 是懒加载依赖**（`loadOpenAI()` 内 `require`，不在模块顶层）。
+依赖：`electron`（`app` / `ipcMain`）、`node:path`、`node:fs`、`../shared/ipc`（`IPC.Settings` 频道常量）、**`../shared/errors`（`friendlyError`——`settings:test` 的失败文案与配置类分类）**、`../shared/types`（`AppSettings`、`CustomModelConfig`、**`ReasoningEffort`**、`RenderOptions` / `RenderOverride` / `RenderQuality` / `RenderFps` / `SettingsSaveRenderPayload` / `SettingsSaveUpdaterPayload` / `UpdaterSettings` 等类型）；**`openai` 是懒加载依赖**（`loadOpenAI()` 内 `require`，不在模块顶层）。
 
 被谁使用：
 
@@ -159,7 +163,7 @@ function isPristineSettings(file: string): boolean
 | --- | --- |
 | `src/main/index.ts` | `import * as settings`；`migrateFrom()` 用 `settings.isPristineSettings(dst)` 判定新 `settings.json` 是否还是出厂状态（决定能否被老配置覆盖），并在装配阶段最早调用 `settings.register(ctx)` |
 | `src/main/whisper.ts` | `getWhisperModel` / `saveWhisperModel` / `getWhisperCustomModels` / `saveWhisperCustomModels`（模型档位与自定义模型增删） |
-| `src/main/voice.ts` | `getVoiceSettings` / `getVoiceProviderConfig` / `saveVoiceProviderConfig` / `readSettings` / `writeSettings` / `DEFAULT_SETTINGS` / `getVoiceProfiles` / `saveVoiceProfile` / `deleteVoiceProfile` |
+| `src/main/voice/api.ts`（+ `ipc/*`） | `getVoiceSettings` / `getVoiceProviderConfig` / `saveVoiceProviderConfig` / `readSettings` / `writeSettings` / `DEFAULT_SETTINGS` / `getVoiceProfiles` / `saveVoiceProfile` / `deleteVoiceProfile` |
 | `src/main/agent/chat.ts` | `getCustomModel`（取自定义模型配置发起对话）与 `loadOpenAI`（懒加载 SDK 构造函数） |
 | `src/main/projects.ts` | `pickRenderOverride`——`project:set-render` 写 / 清除项目级渲染档位覆盖时做白名单过滤 |
 | `src/main/video.ts` | `pickRenderOverride`——把 `video:render` 载荷里显式给出的档位拼成 `--quality` / `--fps` 参数 |
@@ -170,7 +174,7 @@ function isPristineSettings(file: string): boolean
 
 协作要点：
 
-- `voice.ts` 的 `voice:save-config` 复用本模块的 `saveVoiceProviderConfig`（存某厂家 Key，可带 `saveDir`）与 **`saveVoiceSaveDir`**（只存目录），内部再走 `readSettings` / `writeSettings` 做「只更新指定字段」的合并后整文件回写；因此 **`voice` 段与 `voiceProfiles` 的持久化入口在 `voice.ts`**，而通用读写工具与归一化在本模块。
+- `voice/ipc/voices.ts` 的 `voice:save-config` 复用本模块的 `saveVoiceProviderConfig`（存某厂家 Key，可带 `saveDir`）与 **`saveVoiceSaveDir`**（只存目录），内部再走 `readSettings` / `writeSettings` 做「只更新指定字段」的合并后整文件回写；因此 **`voice` 段与 `voiceProfiles` 的持久化入口在 `voice/ipc/voices.ts`**，而通用读写工具与归一化在本模块。
 - **`settings:save` 只碰 `customModel`、`settings:save-render` 只碰 `render`、`settings:save-updater` 只碰 `updater`、`voice:save-config` 只碰 `voice`（该厂家的 `apiKey` + `active`），四者各管一个分区，互不覆盖。**
 - 渲染档位的白名单与合并策略**只在 `normalizeRenderOptions` / `pickRenderOverride` 里定义一次**：`projects.ts` 用它过滤项目覆盖、`video.ts` 用它过滤渲染参数、渲染层 `utils/render.ts` 有一份同语义的纯函数实现（取值必须同步）。
 - `isPristineSettings` 是**跨模块的唯一调用点**：`index.ts` 的 `migrateFrom()`（**用户点「迁移过来」之后**才执行，不在启动早期）。它依赖本模块的惰性路径约定——`settingsFile()` 是函数，因此 `index.ts` 顶部 `import * as settings` 的求值不会提前读写 userData。
@@ -182,6 +186,7 @@ function isPristineSettings(file: string): boolean
 - **容错策略**：`readSettings` 吞掉所有异常并回退默认值，好处是文件损坏不会崩溃，代价是「设置看似被重置」而不报错；排查时应先检查 settings.json 是否为合法 JSON。
 - **写入无兜底**：`writeSettings` 没有 `try/catch`，`fs.mkdirSync` / `fs.writeFileSync` 失败会向上抛异常，由调用方决定如何处理。
 - **合并是浅合并**：若某分区将来嵌套更深的子对象，`Object.assign` 不会递归合并。
+- **`customModel.reasoningEffort` 是零迁移**：老 `settings.json` 里没有这个字段，`normalizeCustomModel` 直接落回默认 `'high'`；文件里写了白名单外的值（手改出错）同样落回 `'high'`，免得把非法值当 `reasoning_effort` 发给端点（部分网关会直接 400）。**白名单只此一处**，`readSettings` 与 `settings:save` 共用，新增档位只改 `REASONING_EFFORTS` 与 `src/shared/types.ts` 的 `ReasoningEffort`。
 - **`settings:save` 不做完整性校验**：即使三项为空也会写入，只有 `settings:test` 才校验配置完整性。
 - **渲染档位的两种规范化不可混用**：`normalizeRenderOptions`（补默认，得到完整档位）用于**读取**（`readSettings`）与保存默认档位（`settings:save-render`）；`pickRenderOverride`（只留显式合法值）用于**覆盖类**场景（项目覆盖、渲染参数）。用错会导致「没传档位」被静默升级成「显式默认档位」，覆盖掉上一级配置。
 - **`settings:test` 依赖 SDK 形态**：成功路径取决于 `loadOpenAI()` 是否返回可构造函数（内部按 `mod.default || mod` 取），SDK 的导出形态变化会静默切到 `fetch` 分支。

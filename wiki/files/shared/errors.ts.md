@@ -184,7 +184,7 @@ export function configTargetOf(message: string): { needConfig?: ConfigTarget; ti
 | --- | --- | --- |
 | `src/main/agent/html.ts` | `friendlyError` + `ConfigTarget` | 两处配置校验走 `cfgErr()`（`label: '生成 HTML'`、`baseUrl: m.baseUrl`；未启用带 `hint: 'model-not-enabled'`）；每次尝试的 `catch` 用 `label: '生成 HTML'` + `extras: ['请求地址：' + apiUrl, httpDetail]`，产出 `attemptErr` / `attemptCfg`（`{ needConfig: ConfigTarget } \| null`）/ `attemptDetail` |
 | `src/main/settings.ts` | `friendlyError` | `IPC.Settings.Test` 的失败分支：`friendlyError(e, { label: '连接失败', baseUrl: m.baseUrl })`，把 `message` / `detail` / `needConfig` 一起回给界面（渲染层的设置页刻意不弹窗，只显示状态） |
-| `src/main/voice.ts` | `friendlyError` + `ConfigTarget` | `voiceFriendlyError()` 是薄包装：`friendlyError(err, { label, provider: activeProviderDef().key, baseUrl: activeProviderDef().apiBase })`，再把 `detail` 追加回文案（`f.message + '（' + f.detail + '）'`，保留旧行为让用户能报障）；`voiceNoKeyFail()` 直接产出 `needConfig: 'voice'` |
+| `src/main/voice/api.ts` | `friendlyError` + `ConfigTarget` | `voiceFriendlyError()` 是薄包装：`friendlyError(err, { label, provider: activeProviderDef().key, baseUrl: activeProviderDef().apiBase })`，再把 `detail` 追加回文案（`f.message + '（' + f.detail + '）'`，保留旧行为让用户能报障）；`voiceNoKeyFail()` 直接产出 `needConfig: 'voice'` |
 | `src/main/projects.ts` | 只用 `configTargetOf` | `project:generate-html` / `project:modify-html` 两处 catch：`return { ok: false, message: msg, ...configTargetOf(msg) }` |
 | `src/renderer/src/composables/useConfigPrompt.ts` | 间接 | 渲染层**不做判定**，只消费 IPC 回传的 `needConfig` / `title` 弹框（`[去设置]` / `[取消]`） |
 | `docs/error-mapping.md` | 设计依据 | 58 条映射清单 + §11.1 弹窗决策；改本文件前先看它 |
@@ -205,5 +205,5 @@ export function configTargetOf(message: string): { needConfig?: ConfigTarget; ti
 
 - 类型真源：[types.ts](./types.ts.md)（① 节的 `ConfigTarget` 与 `IpcFail.needConfig` / `title`）
 - 弹窗消费方：`src/renderer/src/composables/useConfigPrompt.ts`（见 [renderer/src/common.md](../renderer/src/common.md)）与 `src/renderer/src/App.vue`（见 [renderer/src/App.vue.md](../renderer/src/App.vue.md)）
-- 主进程接入点：[main/agent.md](../main/agent.md)（`chat.ts` 的 `friendlyError` / `cfgErr` 与 `script.ts` 的 `configTargetOf`）、[main/settings.ts.md](../main/settings.ts.md)、[main/voice.ts.md](../main/voice.ts.md)、[main/projects.ts.md](../main/projects.ts.md)
+- 主进程接入点：[main/agent.md](../main/agent.md)（`chat.ts` 的 `friendlyError` / `cfgErr` 与 `script.ts` 的 `configTargetOf`）、[main/settings.ts.md](../main/settings.ts.md)、[main/voice.md](../main/voice.md)、[main/projects.md](../main/projects.md)
 - 设计文档（仓库内，非 wiki）：`docs/error-mapping.md`

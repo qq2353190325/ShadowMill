@@ -9,7 +9,7 @@
 | `src/main/updater/index.ts` | 104 | **统一出口**：`register(ctx)` 装配 7 个 `update:*` 频道 + 3 秒启动静默检查 + 5 秒迟到清缓存；具名导出原样挂在 index 上 |
 | `src/main/updater/base.ts` | 270 | 运行态单例（`updater` / `flags` / `state`）、日志与小工具、`humanError()`、进度推送、事件绑定与懒加载 |
 | `src/main/updater/actions.ts` | 139 | 对外动作：`notReady()` / 更新源覆盖 / `checkNow()` / `downloadUpdate()` / `cancelDownload()` |
-| `src/main/updater/install.ts` | 134 | `finalizePendingUpdate()` / `installNow()` / `busy` 推导 / `quitForUpdate()` |
+| `src/main/updater/install.ts` | 145 | `finalizePendingUpdate()` / `installNow()` / `busy` 推导（`bindBusyTracking()`，其中 `project:html-progress` 按活动 `taskId` 集合判忙）/ `quitForUpdate()` |
 
 依赖方向单向：`index.ts → install.ts → actions.ts → base.ts`（`base.ts` 不 import 任何同目录模块）。调用方与对外接口未变——`src/main/index.ts` 仍是 `import * as updater from './updater'`，只用 `register(ctx)` 与 `quitForUpdate()`。
 

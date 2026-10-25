@@ -1,4 +1,7 @@
 # src/main/editRoute.ts
+> **⚠️ 本轮角色改造对本文件的影响（以本块为准）**
+>
+> 解析逻辑本身没变（`parseRouteReply(reply, allowed)`：`MAX_TARGETS = 6`、非法路径直接跳过、全无合法项则回退「发全部源码」），但**调用方传进来的 `allowed` 只剩章节**：`projects/chaptersFlow.ts` 的 `applyChapterEdit` 用 `cur.map(c => chapters.chapterRelPath(c.id))`，角色不在白名单里。源码里 `EditTargets.paths` 的注释仍写着 `pages/cNN.js` 或 `cast/<id>.js`（历史注记）——**现在路由结果里不会出现 `cast/*.js`**。
 
 > 「按需求修改」第一段（**路由**）的纯逻辑：从模型回复里解析出「这次要改哪几个文件」，按项目里真实存在的文件做白名单过滤、去重、限 6 个；解析失败一律返回 `error`，由调用方回退成「发全部源码」
 
@@ -56,7 +59,7 @@ project:modify-html（章节模式）
 
 - **被 `projects.ts` 调用**：`applyChapterEdit()` 在路由调用之后调 `parseRouteReply()`，再按结果决定发哪几份源码；本模块**不 import `projects.ts`**（避免成环）。
 - **提示词在 `agent/html.ts`**：`HTML_ROUTE_SYSTEM` 规定路由回复的形态与规则，`chatWithRoute()` 是它的调用包装；本模块只消费模型回复。
-- **路径语义与 `chapters.ts` / `cast.ts` 一致**：章节是 `pages/cNN.js`（`chapters.chapterRelPath`）、角色是 `cast/<id>.js`（`cast.castRelPath`），三处拼法同源。
+- **路径语义与 `chapters.ts` / `cast/table.ts` 一致**：章节是 `pages/cNN.js`（`chapters.chapterRelPath`）、角色是 `cast/<id>.js`（`cast.castRelPath`），三处拼法同源。
 - **不注册 IPC、不碰渲染层**：路由是 `project:modify-html` 内部的两次模型调用，**没有新增频道**，界面上也看不到「路由」这一步（进度行仍是 `project:html-progress` 的阶段文案）。
 
 ## 5. 注意事项与实现要点

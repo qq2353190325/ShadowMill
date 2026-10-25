@@ -2,7 +2,7 @@
 
 > 应用自更新：`electron-updater` + electron-builder 的 generic provider（自建 HTTP 静态服务器）。**一个模块、四个文件**：同名目录 + `index.ts` 统一出口，对外接口与拆分前逐字相同。
 
-- **覆盖文件**：`updater/index.ts`（108 行）、`updater/base.ts`（285 行）、`updater/actions.ts`（139 行）、`updater/install.ts`（134 行）——行数为工作区实测（`[IO.File]::ReadAllLines`）
+- **覆盖文件**：`updater/index.ts`（108 行）、`updater/base.ts`（285 行）、`updater/actions.ts`（139 行）、`updater/install.ts`（145 行）——行数为工作区实测（`[IO.File]::ReadAllLines`）
 - **所在目录**：src/main/updater/
 - **类型**：业务域模块（`register(ctx)` 装配模式，全工程唯一使用**同步 IPC** 的模块）；拆分为「同名目录 + `index.ts` 统一出口」（形态与依赖方向属工程约定，见根 `AGENTS.md` 关键约定 9）
 - **对外导出**（全部由 `index.ts` 再导出，与拆分前同名）：`register`、`checkNow`、`downloadUpdate`、`cancelDownload`、`installNow`、`isBusy`、`quitForUpdate`、`updaterLoadError`（**取值函数** `() => string`，不再是字符串）
@@ -16,7 +16,7 @@
 | `index.ts` | 108 | **统一出口**：`register(ctx)` 装配 8 个 `update:*` 频道 + 3 秒启动静默检查 + 5 秒迟到清缓存；把各子文件的具名导出原样再导出；文件头保留全部设计约定（①～⑦） | `register`、`register()` 内的 `Update.OpenLog` handler、`register()` 内的 `Update.Changelog` handler、`export { getUpdaterLoadError as updaterLoadError }` |
 | `base.ts` | 285 | **底座 / 依赖最上游**：运行态单例（`updater` 句柄 + `flags` + `state`）、日志与小工具（`writeLog` / `logPath` / `msg` / `errText` / `bytesText` / `appVersion`）、**随包更新日志的定位与读取**（`changelogPath()` / `readBundledChangelog()`）、`humanError()` 文案映射与 `setError()`、进度 `payload()` / `send()`、electron-updater 的 6 个事件绑定 `bindEvents()`、懒加载 `ensureUpdater()` | `updater`、`getUpdaterLoadError`、`flags`、`state`、`appVersion`、`logPath`、`writeLog`、`msg`、`errText`、`bytesText`、**`changelogPath`、`readBundledChangelog`**、`HumanError`、`humanError`、`setError`、`ensureUpdater`、`payload`、`send`、`bindEvents`、`UpdaterLike` / `UpdaterProgressLike` / `UpdaterInfoLike` |
 | `actions.ts` | 139 | **对外动作**：`notReady()`、更新源覆盖 `applyFeedUrl()`（**私有**）、`checkNow()`、`downloadUpdate()`、`cancelDownload()`（含两条「无事件不许报成功」的守卫） | `notReady`、`checkNow`、`downloadUpdate`、`cancelDownload`、`isBusy`（本文件也有一份，当前无调用方，见 §5） |
-| `install.ts` | 134 | **退出安装 / 缓存清理 / 忙碌推导**：`updaterCacheDir()`（私有）、`installMarkerPath()`（私有）、`finalizePendingUpdate()`、`installNow()`、`bindBusyTracking()`、`quitForUpdate()` | `finalizePendingUpdate`、`installNow`、`bindBusyTracking`、`isBusy`、`quitForUpdate` |
+| `install.ts` | 145 | **退出安装 / 缓存清理 / 忙碌推导**：`updaterCacheDir()`（私有）、`installMarkerPath()`（私有）、`finalizePendingUpdate()`、`installNow()`、`bindBusyTracking()`、`quitForUpdate()` | `finalizePendingUpdate`、`installNow`、`bindBusyTracking`、`isBusy`、`quitForUpdate` |
 
 **依赖方向单向、不成环**（设计要求）：
 
@@ -99,7 +99,7 @@ index.ts  ──→  install.ts  ──→  actions.ts  ──→  base.ts
 - `installMarkerPath()`（**私有**）：`userData/update-installing.json`。
 - `finalizePendingUpdate()`：读标记（没有标记 = 本次启动与更新安装无关，直接返回；读完即删标记）→ 标记里的版本与 `appVersion()` 不一致时写日志 `install marker 版本 … ≠ 当前 …（未装上或已回退），保留下载缓存` 并返回 → 一致则删除 `<cacheDir>/pending/` 下的条目（逐个 `rmSync`，单个失败不影响其余；删了才写一行日志）。**只清 `pending/`**：`cacheDir/installer.exe` 必须保留，它是 electron-updater 下次差分下载的旧文件基线。安装是否真的生效只能等下次启动比版本号，这就是标记文件的用处。
 - `installNow()`：`ensureUpdater()` → 空则 `notReady()`；未 `downloaded` 回 `更新尚未下载完成`；`flags.busy` 时回 `当前有任务正在进行（转录 / 渲染 / 配音），请等任务结束后再重启安装`；随后弹原生 `dialog.showMessageBox`（窗口还在就以它为父），标题「重启并安装更新」、按钮「立即重启安装 / 取消」，`detail` 里写明「安装期间应用会关闭约 1~2 分钟、快捷方式会暂时失效、UAC 要点『是』」——这段预期必须提前说清楚，否则用户看到的是「应用莫名消失很久，点快捷方式说文件不存在」。用户取消（对话框异常时按继续处理）→ 日志 `quitAndInstall cancelled by user` + `{ ok: true, message: '已取消安装，可稍后再点「立即重启安装」' }`；确认则写标记 → `flags.quitFlag = true` → `state.message = '正在退出并安装更新…'` + 日志 `quitAndInstall <version>` → 300ms 后 `u.quitAndInstall(true, true)`，抛错时回滚 `quitFlag`、落 `error` + `启动安装程序失败，请重新下载安装包后手动安装` + `detail: 'quitAndInstall 失败：…'`。
-- `bindBusyTracking()`：不改动任何业务模块，只监听 4 路进度通道的**起止**推导全局 `flags.busy`（明细见 §3.3）。
+- `bindBusyTracking()`：不改动任何业务模块，只监听 4 路进度通道的**起止**推导全局 `flags.busy`（明细见 §3.3）。其中 `project:html-progress` 按**活动任务集合**判忙（`htmlTasks: Set<string>`），其余三路仍是「一条通道一个判据、后到覆盖」。
 - `quitForUpdate()`：`() => flags.quitFlag`（与 `isBusy()` 同为本文件的两个只读出口）。
 
 ## 3. 关键流程
@@ -169,9 +169,11 @@ update:status → base.payload()
 | `whisper:progress` | `stage` 为 `downloading` / `loading` / `transcribing` | 其它 stage（含 `done` / `error`） |
 | `video:progress` | 任意一条日志 | 无单独的「结束」事件，靠后续通道或用户操作复位 |
 | `voice:align-progress` | `stage` 为 `synth` / `assemble` | `done` / `error` |
-| `project:html-progress` | `stage !== 'done'` | `stage === 'done'` |
+| `project:html-progress` | **活动任务集合非空**：`stage !== 'done'` 的推送把它的 `taskId` `add` 进 `htmlTasks` | 该 `taskId` 的 `stage === 'done'` 只把它自己从集合里 `delete`；集合空了才置闲 |
 
-因为是「后到的通道覆盖全局标志」，多任务并发时最后一个置闲的通道会提前解除忙碌；`installNow()` 因此只把忙碌当作**尽力而为的保护**，真正的兜底是提示用户自行确认。
+`project:html-progress` 这一路**不再是「最后一条进度是不是 done」**：HTML 生成 / 修改与画角色现在可以并行（一条频道 + 按 taskId 分发，见 preload 的 `onTaskProgress`），若沿用旧判据，先结束的那个任务会把忙清掉、安装器就会在生成中途动手。现在的写法是模块内 `const htmlTasks = new Set<string>()`：`done` 时 `delete(taskId)`、其它 stage `add(taskId)`，`flags.busy = htmlTasks.size > 0`。**没带 `taskId` 的推送**（不该再有）退回老语义 `!!(d && d.stage !== 'done')`，免得漏一条就永远忙。
+
+其余三路**仍是「后到的通道覆盖全局标志」**：多任务并发时最后一个置闲的通道会提前解除忙碌；`installNow()` 因此只把忙碌当作**尽力而为的保护**，真正的兜底是提示用户自行确认。
 
 ### 3.4 打开日志目录（`update:open-log`，`index.ts` 内的 handler）
 

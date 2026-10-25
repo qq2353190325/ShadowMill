@@ -1,19 +1,28 @@
 # src/renderer/src/pages/HtmlGenPage/（页面）
+> **⚠️ 本轮「角色只有全局一份」的改造推翻本篇关于角色的部分（以本块为准）**
+>
+> - 「HTML生成」页 ·「角色」区**只剩勾选**（`CastSection.vue`，118 行）：顶部「管理角色」按钮跳「角色」页；原来的「新建角色」「从全局库添加」「存为全局」「改这个角色」**全部下线**，`pages/HtmlGenPage/CastCreateModal.vue` 与 `CastLibraryModal.vue` **已删除**，`<CastSection />` 不再接 `prompt`。
+> - 勾选 / 取消 → `projectTools.saveCast(appState.currentName, [{ id }...])` → `project:save-cast` → `refreshProject()`；主进程按 id 从全局库补全元数据、把选中的复制进 `<项目>/cast/`、重刷页面。
+> - 角色卡片的预览组件搬到公共目录：`components/CastShot.vue`（props `id` / `units` / `title?` / `uses?` / `epoch?` / `big?`，**没有 `project` / `from`**），内部调 `window.castTools.preview(id, { units, title, uses })`。
+> - 新建 / 改画法 / 改信息 / 删除都在**侧栏「角色」页**（见 [CastPage.md](./CastPage.md)）；角色预览页落 `<userData>/cast-preview/<id>.html`，URL 是 `hgpreview://user/cast-preview/<id>.html?user=1`（`utils/url.ts` 的 `userFileUrl`）。
+> - 相关频道：`cast:list` / `cast:create` / `cast:recreate` / `cast:save-meta` / `cast:remove` / `cast:preview`（`Cast` 组 6 条）+ `project:save-cast`。
 
-> HTML 生成 / 修改 + **画布（成片尺寸，项目属性：只在本页生成侧选一次）** + **全局视觉风格（整片视觉基调，项目属性 `content.style`：也只在本页生成侧编辑）** + **项目素材（图片 / 视频 / 角色三类并列，勾选决定本次用哪些）** + 背景音频选定（音轨由主进程注入 HTML）+ 实时预览（iframe 视口 = **页面自己声明的画布**，含**视角比例切换**、播放控制与拖动 seek；**页面里有 GSAP 的 `repeat: -1` 时总时长显示 `--:--` 并在播放控制条下方多一行说明**）+ AI 思考过程展示 + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染；弹窗里没有画布）** + **章节列表（只读，章节模式下才有内容）**。
+> HTML 生成 / 修改 + **画布（成片尺寸，项目属性：只在本页生成侧选一次）** + **全局视觉风格（整片视觉基调，项目属性 `content.style`：也只在本页生成侧编辑）** + **项目素材（图片 / 视频 / 角色三类并列，勾选决定本次用哪些）** + 背景音频选定（音轨由主进程注入 HTML）+ 实时预览（iframe 视口 = **页面自己声明的画布**，含**视角比例切换**、播放控制与拖动 seek；**页面里有 GSAP 的 `repeat: -1` 时总时长显示 `--:--` 并在播放控制条下方多一行说明**）+ AI 思考过程（标题行可折叠，生成中展开、结束收起） + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染；弹窗里没有画布）** + **章节列表（只读，章节模式下才有内容）**。
 
-- **覆盖文件**（AGENTS.md 第五节 6：页面自己的子组件与助手并入同一篇）：
+- **覆盖文件**（AGENTS.md 第五节 6：页面自己的子组件与助手并入同一篇；**角色预览组件 `CastShot.vue` 例外——它已搬到公共组件目录、归 [components.md](../components.md) 一篇**）：
   | 文件 | 行数 | 角色 |
   |------|------|------|
-  | `HtmlGenPage/index.vue` | 496 | 页面入口：状态条（3 个纯数据格 + 标题右侧「用法」`?`）/ **字幕 + 画布（同一行）** / **全局视觉风格输入框** / `<MaterialsSection />` → **`<CastSection />`** → `<ChapterSection />` / 需求描述 / 统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；生成与渲染两套动作链 |
+  | `HtmlGenPage/index.vue` | 477 | 页面入口：状态条（3 个纯数据格 + 标题右侧「用法」`?`，两者都由 `useProjectMeta()` 派生）/ **字幕 + 画布（同一行）** / **全局视觉风格输入框** / `<MaterialsSection />` → **`<CastSection />`** → `<ChapterSection />` / 需求描述 / 统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；生成与渲染两套动作链（生成侧用自己的 `taskId` 订阅进度） |
   | `HtmlGenPage/MaterialsSection.vue` | 167 | 「项目素材」区块：**图片组** / **视频组**的卡片墙（勾选、移除、添加） |
-  | **`HtmlGenPage/CastSection.vue`** | **262** | **「项目素材 · 角色」**（常显，0 个角色也显示）：每行 = **勾选框** + 名字 + 描述 + 高几 u + `cast/<id>.js` + **三个动作**（存为全局 / 改这个角色 / 移除）；标题右侧两个动作（**从全局库添加** / **新建角色**）；两个 `.hf-modal` 弹窗（全局库勾选导入、新建角色表单）；空态提示带全局库条目数 |
+  | **`HtmlGenPage/CastSection.vue`** | **184** | **「项目素材 · 角色」**（常显，0 个角色也显示）：**与「项目素材」同一套卡片墙**（人物在上面、名字在下面）——每张卡 = 左上角**勾选框**（`.mat-check`）+ 右上角**「…」按钮**（`.hf-btn.cast-more`）+ **13:15 竖版预览位（130×150）**（`.cast-thumb` 包 `CastShot`；卡片墙容器是 `.mat-grid.cast-mat-grid`——列宽定死 130px，素材那张 `.mat-grid` 仍是 `minmax(158px, 1fr)`；**130 是下限、别再收回 100**）+ `.mat-meta`（名字 + `{{units}}u · {{desc}}`）+ 条件渲染的**动作菜单**（`.cast-menu`：存为全局 / 改这个角色 / 移除）；标题右侧两个动作（**从全局库添加** / **新建角色**）；两个 `.hf-modal` 弹窗已拆成独立文件；空态提示带全局库条目数；`epoch` ref + `watch(() => appState.project)` 让缩略图在角色代码变化后重载。**props 只剩 `{ prompt?: string }`**（`status` 已删，进度由弹窗自己按 `taskId` 订阅） |
+  | **`HtmlGenPage/CastLibraryModal.vue`** | **116** | **「从全局角色库添加」**：**方格网格**（`repeat(auto-fill, minmax(132px, 1fr))`），每格一张 `CastShot`（`from="lib"`）+ 名字 + 身高；点格子切换选中（`picked: string[]`），选中态 = 主色描边 + 勾角标；库里索引有但文件缺失（`missing`）的格子压暗、不可点、角上「文件缺失」；底部「导入 N 个」→ `projectTools.importCast` → `refreshProject()` → toast → 发 `imported` 与 `close`；每次打开都重新 `listCastLibrary()` |
+  | **`HtmlGenPage/CastCreateModal.vue`** | **169** | **「新建角色」**：两态——① 填设定（角色名 / 外形描述 / 身高 units / 是否水彩 `watercolor`）；② **画成功后弹窗不关**：左侧 200×260 大图 `CastShot`（`big`，`epoch` 用本组件局部计数器，因为文件刚写盘必须换地址重载）+ 右侧名字 / 描述 / 身高 / `cast/<id>.js` 与「已加入本项目…重新生成 HTML 后才会画进页面」，底部按钮变「再画一个」（回到空白表单）/「完成」（关窗）。**props 只有 `{ open: boolean; project: string }`（不再收 `status`）**；进度文案用本组件自己的 `castStatus` ref，由 `newTaskId('cast')` + `onTaskProgress` 订阅、结束后 `off()` |
   | `HtmlGenPage/ChapterSection.vue` | 71 | 「章节列表」只读卡片（章节模式下才有内容）：每行 序号 / 标题 / 起止（`sceneFrom`–`sceneTo`）/ 时长 / `pages/cNN.js` + 「改这一章」按钮；点它把「只改第 N 章（pages/cNN.js）：」填进「需求描述」 |
-  | `HtmlGenPage/PreviewSection.vue` | 449 | 「预览」卡片：**背景音频行（一个占满整行的下拉：当前音频 = 「已生成音频」里的选中项 + 清空/本地两项动作）**、状态行、AI 思考过程、**「视角比例」行**（**不显示画布值**）、iframe 预览副本（**视口 = 页面声明的画布**；**容器高度上限 800px、宽度按比例、水平居中**，页面按 contain 缩放 + 居中）、播放控制条（**一个三态键** + 进度条 + 时间）、**控制条下方的「总时长无法确定」提示行（`v-if="prevDurUnknown"`，只在页面里有无限循环动画时出现）** |
+  | `HtmlGenPage/PreviewSection.vue` | 470 | 「预览」卡片：**背景音频行（一个占满整行的下拉：当前音频 = 「已生成音频」里的选中项 + 清空/本地两项动作）**、状态行、AI 思考过程（标题行可折叠：生成 / 修改进行中自动展开、一轮结束自动收起）、**「视角比例」行**（**不显示画布值**）、iframe 预览副本（**视口 = 页面声明的画布**；**容器高度上限 800px、宽度按比例、水平居中**，页面按 contain 缩放 + 居中）、播放控制条（**一个三态键** + 进度条 + 时间）、**控制条下方的「总时长无法确定」提示行（`v-if="prevDurUnknown"`，只在页面里有无限循环动画时出现）** |
 - **所在目录**：`src/renderer/src/pages/HtmlGenPage/`（一页一目录，入口 `index.vue`）
 - **类型**：页面组件（SFC，`<script setup lang="ts">`）
-- **规模**：5 个文件合计 1445 行（`index.vue` 496 + `CastSection.vue` 262 + `MaterialsSection.vue` 167 + `ChapterSection.vue` 71 + `PreviewSection.vue` 449）
-- **对外导出**：`index.vue` 默认导出组件（无 props，模板内渲染 `StepBar` / `MaterialsSection` / `CastSection` / `ChapterSection` / `PreviewSection`）；四个子组件分别是「无 props / 无 emits」（`MaterialsSection`）、「4 个 props + `reload()`」（`PreviewSection`）、只读章节列表（`ChapterSection`，点「改这一章」只把范围写进需求描述）与**角色区**（`CastSection`，`v-model:prompt` 只写不读；除「改这个角色」外还会直接调角色相关的 IPC：库里搬文件、新建角色、整份角色表回写）
+- **规模**：7 个文件合计 1654 行（`index.vue` 477 + `CastCreateModal.vue` 169 + `CastLibraryModal.vue` 116 + `CastSection.vue` 184 + `MaterialsSection.vue` 167 + `ChapterSection.vue` 71 + `PreviewSection.vue` 470）；**`CastShot.vue`（67 行）已不在本目录**——它搬到了公共组件目录 `src/renderer/src/components/CastShot.vue`（见 [components.md](../components.md)），本页三处（`CastSection.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue`）都通过别名 `@renderer/components/CastShot.vue` 引入
+- **对外导出**：`index.vue` 默认导出组件（无 props，模板内渲染 `StepBar` / `MaterialsSection` / `CastSection` / `ChapterSection` / `PreviewSection`）；子组件的契约分别是——`MaterialsSection`「无 props / 无 emits」、`PreviewSection`「5 个 props + `reload()`」、`ChapterSection`「`v-model:prompt` 只写不读」、**`CastSection`「只有 `prompt?` 一个 prop（`v-model:prompt` 的接收端，只写不读）；不再接父页的 `status` / `thinkText`」**、**`CastShot`（`@renderer/components/CastShot.vue`，公共组件）「8 个 props、无 emits」**、**`CastLibraryModal`「`open` / `project` / `epoch?` props + `close` / `imported` emits」**、**`CastCreateModal`「`open` / `project` 两个 props + `close` / `created` emits（不再收 `status`）」**
 
 ## 1. 作用与职责
 
@@ -25,7 +34,9 @@
 
 **角色 = 项目素材（本轮定稿，推翻上一版「角色跟着章节化」的说法）**：角色落在**「项目素材」区**，与「图片」「视频」并列，是与「单文件 / 章节化」两种产物形态**完全无关**的项目资产。角色是**一份绘制代码**（`cast/<id>.js` 里 `window.__cast["hero"] = function (x, y, u, o) { … }`），同一角色在哪种形态下都由同一个函数画出来、长相不会一处一个样。**勾选「参与本次生成」**（`ProjectCastMember.selected`，与素材勾选同语义、缺省参与）后由应用注入页面：章节模式写进骨架、单文件模式注入模型写的 `index.html`——模型只负责调用，不再各自重画。
 
-**两条创建路径都不经过「生成 HTML」**：① 标题右侧 **「新建角色」**（弹窗填 角色名 / 外形描述 / 高几 u / 是否用水彩 → **调一次模型**画 `cast/<id>.js` → `project:new-cast`）；② **「从全局库添加」**（从 `<userData>/cast-library/` 复制进项目 `cast/` → `project:import-cast`）。每行三个动作：**存为全局** / **改这个角色**（把「只改角色 <id>（cast/<id>.js）：」填进需求描述，修改仍走「按需求修改」）/ **移除**；勾选、移除、改名都走 `project:save-cast`（整份角色表回写）。这些动作**直接调 IPC、不经模型**（本轮为角色加 2 条频道：`Project` 组 30 → 32、全库 98 → **100**）。角色表随 `project:load` 的 `Project.cast` 返回，**变更后由主进程 `refreshCastInPage()` 立刻反映到页面**（不需要重新生成）。
+**角色现在能「看见样子」了（本轮核心变化）**：因为角色不是图片，界面上的预览只能是**把这份代码真跑一遍**——主进程 `project:cast-preview` 把 `core.js` + 这份角色代码**内联**成一页自包含 HTML 落到 `<userData>/cast-preview/<id>.html`，渲染层用 `hgpreview://` 载进 `iframe`（组件 `CastShot.vue`），浏览器画出**静态一帧**。三处界面因此改观：① 角色卡片上多一块 **13:15 竖版预览位（130×150）**（`.cast-thumb`，卡片列宽定死 130px，图就 130×150）；② **新建角色成功后弹窗不关**，直接显示 **200×260 大图**（`CastCreateModal.vue`）；③ 「从全局库添加」从整行勾选改成**方格网格**（`CastLibraryModal.vue`），每格一张预览。为什么内联而不是 `<script src>`：全局角色库在 `<userData>/cast-library/`，而 `hgpreview://` 只放行项目目录（`src/main/index.ts` 的 `resolveHgPreviewPath`），库里的文件页面读不到。
+
+**两条创建路径都不经过「生成 HTML」**：① 标题右侧 **「新建角色」**（弹窗填 角色名 / 外形描述 / 高几 u / 是否用水彩 → **调一次模型**画 `cast/<id>.js` → `project:new-cast`）；② **「从全局库添加」**（从 `<userData>/cast-library/` 复制进项目 `cast/` → `project:import-cast`）。每张卡右上角的 **「…」菜单**里有三个动作：**存为全局** / **改这个角色**（把「只改角色 <id>（cast/<id>.js）：」填进需求描述，修改仍走「按需求修改」）/ **移除**；勾选与移除都走 `project:save-cast`（整份角色表回写）。这些动作**直接调 IPC、不经模型**（角色相关频道现共 7 条：库 4 条 + 项目角色 2 条 + 本轮的角色预览 1 条；`Project` 组 32 → **33**、全库 100 → **101**）。角色表随 `project:load` 的 `Project.cast` 返回，**变更后由主进程 `refreshCastInPage()` 立刻反映到页面**（不需要重新生成），缩略图则由 `epoch` 变化强制重载。
 
 **生成侧的两个「项目属性」控件**：**「画布（成片尺寸）」下拉**与**「全局视觉风格」输入框**。两者都不是渲染档位（不进设置页那套「全局默认 / 项目覆盖」），都只在本页编辑一次、都只影响生成提示词，生效方式也相同——「改完要重新「生成 HTML」或「按需求修改」才会体现在页面上」这句**统一写在动作行上方的一句 `.hgen-tip` 里**（原先在画布与风格两处 tip 里各说一遍，见第 2 节）。全局视觉风格原先在「内容脚本」页，本轮搬到本页与画布同级：它只进 HTML 生成提示词（配音与字幕只读场景的旁白 / 时长提示，不读它）。
 
@@ -37,17 +48,20 @@
 
 **预览卡会明说「总时长为什么是 `--:--`」**：如果这个页面里还有 GSAP 的无限循环（`repeat: -1`），GSAP 会把那条 tween 的时长当成 1e10 秒，父时间轴的总时长于是荒谬到没法用来做进度条。播放控制条下方因此多一行 12px 提示，说明「总时长无法确定、进度条与拖动跳转暂不可用，把循环改成有限次数（如 `repeat: 12, repeatDelay: 0.4`）后就会恢复」；同一时刻「转视频」也会被主进程拒掉（见 [main/video.ts.md](../../../main/video.ts.md) §1.3）。
 
-### 1.1 五个文件的职责边界
+### 1.1 七个文件的职责边界
 
-拆分按「一个文件一件事」切（源码注释在 `index.vue`、`MaterialsSection.vue`、`PreviewSection.vue`、`ChapterSection.vue`、`CastSection.vue` 里）：
+拆分按「一个文件一件事」切（源码注释在 `index.vue`、`MaterialsSection.vue`、`PreviewSection.vue`、`ChapterSection.vue`、`CastSection.vue`、`CastLibraryModal.vue`、`CastCreateModal.vue` 里；**角色预览组件 `CastShot.vue` 的注释现在写在公共组件目录那个文件头上**——它本轮从本页目录搬到了 `src/renderer/src/components/`，理由见 §11.3）：
 
 | 文件 | 只回答一个问题 | 不负责什么 |
 |------|----------------|------------|
 | `index.vue` | 「这一页要生成 / 修改 / 渲染什么」——项目状态条（3 个纯数据格）、标题右侧的「用法」`?` 气泡、**字幕素材 + 画布下拉（同一个 `.hgen-row`）**、**全局视觉风格输入框（`content.style`）**、需求描述、动作行上方统一的生成前提提示、四个动作按钮、转视频弹窗与渲染档位、两套动作的状态文案 | 素材的增删勾选（交 `MaterialsSection`）、预览与背景音频/试听（交 `PreviewSection`） |
 | `MaterialsSection.vue` | 「这次生成用哪些素材」——图片 / 视频素材库的展示与增删勾选 | 生成流程、预览、渲染；不碰文件系统，全部经主进程 |
-| `PreviewSection.vue` | 「产物长什么样」——预览副本 iframe（**按页面自己声明的画布渲染**）、**视角比例（换一种比例观察）**、播放控制与 seek、**总时长不可信时的 `--:--` 与那行原因说明**、AI 思考过程展示、背景音频选定与试听 | 发起生成 / 渲染（按钮在父页），因此状态由父页以 props 传入；**也不显示「画布」值**（那属于「HTML · Agent」卡片） |
+| `PreviewSection.vue` | 「产物长什么样」——预览副本 iframe（**按页面自己声明的画布渲染**）、**视角比例（换一种比例观察）**、播放控制与 seek、**总时长不可信时的 `--:--` 与那行原因说明**、AI 思考过程（标题行可折叠：生成中展开、一轮结束收起）、背景音频选定与试听 | 发起生成 / 渲染（按钮在父页），因此状态由父页以 props 传入；**也不显示「画布」值**（那属于「HTML · Agent」卡片） |
 | `ChapterSection.vue` | 「这片子分了哪几章、要改哪一章」——章节模式下把 `Project.chapters` 列成只读行（序号 / 标题 / 起止 / 时长 / `pages/cNN.js`），每行一个「改这一章」 | 生成 / 修改 / 渲染本身；点「改这一章」只把「只改第 N 章（pages/cNN.js）：」写进需求描述，不发起请求 |
-| **`CastSection.vue`** | **「本项目有哪些角色、这次用哪些、要新建 / 导 / 改 / 存哪一个」——把 `Project.cast` 列成行（勾选框 + 名字 + 描述 + 高几 u + `cast/<id>.js`），行内三个动作「存为全局」/「改这个角色」/「移除」，标题右侧「从全局库添加」/「新建角色」，外加两个弹窗** | **生成 / 修改 / 渲染本身；「改这个角色」只把范围写进需求描述；其余动作只调角色相关 IPC（存为全局 / 导入 / 新建 / 整份回写，都不经「生成 HTML」）** |
+| **`CastSection.vue`** | **「本项目有哪些角色、这次用哪些、要新建 / 导 / 改 / 存 / 删哪一个」**——把 `Project.cast` 摆成**与素材同一套卡片墙**（人物在上、名字在下；勾选框在左上角，`.mat-path` 里写 `高几 u · 描述`），三个动作收进卡片右上的「…」菜单，标题右侧两个入口，外加打开两个弹窗；列表回写（勾选 / 移除 / 存为全局）各管各的 `busy` | **生成 / 修改 / 渲染本身；「改这个角色」只把范围写进需求描述；弹窗自己的忙碌态与错误态由弹窗自己管（`busy` 只管列表回写）** |
+| **`components/CastShot.vue`**（**不在本页目录**，公共组件，两页共用） | **「这个角色长什么样」**——只负责「取预览页地址 + 载入 `iframe`」（一次 `castPreview` 调用 + `previewUrl` + `epoch` 重载 + `seq` 并发保护） | **不拼 HTML、不读文件、不做交互**：预览页由主进程生成（`main/cast/preview.ts`），`iframe` 的 `pointer-events` 交给外层 CSS，尺寸由 `.cast-shot` / `.cast-shot.big` 决定 |
+| **`CastLibraryModal.vue`** | **「从全局角色库里挑哪几个导入」**——方格网格 + 选中态 + 缺文件置灰 + 「导入 N 个」 | 不新建角色、不改项目角色表（`importCast` 之后只 `refreshProject()`）；库本身只读 |
+| **`CastCreateModal.vue`** | **「画一个新角色，并当场看它长什么样」**——两态表单 / 结果大图 + 「再画一个 / 完成」 | 不轮询；进度由**它自己**按 `taskId` 订阅（`castStatus`），不再从父页传 `status` / `thinkText` 进来 |
 
 ## 2. `index.vue`：模板结构
 
@@ -66,35 +80,32 @@
 | `.hgen-block`（需求描述） | `textarea.hgen-subtitle`，`v-model="prompt"`、`spellcheck="false"`、`:placeholder="promptPlaceholder"`；文案随 `hasHtml` 变：已有 HTML 讲「这次要改什么」（换紫色霓虹配色 / 字幕节奏放慢），否则讲「你想要的 HTML 效果」（深空科技风格标题动画页 / 每条字幕间隔两秒依次上浮淡入） |
 | 统一的 `.hgen-tip`（动作行上方） | 原文：「画布与视觉风格都是生成前提：改完要重新「生成 HTML」或「按需求修改」才会体现在页面上。」——源码注释：「画布与视觉风格的共同前提（原先在两处 tip 里各说一遍）：改完不会自动生效，要重新生成」。它是 `.hgen-actions` 之前、卡片内的最后一个区块 |
 | `.hgen-actions` | 动作行，顺序固定为：**「生成 HTML」**（`hf-btn hf-btn-primary`，`:disabled="rendering"`，`@click="onGenerate"`，文案恒为字面量 `生成 HTML`，**无 `:title`**）→ **「按需求修改」**（`hf-btn`，`:disabled="!hasHtml \|\| rendering"`，`@click="onModify"`，**无 `:title`**）→ 「下载 HTML」（`onDownload`，`title`「下载当前项目 HTML 到本地」）→ **「转视频」**（主按钮，`:disabled="!hasHtml \|\| rendering"`，`openRenderModal`，`title` 为「把当前 HTML 渲染成 MP4（约 30 秒）」）。**行内帮助 `?` 在 `<button>` 内部、每个动作按钮里各一个**（`<span class="hg-help" @click.stop>` > `.hg-help-icon`「?」 + `.hg-help-pop`），原文照抄：「生成 HTML」按钮内 —「不参考现有页面，从零做一版新的。点一次即开始并覆盖当前页面，想留底稿可先「下载 HTML」。」；「按需求修改」按钮内 —「在当前页面的基础上，按你描述的改一版——换配色、调节奏、改文案都用它。还没生成过 HTML 时不可用。」。**动作行末尾没有独立的 `?`**（本页的另外两处 `?` 在标题「用法」与字幕 / 画布那一行，见上） |
-| `<PreviewSection />`（第 1 张卡片之外） | `ref="previewRef"`，四个 props：`:status` / `:status-class` / `:think-text` / `:rendering`（全部来自本页状态），见第 4 节 |
+| `<PreviewSection />`（第 1 张卡片之外） | `ref="previewRef"`，五个 props：`:status` / `:status-class` / `:think-text` / `:rendering` / **`:running="agentRunning"`**（全部来自本页状态；`running` 只用于思考区自动展开 / 收起），见第 4 节 |
 | `<ChapterSection />` | 章节模式下渲染只读章节列表；点每行「改这一章」把「只改第 N 章（pages/cNN.js）：」填进「需求描述」`textarea`，不直接发请求。 |
 | **`<CastSection />`** | **紧跟 `<MaterialsSection />`（素材区）之后、`<ChapterSection />` 之前**，`v-model:prompt="prompt"`：**常显（0 个角色也显示）**——它是素材的一部分，不能因为「项目还没有角色」就把入口藏起来（「从全局库添加」/「新建角色」就在这一块里）。每行 = 勾选框（`:class="{ on: m.selected !== false }"`，点击 `onToggle`）+ 名字 + 描述 + `{{ m.units }}u` + `cast/<id>.js` + 三个动作；标题右侧两个动作；空态一行提示 + 一个 `.hgen-tip` 说明角色是什么。行上加 `:class="{ off: m.selected === false }"`（未勾选整行压暗）。点「改这个角色」把「只改角色 <id>（cast/<id>.js）：」填进下方的「需求描述」`textarea`，不直接发请求 |
 | 「转视频」弹窗（页面级，位于两张卡片之外） | `.hf-modal-mask`（`v-show="renderModalVisible"`，遮罩点击自身关闭 `@click.self="closeRenderModal"`）> `.hf-modal`（行内 `style="width:min(520px,92vw)"`；**样式全部复用 `assets/main.css` 的通用弹窗类，未新增 CSS 类**）：`.hf-modal-head`（`.hf-modal-title`「转视频」+ `.hf-modal-close`「×」，`title`「关闭」）→ `.hf-modal-body`（`.panel-title-sm`「渲染档位」（行内 `style="margin-top:0"`）→ 质量 `.hgen-row`（`label.sel-label`「质量」+ `HfSelect` `v-model="quality"`、`:groups="qualityGroups"`、`:disabled="rendering"`、`@change="onOptionChange"`）→ 帧率 `.hgen-row`（同上，`v-model="fps"` / `:groups="fpsGroups"`）→ 档位来源 `.hgen-row`（`style="margin-bottom:0"`：`.hf-file` 显示 `optionNote` + `v-if="overridden"` 的「恢复默认档位」）→ `.hgen-tip`）→ `.hf-modal-foot`（「取消」`closeRenderModal` / 「开始渲染」（主按钮）`confirmRenderVideo`） |
 | `.hgen-tip`（**在弹窗内、档位来源行下方**） | `{{ qualityHint }}` + 「转视频」说明：「把当前 HTML 渲染成 MP4（约 30 秒）；渲染完成后到「视频预览」页查看成品。」|
 
-### 2.1 项目状态条文案（`meta` computed）
+### 2.1 项目状态条与「用法」文案（`useProjectMeta()`，逻辑已搬到 `composables/useProjectMeta.ts`）
 
-```js
-const c = (p && p.content) || { scenes: [] };
-const filled = (Array.isArray(c.scenes) ? c.scenes : [])
-  .filter((s) => s && (String(s.narration || '').trim() || String(s.visual || '').trim()));
-const sceneN = filled.filter((s) => String(s.visual || '').trim()).length;
-const missVisual = filled.length > 0 && sceneN === 0;
-const mats = (p && p.materials) || [];
-const images = mats.filter((m) => m.kind === 'image').length;
-const videos = mats.filter((m) => m.kind === 'video').length;
-const picked = mats.filter((m) => m.selected).length;
-const subCount = (p && p.subtitleCount) || 0;
-const parts: string[] = [];
-if (subCount) parts.push('字幕 ' + subCount + ' 条');
-if (p && p.audioFile) parts.push('已配背景音频');
-if (mats.length) parts.push('素材 ' + mats.length + ' 个（图片 ' + images + ' · 视频 ' + videos + '，参与生成 ' + picked + '）');
+`index.vue` 现在只有一行 `const { meta, usageHint } = useProjectMeta();`——派生逻辑在 `@renderer/composables/useProjectMeta.ts`（48 行），源码原文（`const meta = computed(() => {` 之后的主体）：
+
+```ts
+    const p = appState.project
+    const c = (p && p.content) || { scenes: [] as { narration?: string; visual?: string }[] }
+    // 有内容的场景（旁白或画面分镜非空）：「两个字段都空」的空壳不算——loadScenes 会给空项目补一个空场景。
+    const filled = (Array.isArray(c.scenes) ? c.scenes : [])
+      .filter((s) => s && (String(s.narration || '').trim() || String(s.visual || '').trim()))
+    // 场景数口径与主进程 buildContentBlock 一致：**画面分镜非空**才算一场（旁白可以为空 = 静音段）。
+    // 早先只数旁白非空，静音段被漏掉，这个格子写的「N 个场景（生成时自动附带）」就与实际附带的对不上。
+    const sceneN = filled.filter((s) => String(s.visual || '').trim()).length
 ```
 
 - `meta` 返回 `{ hasH, sceneN, missVisual, subCount, matN, matText }`：`hasH` 取 `hasHtml.value`；`filled` = 「旁白或画面分镜非空」的场景（**两个字段都空**的空壳不算——`loadScenes` 会给空项目补一个空场景）；`sceneN` = `filled` 里**画面分镜非空**的条数（统计**画面分镜非空**的场景数，与主进程 `buildContentBlock` 的附带口径一致，旁白可以为空 = 静音段）；`missVisual` = `filled.length > 0 && sceneN === 0`（**写了旁白、但一场都没填画面分镜**——这时报「无内容脚本」会让人以为自己的脚本白写了，所以要单独说清楚缺什么）。
 - 三段都为空时 `matText` 恒为「无素材（可先到「字幕生成」页添加字幕，或在上方「项目素材」里添加图片 / 视频）」。
 - 与素材库的联动是**自动的**：`MaterialsSection` 每次落盘后调 `refreshProject()`，本 computed 直接读 `appState.project.materials`，因此计数与「参与生成 N 个」无需父页参与。
-- **「用法」文案不在 `meta` 里**：`usageHint` 是定义在 `meta` **之后**的另一个 computed（`meta.value.hasH` 为真 / 为假各给一段，逐字来自原先的第 4 格，只补了句号），挂在标题右侧的 `?` 气泡上；`meta` 只保留上面这六项数据，`.proj-meta` 因此只剩 3 格。
+- **「用法」文案不在 `meta` 里**：`usageHint` 是同一文件里定义在 `meta` **之后**的另一个 computed（`meta.value.hasH` 为真 / 为假各给一段，逐字来自原先的第 4 格，只补了句号），挂在标题右侧的 `?` 气泡上；`meta` 只保留上面这六项数据，`.proj-meta` 因此只剩 3 格。`useProjectMeta()` 一次返回 `{ meta, usageHint }`，页面解构之后不再自己算任何一项。
+- **为什么搬出去**（`useProjectMeta.ts` 文件头注释）：「它只是**读 appState.project 算出一份展示用快照**，与生成/渲染流程毫无耦合；页面本身已经很长（还带着预览、素材、角色、章节四块），把这段纯派生搬出来页面才留得住「一件事」。」口径必须与主进程一致（`buildContentBlock`）：「画面分镜非空」才算一场——旁白可以为空（静音段）。
 
 ## 3. `MaterialsSection.vue`：「项目素材」区块
 
@@ -202,7 +213,7 @@ function plainList(list: ProjectMaterial[]): ProjectMaterial[] {
 
 ## 4. `PreviewSection.vue`：「预览」卡片
 
-### 4.1 契约：4 个 props + `defineExpose({ reload })`
+### 4.1 契约：5 个 props + `defineExpose({ reload })`
 
 ```js
 const props = defineProps<{
@@ -210,24 +221,27 @@ const props = defineProps<{
   statusClass: string
   thinkText: string
   rendering: boolean
+  // Agent（生成 / 修改）是否正在进行：只用来决定思考区自动展开还是自动收起
+  running: boolean
 }>();
 
 // 父页在 Agent 成功 / 项目状态变化后调用：重新判定并载入预览（原 index.vue 的 syncPreview）
 defineExpose({ reload: syncPreview });
 ```
 
-- **props 单向**：生成与渲染两套状态都归父页写（发起两者的按钮都在父页），本组件只读不改；`status` / `statusClass` 是父页的最终文案与样式，`thinkText` 是流式思考原文，`rendering` 用于判断是否让全局 trace 接管状态行。
+- **props 单向**：生成与渲染两套状态都归父页写（发起两者的按钮都在父页），本组件只读不改；`status` / `statusClass` 是父页的最终文案与样式，`thinkText` 是流式思考原文，`rendering` 用于判断是否让全局 trace 接管状态行，`running` 只决定思考区自动展开 / 收起（生成 / 修改进行中展开、一轮结束收起），不参与任何状态文案。
 - **`reload()` 是唯一对外方法**，父页在两处调用：Agent 成功（`previewRef.value?.reload()`）与生成失败且项目原本无 HTML（同样 `reload()` → 回到「尚未生成」展示）。
 
 ### 4.2 模板结构
 
 | 区块 | 说明 |
 |------|------|
-| `.card.hgen-panel`（`style="margin-top:16px"`） | 标题「预览」；卡片内顺序为**背景音频行（只有一个占满整行的下拉）→ 试听行（`v-show`）→ `.hf-status` → AI 思考过程 → `.empty-hint` → 「视角比例」行 → iframe 画布 → 播放控制条 → 总时长不可信时的说明行（`v-if="prevDurUnknown"`）** |
+| `.card.hgen-panel`（`style="margin-top:16px"`） | 标题「预览」；卡片内顺序为**背景音频行（只有一个占满整行的下拉）→ 试听行（`v-show`）→ `.hf-status` → AI 思考过程（标题行可点、默认收起）→ `.empty-hint` → 「视角比例」行 → iframe 画布 → 播放控制条 → 总时长不可信时的说明行（`v-if="prevDurUnknown"`）** |
 | 背景音频行（`.hgen-row`，**一行一个控件；当前值落在列表的选中项上**） | 只有两个元素：`span.sel-label`（行内 `style="flex:none;width:56px"`）「背景音频」+ **`HfSelect` `v-model="audioPick"` `:groups="audioSelGroups"` 行内 `style="flex:1"`（**占满整行**）**；`:title` 动态——有音频 `'当前背景音频：' + audioFile + '（由应用注入 HTML，不进生成提示词）'`，无音频 `'还没有背景音频：可选「已生成音频」或本地文件；音轨由应用注入 HTML，不进生成提示词'`。源码注释：「这一行只有一个控件：下拉占满整行，**当前音频就是「已生成音频」里的选中项**（勾选 + 显示在该下拉上），清空走「不使用背景音频」那一项 —— 所以没有独立的「移除」按钮、也不挂 `?` 气泡（音轨的注入规则写在触发器 title 里，鼠标悬停即可看到）」。**注意弹层宽度**：`HfSelect` 的菜单宽度是 `max(触发器宽, 220px)`，触发器占满整行 ⇒ 弹层也跟着变宽——这是「占满一行」的直接结果 |
 | 试听行 `v-show="audioPreviewVisible"` | `<audio ref="audioEl" :src="audioSrc" controls>`（行内 `flex:1;max-height:44px`）+ `label.sel-label`「语速」+ `.rate-spinner`：`−`（`rateStep(-0.05)`）/ `<input ref="rateEl" :value="rateValue" inputmode="decimal" class="hgen-input">`（`@input="onRateInput"`）/ `+`（`rateStep(0.05)`），按钮各自带 `title`（「语速减 0.05」/「语速加 0.05」），输入框 `title`「播放语速 0.5~2.0（非法或空值自动回退 1x）」 |
-| `.hf-status` | `:class="statusDisplayClass"`，文本 `statusDisplay`（渲染中优先显示全局 trace，其余为本页传入的 `status`） |
-| AI 思考过程区 `v-show="showThink"` | 蓝色描边块，标题「AI 思考过程（实时）」，内为 `<pre ref="thinkPreEl">{{ thinkText }}</pre>`（`max-height:220px;overflow-y:auto`） |
+| `.hf-status` | `:class="statusDisplayClass"`，文本 `statusDisplay`（渲染中优先显示全局 trace，其余为本页传入的 `status`）。**它不参与折叠**：思考区收起时状态行照常显示 |
+| **AI 思考过程区（外层）`v-show="showThink"` + 标题行 `.hg-think-head`** | 外层蓝色描边块（内联样式与改前一致：`margin-top:10px;padding:10px 12px;border:1px solid rgba(0,212,255,.22);border-radius:8px;background:rgba(0,212,255,.05)`），只有 `thinkText` 非空才出现、**默认收起**。块内第一行就是**开关本身**（不另设按钮）：`<div class="hg-think-head" :title="thinkOpen ? '收起思考过程' : '展开思考过程'" @click="thinkOpen = !thinkOpen">`，内容为 `<span class="hg-think-arrow">{{ thinkOpen ? '▾' : '▸' }}</span>` + `<span>AI 思考过程{{ running ? '（实时）' : '' }}</span>`——即 `running` 为真时标题多了「（实时）」。样式在 `main.css` 的 `.hg-think-head`（`flex` + `gap:6px` + 12px + `var(--color-primary)` + `cursor:pointer` + `user-select:none`）、`.hg-think-head:hover`（`#33ddff`）、`.hg-think-arrow`（`inline-block` + `width:10px` + `flex:none` + 11px），源码注释写明「标题行本身就是开关，箭头只标当前展开态，点整行都是切换」 |
+| **AI 思考正文** `<pre v-show="thinkOpen" ref="thinkPreEl">` | 内容 `{{ thinkText }}`，内联样式 `margin:6px 0 0;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;font-size:12px;line-height:1.7;color:rgba(255,255,255,.82)`（`margin` 顶边从 0 改成 6px，与标题行拉开；其余与改前相同）。收起时整块 `v-show` 隐藏，但原文仍在 DOM 里 |
 | `.empty-hint` `v-show="emptyVisible"` | 空态 / 失败态提示，文本 `emptyText` |
 | **「视角比例」行**（在预览框之前；**不显示画布值**） | `.hgen-row`（行内 `style="margin-bottom:8px"`）：`label.sel-label`（行内 `style="flex:none;width:56px"`）「**视角比例**」+ `HfSelect` `v-model="viewMode"` `:groups="VIEW_MODE_GROUPS"`（行内 `style="width:130px;flex:none"`，`title`「预览按哪种比例显示；只影响观看，成片仍是真实分辨率」）+ `.hg-help`（`@click.stop`，向下气泡，正文原文：「预览只按**比例**缩放显示（等比 contain + 居中），像素由成片保证——成片才是真实分辨率。切到别的比例＝『把这条片子放进那种形状的屏幕里看』，多出来的地方就是黑边，**不影响成片**；页面仍按它自己声明的画布渲染，所以版式不会被裁。」）+ 行尾 `span.hgen-tip` `v-show="viewHint"`（行内 `style="margin:0"`）显示 `{{ viewHint }}`（默认态为空串 ⇒ 不渲染）。**画布的 `sel-label` 与它的值显示（原胶囊 + `canvasText`）已删除**（源码注释：画布是项目属性、入口在「HTML · Agent」卡片，预览卡里不重复它）。**这是预览卡里唯一带 `?` 的行**（背景音频行的 `?` 已随简化删除）。三档只有 `landscape`「16:9」/ `portrait`「9:16」/ `square`「1:1」，**没有「跟随画布」这一项**（初值就是页面天然比例 `pageMode`） |
 | `.hgen-frame-wrap` `v-show="frameVisible"` | 预览画布容器（`ref="frameWrapEl"`）：**尺寸内联绑定 `:style="frameStyle"`**——高度上限 **800px**、宽度 = `min(100%, Math.round(800 × 宽/高)px)`、高度由 `aspect-ratio` 决定、`paddingBottom` 被内联设成 `'0'`。**宽窗口下的实际尺寸**：`16:9` → **1422×800**、`9:16` → **450×800**、`1:1` → **800×800**；**可用宽度不够时宽度退到 `100%`、高度按比例下降，永不裁切**。源码注释：`paddingBottom: '0'` 是**覆盖 `.hgen-frame-wrap` 的 `padding-bottom` 占位**（那是纯 CSS 时代的留位技巧，现在由 `aspect-ratio` 决定高度）。**容器水平居中**：`main.css` 的 `.hgen-frame-wrap` 有 **`margin-inline: auto`**——宽度小于可用宽度时左右均分余量（否则会贴左、右边空一大块，9:16 最明显），宽度吃满时 margin 为 0 等于没有 |
@@ -254,7 +268,7 @@ defineExpose({ reload: syncPreview });
 | `frameStyle` | `computed`（**本轮新增，取代已删除的 `framePadPct`**）：`{ width: 'min(100%, ' + Math.round(VIEW_MAX_HEIGHT * viewBox.width / viewBox.height) + 'px)', aspectRatio: viewBox.width + ' / ' + viewBox.height, paddingBottom: '0' }`——高度上限 800、宽度按比例、**宽度不足时退到 `100%` 且高度按比例下降**（永不裁切）；绑到 `.hgen-frame-wrap`，并用内联 `paddingBottom:'0'` 覆盖 CSS 里的 `padding-bottom` 占位 |
 | `frameVisible` / `frameSrc` / `emptyVisible` / `emptyText` | 画布显隐、iframe 地址（`hgpreview://` URL，由 `previewUrl()` 拼）、空态显隐与文案（初值「尚未生成 HTML。」） |
 | `ctlVisible` | 等同 `frameVisible.value` |
-| `thinkPreEl` / `showThink` | `<pre>` 引用；`showThink` = `props.thinkText.length > 0`；`watch(() => props.thinkText)` 每次更新把 `<pre>` 滚到底部 |
+| `thinkPreEl` / `showThink` / `thinkOpen` | `<pre>` 引用；`showThink` = `props.thinkText.length > 0`（非空才有这一块）；`thinkOpen` = `ref(false)`，思考区是否展开（**默认收起**），标题行点击直接翻转它。两个 `watch`：① `watch(() => props.running, (now, was) => …)`——`now` 为真（新一轮开始）→ `thinkOpen = true`；`now` 为假但 `was` 为真（这一轮结束）→ `thinkOpen = false`（手动展开过的也收，保持一致）；② `watch(() => props.thinkText, …)`——**只在已展开时**把 `<pre>` 滚到底（`scrollTop = scrollHeight`），收起时直接 `return`（元素尺寸为 0，滚了也没有意义），形成「实时滚动」观感 |
 | `prevPlaying` | `ref(true)` 初值，但 `onFrameLoad()` 会置 `false`（预览**不自动播放**），之后由画面回报的 `playing` 校准 |
 | `prevDur` / `prevTimeCur` / `prevFillPct` / `prevTimeText` | 预览总时长、当前时间、进度条宽度百分比、`mm:ss / mm:ss` 文案。**`prevDur` 为 0 时总时长位置显示 `--:--`**（`prevTimeText` 里既有逻辑：`prevDur > 0 ? fmtPrev(prevDur) : '--:--'`），进度条宽度同样是 `prevDur > 0 ? … : '0%'` |
 | **`prevDurUnknown`** | `ref(false)`（**本轮新增**）：画面的时长是否被判定不可信。`onPrevMessage()` 里 `prevDurUnknown.value = d.unknown === true`（每个 `progress` 回报都覆盖一次），`onFrameLoad()` 里复位为 `false`（换项目 / 重载预览后回到「未知 = 假」）。它只驱动模板那行说明；`--:--` 与「拖动不可用」都是既有逻辑自然得出的结果，不靠它额外拦截 |
@@ -320,11 +334,10 @@ defineExpose({ reload: syncPreview });
 | `canvasHint` | 普通常量 `string`（**不是 computed**） | 画布 `?` 气泡的**后半句**（固定文案，内容一字未变）：`'换画布不会自动重排已有页面：版式是生成时按画布排的，模型若按横屏排过版，切到竖屏 / 方形会留下黑边或裁切。'`——只讲「换画布要付出什么代价」，「改完要重新生成」那句由动作行上方的统一 `.hgen-tip` 承担 |
 | `styleText` | `ref<string>` | **全局视觉风格文本（项目属性 `content.style`）**：初值 `''`，挂载时由 `syncStyle()` 从 `appState.project.content.style` 同步；输入框 `v-model="styleText"`，`@change`（失焦）触发 `onStyleChange()` 落盘。它是该字段在全应用里**唯一的编辑点**（内容脚本页只做「原样带回」的只读回写） |
 | `subSelGroups` | `computed<HfSelectGroup[]>` | 字幕下拉选项：`'不使用字幕'` + 仅当 `appState.project?.subtitle` 非空时出现的 `'当前项目字幕（N 条）'` + `appState.myProjects.filter(m => m.name !== currentName && m.hasSubtitle)` 的项目字幕（文案 `项目「标题或名」字幕（N 条）`） |
-| `status` / `statusClass` / `thinkText` | `ref<string>` | 状态条文本、样式类（`''` / `'hf-ok'` / `'hf-error'`）、AI 思考原文；三者整体传给 `PreviewSection` |
-| `meta` | `computed` | 项目状态条数据源，见 2.1（**只出数据**：`{ hasH, sceneN, missVisual, subCount, matN, matText }`；`sceneN` 数**画面分镜非空**的场景、`missVisual` = 有旁白但一场都没填画面分镜） |
-| `usageHint` | `computed<string>` | 标题右侧「用法」`?` 气泡的正文，定义在 `meta` **之后**：`meta.value.hasH` 为真 → 「填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份。」；为假 → 「在「项目素材」里选好素材（可多张图片 / 多个视频，勾选决定这次用哪些），再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定。」——两段逐字来自原先 `.proj-meta` 的第 4 格（只补了句号） |
+| `status` / `statusClass` / `thinkText` | `ref<string>` | 状态条文本、样式类（`''` / `'hf-ok'` / `'hf-error'`）、AI 思考原文；三者连同 `agentRunning`（`:running`）一起传给 `PreviewSection` |
+| `meta` / `usageHint` | `computed`（来自 `useProjectMeta()`） | 一次解构拿两个：`meta` = 项目状态条数据源（**只出数据**：`{ hasH, sceneN, missVisual, subCount, matN, matText }`；`sceneN` 数**画面分镜非空**的场景、`missVisual` = 有旁白但一场都没填画面分镜），`usageHint` = 标题右侧「用法」`?` 气泡的正文。两者的定义与文案都在 `@renderer/composables/useProjectMeta.ts`，见 2.1 |
 | `previewRef` | `ref<{ reload: () => void } \| null>` | 预览子组件引用；**对外契约只有 `reload()`** |
-| `agentRunning` | `let agentRunning = false` | **模块作用域普通变量**（非 ref），生成/修改并发互斥标志 |
+| `agentRunning` | `ref(false)` | 生成 / 修改是否进行中：① 并发互斥（`runAgent` 的守卫与置真 / 置假、`openRenderModal` / `onRenderVideo` 的守卫都读写 `agentRunning.value`）② **下传给 `PreviewSection` 的 `:running`**，只用于思考区自动展开 / 收起。源码注释：「用 ref 而不是普通 let：预览卡的思考区要按它决定「自动展开 / 自动收起」」 |
 | `rendering` | `ref(false)` | 转视频进行中标志（禁用三个动作按钮、画布下拉与弹窗里的两个档位下拉），并传给 `PreviewSection` 决定状态行是否让位给 trace |
 | `qualityOptions` / `fpsOptions` | 常量 | 直接引用 `utils/render.ts` 的 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` |
 | `quality` / `fps` | `ref<RenderQuality>` / `ref<RenderFps>` | 当前所选档位，初值取 `FALLBACK_RENDER`（`standard` / `30`），挂载时按 `effectiveRenderOptions()` 同步 |
@@ -339,7 +352,7 @@ defineExpose({ reload: syncPreview });
 
 | 名称 | 说明 |
 |------|------|
-| `runAgent(mode)` | 生成/修改主流程（见 6.2）：守卫 → 组装 `materials` 载荷 → 按 `mode` 调 `generateHtml` / `modifyHtml` → 成功后 `refreshProject()` + `previewRef.value?.reload()` |
+| `runAgent(mode)` | 生成/修改主流程（见 6.2）：守卫 → `const taskId = newTaskId('html')` → `onTaskProgress(taskId, cb)` 先订阅 → 组装带 `taskId` 的 `materials` 载荷 → 按 `mode` 调 `generateHtml` / `modifyHtml` → 成功后 `refreshProject()` + `previewRef.value?.reload()`；`finally` 里 `off(); agentRunning.value = false` |
 | `onGenerate()` | 渲染中 → `toast('正在渲染视频，请等它结束再提交需求')` 并返回；否则 `void runAgent('generate')`。**没有二次确认** |
 | `onModify()` | `!appState.project?.htmlExists` → `toast('还没有 HTML，先点「生成 HTML」')`（模板已 `:disabled`，这里是兜底），否则 `void runAgent('modify')` |
 | `onDownload()` | 只走 `window.projectTools.downloadHtml(appState.currentName)`；按 `ok` / `canceled` / `message` 分支提示 |
@@ -355,7 +368,7 @@ defineExpose({ reload: syncPreview });
 | `confirmRenderVideo()` | **先关弹窗**再 `void onRenderVideo()` |
 | `onModalKeydown(e)` | `document` 级 `keydown`：`e.key === 'Escape' && renderModalVisible.value` 时 `closeRenderModal()` |
 | `onRenderVideo(skipEnvGuard = false)` | 转视频主流程（见 6.7） |
-| `onMounted(cb)` | 清空 `status` / `statusClass` / `thinkText`；`resetRenderProgress()`；`syncFromEffective()`（渲染档位：项目覆盖 > 设置页全局默认）；`syncCanvas()`（画布显示，项目属性、缺省横屏）；`syncStyle()`（全局视觉风格显示，项目属性 `content.style`）；注册 `onHtmlProgress`；注册 `document` 级 `keydown`（弹窗 ESC） |
+| `onMounted(cb)` | 清空 `status` / `statusClass` / `thinkText`；`resetRenderProgress()`；`syncFromEffective()`（渲染档位：项目覆盖 > 设置页全局默认）；`syncCanvas()`（画布显示，项目属性、缺省横屏）；`syncStyle()`（全局视觉风格显示，项目属性 `content.style`）；注册 `document` 级 `keydown`（弹窗 ESC）。**不再在这里注册进度回调**——进度改由 `runAgent` 按自己的 `taskId` 订阅并在 `finally` 退订 |
 | `onBeforeUnmount(cb)` | 只 `document.removeEventListener('keydown', onModalKeydown)` |
 
 ## 6. 关键流程
@@ -364,7 +377,7 @@ defineExpose({ reload: syncPreview });
 
 1. 复位 `status`、`statusClass`、`thinkText`，避免复用实例时残留上一次会话的文案。
 2. `resetRenderProgress()` 清掉上一次渲染的 trace 残留（源码注释：渲染中若再次进入本页，随后仍会被新 trace 覆盖）；`syncFromEffective()` 把档位下拉刷成「项目覆盖 > 设置页全局默认」的生效值；`syncCanvas()` 把画布下拉刷成当前项目的画布值（源码注释：画布显示：项目属性（缺省横屏））；**`syncStyle()` 把全局视觉风格输入框刷成当前项目的 `content.style`**（源码注释：全局视觉风格显示：项目属性（`content.style`））。
-3. `window.projectTools.onHtmlProgress((info) => …)` 注册进度回调（preload 侧为**单订阅**：重复注册只替换回调，因此切页不会叠加监听）。回调只用两个字段：`info.text` → `status`（同时清空 `statusClass`）、`info.thinkText` → `thinkText`（`String(info.thinkText || '')`）。
+3. **不再注册任何全局进度回调**（这段原来是 `window.projectTools.onHtmlProgress(...)`，已删除）。进度改为按任务 id 分发：`runAgent()` 每次发起时用 `newTaskId('html')` 生成 id、`onTaskProgress(taskId, cb)` 订阅，回调只用两个字段——`info.text` → `status`（同时清空 `statusClass`）、`info.thinkText` → `thinkText`（`String(info.thinkText || '')`），任务结束在 `finally` 里 `off()`。
 4. 注册 `document.addEventListener('keydown', onModalKeydown)`（弹窗 ESC 关闭）；卸载时在 `onBeforeUnmount` 移除。
 5. 预览、已生成音频列表与 iframe 播放控制**不在这里**：`PreviewSection` 自己在 `onMounted` 里 `setAudioPreview(audioFile)` + `syncPreview()` + `genLoad()` + 注册 `message` / `resize`。
 
@@ -374,31 +387,34 @@ defineExpose({ reload: syncPreview });
 
 生成侧在界面上是**两个并列的按钮，各自对应一个明确动作**：`生成 HTML`（主按钮 → `onGenerate`）与 `按需求修改`（次要按钮 → `onModify`）。两者的区别写在**每个动作按钮内部各自的 `?`** 里，按钮文案本身不随状态变化。
 
-1. `agentRunning` 为真 → `toast('上一个请求还在处理中，请稍候')` 并返回（重复提交防护）。
+1. `agentRunning.value` 为真 → `toast('上一个请求还在处理中，请稍候')` 并返回（重复提交防护）。
 2. `rendering` 为真 → `toast('正在渲染视频，请等它结束再提交需求')` 并返回；`prompt.trim()` 为空 → `toast('请先填写需求描述（上方提示词输入框）')` 并返回。
-3. 置 `agentRunning = true`，再按 `meta.value.sceneN` 与 `meta.value.missVisual` 写初始状态文案（**三态**）：有场景（`sceneN` 为真）→「将附带当前项目内容脚本（N 个场景），已提交给 Agent，处理中...」（N 即画面分镜非空的场景数）；`missVisual`（有旁白但一场都没填画面分镜，而画面才是附带门槛）→「当前项目的内容脚本都缺「画面分镜」，附带不到提示词里，将仅按需求描述生成。已提交给 Agent，处理中...」；其余 →「当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...」。最后清空 `statusClass`。
+3. 置 `agentRunning.value = true`，然后 `const taskId = newTaskId('html')` 生成本次任务 id，并**先订阅**：`const off = window.projectTools.onTaskProgress(taskId, (info) => { … })`（源码注释：任务 id 是本页唯一认的进度凭据；画角色那一路在弹窗里用自己的 `cast-…` id，两条流可以并行、状态与思考各归各的）。接着按 `meta.value.sceneN` 与 `meta.value.missVisual` 写初始状态文案（**三态**）：有场景（`sceneN` 为真）→「将附带当前项目内容脚本（N 个场景），已提交给 Agent，处理中...」（N 即画面分镜非空的场景数）；`missVisual`（有旁白但一场都没填画面分镜，而画面才是附带门槛）→「当前项目的内容脚本都缺「画面分镜」，附带不到提示词里，将仅按需求描述生成。已提交给 Agent，处理中...」；其余 →「当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...」。最后清空 `statusClass`。
 4. 组装本次生成的素材载荷（源码注释：字幕 + 素材库里**勾选**的图片/视频，顺序 = 列表顺序；**音轨不在其中**，主进程在 HTML 落盘后按 `project.audioFile` 注入 `<audio id="myv-bgm">`）：
 
 ```js
-const materials = {
-  subtitleProject: subSel.value,
-  materialIds: ((appState.project && appState.project.materials) || []).filter((m) => m.selected).map((m) => m.id)
-};
+  const materials = {
+    subtitleProject: subSel.value,
+    materialIds: ((appState.project && appState.project.materials) || []).filter((m) => m.selected).map((m) => m.id),
+    // 进度按它路由（必填）：主进程每条进度都带回这个 id
+    taskId
+  };
 ```
 
-5. 按模式调用 IPC：`mode === 'generate'` → `window.projectTools.generateHtml(appState.currentName, p, materials)`；否则 `window.projectTools.modifyHtml(appState.currentName, p, materials)`。
-6. 成功（`res.ok`）：`await refreshProject()` → `previewRef.value?.reload()` → `status = 'Agent 已更新 HTML' + (res.htmlPath ? '：' + res.htmlPath : '')`、`statusClass = 'hf-ok'`，并 toast「HTML 已生成」/「HTML 已修改」。**`refreshProject()` 必须先做**：素材可能与生成过程无关地变了，且预览副本要基于新的 `index.html` 重生成。
+5. 按模式调用 IPC：`mode === 'generate'` → `window.projectTools.generateHtml(appState.currentName, p, materials)`；否则 `window.projectTools.modifyHtml(appState.currentName, p, materials)`。**`materials` 是必填参数**（类型 `Omit<ProjectAgentPayload, 'name' | 'prompt'>`），漏传或漏 `taskId` 在 `typecheck` 阶段就报错。
+6. 成功（`res.ok`）：`await refreshProject()` → `previewRef.value?.reload()` → `status.value = (res.message || 'Agent 已更新 HTML') + (res.htmlPath ? '：' + res.htmlPath : '')`、`statusClass = 'hf-ok'`，并 toast「HTML 已生成」/「HTML 已修改」。**状态行取主进程回的 `res.message`**（源码注释：「只改角色时它回「已改角色 cast/x.js」，不会假装重写过页面」）——「按需求修改」只改角色时，状态行显示的就是 `已改角色 cast/x.js：<htmlPath>`，而不是「Agent 已更新 HTML」。**`refreshProject()` 必须先做**：素材可能与生成过程无关地变了，且预览副本要基于新的 `index.html` 重生成。
 7. 失败：`status = res.message || '提交失败'`、`statusClass = 'hf-error'`；随后**按主进程分类分流**——`res.needConfig` 为真时调 `configPrompt.open(msg, res.needConfig, false, res.title)`（`jump = false`：只说明原因，不把用户拽离本页）且**不叠 toast**，否则维持 `toast(msg)`；再判「无 HTML 才恢复空态」：若 `!appState.project?.htmlExists` 则 `previewRef.value?.reload()`（等价于旧的关画布 + 空态）。**余额 / 欠费不在 `needConfig` 之内**，因此仍走 `toast` + 状态行。
-8. `finally` 中复位 `agentRunning = false`，保证异常路径也能再次提交。
-9. **两个频道的提示词差异（主进程侧）**：`project:generate-html` 的提示词只含需求 + 内容脚本 + 素材（**不含现有页面**）；`project:modify-html` 会把当前 `index.html` 全文作为 `extra` 置于提示词最前（见 [main/projects.ts.md](../../../main/projects.ts.md)）。素材部分由主进程 `buildMaterialBlock()` 按 `materialIds` 生成「【图片素材】/【视频素材】」两段。
-10. **素材链路**：添加素材（`pick-media` → `add-materials`）→ 复制进项目 `images/` / `video/` 并在 `project.json` 的 `materials` 里登记 → 卡片上勾选（`selected`，经 `save-materials` 整份回写）→ 生成时提交 `materialIds` → 主进程 `resolveMaterials()` 按 id 过滤 → `buildMaterialBlock()` 拼提示词 → 模型在 HTML 里按 `images/文件名` / `video/文件名` 的相对路径引用。
+8. `finally` 中**先 `off()` 退订、再复位 `agentRunning.value = false`**（源码注释：任务结束就退订：不留后台回调，也不影响其它 `taskId`），保证异常路径也能再次提交。
+9. **两个频道的提示词差异（主进程侧）**：`project:generate-html` 的提示词只含需求 + 内容脚本 + 素材（**不含现有页面**）；`project:modify-html` 会把当前 `index.html` 全文作为 `extra` 置于提示词最前，**单文件模式下还会附【项目角色】+【当前角色源码】**（见 [main/projects.md](../../../main/projects.md) §3.2）。素材部分由主进程 `buildMaterialBlock()` 按 `materialIds` 生成「【图片素材】/【视频素材】」两段。
+10. **「按需求修改」在主进程侧也可以只交 `cast/<id>.js`**（单文件模式与章节模式一致；界面上没有任何变化，仍是同一个「按需求修改」按钮、同一个状态行）：模型只改角色画法时回复里没有 HTML，主进程只把角色文件写到 `<项目>/cast/<id>.js` 并重新注入页面（**不覆盖 `index.html`**），回执的 `message` 是「已改角色 cast/x.js」——所以第 6 步的状态行按 `res.message` 显示（见 [main/cast.md](../../../main/cast.md) 与 [main/projects.md](../../../main/projects.md) §3.2）。
+11. **素材链路**：添加素材（`pick-media` → `add-materials`）→ 复制进项目 `images/` / `video/` 并在 `project.json` 的 `materials` 里登记 → 卡片上勾选（`selected`，经 `save-materials` 整份回写）→ 生成时提交 `materialIds` → 主进程 `resolveMaterials()` 按 id 过滤 → `buildMaterialBlock()` 拼提示词 → 模型在 HTML 里按 `images/文件名` / `video/文件名` 的相对路径引用。
 
 ### 6.3 进度阶段文案与思考原文
 
 1. 主进程 Agent 的 `AgentProgress.stage` 取值为 `'connecting' | 'thinking' | 'writing' | 'retry' | 'done'`，主进程 `progressText` 把它翻成 `正在连接模型…` / `AI 正在推理中…（已思考 N 字符）` / `AI 正在生成 HTML…（已输出 N 字符）` / `本次输出为空，正在升档重试…` / `模型输出完成，正在写入文件…`，随 `IPC.Project.HtmlProgress` 推送。
-2. 本页回调写 `status` / `statusClass` / `thinkText`（见 6.1），**展示由 `PreviewSection` 负责**（`.hf-status` 与 `.pre` 都在「预览」卡片里）。
+2. 本页的 `onTaskProgress` 回调写 `status` / `statusClass` / `thinkText`（见 6.2 第 3 步），**展示由 `PreviewSection` 负责**（`.hf-status` 与思考区的 `pre` 都在「预览」卡片里）。
 3. 主进程上报时对思考原文做**尾部截断**：`thinkText.slice(-20000)`，即最多 2 万字符的末尾片段；完整思考原文与 `thinkChars` / `contentChars` 会落到 userData 下 `html-agent/chat.jsonl` 供分析。
-4. `thinkText` 非空即 `showThink` 为真显示思考区；`PreviewSection` 内的 `watch` 每次更新把 `<pre>` 滚到底部，形成「实时滚动」观感。
+4. `thinkText` 非空才有思考区这一块（`showThink`），且**默认收起**；只有 `running` 为真（这一轮在跑）才自动展开、一轮结束自动收起——`thinkText` 的变化**只在已展开时**把 `<pre>` 滚到底部，形成「实时滚动」观感；想回看上一轮的原文，点标题行即可。
 
 ### 6.4 生成预览副本与 iframe 载入（`PreviewSection`）
 
@@ -409,7 +425,7 @@ const materials = {
 
 ### 6.5 预览 postMessage 协议与 seek（`PreviewSection`）
 
-父页 → iframe：`prevPost(type, seconds?)` 发送 `{ __hg: true, type, seconds }`，`type` 取 `'pause'` / `'play'` / `'seek'` / `'restart'`；副本注入脚本收到 `'restart'` 时 `location.reload()`、收到 `'seek'` 时调 `setTime(d.seconds)`（只挪播放头、不改播放/暂停状态，并立刻回一条带 `ack` 的进度），见 [main/projects.ts.md](../../../main/projects.ts.md)。**载入完成后不再发 `'play'`**：预览默认静止。
+父页 → iframe：`prevPost(type, seconds?)` 发送 `{ __hg: true, type, seconds }`，`type` 取 `'pause'` / `'play'` / `'seek'` / `'restart'`；副本注入脚本收到 `'restart'` 时 `location.reload()`、收到 `'seek'` 时调 `setTime(d.seconds)`（只挪播放头、不改播放/暂停状态，并立刻回一条带 `ack` 的进度），见 [main/projects.md](../../../main/projects.md)。**载入完成后不再发 `'play'`**：预览默认静止。
 
 iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报 `{ __hg: true, type: 'progress', time, dur, playing, ack, unknown }`（`playing` 是真实播放状态、**已播完不算在播**；`ack` 只在收到 seek 后的那条上报里为 `true`；**`unknown` 为真表示画面里的 `clock()` 判定「总时长不可信」——超过页面声明时长 10 倍或超过 24 小时**，此时 `dur` 是 0，父页不显示任何假时长）。
 
@@ -417,7 +433,7 @@ iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报
 
 ### 6.6 转视频：弹窗确认档位（`openRenderModal` / `confirmRenderVideo`）
 
-**第一步：点「转视频」只开弹窗，不渲染。** 三道守卫，任一不通过就 toast 且**不开弹窗**：① `rendering.value` 为真直接返回（按钮本身也已 `:disabled`）；② `agentRunning` 为真 → `toast('Agent 正在处理 HTML，请等它结束再转视频')`；③ 取 `appState.project.htmlPath`，`!htmlPath || !htmlExists` → `toast('还没有 HTML，请先「生成 HTML」')`。
+**第一步：点「转视频」只开弹窗，不渲染。** 三道守卫，任一不通过就 toast 且**不开弹窗**：① `rendering.value` 为真直接返回（按钮本身也已 `:disabled`）；② `agentRunning.value` 为真 → `toast('Agent 正在处理 HTML，请等它结束再转视频')`；③ 取 `appState.project.htmlPath`，`!htmlPath || !htmlExists` → `toast('还没有 HTML，请先「生成 HTML」')`。
 
 守卫放在 `openRenderModal` 而不是只放在 `onRenderVideo`，是为了避免「弹窗打开了又被拒」的观感；`onRenderVideo` 内保留同一套守卫，兜住弹窗打开后状态被改的窗口期。
 
@@ -427,7 +443,7 @@ iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报
 
 ### 6.7 转视频主流程（`onRenderVideo(skipEnvGuard = false)`）
 
-1. 进行中守卫（`rendering`）→ **Agent 忙守卫**（`agentRunning` → toast）→ `htmlPath` / `htmlExists` 校验。
+1. 进行中守卫（`rendering`）→ **Agent 忙守卫**（`agentRunning.value` → toast）→ `htmlPath` / `htmlExists` 校验。
 2. `options = { quality: quality.value, fps: fps.value, canvas: canvas.value }`（质量 / 帧率是渲染档位，`canvas` 是项目属性，一起随载荷下发）；`skipEnvGuard` 为假时先过 `envGate.guard(['ffmpeg', 'hyperframes'], '转成视频', () => { void onRenderVideo(true); })`，`!g.ok` 直接返回（见第 8 节）。
 3. `status = '已提交渲染（' + renderOptionsText(options) + ' · ' + canvasLabel(options.canvas) + '，约 30 秒）...'`、`statusClass = ''`、`rendering = true`。
 4. `await window.hfTools.renderVideo(htmlPath, options)`（`video:render`；主进程按白名单拼 `--quality` / `--fps`）。
@@ -458,7 +474,7 @@ iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报
 
 ### 6.10 背景音频：设定 / 更换 / 清空（`PreviewSection`，音轨由主进程注入 HTML）
 
-背景音轨**不经过 Agent**：本卡片只负责「选定哪份音频」，写 HTML 由主进程完成——`project:set-audio` / `project:clear-audio` / `project:extract-video-audio` 在 `writeProject` 之后调用 `applyBgmToHtml()`，按 `project.audioFile` 重写 `index.html` 里的 `<audio id="myv-bgm" src="audio/…" autoplay loop>`（先摘掉本应用注入的旧标签、再摘掉引用同一音频文件的历史标签；幂等，内容无变化时不写盘，无 HTML 时静默返回 `false`）。细节见 [main/projects.ts.md](../../../main/projects.ts.md)。
+背景音轨**不经过 Agent**：本卡片只负责「选定哪份音频」，写 HTML 由主进程完成——`project:set-audio` / `project:clear-audio` / `project:extract-video-audio` 在 `writeProject` 之后调用 `applyBgmToHtml()`，按 `project.audioFile` 重写 `index.html` 里的 `<audio id="myv-bgm" src="audio/…" autoplay loop>`（先摘掉本应用注入的旧标签、再摘掉引用同一音频文件的历史标签；幂等，内容无变化时不写盘，无 HTML 时静默返回 `false`）。细节见 [main/projects.md](../../../main/projects.md)。
 
 1. **下拉 = 列表 + 动作（当前值就落在列表的选中项上）**：从「已生成音频」里挑出来的那条**就是下拉的选中项**——HfSelect 自己的勾选打在这一行、触发器显示它的名字，**没有「当前：…」这种合成项**（合成的 `CURRENT_AUDIO` 已删除）。首组只在 `currentAudioIndex < 0`（对不上列表）时才放一个同名项把值显示出来（label = 文件名，无音频时「未设置背景音频」），有音频时再加「不使用背景音频」（`NONE_AUDIO`）= 清空入口；其后是「已生成音频」与「本地」→「选择本地文件…」（值 `'__file__'`）。**没有独立「移除」按钮、也没有 `?` 气泡**：清空走 `NONE_AUDIO`，音轨注入规则写在触发器 `title` 里（「由应用注入 HTML，不进生成提示词」）。
 2. **试听**：`setAudio` 的回执 `res.audioFile` 就是**项目内相对引用**（`audio/xxx`，主进程已把音频复制进项目），`setAudioPreview(relFile)` 直接把它交给 `previewUrl()` 拼 `hgpreview://p/…` 显示 `<audio>` 试听行（语速控件见 6.11）。**进入本页时 `onMounted` 会先按项目现有的 `audioFile` 初始化试听源**——否则切页回来后 `audioPreviewVisible` 又是 `false`，那一行试听会整块消失；无音频时传空串，行自动收起。
@@ -487,6 +503,14 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 4. **成功**：`await refreshProject()` → `syncStyle()`。**不重载预览**（页面本身没变）。
 5. 生效方式与画布相同：值只进生成提示词，要重新「生成 HTML」或「按需求修改」才会体现在页面上（这句统一在动作行上方的 `.hgen-tip` 里，本区块自己的 tip 不再重复）。配音（`SynthSection` 的「载入脚本旁白」）与字幕（「由脚本旁白生成」）只读场景的旁白 / 时长提示，**都不读这个字段**。
 
+### 6.13 项目状态条与「用法」气泡（`useProjectMeta()`）
+
+1. `index.vue` 里只有一行 `const { meta, usageHint } = useProjectMeta();`——派生逻辑整体搬到 `@renderer/composables/useProjectMeta.ts`（48 行），页面不再自己算场景数 / 素材数，也不自己写「用法」文案。
+2. `meta` 是 `computed`：`hasH`（`hasHtml.value`）、`sceneN`（**画面分镜非空**的场景数）、`missVisual`（有旁白但一场都没填画面分镜）、`subCount`、`matN`、`matText`（字幕条数 / 背景音频 / 素材计数拼成的一行说明）。`usageHint` 也是 `computed`，按 `meta.value.hasH` 给两段操作引导之一。
+3. **口径必须与主进程一致**（源码注释逐字）：「场景数口径与主进程 `buildContentBlock` 一致：**画面分镜非空**才算一场（旁白可以为空 = 静音段）。早先只数旁白非空，静音段被漏掉，这个格子写的「N 个场景（生成时自动附带）」就与实际附带的对不上。」
+4. 状态条只有 3 格（HTML / 内容脚本 / 素材），**「用法」不是数据、不占格**：它是标题右侧 `.hg-help` 的气泡正文。
+5. 数据源仍是模块级 `appState.project`：`MaterialsSection` / 角色区 / 改稿落盘后都调 `refreshProject()` 换掉 `appState.project` 对象，computed 自动重算——`index.vue` 不需要 `watch`。
+
 ## 7. 依赖与协作
 
 ### 7.1 `index.vue` 的导入
@@ -504,9 +528,13 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 | `@renderer/composables/useRenderOptions`：`effectiveRenderOptions, renderDefaults, saveProjectRenderOverride` | 生效档位、全局默认、写入 / 清除项目覆盖 |
 | `@renderer/components/StepBar.vue` | 顶部流水线步骤条 + 工作项目切换 |
 | `@renderer/components/HfSelect.vue`：`HfSelect`（默认）、`type HfSelectGroup` | 全局自绘下拉组件（**全局视觉风格用的是原生 `input`**） |
-| `./MaterialsSection.vue` / `./PreviewSection.vue` / `./ChapterSection.vue` / **`./CastSection.vue`** | 同目录子组件，**相对路径导入**（AGENTS.md 第五节 7）；`index.vue` 对它们各只加一行 import + 一处挂载。**挂载顺序 = 素材 → 角色 → 章节**（`<MaterialsSection />` → `<CastSection v-model:prompt="prompt" />` → `<ChapterSection v-model:prompt="prompt" />`）——角色与图片 / 视频同属「项目素材」，章节列表才是产物结构 |
+| `./MaterialsSection.vue` / `./PreviewSection.vue` / `./ChapterSection.vue` / **`./CastSection.vue`** | 同目录子组件，**相对路径导入**（AGENTS.md 第五节 7）；`index.vue` 对它们各只加一行 import + 一处挂载。**挂载顺序 = 素材 → 角色 → 章节**（`<MaterialsSection />` → `<CastSection v-model:prompt="prompt" />` → `<ChapterSection v-model:prompt="prompt" />`）——角色与图片 / 视频同属「项目素材」，章节列表才是产物结构。**`CastSection` 内部再相对导入 `./CastLibraryModal.vue` / `./CastCreateModal.vue` 两个同目录组件，并跨目录用别名 `import CastShot from '@renderer/components/CastShot.vue'`**（`CastShot` 已不在本页目录） |
+| **`@renderer/composables/useProjectMeta`：`useProjectMeta`** | 项目状态条（`meta`）与标题右侧「用法」气泡（`usageHint`）的派生逻辑（见 2.1）；页面只保留 `const { meta, usageHint } = useProjectMeta()` 一行 |
+| **`@renderer/utils/taskId`：`newTaskId`** | 生成 / 修改的任务 id（`newTaskId('html')`）；进度按它订阅（见 6.2），画角色那一路在弹窗里用 `newTaskId('cast')` |
 
-> **本轮 `index.vue` 只是挪了一下挂载顺序**（`<CastSection />` 从 `<ChapterSection />` 之后移到 `<MaterialsSection />` 之后，仍是 496 行、import 数量不变）；`NONE_AUDIO` 仍是本文件内的普通常量，`audioBaseName` 是模块内普通函数、`currentAudioIndex` 是 `computed`（合成的 `CURRENT_AUDIO` 已删除）。
+> **`index.vue` 不再往角色区传任何状态投影**：模板里就是 `<CastSection v-model:prompt="prompt" />`（上一版的 `:status` / `:think-text` 已删）。生成侧因此瘦到 **477 行**（上一版 496 行）：`meta` / `usageHint` 交给 `useProjectMeta()`，进度订阅从 `onMounted` 挪进 `runAgent`。`NONE_AUDIO` 仍是本文件内的普通常量，`audioBaseName` 是模块内普通函数、`currentAudioIndex` 是 `computed`（合成的 `CURRENT_AUDIO` 已删除）。
+
+> **两个弹窗为什么不直接在 `index.vue` 里挂**：它们只服务「角色」这一块，且都要用 `appState.currentName` 当项目名；放在 `CastSection` 内部，父页不必知道「角色区有几个弹窗」。**上一版为此付出的代价已经消失**：当时 `status` / `thinkText` 要作为 props 从 `index.vue` → `CastSection` → `CastCreateModal` 转一趟，原因是 `onHtmlProgress` 是单订阅、弹窗自己再订会把父页那条顶掉。现在一条频道 + 按 `taskId` 分发，弹窗用自己的 `newTaskId('cast')` 订阅自己的进度，`CastSection` 也就不必再中转任何状态。
 
 ### 7.2 `MaterialsSection.vue` 的导入
 
@@ -523,7 +551,7 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 
 | 依赖 | 用途 |
 |------|------|
-| `vue`：`computed, nextTick, onBeforeUnmount, onMounted, ref, watch` | 响应式状态与生命周期、思考文本自动滚底、**三个 `watch`（`canvas` → 归位视角比例 + `nextTick(fitFrame)`；`viewMode` → `nextTick(fitFrame)`；`[currentAudioIndex, genAudios]` → 同步背景音频下拉的选中态）** |
+| `vue`：`computed, nextTick, onBeforeUnmount, onMounted, ref, watch` | 响应式状态与生命周期、**五个 `watch`（`props.running` → 思考区自动展开 / 一轮结束自动收起；`props.thinkText` → 仅展开时把 `<pre>` 滚到底；`canvas` → 归位视角比例 + `nextTick(fitFrame)`；`viewMode` → `nextTick(fitFrame)`；`[currentAudioIndex, genAudios]` → 同步背景音频下拉的选中态）** |
 | `@shared/types`：**`type RenderCanvas`** | 画布 / 页面声明画布 / 视角比例 / `pageMode` 的类型标注（`VIEW_MODE_OPTIONS` 的 `value` 也用这个类型） |
 | `@renderer/composables/useAppStore`：`appState, refreshProject` | 读 `audioFile` / `htmlExists` / `htmlPath` 与**成片画布 `canvas`**，音频变更后刷新项目 |
 | `@renderer/composables/useToast`：`toast` | 轻提示 |
@@ -533,15 +561,15 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 | `@renderer/composables/useRenderProgress`：`renderProgress` | 渲染中状态行改显全局 trace |
 | `@renderer/components/HfSelect.vue`：`HfSelect`（默认）、`type HfSelectGroup` | 背景音频的下拉 + 预览「视角比例」下拉 |
 
-> **导入面稳定**：`prevDurUnknown` 只是一个 `ref`（**本轮新增，没有引入任何新 import**）；`NONE_AUDIO` / `pageMode` / `audioBaseName` / `currentAudioIndex` 也都只是本文件内的常量、函数与 computed；`escTxt` 与 `canvasLabel` 都已不再使用。
+> **导入面稳定**：`prevDurUnknown` 只是一个 `ref`（**本轮新增，没有引入任何新 import**）；`NONE_AUDIO` / `pageMode` / `audioBaseName` / `currentAudioIndex` 也都只是本文件内的常量、函数与 computed；`escTxt` 与 `canvasLabel` 都已不再使用。思考区的折叠（`thinkOpen` / `hg-think-head`）同样没有新增 import——`running` 是第 5 个 prop，样式写在 `main.css`。
 
 ### 7.4 调用的 preload / IPC
 
 | 方法 | 用途 | 调用点 |
 |------|------|--------|
 | `previewHtml(name)` | 生成 `index.preview.html` 预览副本；返回 `{ ok, previewPath, pageCanvas }`——`pageCanvas` 是**页面自己声明的画布**（取自原 HTML 的 `<html data-resolution>`，`RENDER_CANVASES` 白名单，缺失 / 非法为 `''`），渲染层用它决定预览 iframe 的视口 | `PreviewSection.loadFrame` |
-| `generateHtml(name, prompt, materials)` | 生成 `index.html`（`materials` = `{ subtitleProject, materialIds }`，**不含音频**；音轨由主进程在落盘后注入） | `index.vue` 的「生成 HTML」按钮 |
-| `modifyHtml(name, prompt, materials)` | 基于现有 HTML 改造并覆盖（载荷同上）。提示词含当前 `index.html` 全文 | `index.vue` 的「按需求修改」按钮 |
+| `generateHtml(name, prompt, materials)` | 生成 `index.html`（`materials` 类型 `Omit<ProjectAgentPayload, 'name' \| 'prompt'>`、**必填**，内容 = `{ subtitleProject, materialIds, taskId }`，**不含音频**；音轨由主进程在落盘后注入） | `index.vue` 的「生成 HTML」按钮 |
+| `modifyHtml(name, prompt, materials)` | 基于现有 HTML 改造并覆盖（载荷同上，**同样必填且含 `taskId`**）。提示词含当前 `index.html` 全文；**单文件模式下还附【项目角色】+【当前角色源码】**，回执 `message` 可能是「已改角色 cast/x.js」（只改角色时**不覆盖** `index.html`，只重新注入） | `index.vue` 的「按需求修改」按钮 |
 | `pickMedia(kind)` | 按素材类型打开文件选择框，返回本地绝对路径数组（取消 → 空数组） | `MaterialsSection.onAdd` |
 | `addMaterials(name, paths)` | 把所选文件复制进项目并登记进 `materials`，返回登记结果（含被跳过数时的 `message`） | `MaterialsSection.onAdd` |
 | `saveMaterials(name, materials)` | 整份素材列表回写（移除与勾选共用） | `MaterialsSection.save` |
@@ -549,11 +577,12 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 | `downloadHtml(name)` | 另存项目 HTML（主进程把 `./gsap.min.js` 换回 CDN 后写出） | `index.vue.onDownload` |
 | `pickAudio()` / `setAudio(name, audioPath)` / `clearAudio(name)` | 背景音频选择 / 设置 / 清空；主进程同时改写 `index.html` 里的注入音轨，`setAudio` 回执的 `audioFile`（项目内相对路径）被交给 `previewUrl()` 试听 | `PreviewSection`（`onPickAudioFile` / `onAudioPick` / `onRemoveAudio`） |
 | `extractVideoAudio(name)` | 提取视频原声为背景音频——**本页当前无界面入口**（实现整段被注释，见 3.5），频道与 preload 方法保留 | 无（保留但不可达） |
-| `onHtmlProgress(callback)` | 订阅 `IPC.Project.HtmlProgress` 流式进度（单订阅） | `index.vue.onMounted` |
+| **`onTaskProgress(taskId, callback)`** | **按任务 id 订阅** `IPC.Project.HtmlProgress` 的进度，返回**退订函数**（一条频道 + 按任务 id 分发，不是单订阅）：本页用自己的 `newTaskId('html')`，画角色弹窗用自己的 `newTaskId('cast')`，两路可并行 | `index.vue` 的 `runAgent`（`finally` 里 `off()`）与 `CastCreateModal.onCreate` |
 | `setCanvas(name, canvas)` | 调 `project:set-canvas`，写**成片画布方向**（项目属性；白名单校验在主进程，值变化时主进程把 `videoPath` 置空） | `index.vue` 字幕 / 画布行里的画布下拉（`onCanvasChange`） |
-| `newCast(name, brief)` | 调 `project:new-cast`：**新建角色**（一次模型调用画 `cast/<id>.js`，与「生成 HTML」无关）；`brief` = `{ title, desc, units, watercolor }` | `CastSection.onCreate` |
+| `newCast(name, brief)` | 调 `project:new-cast`：**新建角色**（一次模型调用画 `cast/<id>.js`，与「生成 HTML」无关）；`brief` **必填** = `{ taskId, title, desc, units, watercolor }`——`taskId` 是弹窗自己 `newTaskId('cast')` 生成的，主进程每条进度都带回它 | `CastCreateModal.onCreate` |
 | `saveCast(name, cast)` | 调 `project:save-cast`：**整份角色表回写**（勾选 / 移除共用）；提交前把每行铺平成 `{ id, name, desc, units, uses?, selected }` 普通对象 | `CastSection.saveAll`（`onToggle` / `onRemove` 共用） |
-| `listCastLibrary()` / `promoteCast(name, id)` / `importCast(name, ids)` | 全局角色库：列库（弹窗数据源 + 空态里的条目数）/ 存为全局 / 导入（`importCast` 传普通字符串数组） | `CastSection.openShelf` / `onPromote` / `onImport` |
+| `listCastLibrary()` / `promoteCast(name, id)` / `importCast(name, ids)` | 全局角色库：列库（**弹窗网格数据源** + 空态里的条目数）/ 存为全局（行内）/ 导入（`importCast` 传普通字符串数组） | `CastSection.onMounted`（空态条目数）/ `CastSection.onPromote` / `CastLibraryModal.loadLib` / `CastLibraryModal.onImport` |
+| **`castPreview(name, id, { units, title, from, uses })`** | 调 `project:cast-preview`：**角色静态预览**——主进程只读角色代码 + 拼一页预览 HTML 落盘，回 `{ rel }`；渲染层拿 `rel` 拼 `hgpreview://` 交给 `iframe` | `CastShot.load`（缩略图与大图共用；每次 `project` / `id` / `units` / `from` / `epoch` 变化都重调） |
 | `setRender(name, render \| null)` | 调 `project:set-render`（经 `saveProjectRenderOverride`），写 / 清除项目级渲染档位覆盖 | `index.vue` 档位下拉 |
 | `saveVideo(name, videoPath)` | 调 `project:save-video`，渲染成功后把产物路径回写到项目 `project.json` | `index.vue.onRenderVideo` |
 | `window.hfTools.renderVideo(htmlPath, { quality, fps, canvas })` | 调 `video:render`，把当前项目 HTML 渲染为 MP4（载荷含 `canvas`：主进程据此给渲染入口的舞台写 `data-width`/`data-height`（并写 `<html data-resolution>` 作页面自描述）——不传就写不出舞台宽高，CLI 兜底 1080×1920 竖屏）。**页面里有 `repeat: -1` 时主进程在进 CLI 之前就返回 `{ ok: false, message }`**（不新增频道、不加字段，见 6.7 第 8 步） | `index.vue.onRenderVideo` |
@@ -576,16 +605,17 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 - **画布说明全在一个 `?` 气泡里**（HTML · Agent 卡片那处）：正文是两段拼接——`canvasNote`（computed，随画布变）+ `canvasHint`（普通常量，固定文案）；行内那行 `.hgen-tip` 已删除，「改完要重新生成」统一在动作行上方说一次。**预览卡里不显示画布值**（只留「视角比例」行）。
 - **总时长不可信 = `--:--` + 一行说明，不是「猜一个数」**：页面里有 GSAP 的 `repeat: -1` 时，那条 tween 的时长是 1e10 秒量级（GSAP 的无限循环哨兵，不是 `Infinity`），父时间轴 `duration()` 会报出 1e10 量级；主进程注入的 `HG_PREVIEW_CTRL.clock()` 因此在两种情况下判「不可信」——超过页面自己声明的 `<html data-composition-duration>` 10 倍，或绝对超过 24 小时——并回报 `{ dur: 0, unknown: true }`。本卡只做三件事：`prevDurUnknown` 记下这个标记、模板在**播放控制条下方**多一行 12px `.hgen-tip` 说明原因、总时长因既有逻辑（`prevDur > 0 ? fmtPrev(prevDur) : '--:--'`）回落成 `--:--`；**进度条与拖动跳转不用额外禁用**（`prevFillPct` 要求 `prevDur > 0`、`seekTo` / `onSeekStart` 同样要求 `prevDur > 0`），换项目 / 重载预览（`onFrameLoad`）把它复位成 `false`。
 - **「转视频」被拦时用户看到的是同一件事**：主进程 `video:render` 在进 CLI 之前就拒绝（`{ ok: false, message: '页面里有无限循环动画（GSAP 的 repeat: -1）…' }`），本页把它写进状态行并 toast；修法只有一个——到本页把循环改成有限次数（如 `repeat: 12, repeatDelay: 0.4`）再生成 / 修改，预览与转视频会同时恢复。
-- **预览视口 = 页面自己声明的画布**：`pageDeclared` 由 `previewHtml()` 回执的 `pageCanvas` 写入，`pageBox = canvasSize(pageDeclared || canvas)` 决定 **iframe 的宽高**；页面没声明（老页面）或声明非法 ⇒ `''` ⇒ 回落成项目当前画布，**行为与旧实现完全一致**。主进程侧的解析在 `project:preview-html`（从**原 HTML** 取，发生在去 CSP / GSAP 本地化之前），见 [main/projects.ts.md](../../../main/projects.ts.md) §5.4。
+- **预览视口 = 页面自己声明的画布**：`pageDeclared` 由 `previewHtml()` 回执的 `pageCanvas` 写入，`pageBox = canvasSize(pageDeclared || canvas)` 决定 **iframe 的宽高**；页面没声明（老页面）或声明非法 ⇒ `''` ⇒ 回落成项目当前画布，**行为与旧实现完全一致**。主进程侧的解析在 `project:preview-html`（从**原 HTML** 取，发生在去 CSP / GSAP 本地化之前），见 [main/projects.md](../../../main/projects.md) §3.5。
 - **「视角比例」只影响观看、不落盘**：`viewMode` 只换外层容器的**尺寸形状**（`frameStyle`：高度上限 800、宽度按比例）并让 `fitFrame()` 把 `pageBox` **contain** 进去（居中 + 黑边），**iframe 视口与成片都不变**——预览只按**比例**缩放，像素由成片保证（横屏成片仍是 1920×1080）。默认值 = **`pageMode`（页面天然比例）**，此时不留黑边；没有「跟随画布」这一项。`watch(canvas)` 把 `viewMode` 归位到 `pageMode`；`loadFrame()` 只在**用户没手动改过**（`viewMode === 旧 pageMode`）时才跟随页面切换。**因此当页面版式与项目画布不匹配时，预览与成片仍可能不一致**（预览按页面原生画布裁/缩，成片按项目画布渲染）——要让成片也重排，只能靠主进程提示词（`buildCanvasBlock` 第 ⑤ 条）让模型重排后重新生成。
 - **`viewHint` 只剩两态、默认态为空**：① 视角比例 ≠ 页面比例（「模拟：按「16:9」观看（左右 / 上下 留黑边）；只影响预览」）；② 页面未声明画布（「本页未声明画布，按当前项目画布的比例显示」）；其余为空串 ⇒ `v-show="viewHint"` 不渲染。模板上**默认态不留任何提示**（那行「无限循环」说明是**另一个独立元素**、由 `prevDurUnknown` 控制，两者不要合并）。
 - **预览缩放实现**：**容器尺寸由 `frameStyle` 内联决定**——高度上限 `VIEW_MAX_HEIGHT = 800`、宽度 `min(100%, round(800 × 宽/高)px)`、高度由 `aspect-ratio` 撑、`paddingBottom: '0'` 覆盖 CSS 占位（**宽窗口：16:9 = 1422×800、9:16 = 450×800、1:1 = 800×800；窄窗口宽度退到 100%、高度按比例降，永不裁切**）；iframe 的宽高仍**内联绑定 `pageBox`**（视口 = 页面原生画布 + `transform-origin: 0 0`）；`fitFrame()` 用 **contain** —— `k = Math.min(wrap.clientWidth / pageBox.width, wrap.clientHeight / pageBox.height)`，`tx/ty = (容器尺寸 - pageBox 尺寸 × k) / 2`，最终 `transform: translate(tx, ty) scale(k)`；`watch(canvas)` 先归位 `viewMode` 再 `nextTick(fitFrame)`，`watch(viewMode)` 单独重算一次（容器尺寸随 `frameStyle` 变）。窗口 `resize`（`onMounted` 的 `addEventListener('resize', fitFrame)`）与每次 `load`（`@load="onFrameLoad"` 内调 `fitFrame()`）都会重新缩放。
 - **思考文本截断**：展示的是主进程 `thinkText.slice(-20000)` 的结果（仅末尾片段），完整原文写入 userData 下 `html-agent/chat.jsonl`。
 - **思考区样式与状态样式互斥**：进度回调每次设置 `status` 都会把 `statusClass` 清空，只有最终成功/失败分支才写入 `hf-ok` / `hf-error`。
-- **取消 / 重复提交防护**：`agentRunning` 为模块作用域普通变量（非响应式），`try/finally` 保证复位；并发点击「生成 HTML」/「按需求修改」会被直接 toast 拒绝。渲染与 Agent 互斥：渲染中禁用两个按钮与「转视频」，Agent 处理中调 `openRenderModal` / `onRenderVideo` 都会被 toast 拦下。
+- **思考区一轮结束后原文还在、切页回来就没了**：`running` 由真变假只把思考区**收起**，不丢 `thinkText`——这一轮的原文仍留在内存里，点标题行（`.hg-think-head`）就能回看；但父页 `onMounted` 会清空 `status` / `statusClass` / `thinkText`，所以离开本页再回来，思考区连同原文一起消失（与改动前一致）。另外**「可折叠」只针对 AI 思考过程**：状态行 `.hf-status` 没有被折叠，任何时刻都常显——不要把两者混为一谈。
+- **取消 / 重复提交防护**：`agentRunning` 是 `ref(false)`（**不是模块级 `let`**——预览卡要按它决定思考区自动展开 / 收起），`try/finally` 保证复位；并发点击「生成 HTML」/「按需求修改」会被直接 toast 拒绝。渲染与 Agent 互斥：渲染中禁用两个按钮与「转视频」，Agent 处理中调 `openRenderModal` / `onRenderVideo` 都会被 toast 拦下。
 - **弹窗与页面级监听**：转视频弹窗用的是通用弹窗类（`.hf-modal-mask` / `.hf-modal*`，与「从音频生成字幕」弹窗同一套），**没有新增 CSS 类**；弹窗节点写在模板末尾（两张卡片之外），靠 `position: fixed` 覆盖全屏。ESC 关闭走 `document` 级 `keydown`（`onModalKeydown`），必须与 `onMounted` / `onBeforeUnmount` 成对，否则切页后会留下悬挂监听。**iframe 的 `message` / `resize` 监听改由 `PreviewSection` 自己成对管理**（含 `seekAckTimer`）。
 - **弹窗不承担「取消档位改动」**：质量 / 帧率下拉的 `@change` 仍然即时落盘，点「取消」只关弹窗、不回滚档位；弹窗的语义只是「确认要开始渲染」。
-- **进度订阅的单订阅语义**：`onHtmlProgress` 在 preload 中只绑定一次 `ipcRenderer.on`，后续注册仅替换回调；本页因此只需在 `onMounted` 注册、无需（也无法）取消订阅。
+- **进度按任务 id 订阅、且可以并行**：`onTaskProgress` 在 preload 里仍只绑定一次 `ipcRenderer.on`，但回调是 `taskId → 回调` 的 `Map`，因此本页（`html-…`）与新建角色弹窗（`cast-…`）各订各的、互不覆盖；订阅函数**返回退订函数**，两处都在自己的收尾里 `off()`。**别再退回「进页面注册一次、离开不用管」的写法**——那正是上一版「单槽 + 后注册覆盖」的语义，会让页面状态行在弹窗开过之后停住。
 - **播放控制边界**：`ctlVisible` 跟随 `frameVisible`；无 `frameSrc` 时点那个三态键只 toast「暂无预览」。**只有一个按钮、三种语义**（播放中 = 暂停 / 播完 = 重新播放 / 其余 = 播放），由 `prevEnded` 判定第三态，**不要再加第二个「重新播放」按钮**。**预览默认静止**：载入完成后不再主动发 `'play'`，`prevPlaying` 置 `false`，按钮文案由画面回报的 `playing` 校准——首帧本来就是空的（合成 `paused: true` + 开头 `opacity: 0`），`.hg-prev-hint` 就是把这句说明写在进度条旁边。
 - **进度条拖动跳转（seek）的四条约定**：① 拖动期间不采信画面回报；② 松手后等 `ack`（800ms 兜底）；③ 本地立即跟手，画面侧 `setTime()` 只挪播放头、不改播放/暂停状态；④ 总时长未上报时忽略拖动，并用 `setPointerCapture` 保证拖出控件仍继续收 `pointermove`。
 - **预览副本与原件分离**：预览用 `index.preview.html`（剥离 CSP、注入控制脚本），下载与转视频始终使用原件 `index.html`；`pageCanvas` 也是从**原件**解析的，副本里的剥离 / 本地化不影响这个判断。
@@ -597,15 +627,16 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 - **状态区文本与样式成对切换**：`statusDisplay` 与 `statusDisplayClass` 必须一起用（都在 `PreviewSection`）；若只换文本不换样式，渲染中的 trace 文案会继承上一次的 `hf-ok` / `hf-error` 颜色。
 - **渲染中切页的语义**：`resetRenderProgress()` 只在 `HtmlGenPage/index.vue` 的挂载与渲染结束时调用；渲染进行中切走再回来，本页会先清空 trace，随后的新 trace 会重新写入（源码注释已说明此取舍）。
 - **`hgpreview:` 是本页三种页面资源的共同出口**：`<img :src="thumbUrl(...)">`（`MaterialsSection`）、`iframe.hgen-frame`（`PreviewSection` 的 `loadFrame()`）与 `<audio :src="audioSrc">`（`PreviewSection` 的背景音频试听）都经该协议，因此 `src/renderer/index.html` 的 CSP 需要同时放行 `img-src`、`frame-src` 与 `media-src`。
-- **背景音频试听的源从 `file://` 改为 `hgpreview://p/…`**：`setAudioPreview(relFile)` 现在收**项目内相对路径**（设置 / 清空两处调用点传 `res.audioFile` 或 `''`），URL 由 `previewUrl(appState.currentName, relFile, true)` 拼成 `hgpreview://p/<编码项目名>/<逐段编码的相对路径>?v=<时间戳>`；音频与视频一样吃主进程 `rangeResponse()` 的字节范围支持，进度条才能拖。**背景（为什么以前能用）**：旧版 `createWindow()` 用 `mainWindow.loadFile(...)`，**dev 与生产都是 `file://` 源**，`'file:///' + encodeURI(path)` 这批写法当时确实成立（旧树里十余处，Vue 化时整段照搬）；`9615eaf`（electron-vite 重构）引入 `if (process.env['ELECTRON_RENDERER_URL']) loadURL(...) else loadFile(...)` 之后，**dev 渲染页变成 `http://localhost` 源**，Chromium 拒绝 http 页读 `file://`，本卡与配音页的音频试听在 dev 下一直**静默失效**（打包版仍可用，CHANGELOG #25 / #26 / #27）。渲染层现在不再拼 `file://`：路径 → URL 一律经 `src/renderer/src/utils/url.ts`（`previewUrl()` / `ttsUrl()`），**逐段 `encodeURIComponent`** 与主进程「按段 `decodeURIComponent`」严格对应。
+- **背景音频试听的源从 `file://` 改为 `hgpreview://p/…`**：`setAudioPreview(relFile)` 现在收**项目内相对路径**（设置 / 清空两处调用点传 `res.audioFile` 或 `''`），URL 由 `previewUrl(appState.currentName, relFile, true)` 拼成 `hgpreview://p/<编码项目名>/<逐段编码的相对路径>?v=<时间戳>`；音频与视频一样吃主进程 `rangeResponse()` 的字节范围支持，进度条才能拖。**背景（为什么以前能用）**：旧版 `createWindow()` 用 `mainWindow.loadFile(...)`，**dev 与生产都是 `file://` 源**，`'file:///' + encodeURI(path)` 这批写法当时确实成立（旧树里十余处，Vue 化时整段照搬）；`9615eaf`（electron-vite 重构）引入 `if (process.env['ELECTRON_RENDERER_URL']) loadURL(...) else loadFile(...)` 之后，**dev 渲染页变成 `http://localhost` 源**，Chromium 拒绝 http 页读 `file://`，本卡与配音页的音频试听在 dev 下一直**静默失效**（打包版仍可用，CHANGELOG #25 / #26 / #27）。渲染层现在不再拼 `file://`：路径 → URL 一律经 `src/renderer/src/utils/url.ts`（`previewUrl()` / `userPathUrl()`），**逐段 `encodeURIComponent`** 与主进程「按段 `decodeURIComponent`」严格对应。
 
 - **章节列表只读、点击只填需求描述**：`ChapterSection` 不发起生成 / 修改；章节模式下 `index.html` 由主进程生成，本页动作仍是原来的四个按钮。
 
-- **「角色」区不再只读、但修改链只有一条**：`CastSection` 读 `appState.project.cast` 与 `appState.project.chapters`；点「改这个角色」把「只改角色 <id>（cast/<id>.js）：」写回同一个需求描述，**它不自己调修改接口**。角色是跨章共用的一份绘制代码，页面只展示「名字 / 描述 / 高几 u / 文件」这四项，**没有编辑框、没有增删按钮**——增删角色属于「改结构」，由模型在改稿时先交新表（`CAST` 块）完成；页面新增的是「存为全局」与「从全局库添加」两条**库侧**动作（搬文件，不经模型，也不改本片的角色表之外的任何内容）。
+- **「角色」区可预览、可勾选、可增删，但「改画法」的修改链只有一条**：`CastSection` 读 `appState.project.cast`；点「改这个角色」把「只改角色 <id>（cast/<id>.js）：」写回同一个需求描述，**它不自己调修改接口**。角色是跨章共用的一份绘制代码，页面只展示「缩略图 / 名字 / 描述 / 高几 u / 文件」这五项，**没有就地编辑框**——改画法由模型在改稿时完成。页面新增的是「新建角色」（一次模型调用）与「从全局库添加」（搬文件）两条**不经「生成 HTML」**的入口，以及缩略图 / 大图这条**只读预览**路径（`project:cast-preview`，只写 `cast-preview/`，不动 `cast/` 下任何文件）。
+- **预览是「真跑一遍代码」，所以有两条已知边界**：① 只有**静态一帧**（动画写在章节里，角色本身是纯绘制函数）；② 声明了 `p5` / `p5.brush` 的水彩角色走 p5 的 WEBGL 画布，这条预览路径只画得出它传给 `o.ctx` 的那部分，页内会提示「只显示 Canvas 2D 部分」/「生成后的页面里才看得到」。预览位若窄到 `W < 120` 页内只显示 `⚠` / `空` / `水彩` 短标记——但**现在三处预览位都不窄**（角色卡片 130px、全局库方格 132px、大图 200×260），这条分支不触发、留作更小格子的兜底；完整原因也可看大图或 `CastShot` 的 `title`。
 
 ## 9. 运行环境缺包守卫（`useEnvGate`）
 
-`转成视频` 需要**不随安装包**的运行环境：`video:render` 需要 `ffmpeg` + `hyperframes`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）；`project:extract-video-audio` 需要 `ffmpeg`（42.6 MB）——但该入口当前已下线（见 3.5），所以本目录现在**只有 `onRenderVideo(skipEnvGuard)` 一个守卫调用点**（分包方案见 `docs/runtime-pack-split.md`、主进程实现见 [main/video.ts.md](../../../main/video.ts.md) / [main/projects.ts.md](../../../main/projects.ts.md)）。
+`转成视频` 需要**不随安装包**的运行环境：`video:render` 需要 `ffmpeg` + `hyperframes`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）；`project:extract-video-audio` 需要 `ffmpeg`（42.6 MB）——但该入口当前已下线（见 3.5），所以本目录现在**只有 `onRenderVideo(skipEnvGuard)` 一个守卫调用点**（分包方案见 `docs/runtime-pack-split.md`、主进程实现见 [main/video.ts.md](../../../main/video.ts.md) / [main/projects.md](../../../main/projects.md)）。
 
 - 动手前先 `const g = await envGate.guard(['ffmpeg','hyperframes'], '转成视频', () => { void onRenderVideo(true) })`；`!g.ok`（缺包已弹框或用户取消）就 `return`，**不发后续 IPC、不产生任何下载**；
 - 主进程返回 `res.needPacks`（并发 / 探测窗口造成的二次缺包）时再 `envGate.guard(res.needPacks, '转成视频', …)` 一次；
@@ -621,62 +652,121 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 - **和「按需求修改」的关系**：章节模式下主进程分两段改稿——先让模型只根据「大纲 + 角色表 + 用户的话」报这次要改哪几份文件（最多 6 个），再只把那份源码发给它改；路由失败会自动回退成「发全部源码」。「改这一章」只是把范围说清楚，用户仍点「按需求修改」发起。
 - **样式**：行样式是全局设计系统的 `.ch-*` 一节（列宽 `minmax(0, Nfr)`），见 [assets.md](../assets.md) §3.4。
 
-## 11. 「角色」区（`CastSection.vue`）
+## 11. 「角色」区（`CastSection.vue` + 公共 `components/CastShot.vue` + 两个弹窗）
 
-**角色 = 项目素材，不是「章节模式的附属品」**。「HTML生成」页 ·「项目素材」区里，角色与图片 / 视频并列成第三块「角色」：**常显**（0 个也显示），每行 = **勾选框** + 名字 / 描述 / **高几 u**（`units`）/ `cast/<id>.js` + **三个动作**（存为全局 / 改这个角色 / 移除），标题右侧 **两个动作**（从全局库添加 / 新建角色），外加**两个弹窗**（全局库勾选导入、新建角色表单）。
+**角色 = 项目素材，不是「章节模式的附属品」**。「HTML生成」页 ·「项目素材」区里，角色与图片 / 视频并列成第三块「角色」：**常显**（0 个也显示），**版式与「项目素材」完全同一套卡片墙**（人物在上面、名字在下面）——每张卡 = 左上角**勾选框**（`.mat-check`）+ 右上角**「…」按钮** + **13:15 竖版预览位（130×150）**（`.cast-thumb` 里是 `CastShot`）+ 名字 / `高几 u · 描述`（`.mat-path` 里写 `{{units}}u · {{desc}}`）；三个动作（存为全局 / 改这个角色 / 移除）收进「…」菜单，标题右侧仍 **两个动作**（从全局库添加 / 新建角色），外加**两个弹窗**（`CastLibraryModal.vue` 方格网格导入、`CastCreateModal.vue` 新建 + 看大图）。
+
+**卡片上不再显示文件路径 `cast/<id>.js`**：它只在两处出现——「改这个角色」写进需求描述的前缀里（`只改角色 <id>（cast/<id>.js）：`），以及新建角色弹窗里大图旁边那行落地信息。
 
 ### 11.1 常显（0 个角色也显示）
 
 - **上一版是靠 `v-if` 藏起来的**：`visible = chapters.length > 0 || list.length > 0`——单文件项目、或章节化但还没角色的项目，整块不渲染，「从全局库添加」的入口也就永远点不到（入口藏在「只有入口才能打开的区块」里）。
-- **现在没有 `v-if`**：角色是素材的一部分（与图片 / 视频同一层级），所以**无条件渲染**，空的时候给一行空态文案。`libCount` 只在空态提示里出现（挂载时 `onMounted` 读一次 `listCastLibrary`，打开弹窗时也顺手更新）。
+- **现在没有 `v-if`**：角色是素材的一部分（与图片 / 视频同一层级），所以**无条件渲染**，空的时候给一行空态文案。`libCount` 只在空态提示里出现（挂载时 `onMounted` 读一次 `listCastLibrary`）。
 - **`project.chapters` 不是「模式开关」**：单文件 / 章节化由「生成 HTML」时模型判断，这个字段只记录**「上一版产物是什么形态」**；它与「这一块显不显示」已经没有任何关系。
 
-### 11.2 行内三个动作 + 勾选
+### 11.2 卡片墙结构、「…」菜单与 `busy` 的边界
+
+`CastSection.vue` 的契约：props **只有 `{ prompt?: string }`**（上一版的 `status?` / `thinkText?` 已删），emits `update:prompt`（**只写不读**）；`<CastCreateModal>` 也不再传 `:status`——新建角色弹窗自己按 `taskId` 订阅自己的进度。列表来自 `computed(() => appState.project?.cast || [])`，渲染在 `.mat-grid.cast-mat-grid` 里（**容器多挂一个 `.cast-mat-grid`，只覆盖列宽**：`repeat(auto-fill, 130px)`，`display: grid` 与 `gap` 仍来自 `.mat-grid`），每张卡是 `<div class="mat-card cast-mat">`。
+
+**卡片内部顺序**（源码模板固定这个次序）：左上角 `.mat-check` → 右上角 `.hf-btn.cast-more`（「…」）→ `.cast-thumb`（包着 `CastShot`）→ `.mat-meta`（`.mat-name` 名字 + `.mat-path` 写 `{{units}}u · {{desc}}`）→ 条件渲染的 `.cast-menu`。
+
+**「…」菜单的开关与收起**：`menuFor` 是当前打开的卡片 id（**一次只开一个**），`toggleMenu(id)` 同 id 再点即收起；「…」按钮用 `@click.stop`（点它不触发 document 那条收起），菜单自身也 `@click.stop`。打开时挂 `document.addEventListener('click', closeMenu)`、收起时先 `document.removeEventListener('click', closeMenu)` 再按需加回——**「先摘再加」是必要的**：从 A 卡的菜单直接点 B 卡的「…」时 `menuFor` 值仍是 truthy，只加不摘会把监听叠成两条；`onBeforeUnmount` 也摘。菜单里三项都走同一个 `act(m, 'promote' | 'pick' | 'remove')`：**先 `closeMenu()`，再调原来的动作**。
 
 | 动作 | 做什么 | 走哪条链 |
 | --- | --- | --- |
-| **勾选框**（`.mat-check`） | `onToggle(m)`：`{ ...x, selected: x.selected === false }` → `saveAll(...)` → toast「本次会注入：<名字>」/「本次不注入：<名字>」 | `project:save-cast`（整份回写），主进程随即 `refreshCastInPage()` |
-| **存为全局** | `window.projectTools.promoteCast(appState.currentName, m.id)` → `project:promote-cast`；成功 toast 形如「已存为全局角色：hero」（同 id 覆盖库里那份） | **不经模型**，纯搬文件 |
-| **改这个角色** | `onPick(i)` 把 `只改角色 <id>（cast/<id>.js）：\n` 写回「需求描述」（`v-model:prompt`，组件只写不读） | 用户接着点**「按需求修改」**——修改链只有一条，角色区不自己调修改接口 |
-| **移除** | `onRemove(m)`：过滤掉该 id → `saveAll(...)` → toast「已移除角色：<名字>（全局库里那份保留）」 | `project:save-cast`；主进程把 `cast/<id>.js` 一并删掉，全局库那份不受影响 |
+| **勾选框**（`.mat-check`，卡左上角） | `onToggle(m)`：`{ ...x, selected: x.selected === false }` → `saveAll(...)` → toast「本次会注入：<名字>」/「本次不注入：<名字>」 | `project:save-cast`（整份回写），主进程随即 `refreshCastInPage()` |
+| **存为全局**（菜单第 1 项） | `window.projectTools.promoteCast(appState.currentName, m.id)` → `project:promote-cast`；成功 toast 形如「已存为全局角色：hero」（同 id 覆盖库里那份） | **不经模型**，纯搬文件 |
+| **改这个角色**（菜单第 2 项） | `onPick(m)` 把 `只改角色 <id>（cast/<id>.js）：\n` 写回「需求描述」（`v-model:prompt`，组件只写不读） | 用户接着点**「按需求修改」**——修改链只有一条，角色区不自己调修改接口 |
+| **移除**（菜单第 3 项，`.danger` 走警报红） | `onRemove(m)`：过滤掉该 id → `saveAll(...)` → toast「已移除角色：<名字>（全局库里那份保留）」 | `project:save-cast`；主进程把 `cast/<id>.js` 一并删掉，全局库那份不受影响 |
+
+> `onPick` 的入参本轮从**下标**（`onPick(i)`）改成了**成员**（`onPick(m: ProjectCastMember)`）——菜单是挂在某张卡上的，没有「行下标」可传；写进需求描述的文案与 `relPath(m.id)` 没变。
 
 `saveAll(next, tip)` 是三个写操作的共同收尾：`busy = true` → 把角色铺平成普通对象（`{ id, name, desc, units, uses?, selected: m.selected !== false }`，**reactive Proxy 过不了结构化克隆**）→ `saveCast(currentName, plain)` → `busy = false` → 失败 toast；成功 `await refreshProject()` 再 toast。
 
-### 11.3 两个弹窗
+**`busy` 只管列表回写**（勾选 / 移除 / 存为全局，以及两个入口按钮的 `:disabled`）；**弹窗自己管自己的忙碌态与错误态**（`CastLibraryModal` 的 `busy` 管「导入中」、`CastCreateModal` 的 `busy` + `createError` 管「正在画 / 画失败」）。两个弹窗的开关是 `CastSection` 自己的 `shelfOpen` / `createOpen`。
 
-**A.「从全局库添加」**（标题右侧按钮 → `openShelf()`）：
+**`epoch` 是「缩略图重载」的唯一开关**（下面两段均为源码原文，位置不连续）：
 
-- `.hf-modal`（宽度 `min(560px,92vw)`）里 `label.lib-row` 逐行勾选：复选框 `v-model="picked"` + 名字 + 描述 + `u`；**`m.missing` 的行加 `.off`（压暗、复选框禁用）并显示 `.lib-missing`「文件缺失」**。
-- 底部「导入 N 个」→ `importCast(currentName, picked.slice())`（**传普通数组**）→ 成功 `await refreshProject()` + toast + 关弹窗；「取消」/ 点蒙层关闭。
-- 空库态文案：「全局库还是空的：先在角色列表里点「存为全局」，把某个角色放进全局库，其他项目就能导入它。」
-- 弹窗底部那条提示把语义写死：**导入 = 把库里那份复制进本项目的 `cast/`，之后它归本项目管；全局库再改不会影响已导入的项目，要更新就再导入一次。**
+```ts
+// 预览失效计数：角色代码文件被重画（新建 / 导入 / 按需求修改）后 iframe 必须换地址重新载入。
+// 项目每 refreshProject 一次，appState.project 就是新对象 ⇒ 这里统一 +1（覆盖所有改文件的路径）。
+const epoch = ref(0)
+watch(() => appState.project, () => { epoch.value++ })
+```
 
-**B.「新建角色」**（标题右侧主按钮 → `openCreate()`）：`.hf-modal`（`min(520px,92vw)`）里四样东西——
+```ts
+// 弹窗里改过角色（新建 / 导入）：列表由 refreshProject 更新，预览靠 epoch 重载
+function bump(): void {
+  epoch.value++
+}
+```
 
-| 控件 | 说明 |
+`refreshProject()` 换掉 `appState.project` 对象 ⇒ `epoch` +1 ⇒ 所有 `CastShot` 的 `watch` 命中 ⇒ 重新请求预览页并换 `iframe` 地址；`bump()` 由两个弹窗的事件挂在模板上（`@imported="bump"` / `@created="bump"`）。**覆盖的路径**：新建角色、导入角色、勾选 / 移除（这几条都会 `refreshProject()`）、「按需求修改」改到角色代码（改稿后同样刷新项目）。`epoch` 也作为 prop 传给两个弹窗（`CastLibraryModal` 用它让网格里的预览重载）。
+
+### 11.3 预览组件 `CastShot.vue`（公共组件 `src/renderer/src/components/CastShot.vue`，缩略图与大图共用）
+
+> **它不在本页目录**：本轮从 `pages/HtmlGenPage/CastShot.vue` 搬到了 `src/renderer/src/components/CastShot.vue`（66 → **67 行**，只改文件头 / 首行注释，另加 `&e=` 续接的 2 行注释，逻辑一行未动）。原因是「内容脚本」页 · AI 创作 · 选角色弹窗（`ContentPage/CastPickerModal.vue`）也要用它——留在某个页面目录下会变成「页面互相 import」，放进公共组件目录才说得清谁依赖谁。本页三处（`CastSection.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue`）与那一页一处都写 `import CastShot from '@renderer/components/CastShot.vue'`；组件契约与职责详见 [components.md](../components.md) 的 `CastShot.vue` 一节。
+
+| 项 | 内容 |
 | --- | --- |
-| `角色名` | `draft.title`，placeholder「如：主角 / 研究员 / 猫」 |
-| `外形描述` | `draft.desc`（`textarea.hgen-subtitle`，`min-height:74px`），placeholder 举例「戴圆眼镜的小人，米白实验袍，墨线勾边，头发乱」 |
-| `身高` | `draft.units`（`type="number"`，1–30、step 0.5，缺省 8），旁注「u（主角 8、配角 6 这样，多角色比例靠它对齐）」 |
-| `笔刷` | `draft.watercolor` 复选框：「用水彩笔刷（p5.brush；不勾则用 Canvas 2D 平涂）」 |
+| **位置 / 引用** | `src/renderer/src/components/CastShot.vue`（**公共组件**，被「HTML生成」页三处 + 「内容脚本」页选角色弹窗共用）；四处都用跨目录别名 `@renderer/components/CastShot.vue` 引入，**没有页面内副本** |
+| props | `id`（角色 id，同时是文件名词干）/ `units`（高几 u，只决定预览里画多大）/ `title?` / `uses?`（角色声明的随包库，主进程据此提示水彩）/ `epoch?` / `big?` |
+| 模板 | `div.cast-shot`（`:class="{ big }"`）里 `iframe.cast-shot-frame`（`:src="src"`、`sandbox="allow-scripts allow-same-origin"`、`:title="'角色预览：' + (title \|\| id)"`）；**没有 `src` 时**显示 `span.cast-shot-note`：生成中「…」、失败「无法预览」（原因在 `title`，即 `err \|\| '正在生成预览…'`） |
+| 取地址 | `load()`：`seq` 自增并记下 `mine` → 清空 `src` / `err` → 缺 `id` 直接返回 → `await window.castTools.preview(id, { units, title, uses: uses \|\| [] }).catch(() => null)` → **`mine !== seq` 就丢弃**（并发保护，避免闪回旧角色的预览）→ 失败写 `err`（`res.message` 或「预览生成失败」）→ 成功 `src = userFileUrl(res.rel) + '&e=' + (epoch \|\| 0)` |
+| 重载 | `watch(() => [props.id, props.units, props.epoch], load, { immediate: true })`——**注意 `title` / `uses` 不在 watch 里**：它们只影响提示文案与页标题，改了不必重走一遍主进程 |
+| 为什么带 `&e=` | ① 预览页每次都是重写的，但 `iframe` 地址不变就不会重载；`epoch` 一变地址就变（服务端本身 `no-store`）；② `userFileUrl` 自带 `?user=1`，**只能用 `&` 续接**——写成 `?e=` 会让查询串变成 `user=1?e=0`，主进程认不出 `?user=1` ⇒ 把 `cast-preview` 当项目名 ⇒ 404、iframe 里显示 `Not Found` |
+| 交互 | CSS `.cast-shot-frame { pointer-events: none }`：**点击穿透到卡片 / 行本身**（预览窗口里没有可交互的东西） |
+| 尺寸 | 组件不定尺寸，由外层 CSS 决定：卡片预览位 `.cast-thumb .cast-shot` 撑满 `13:15` 的框（卡片列宽定死 130px ⇒ 预览位正好 130×150；`width/height: 100%`）、全局库网格 `.cast-card .cast-shot` 是 `100% × 132px`、弹窗大图 `.cast-shot.big` 是 **200×260**；`.cast-shot` 自身的 `56px × 72px` 只是基线尺寸，这三处使用点都把它覆盖掉了 |
 
-- `canCreate = !!(title.trim() || desc.trim())`（**至少填一个**），按钮文案「画这个角色」，busy 时为「正在画…」。
-- 提交 → `newCast(currentName, { title, desc, units, watercolor })`：**一次模型调用、与「生成 HTML」完全无关**；成功 `await refreshProject()`，toast「已新建角色：<名字>」，**若项目已有页面再加一句「（重新「生成 HTML」后才会画进页面）」**（`hasPage = appState.project.htmlExists`）；失败 toast `res.message` 或「新建角色失败」。
+### 11.4 两个弹窗
 
-### 11.4 空态与其余说明
+**A.「从全局角色库添加」（`CastLibraryModal.vue`）**——标题右侧按钮 → `shelfOpen = true`：
+
+- **方格网格**：`.cast-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); max-height: 56vh; overflow-y: auto }`，每格 `.cast-card` 一张 `CastShot`（`from="lib"`，`:epoch="epoch"`）+ `.cast-card-meta`（名字 + 身高 `u`）。
+- **点格子切换选中**：`toggle(m)` 先 `if (m.missing || busy) return`，再在 `picked: string[]` 里增删；选中态 `.cast-card.on` = 主色描边 + 卡片辉光 + 右上角 `.cast-card-tick`（✓）；`role="button"` + `tabindex` + `@keydown.enter.prevent`，键盘也能选。
+- **缺文件的格子**：`.cast-card.off`（`opacity: .5`、`cursor: not-allowed`）+ 左上角 `.cast-card-missing`「文件缺失」，`tabindex="-1"`、点不动。**描述与身高之外的元数据进格子的 `title`**（`name · desc · 高 Nu`）。
+- 底部「**导入 N 个**」（`disabled` = `busy || !picked.length`）→ `importCast(currentName, picked.slice())`（**传普通数组**）→ `await refreshProject()` → `toast(res.message || '已导入')` → `picked = []` → `emit('imported')` + `emit('close')`。`imported` 让 `CastSection.bump()` 把 `epoch` +1（网格与列表的预览一起重载）。
+- **每次打开都重新 `listCastLibrary()`**：`watch(() => props.open, …, { immediate: true })`——用户可能在别的项目里刚「存为全局」过；读库失败时清空列表并 toast 原因。
+- 空库态：「全局库还是空的：先在角色列表里点「存为全局」，把某个角色放进全局库，其他项目就能导入它。」底部提示把语义写死：**导入 = 把库里那份复制进本项目的 `cast/`，之后它归本项目管；全局库再改不会影响已导入的项目，要更新就再导入一次。**
+- 关闭：右上 ×、底部「取消」、点蒙层（`@click.self`）；`busy` 中不允许关闭。
+
+**B.「新建角色」（`CastCreateModal.vue`）**——标题右侧主按钮 → `createOpen = true`。**两态**：
+
+| 态 | 内容 |
+| --- | --- |
+| ① 填设定（`created === null`） | `角色名`（`draft.title`，placeholder「如：主角 / 研究员 / 猫」）/ `外形描述`（`textarea.hgen-subtitle`，`min-height:74px`，placeholder 举例「戴圆眼镜的小人，米白实验袍，墨线勾边，头发乱」）/ `身高`（`type="number"`，1–30、step 0.5，缺省 8，旁注「u（主角 8、配角 6 这样，多角色比例靠它对齐）」）/ `笔刷`（`draft.watercolor` 复选框：「用水彩笔刷（p5.brush；不勾则用 Canvas 2D 平涂）」）；按钮「画这个角色」（`disabled` = `busy \|\| !canCreate`，`canCreate = !!(title.trim() \|\| desc.trim())`，busy 时文案「正在画…」） |
+| ② 画成功（`created !== null`） | **弹窗不关**：左侧 `.cast-shot.big`（200×260）的 `CastShot`（`big`、`:epoch="epoch"`、`:uses="created.uses"`），右侧 `.cast-done-info`：`created.name` / `created.desc \|\| '（未描述）'` / `高 Nu · cast/<id>.js` / 一句「已加入本项目（勾选参与本次生成）。**重新「生成 HTML」后它才会画进页面**」（`hasPage = appState.project.htmlExists` 时才拼后半句）；底部按钮变「再画一个」（`again()`：**回到空白表单**，上一个角色已落盘、列表里也有）/「完成」（关窗） |
+
+- **进度与失败原因就在弹窗里**：`busy || createError` 时显示 `.hf-status`（失败加 `.hf-error`）——失败分支显示 `createError` + 「完整调用记录（含模型的原始回复）：`userData/html-agent/cast.jsonl`」；进行中显示**本组件自己的** `castStatus`（模板为 `{{ castStatus || '正在画角色…' }}`，由 `info.text` 写入）。**进度不再由父页传下来**：弹窗自己 `newTaskId('cast')` + `onTaskProgress` 订阅，与「生成 HTML」那一路完全隔离（源码注释：「进度走本弹窗自己的 taskId……与「生成 HTML」并行时各订阅各的」）。
+- `onCreate()`：`busy = true` → 清空 `createError` / `castStatus` → `const taskId = newTaskId('cast')` → `const off = window.projectTools.onTaskProgress(taskId, (info) => { if (!info) return; if (info.text) castStatus.value = String(info.text) })`（源码注释：自己的任务 id，先订阅、再调用）→ `await window.projectTools.newCast(props.project || appState.currentName, { taskId, title: trim(), desc: trim(), units: Number(units) || 8, watercolor })`（`.catch(() => null)`）→ **`off()`** → `busy = false` → 失败写 `createError`（`res.message` 或「新建角色失败（主进程没有返回原因，看 userData/html-agent/cast.jsonl）」）→ 成功 `created = res.member`、**`epoch.value++`**（文件刚写盘，必须换地址重载大图）、`await refreshProject()`、`emit('created')`（父页 `bump()` 让列表缩略图也重载）。
+- 每次打开都回到空白表单（`watch(open)` 重置 `draft` / `createError` / `created`）。
+- 弹窗宽度：新建角色 `min(560px,92vw)`、全局库 `min(760px,94vw)`（网格要够宽才排得下多列）。
+
+### 11.5 空态与其余说明
 
 - **空态文案**：「本项目还没有角色。点右上「新建角色」让 AI 画一个，或「从全局库添加」导入现成的（全局库里已有 N 个 / 全局库还是空的：先在别的项目里点「存为全局」）。角色与「单文件 / 章节化」无关，两种形态都会被注入。」`N` 就是 `libCount`，**只用于这句提示**。
-- **常驻说明**（空态下面那条 `.hgen-tip`）：「角色是**跨片共用的一份绘制代码**（`cast/<id>.js`，页面里由 `window.__cast["id"]` 调用），所以同一角色在任何一章都由同一份代码画出来，长相不会各章一个样。「高几 u」是身高比例，改它会让整片里这个人的大小一起变。」
-- **角色是什么**：一份绘制代码，不是图片——`cast/<id>.js` 里登记 `window.__cast["hero"] = function (x, y, u, o) { … }`。章节是互相隔离的 IIFE、作用域不共享，不共享角色代码同一角色就会在各章被各画一遍；所以骨架把角色脚本放在章节脚本**之前**引入，单文件模式则由 `castInject` 把同一批脚本插在模型第一个 `<script>` 之前（见 [main/cast.ts.md](../../../main/cast.ts.md) / [main/castInject.ts.md](../../../main/castInject.ts.md)）。
-- **「高几 u」是身高比例**：`units` 声明这个角色等于几个单位高度（主角 8u、配角 6u），角色绘制函数按 `u` 的倍数画——改它会让整片里这个人的大小一起变。这也是角色表里唯一影响「相对尺度」的字段，所以单独占一列。
-- **数据来源**：角色表随 `project:load` 返回（`Project.cast`）；**本轮新增 2 条频道**（`project:new-cast` / `project:save-cast`）供新建与整份回写，另有上一轮的 4 条角色库频道（`cast-library` / `promote-cast` / `import-cast` / `remove-cast-from-library`）——`Project` 组 30 → **32**、全库 98 → **100**。生成进度仍复用 `project:html-progress`。
-- **组件仍是自包含的**：不接数据 props（只有 `prompt?`），项目角色读 `appState.project.cast`，落盘后 `refreshProject()` 刷新；**它自己不做「生成前检查」**——勾选状态就是唯一开关，主进程注入时不看别的。
-- **样式**：行样式是全局设计系统的 `.cast-*`（`.cast-row` 的列宽含勾选列 `24px`，`minmax(0,1.2fr) minmax(0,2.6fr) 48px minmax(0,1.3fr) auto`，未勾选加 `.off`）+ `.cast-actions`（行尾三个按钮）+ `.lib-row*`（库弹窗的行），见 [assets.md](../assets.md)。
+- **常驻说明**（空态下面那条 `.hgen-tip`，原文；强调用 `<b>`）：「卡片上画的就是这个角色<b>真跑一遍绘制代码</b>得到的样子（静态一帧，动画写在章节里）。角色是<b>跨片共用的一份绘制代码</b>（`cast/<id>.js`，页面里由 `window.__cast["id"]` 调用），所以同一角色在任何一章都由同一份代码画出来，长相不会各章一个样。「高几 u」是身高比例，它会跟着名字一起显示。」——**已修**：强调改用 `<b>`，可见文本里不再有字面 `**`（模板 / 脚本注释里的 `**` 保留，不影响渲染）。
+- **角色是什么**：一份绘制代码，不是图片——`cast/<id>.js` 里登记 `window.__cast["hero"] = function (x, y, u, o) { … }`。章节是互相隔离的 IIFE、作用域不共享，不共享角色代码同一角色就会在各章被各画一遍；所以骨架把角色脚本放在章节脚本**之前**引入，单文件模式则由 `cast/inject.ts` 把同一批脚本插在模型第一个 `<script>` 之前（见 [main/cast.md](../../../main/cast.md)）。
+- **「高几 u」是身高比例**：`units` 声明这个角色等于几个单位高度（主角 8u、配角 6u），角色绘制函数按 `u` 的倍数画——改它会让整片里这个人的大小一起变。这也是角色表里唯一影响「相对尺度」的字段，所以它跟着名字一起显示（`.mat-path` 里写 `{{units}}u · {{desc}}`），不再单独占一列；预览里的 `u = (H * 0.84) / units`（脚底中点画在 `(W/2, H-H*0.08)`）。
+- **数据来源**：角色表随 `project:load` 返回（`Project.cast`）；角色相关频道现共 **7 条**——库 4 条（`cast-library` / `promote-cast` / `import-cast` / `remove-cast-from-library`）+ 项目角色 2 条（`new-cast` / `save-cast`）+ **角色预览 1 条（`cast-preview`）**；`Project` 组 32 → **33**、全库 100 → **101**。生成进度仍复用 `project:html-progress`（**没有为预览新增进度通道**）。
+- **组件仍是自包含的**：`CastSection` 只接 `prompt` 一个 prop（**不再接 `status` / `thinkText`**），项目角色读 `appState.project.cast`，落盘后 `refreshProject()` 刷新；新建角色弹窗的进度与失败原因全由它自己持有（`castStatus` / `createError`）。**它自己不做「生成前检查」**——勾选状态就是唯一开关，主进程注入时不看别的。
+- **样式**：卡片墙直接复用「项目素材」那套（`.mat-grid` / `.mat-card` / `.mat-meta` / `.mat-name` / `.mat-path` / `.mat-check`），角色只加五个类（卡片**格子先缩到 100×150、本轮又放宽到 130×150** 之后）——`.cast-mat`（`overflow: visible`，否则 `.mat-card` 默认的 `overflow: hidden` 会把「…」菜单切掉）、**`.cast-mat-grid`**（容器级，只写 `grid-template-columns: repeat(auto-fill, 130px)`：列宽定死 130px，素材那张 `.mat-grid` 仍是 `minmax(158px, 1fr)`；**别收回 100px**——100 宽配 150 高看着细长、下面两行字也挤成一团）、`.cast-thumb`（`aspect-ratio: 13 / 15` ⇒ 人物位正好 130×150，+ `border-radius: 10px 10px 0 0` + 底色 `#EEF2F7`）、`.cast-more`（`position: absolute; top: 5px; right: 5px`、`padding: 1px 6px`、12px、`line-height: 1.3`、5px 圆角——跟着卡片缩了一号）、`.cast-menu*`（`position: absolute; top: 28px; right: 5px`，`min-width: 118px` 不动：**118px 的菜单 + `right: 5px` 整个落在 130px 的卡片内、不会探到相邻卡片上**（源码注释已随 130px 同步），`z-index: 20`；`.cast-menu-item.danger` 走 `--color-danger`）；`.cast-name` / `.cast-desc` 两人保留（新建角色弹窗的大图旁边还在用），而 `.cast-list` / `.cast-row*` / `.cast-actions` / `.cast-units` / `.cast-file` 已整套删除；预览 / 网格 / 大图三组（`.cast-shot*`、`.cast-grid`、`.cast-card*`、`.cast-done*`）本轮与上一轮都未动。见 [assets.md](../assets.md) §3.5。
 
-### 11.5 与上一版的三处差异（别按旧说法理解）
+### 11.6 已知边界（如实写，不是 bug）
+
+- **预览只有静态一帧**：主进程拼的预览页只调用一次绘制函数，不播放、不循环；动画写在章节里（`gsap` 时间轴驱动章节画布）。
+- **水彩（`p5` / `p5.brush`）角色只画得出 Canvas 2D 那部分**：真正的笔触走 p5 的 WEBGL 画布、需要章节里的 p5 实例；预览页会提示「水彩角色（p5）：这里只显示它的 Canvas 2D 部分」/「…生成后的页面里才看得到」。
+- **「窄预览只给短标记」这条分支现在不触发（留作兜底）**：预览页里保留着 `W < 120` 的判断（`small`，`W = cv.clientWidth`），命中时提示条只显示 `⚠`（没挂到 `__cast` / 绘制抛错）、`空`、`水彩`。**三处预览位都 ≥120**——角色卡片列宽 130px（预览位 130×150，扣掉卡片 1px 描边约 128px）、全局库网格 132px、弹窗大图 200×260 ⇒ 卡片 / 方格 / 大图上看到的都是完整句子。`cast/preview.ts` 的判窄注释**已按这个现状同步**（现在三处预览位都不窄：角色卡片 130px、全局库方格 132px、新建大图 200px ⇒ `small = W < 120` 不触发，留作更小格子的兜底）。以上是按 CSS 宽度与源码判据推出的结论，**未在应用内手测**。
+- **预览页落在 `<userData>/cast-preview/`**：隐藏临时目录、同 id 覆盖、不进 `project.json`、不影响导出与渲染；库里的角色也借用当前项目的预览目录（`hgpreview://` 只放行项目目录）。
+- **未在应用内手测**：headless Electron 截图在开发环境起不来；`npm run typecheck` 退出码 0、四个 SFC 用 `vue/compiler-sfc` 的 `parse` + `compileScript` + `compileTemplate` 各过了一遍（全 OK），但**界面上的实际效果没在应用里看过**——卡片墙在窄窗下排几列、格子放宽到 130×150 后 13:15 预览位里的人画得够不够大（`W < 120` 判窄分支已不会触发）、「…」菜单落在 130px 卡片内会不会被相邻卡片盖住，都属**待人工确认**项，不要写成「已实测通过」。
+
+### 11.7 与上一版的差异（别按旧说法理解）
 
 | 旧说法 | 现在 |
 | --- | --- |
-| 「角色跟着章节化」——角色表由规划产出，`v-if="chapters.length > 0 \|\| cast.length > 0"` 才显示，且由骨架按各章 `cast` 并集引入 | **角色是项目素材**：常显、规划不产角色、两种形态都注入（章节模式「传谁引谁」、单文件模式由 `castInject` 注入），角色脚本的引入只看 `cast.selectedMembers()` |
-| 行内两个动作（存为全局 / 改这个角色），角色表只能靠改稿时交 `CAST` 块整份换 | 行内**三个动作**（+ 勾选、+ 移除），标题右侧**两个动作**（+ 新建角色）；角色表由 `project:save-cast` 整份回写、由 `project:new-cast` 追加，**模型不再改角色表**（只可能被要求改某个角色的画法） |
-| 新建 / 导入 / 勾选后要重新「生成 HTML」才会体现 | **立即生效**：主进程 `refreshCastInPage()` 按当前形态重写骨架 / 重新注入 → 写 `project.json`；只有「新角色第一次进画面」在已有页面的项目里仍建议重跑一次（toast 会提示） |
+| 「角色跟着章节化」——角色表由规划产出，`v-if="chapters.length > 0 \|\| cast.length > 0"` 才显示，且由骨架按各章 `cast` 并集引入 | **角色是项目素材**：常显、规划不产角色、两种形态都注入（章节模式「传谁引谁」、单文件模式由 `cast/inject.ts` 注入），角色脚本的引入只看 `cast.selectedMembers()` |
+| 角色只有名字 / 描述 / 身高 / 文件名可看，「画成什么样」要等生成 HTML | **每张卡一块 13:15 竖版预览位（130×150）**；新建成功后**弹窗不关**、直接看 200×260 大图；全局库弹窗改成**方格网格**、每格一张预览 |
+| 全局库弹窗是整行勾选（`.lib-row` + 复选框） | **方格网格**（`.cast-grid` / `.cast-card`）：点格子选中、主色描边 + 勾角标，缺文件格子压暗不可点；`.lib-row*` 样式已随旧列表删除 |
+| 两个弹窗都写在 `CastSection.vue` 里（262 行） | **拆成独立组件**（`CastLibraryModal.vue` 116 行 / `CastCreateModal.vue` **169 行**——因自带 `taskId` 订阅从 155 涨到 169），`CastSection.vue` 回到 154 行、把角色行改成卡片墙后到 187 行、**现在 184 行**（状态投影交还给弹窗后减了 3 行）；预览单独抽 `CastShot.vue`（**现 67 行、已搬到公共组件目录 `src/renderer/src/components/CastShot.vue`**——「内容脚本」页选角色弹窗也要用，留在页面目录里就变成页面互相 import）给缩略图与大图共用 |
+| 角上的勾选框只是普通复选框，新建 / 导入后要手动刷新才看到新缩略图 | 勾选框直接复用素材卡那个 `.mat-check`（绝对定位在卡片左上角，不再需要 `.cast-row .mat-check { position: static }` 那种行内特例）；`epoch` + `watch(appState.project)` 让缩略图自动重载 |
+| 角色是「一行一个角色」的竖排列表：勾选框 + 缩略图 + 名字 / 描述 / 高几 u / `cast/<id>.js` + 行内三个按钮（7 列 grid） | **卡片墙**（与「项目素材」同一套 `.mat-*`）：人物在上、名字在下，勾选框在左上、三个动作收进右上「…」菜单，卡片上**不再显示文件路径**；`.cast-list` / `.cast-row*` / `.cast-actions` / `.cast-units` / `.cast-file` 已删除 |

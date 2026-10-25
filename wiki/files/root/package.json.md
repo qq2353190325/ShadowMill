@@ -67,7 +67,7 @@
 | --- | --- | --- |
 | `appId` | `com.shadowmill.app` | Windows 应用唯一标识（安装/升级识别用） |
 | `productName` | `ShadowMill` | 安装包与可执行文件显示名、快捷方式名（产物为 `ShadowMill.exe` / `ShadowMill Setup <版本>.exe`）；**必须与 `src/shared/constants.ts` 的 `APP_NAME_EN` 一致**——JSON 无法 import TS 常量，故由 `electron.vite.config.ts` 的 `checkBrandConsistency()` 在配置加载时（`npm run dev` / `build` 各一次）比对，不一致时打印 `[dsh:brand] …` 告警（只告警、不阻断构建） |
-| `electronVersion` | `44.7.0` | 打包时下载/使用的 Electron 版本，与 `devDependencies.electron` 对齐（Electron 44.7.0 = Chromium 152 + Node 24.21.0；HyperFrames 渲染复用其内嵌 Node，见 [main/hfEnv.ts.md](./main/hfEnv.ts.md) §3.4） |
+| `electronVersion` | `44.7.0` | 打包时下载/使用的 Electron 版本，与 `devDependencies.electron` 对齐（Electron 44.7.0 = Chromium 152 + Node 24.21.0；HyperFrames 渲染复用其内嵌 Node，见 [main/hfEnv.ts.md](../main/hfEnv.ts.md) §3.4） |
 | `electronDownload.mirror` | `https://npmmirror.com/mirrors/electron/` | **打包期**下载 Electron 运行时的国内镜像；`npm install` 期的二进制下载另由仓库根 `.npmrc` 的 `electron_mirror` 负责，两者分工不同、取值一致 |
 | `directories.output` | `dist` | 所有打包产物输出目录（与 `.gitignore` 的 `dist/` 对应） |
 | `asar` | `true` | 将应用代码打包为 `app.asar` 单文件（`out/**`、`vendor/**` 等被塞进 asar；extraResources 除外） |
@@ -121,7 +121,7 @@
 4. **打包**：`npm run pack`（解包目录，快速验证；**不生成 `app-update.yml`，无法验证自动更新**）或 `npm run dist`（NSIS 安装包 + `latest.yml` + `.exe.blockmap` + `resources/app-update.yml`）；`pack` / `dist` 都会先跑 `npm run runtime:pack` 产出 `ffmpeg.7z` / `hyperframes.7z` 与清单。
 5. **发版**：`npm run release`（`scripts/release.mjs`）——校验安装包 + `.exe.blockmap` + `latest.yml` + `ffmpeg.{7z,json}` + `hyperframes.{7z,json}` 是否齐全（**漏 `.blockmap` ⇒ 客户端每次全量下载**），按 `--dry-run` / `--copy <dir>` / `--rclone <remote>` / `--oss --bucket <name>` 上传，并对远端 `latest.yml` / `ffmpeg.json` / `hyperframes.json` 做匿名 GET + `Range` 自检（206 = 支持 Range，断点续传与差量下载都依赖它）。
 6. **运行期依赖解析**：`main` 指向的 `out/main/index.js` 里对 `openai` / `opencc-js` / `electron-updater` 保持 `require` 形态，由 asar 内 electron-builder 自动收集的 `node_modules` 提供（`build.files` 里没有 `!node_modules/**/*`，也没有逐包白名单）。**新增运行时依赖后仍建议 `npm run pack` 并用 `npx asar list dist/win-unpacked/resources/app.asar` 抽查关键包。**
-7. **运行时二进制**：安装包只带 `resources/whisper`（whisper-cli）与 `resources/tools`（7za 解包器）——它们都在 asar **之外**；`ffmpeg` / `hyperframes` 不在安装包里，由运行环境包在首次用到时下载并解到 `<userData>/runtime/<包名>/`（见 `src/main/runtime.ts` 与 [main/runtime.ts.md](./main/runtime.ts.md)）。
+7. **运行时二进制**：安装包只带 `resources/whisper`（whisper-cli）与 `resources/tools`（7za 解包器）——它们都在 asar **之外**；`ffmpeg` / `hyperframes` 不在安装包里，由运行环境包在首次用到时下载并解到 `<userData>/runtime/<包名>/`（见 `src/main/runtime.ts` 与 [main/runtime.ts.md](../main/runtime.ts.md)）。
 
 ## 4. 与其他文件的关系
 

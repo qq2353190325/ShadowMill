@@ -1,4 +1,7 @@
 # src/renderer/src/pages/VideoPreviewPage/（页面）
+> **⚠️ 本轮角色改造对本页的影响（以本块为准）**
+>
+> 本页不涉及角色；只提示一处工具改名：`utils/url.ts` 的 `ttsUrl` 已改名 **`userPathUrl`**（`previewUrl` 未变）。
 
 > 视频预览：进入页面即载入**当前工作项目**的成品 MP4 内嵌播放，也可在下拉里选另一个「有视频成品」的项目来看（**只换本页播放的内容，不切换工作项目**），并可定位到文件；「转视频」与渲染档位在「HTML生成」页。
 
@@ -82,7 +85,7 @@ function toHgPreviewUrl(projectName: string, absPath: string): string {
 
 - **URL 形状**（由 `previewUrl()` 产出）：`hgpreview://p/<encodeURIComponent(项目名)>/<逐段 encodeURIComponent 的相对路径>?v=<Date.now()>`，例如 `hgpreview://p/%E4%BB%BB%E6%84%8F%E6%96%87%E4%BB%B6%E5%A5%B3%E7%94%9F/video/output.mp4?v=1760000000000`。`bust = true` 是**破缓存**用的一次性查询串（同路径重新渲染后不被浏览器缓存挡回旧文件；主进程只读 `pathname`，查询串不参与解析）。
 - **为什么逐段编码**：主进程 `protocol.handle('hgpreview', …)` 用 `new URL(request.url).pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s))` **按段解码**，再 `segs[0]` 当项目名、`segs.slice(1).join('/')` 当项目内相对路径。整条路径一起 `encodeURIComponent` 会把 `/` 变成 `%2F`、段被并成一段（对 `p/…` 路由而言解码后再 `join('/')` 也能还原，但 `tts/…` 路由要**按段**取顶层目录做白名单判定——只有逐段才与处理器「段 = 段」的口径一一对应）；`utils/url.ts` 的 `encodeRelPath()` 因此按 `/` 切段后逐段编码、斜杠保持原样，项目名则整串编码（项目名是单段）。**这条口径只由 `utils/url.ts` 一处承担，本页不要自己拼 URL。**
-- **相对路径怎么来的**：成品在 `project.json` 里记为项目内相对路径 `video/output.mp4`（见 [`main/projects.ts.md`](../main/projects.ts.md) §3.8），但本页拿到的是 `project:load` 换算后的**绝对路径**，所以这里用 `parts.slice(-2).join('/')` 从末尾反推两段。**这是对当前成品布局的硬编码假设**——成品若搬到别的深度，这里要一起改。
+- **相对路径怎么来的**：成品在 `project.json` 里记为项目内相对路径 `video/output.mp4`（见 [`main/projects.md`](../../../main/projects.md) §1.1），但本页拿到的是 `project:load` 换算后的**绝对路径**，所以这里用 `parts.slice(-2).join('/')` 从末尾反推两段。**这是对当前成品布局的硬编码假设**——成品若搬到别的深度，这里要一起改。
 - 「同一路径重新渲染后也能刷新」还有第二重保证：`loadSelected()` 先 `videoSrc.value = ''` 卸下旧源、必要时 `await nextTick()`，再挂新 URL。
 
 > **CSP 已核对（本轮确认）**：`src/renderer/index.html` 的 `media-src` 是 `'self' file: hgpreview:`，`img-src` / `frame-src` 同样放行 `hgpreview:`（源码注释写明「三个地方都要放行」：img-src 素材缩略图、frame-src 预览 iframe、media-src 视频成品预览）。因此本页的 `<video>`（以及本轮改走同协议的音频试听）不会被 CSP 拦下——上一轮此处标注的「待运行时确认」已可解除。
@@ -129,7 +132,7 @@ function toHgPreviewUrl(projectName: string, absPath: string): string {
    - 无 HTML → 「项目「<标题或名>」还没有 HTML：把它切为工作项目，先到「HTML生成」页生成 HTML，再点「转视频」。」
 6. 两条引导都明确要求「把它切为工作项目」——因为渲染动作在当前工作项目上执行，本页不代劳切项目。
 
-> 存在性以 `ProjectMeta.hasVideo` 为准、路径以 `videoPath` 为准：前者为假时即使 `videoPath` 有残留也不会显示播放器。`hasVideo` 由主进程的 `resolveVideoAbs()` 判定（能认项目内相对路径，也兼容老记录里的绝对路径，见 [`main/projects.ts.md`](../main/projects.ts.md) §3.8）。
+> 存在性以 `ProjectMeta.hasVideo` 为准、路径以 `videoPath` 为准：前者为假时即使 `videoPath` 有残留也不会显示播放器。`hasVideo` 由主进程的 `resolveVideoAbs()` 判定（能认项目内相对路径，也兼容老记录里的绝对路径，见 [`main/projects.md`](../../../main/projects.md) §1.1）。
 
 ### 5.2 挂载初始化（`onMounted`）
 
@@ -189,7 +192,7 @@ function toHgPreviewUrl(projectName: string, absPath: string): string {
 
 ## 7. 注意事项与实现要点
 
-1. **`file://` 在渲染层已全部消失**：本页原先的 `fileUrl()` 助手整段移除、不保留兼容分支，成品播放一律走 `hgpreview://`；**上一轮还留着 `file:///` 的 5 处音频试听本轮也已改走 `hgpreview://tts/…?tts=1`**（`HtmlGenPage/PreviewSection.vue` 1 处、`TextTtsPage/AlignSection.vue` 2 处、`TextTtsPage/SynthSection.vue` 2 处，统一经 `utils/url.ts` 的 `ttsUrl()`）。仓库里唯一保留的 `'file:///'` 在**主进程** `src/main/video.ts:77`——它喂 Chromium `--dump-dom` 量 GSAP 时间轴，不在页面里、不受同源策略约束。
+1. **`file://` 在渲染层已全部消失**：本页原先的 `fileUrl()` 助手整段移除、不保留兼容分支，成品播放一律走 `hgpreview://`；**上一轮还留着 `file:///` 的 5 处音频试听本轮也已改走 `hgpreview://user/…?user=1`**（`HtmlGenPage/PreviewSection.vue` 1 处、`TextTtsPage/AlignSection.vue` 2 处、`TextTtsPage/SynthSection.vue` 2 处，统一经 `utils/url.ts` 的 `userPathUrl()`）。仓库里唯一保留的 `'file:///'` 在**主进程** `src/main/video.ts:77`——它喂 Chromium `--dump-dom` 量 GSAP 时间轴，不在页面里、不受同源策略约束。
 2. **编码分段由 `utils/url.ts` 负责，本页不要自己拼**：`previewUrl()` 内部对该段相对路径逐段 `encodeURIComponent`、斜杠保持原样，项目名整串编码；这与主进程「按 `/` 切段再逐段 `decodeURIComponent`」的解析方式严格对应。整条路径一起编码会把 `/` 变成 `%2F`，段被并成一段、目录层级还原不出来。
 3. **相对路径由绝对路径反推（`parts.slice(-2)`）**：这是对「成品恒为 `<项目目录>/video/output.mp4`」的硬编码假设；成品布局变了这里要同步改。`?v=` 时间戳由 `previewUrl(..., true)` 加上，用于同路径重新渲染后不被浏览器缓存挡回旧文件。
 4. **载入前先卸源**：`loadSelected` 先把 `videoSrc` 置空、必要时 `await nextTick()`，让浏览器先卸载旧媒体再挂新 URL；本页不持有 `<video>` 的元素引用，播放控制完全交给原生 `controls`。
@@ -199,4 +202,4 @@ function toHgPreviewUrl(projectName: string, absPath: string): string {
 8. **`statusText` 的优先级顺序**：全局 trace 优先于本地文案；挂载时调 `resetRenderProgress()` 是为了不让上一轮渲染的残留 trace 抢占首屏文案。
 9. **无成品不等于报错**：`hasVideo` 为假时只写引导文案、不写 `hf-error`，状态条保持中性；工具栏的「在文件夹中显示」用 `:disabled="!videoPath"` 拦下，「重新加载」则**始终可用**。
 10. **「重新加载」兼顾清单刷新与回落**：它先 `refreshProject()` 再判「所选项目是否还在清单里」，不在就回落到当前工作项目——所选项目被删除 / 改名后不会停在一个不存在的项目上。
-11. **上游动作在「HTML生成」页**：正式渲染与档位选择见 [`HtmlGenPage.md`](./HtmlGenPage.md)；产物落盘为项目内相对路径（`project.json` 的 `videoPath`），经 `refreshProject()` / `project:load` 换算成绝对路径后进入本页，再被 `toHgPreviewUrl()` → `previewUrl()` 变成可播 URL。渲染链路本身见 [`main/video.ts.md`](../main/video.ts.md)。
+11. **上游动作在「HTML生成」页**：正式渲染与档位选择见 [`HtmlGenPage.md`](./HtmlGenPage.md)；产物落盘为项目内相对路径（`project.json` 的 `videoPath`），经 `refreshProject()` / `project:load` 换算成绝对路径后进入本页，再被 `toHgPreviewUrl()` → `previewUrl()` 变成可播 URL。渲染链路本身见 [`main/video.ts.md`](../../../main/video.ts.md)。

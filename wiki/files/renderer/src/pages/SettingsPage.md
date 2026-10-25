@@ -10,7 +10,7 @@
 | `src/renderer/src/pages/SettingsPage/types.ts` | 12 | 页面类型出口：`export type { VoiceProviderView } from '@shared/types'`、`export type UpdateCheckReply = IpcResult<UpdateCheckResult>` |
 | `src/renderer/src/pages/SettingsPage/constants.ts` | 32 | 页面级常量：`CUSTOM_VALUE = '__custom__'`、`SETTINGS_SECTION_KEY = STORAGE_KEY_SETTINGS_SECTION`、`SETTINGS_NAV_ITEMS`（5 项：模型配置 / 语音服务 / 渲染档位 / 语音识别模型 / 应用更新）、`SETTINGS_SECTION_KEYS = SETTINGS_SECTIONS` |
 | `src/renderer/src/pages/SettingsPage/helpers.ts` | 56 | 分类状态：`activeSection`（模块级 ref）+ `persistActiveSection` / `applySection` / `applySectionIntent` / `watchSectionIntent` + `updateStage`（模块级 ref，供导航红点） |
-| `src/renderer/src/pages/SettingsPage/components/ModelSection.vue` | 162 | 「模型配置」区块：自定义模型（Base URL / 模型 ID 预设联动、API Key、启用、保存、测试连接） |
+| `src/renderer/src/pages/SettingsPage/components/ModelSection.vue` | 188 | 「模型配置」区块：自定义模型（Base URL / 模型 ID 预设联动、API Key、**思考强度**、启用、保存、测试连接） |
 | `src/renderer/src/pages/SettingsPage/components/VoiceSection.vue` | 85 | 「语音服务」区块（按厂家：厂家下拉 + API Key） |
 | `src/renderer/src/pages/SettingsPage/components/RenderSection.vue` | 74 | 「渲染档位」区块：视频渲染默认档位（质量 / 帧率） |
 | `src/renderer/src/pages/SettingsPage/components/WhisperSection.vue` | 274 | 「语音识别模型」区块（whisper.cpp：模型网格、下载 / 删除 / 设为当前、自定义模型登记、状态与进度条；**卡片外壳 / 标题 / 长说明由外壳 `index.vue` 提供**） |
@@ -27,7 +27,7 @@
 
 | 分类 key | 导航标签 | 区块组件 | 行数 | 内容 |
 |---|---|---|---|---|
-| `model` | 模型配置 | `components/ModelSection.vue` | 162 | 自定义模型：Base URL（预设下拉 / 手填二选一）/ 模型 ID（同）/ API Key / 启用 + 保存配置 / 测试连接 |
+| `model` | 模型配置 | `components/ModelSection.vue` | 188 | 自定义模型：Base URL（预设下拉 / 手填二选一）/ 模型 ID（同）/ API Key / **思考强度（下拉，默认「高（默认）」）** / 启用 + 保存配置 / 测试连接 |
 | `voice` | 语音服务 | `components/VoiceSection.vue` | 85 | 语音服务（按厂家配置）：厂家下拉 + API Key（placeholder 来自厂家）+ 「保存该厂家配置」。**只有 API Key**：模型与音色由厂家目录固定，没有「厂家默认模型」这类全局设置（见 §5.4） |
 | `render` | 渲染档位 | `components/RenderSection.vue` | 74 | 视频渲染默认档位：质量 / 帧率下拉 + 保存渲染默认档位 + 状态条 + 当前质量说明 |
 | `whisper` | 语音识别模型 | `components/WhisperSection.vue`（挂载点在 `index.vue` 的 `.card.hgen-panel` 分支里） | 274 | 语音识别模型（whisper.cpp 字幕转录）：模型网格、下载 / 删除 / 设为当前、自定义模型登记、状态与进度条（**卡片外壳 / 标题 / 长说明由外壳 `index.vue` 提供**，见 §4.4、§5.28） |
@@ -104,16 +104,17 @@
 
 `model` / `voice` / `render` / `update` 四个区块各自自带**卡片外壳**（`.card.hgen-panel` + `.panel-title` + 自己的 `.hf-status` 状态行）；`WhisperSection` 的卡片外壳、标题与长说明由外壳 `index.vue` 提供（见 §4.4）。相互之间没有 props / emit，唯一的共享通道是 `../helpers` 那两个模块级 ref。
 
-### 4.1 `ModelSection.vue`（162 行）——「模型配置」
+### 4.1 `ModelSection.vue`（188 行）——「模型配置」
 
 **模板**（卡片 1，`.card.hgen-panel`，无上边距）：
 
 | 区块 | 关键点 |
 |------|--------|
-| `.hgen-tip` | 原文（改写后）：「配置「HTML 生成 / 修改」使用的模型服务。只支持 OpenAI 格式的端点，Anthropic 格式暂不支持。Base URL 与模型 ID 可从常见服务商直接选，也可手填自己的服务地址；填好 API Key 并勾选「启用」后，HTML 生成页就用这个模型工作。API Key 只保存在本电脑。」**措辞约定**：这段是给使用者看的——不出现 `userData/settings.json` 这类内部路径、不写「OpenAI 兼容模式」这类无信息量的标签（见 §5.24）；但**要写影响决策的限制**，「只支持 OpenAI 格式的端点，Anthropic 格式暂不支持」就是典型（自建网关 / 中转站用户只看手填框、看不到下拉，必须从文字上知道；**这句话也是下拉里不再列 Anthropic 灰项的理由**——见 §5.23）。安全说明用「只保存在本电脑」。卡片标题也据此简化为「自定义模型」（去掉「（OpenAI 兼容）」——协议限制改由这段文字承担） |
+| `.hgen-tip` | 原文（改写后）：「配置「HTML 生成 / 修改」使用的模型服务。只支持 OpenAI 格式的端点，Anthropic 格式暂不支持。Base URL 与模型 ID 可从常见服务商直接选，也可手填自己的服务地址；填好 API Key 并勾选「启用」后，HTML 生成页就用这个模型工作。API Key 只保存在本电脑。「思考强度」控制模型是否先思考再答：思考内容同样按输出计费（推理模型里它常占输出的大头），脚本这类结构化任务可以调到「不思考」省钱，生成 / 修改长代码页面建议保持「高」。」**措辞约定**：这段是给使用者看的——不出现 `userData/settings.json` 这类内部路径、不写「OpenAI 兼容模式」这类无信息量的标签（见 §5.24）；但**要写影响决策的限制**，「只支持 OpenAI 格式的端点，Anthropic 格式暂不支持」就是典型（自建网关 / 中转站用户只看手填框、看不到下拉，必须从文字上知道；**这句话也是下拉里不再列 Anthropic 灰项的理由**——见 §5.23）。安全说明用「只保存在本电脑」。卡片标题也据此简化为「自定义模型」（去掉「（OpenAI 兼容）」——协议限制改由这段文字承担） |
 | **Base URL 行** | **二选一渲染**：`v-if="!baseUrlCustom"` → `HfSelect`（`:model-value="baseUrl"`、`:groups="baseUrlGroups"`、`@change="onBaseUrlPick"`，**不用 `v-model`**）；`v-else` → `<input v-model="baseUrl" class="hgen-input" style="flex:1" placeholder="https://…/v1（OpenAI 兼容，需含版本段）">` + 「从列表选」按钮（`@click="baseUrlCustom = false"`，切回下拉态；手填值保留） |
 | **模型 ID 行** | 同上的二选一：`v-if="!modelCustom"` → `HfSelect`（`:model-value="modelId"`、`:groups="modelGroups"`、`@change="onModelPick"`）；`v-else` → `<input v-model="modelId" … placeholder="如 deepseek-flash / qwen3.8-max">` + 「从列表选」（`@click="modelCustom = false"`） |
 | API Key 行 | `v-model="apiKey"`、`type="password"`，placeholder「sk-...」 |
+| **思考强度行** | **新增在「API Key」与「启用」之间**：`<label class="sel-label">思考强度</label>` + `<HfSelect :model-value="reasoningEffort" :groups="effortGroups" @change="onEffortPick" />`（同样走 `:model-value` + `@change`、不用 `v-model`）；四个选项与费用提示见状态表里的 `effortGroups` |
 | 启用行 | `v-model="enabled"`、`type="checkbox"`，文字「使用自定义模型生成 / 修改 HTML」 |
 | `.hgen-actions` | `保存配置`（主按钮 → `onSave`）、`测试连接`（`onTest`） |
 | `.hf-status` | `:class="statusClass"`、`{{ status }}` |
@@ -124,11 +125,13 @@
 |------|------|------|
 | `baseUrl` / `modelId` / `apiKey` | `ref('')` | 自定义模型三项文本 |
 | `enabled` | `ref(false)` | 是否启用自定义模型生成 / 修改 HTML |
+| `reasoningEffort` | `ref<ReasoningEffort>('high')` | **思考强度**（默认 `high`，与主进程默认值一致）：选中值随 `collectCustomModel()` 一起提交，保存后落进 `settings.json` |
 | `status` / `statusClass` | `ref('')` | 区块状态文案与样式类（`''` / `'hf-ok'` / `'hf-error'`） |
 | `baseUrlCustom` / `modelCustom` | `ref(false)` | 该行是否处于**手填态**：`false` 渲染 `HfSelect`、`true` 渲染 `<input>` + 「从列表选」。用户点「自定义…」置 `true`，「从列表选」按钮置 `false`；`onMounted` 还会按已保存值是否命中预设初始化（见下） |
 | `currentProvider` | `computed` | 当前 `baseUrl` 命中了 `MODEL_PROVIDERS` 里哪家服务商（`p.baseUrls.includes(baseUrl.value)` 全等匹配），没命中为 `null`；模型下拉的候选跟着它联动 |
 | `baseUrlGroups` | `computed<HfSelectGroup[]>` | Base URL 下拉的分组选项，见 §4.1.1 |
 | `modelGroups` | `computed<HfSelectGroup[]>` | 模型 ID 下拉的分组选项，见 §4.1.1 |
+| `effortGroups` | `HfSelectGroup[]`（常量表，不是 computed） | **思考强度下拉的选项表**：单个无标题分组、四项——`none` =「不思考（最省）」、`low` =「低」、`high` =「高（默认）」、`max` =「最高」；每项的 `title` 里写着费用 / 质量提示（例如 `none` 的 title 是「不产生思考内容，reasoning 不计费；适合脚本这类结构化任务，生成长代码页面质量会下降」） |
 
 **函数**：
 
@@ -136,16 +139,17 @@
 |------|------|
 | `onBaseUrlPick(v)` | Base URL 下拉的 `@change` 回调：`v === CUSTOM_VALUE` → **只**把 `baseUrlCustom` 置 `true`（**不动 `baseUrl`**，便于在现有地址上改一改）；否则写入 `baseUrl`、`baseUrlCustom = false`，并在**已填模型不属于新服务商**（`currentProvider` 为空或 `models` 不含它）时把 `modelCustom` 置 `true`——值保留，便于改名而不是从头输 |
 | `onModelPick(v)` | 模型下拉的 `@change` 回调：`v === CUSTOM_VALUE` → 只置 `modelCustom = true`；否则写入 `modelId` 并置 `modelCustom = false` |
+| `onEffortPick(v)` | 思考强度下拉的 `@change` 回调：把选中的值写进 `reasoningEffort`（`v as ReasoningEffort`） |
 | `setStatus(text, kind)` | 写 `status` / `statusClass`，文案取 `text \|\| ''` |
-| `collectCustomModel()` | 返回 `{ baseUrl, modelId, apiKey, enabled }`，三个字符串字段均 `.trim()`，`enabled` 取布尔值 |
+| `collectCustomModel()` | 返回 `{ baseUrl, modelId, apiKey, enabled, reasoningEffort }`，三个字符串字段均 `.trim()`，`enabled` 取布尔值，**`reasoningEffort` 原样带上**（所以点「保存配置」会把它一起存进 `settings.json`） |
 | `onSave()` | 校验通过后 `await window.settingsTools.save(customModel)`；成功提示「配置已保存，可开始使用自定义模型生成 HTML」`hf-ok`，失败显示 `res.message \|\| '保存失败'` `hf-error` |
 | `onTest()` | `await window.settingsTools.test(collectCustomModel())`；刻意**不弹配置类弹窗**（源码注释：按钮与失败状态行都在这个区块上，再弹一个「去设置」框是让用户从原地跳到原地），主进程照常回 `needConfig` 供别的入口用 |
-| `onMounted(async)` | `settingsTools.get()` → `s.customModel \|\| {}` 回填 `baseUrl` / `modelId` / `apiKey` / `enabled = !!m.enabled`，异常写 `setStatus('读取配置失败：' + message, 'hf-error')`；随后**按已保存值初始化两个手填态**：`baseUrlCustom = !!baseUrl && 该地址不在任何预设的 baseUrls 里`、`modelCustom = !!modelId && 该模型不属于 currentProvider`（顺序在赋值之后，故 `currentProvider` 已按新 `baseUrl` 求值）——不这么做下拉会显示空占位，用户看到的是「我配的地址 / 模型没了」（见 §5.22） |
+| `onMounted(async)` | `settingsTools.get()` → `s.customModel \|\| {}` 回填 `baseUrl` / `modelId` / `apiKey` / `enabled = !!m.enabled`，**再多回填一行 `reasoningEffort.value = (m.reasoningEffort as ReasoningEffort) \|\| 'high'`**（老配置没有这个字段时兜一层，免得下拉显示空占位），异常写 `setStatus('读取配置失败：' + message, 'hf-error')`；随后**按已保存值初始化两个手填态**：`baseUrlCustom = !!baseUrl && 该地址不在任何预设的 baseUrls 里`、`modelCustom = !!modelId && 该模型不属于 currentProvider`（顺序在赋值之后，故 `currentProvider` 已按新 `baseUrl` 求值）——不这么做下拉会显示空占位，用户看到的是「我配的地址 / 模型没了」（见 §5.22） |
 
 **关键流程**：
 
 - **保存自定义模型**：`collectCustomModel()` 后若 `baseUrl` / `modelId` / `apiKey` 任一为空 → `setStatus('配置不完整：Base URL / Model ID / API Key 均需填写', 'hf-error')` 并中止（不发任何 IPC）。
-- **测试连接**：先置「正在测试连接...」（样式类清空，保持中性），用**当前表单内容**（不要求已保存）调 `settingsTools.test`，成功 `res.message || '连接成功'`、失败 `res.message || '测试失败'`。主进程失败时还会带 `detail`（排障原文）与可能的 `needConfig`（配置类分类），**这里刻意不使用它们**——`needConfig` 只供别的入口判断。
+- **测试连接**：先置「正在测试连接...」（样式类清空，保持中性），用**当前表单内容**（不要求已保存）调 `settingsTools.test`，成功 `res.message || '连接成功'`、失败 `res.message || '测试失败'`。它和「保存配置」用**同一个 `collectCustomModel()`**（因此载荷里也带 `reasoningEffort`），但主进程的测试连接**不读这个字段**（仍是 `max_tokens: 64` 的 ping、不下发 `reasoning_effort`）。主进程失败时还会带 `detail`（排障原文）与可能的 `needConfig`（配置类分类），**这里刻意不使用它们**——`needConfig` 只供别的入口判断。
 - **选 Base URL / 模型**：两行的下拉都绑定 `@change`（不是 `v-model`）。选「自定义…」时只切到手填态、**不写值**；选具体项时写值并切回下拉态；Base URL 一改，若已填模型不属于新服务商则模型行自动切手填（值保留）。`HfSelect` 只在**用户点选且值确实变化**时 emit `change`（程序化改值不发），并会把 `disabled` 选项渲染成不可点选的行。
 
 #### 4.1.1 两个下拉的选项来源
@@ -395,7 +399,7 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 
 ## 5. 注意事项与实现要点
 
-1. **语音服务按厂家配置**：`settingsTools.get()` 返回的 `s.voice` 里有 `active` 与 `providers`（各家 **`{ apiKey }`**，已无 `defaultModel`），区块把 `providers` 存进 `vSaved`、把 `active` 写进 `vProvider`，再调 `syncVoiceForm()` 回填表单；`voice:list-models` 另提供**厂家目录**（label / Key 提示 / 出厂默认模型 / 模型表），因此「加一家厂家」只需改主进程的 `voiceCatalog.ts`，本区块不用改。保存走 `{ provider, config: { apiKey } }`。
+1. **语音服务按厂家配置**：`settingsTools.get()` 返回的 `s.voice` 里有 `active` 与 `providers`（各家 **`{ apiKey }`**，已无 `defaultModel`），区块把 `providers` 存进 `vSaved`、把 `active` 写进 `vProvider`，再调 `syncVoiceForm()` 回填表单；`voice:list-models` 另提供**厂家目录**（label / Key 提示 / 出厂默认模型 / 模型表），因此「加一家厂家」只需改主进程的 `voice/catalog.ts`，本区块不用改。保存走 `{ provider, config: { apiKey } }`。
 2. 本区块**没有**「自定义保存目录」表单项（只有厂家 / API Key），也没有「厂家默认模型」（本轮删除）；保存目录仍**全局一份**、由使用侧经 `voiceTools.getSaveDir`、`voiceTools.pickDir` 处理。
 3. **`settingsTools.get()` 由四个区块各调一次**（`ModelSection` / `VoiceSection` / `RenderSection` / `UpdateSection` 各自的 `onMounted`，分别取 `customModel` / `voice` / `render` / `updater`），各自在独立 `try` 中，失败分别写 `status` / `vStatus`（渲染档位那次仅静默回落内置默认，更新那次写 `updaterStatus`），互不影响。**未挂载的分类一次都不调**。
 4. **「厂家默认模型」已删除**：`syncVoiceForm()` 切厂家时只回填该厂家的 `apiKey`；系统音色用哪个模型由厂家目录固定（`vendorSystemModel` 只用于说明文案），克隆音色的模型在「音色管理 → 音色映射管理」里按音色绑定。

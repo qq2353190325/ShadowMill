@@ -96,7 +96,7 @@ npx tsc && node dist/agent/index.js
 
 1. **不要把它接进构建图**：一旦被 main/renderer `import`，`openai` 之外的 Node 内置能力（`child_process` 任意命令执行）就会进入应用运行栈，属于安全回退。
 2. **`safePath` 是唯一防线**：`bash` 工具本身可执行任意命令，工作区约束只能靠黑名单与人工使用纪律，切勿在不受信环境运行。
-3. **该脚本的写法前提**：语法保持 erasable-only（不使用 `enum`、构造函数参数属性等需要运行时转换的特性），与 `src/main/vad.ts` 的约束同源。
+3. **该脚本的写法前提**：语法保持 erasable-only（不使用 `enum`、构造函数参数属性等需要运行时转换的特性），与 `src/main/voice/vad.ts` 的约束同源。
 4. **它用的是 `openai` 包**：与应用共用同一个依赖版本，但客户端配置（`baseURL` / `MODEL_ID`）来自环境变量，与应用内 `settings.json` 的配置**互不相通**。
 
 ---

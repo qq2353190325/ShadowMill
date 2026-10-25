@@ -166,7 +166,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `src/main/index.ts` | `runtime.register(ctx)`——装配顺序里**最后一个**（注释：启动只探测；排最后只保证 handler 先挂上） |
 | `src/main/video.ts` | `video:render` 先 `runtime.missingPacks(['ffmpeg','hyperframes'])`，缺包即返回 `{ ok:false, needPacks, message }` |
 | `src/main/projects.ts` | `project:extract-video-audio` 先 `runtime.missingPacks(['ffmpeg'])`，缺包即返回 `needPacks` |
-| `src/main/ttsAlign.ts` | `voice:synth-aligned` 先 `runtime.missingPacks(['ffmpeg'])`，缺包即返回 `needPacks` |
+| `src/main/voice/ttsAlign.ts` | `voice:synth-aligned` 先 `runtime.missingPacks(['ffmpeg'])`，缺包即返回 `needPacks` |
 | `src/main/whisper.ts` | 只在「非 wav/flac/mp3/ogg 要转码」且缺 ffmpeg 时用 `runtime.packSizeText(['ffmpeg'])` 组文案，并回 `needPacks:['ffmpeg']` |
 | `src/main/hfEnv.ts` | 交接对端：接收 `refreshPack(name, root)`，据此重算该包根与 `cachedChrome` / `cachedNode` |
 | `src/preload/index.ts` | `runtimeTools` 命名空间：`status` / `prepare(packs?)` / `cancel` / `onProgress`（单订阅）分别转发上述四个频道 |

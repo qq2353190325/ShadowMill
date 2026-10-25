@@ -1,6 +1,6 @@
 # 05 · 目录架构：`src/shared/`（三端共享层）
 
-> 全应用唯一的「契约层」：IPC 频道名、跨进程载荷类型、错误文案映射表，以及品牌文案 / 成片画布尺寸 / 项目素材白名单 / 估时语速（4 字/秒，一个语速三处用）等应用级常量。它没有自己的运行时产物（构建时被内联进 main / preload / renderer 三端），但决定了三端能否对齐。
+> 全应用唯一的「契约层」：IPC 频道名、跨进程载荷类型、错误文案映射表，以及品牌文案 / 成片画布尺寸 / 项目素材白名单 / 估时语速（4 字/秒，一个语速三处用）/ **角色动作参数表**等应用级常量。它没有自己的运行时产物（构建时被内联进 main / preload / renderer 三端），但决定了三端能否对齐。
 
 ---
 
@@ -8,18 +8,18 @@
 
 | 文件 | 行数 | 角色 |
 |---|---|---|
-| [ipc.ts](./files/shared/ipc.ts.md) | 160 | IPC 频道名常量（**11** 个分组、**100** 个频道）+ `IpcChannel` 类型 |
-| [types.ts](./files/shared/types.ts.md) | 1113 | 跨进程载荷类型（12 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情、`needConfig` / `title` 两个配置类字段）、`RegisterCtx`、设置（含**按厂家的 `VoiceSettings` / `VoiceProviderConfig`（只有 `apiKey`）**、渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境（**分包**：`RuntimePackName` / `RuntimePackState` / `RuntimePhase` / `RuntimeProgressPayload`；`IpcFail.needPacks` 与 `IpcResult` 成功分支的可选 `message`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音（含 `VoiceProviderView`；`VoiceCreatePayload.audioPath` 可为本地路径 / 公网 URL / `data:audio/...` URI）、语音识别、项目与字幕（**项目素材库 `ProjectMaterialKind` / `ProjectMaterial` 与素材三件套载荷 / `ProjectMaterialsResult`**、**内容脚本 Agent 的 `ScriptGeneratePayload` / `ScriptGenerateReply`**、**对话记录的 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`**）、预览/转视频、进度推送（**通用 `AgentStage` / `AgentProgressPayload` + 旧名别名 + `HtmlProgressPayload` / `ScriptProgressPayload` 都 `extends` 它**），以及 `PreloadApi`（`window.*` 契约唯一真源，**12 个命名空间**）；`ProjectHtmlMaterials` 的 `videoPath` 已换成 `materialIds?: string[]` 并删掉 `audioPath`（背景音轨由主进程注入 HTML），`Project.videoMaterial` 退化为**历史字段**，`ProjectSetVideoResult` 已删除；`ConfigTarget = 'model' \| 'voice'` 定义在 `RuntimePackName` 之后（**没有 `'billing'`**：余额类不弹窗） |
+| [ipc.ts](./files/shared/ipc.ts.md) | **184** | IPC 频道名常量（**12** 个分组、**106** 个频道）+ `IpcChannel` 类型 |
+| [types.ts](./files/shared/types.ts.md) | **1333** | 跨进程载荷类型（12 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情、`needConfig` / `title` 两个配置类字段）、`RegisterCtx`、设置（含**按厂家的 `VoiceSettings` / `VoiceProviderConfig`（只有 `apiKey`）**、渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境（**分包**：`RuntimePackName` / `RuntimePackState` / `RuntimePhase` / `RuntimeProgressPayload`；`IpcFail.needPacks` 与 `IpcResult` 成功分支的可选 `message`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音（含 `VoiceProviderView`；`VoiceCreatePayload.audioPath` 可为本地路径 / 公网 URL / `data:audio/...` URI）、语音识别、项目与字幕（**项目素材库 `ProjectMaterialKind` / `ProjectMaterial` 与素材三件套载荷 / `ProjectMaterialsResult`**、**内容脚本 Agent 的 `ScriptGeneratePayload` / `ScriptGenerateReply`**、**对话记录的 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`**、**角色：`ProjectCastMember`（含 `style?`）/ `ProjectCastSelection` / `ProjectSaveCastPayload` / `ProjectCastResult` 与全局库的 `CastLibraryMember` / `CastLibraryResult` / `CastCreatePayload` / `CastRecreatePayload` / `CastSaveMetaPayload` / `CastPreviewPayload` / `CastPreviewResult`**、**动作示范的十个类型 `CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload` / `CastDemoResult`**）、预览/转视频、进度推送（**通用 `AgentStage` / `AgentProgressPayload` + 旧名别名 + `HtmlProgressPayload` / `ScriptProgressPayload` 都 `extends` 它**），以及 `PreloadApi`（`window.*` 契约唯一真源，**13 个命名空间**）；`ProjectHtmlMaterials` 的 `videoPath` 已换成 `materialIds?: string[]` 并删掉 `audioPath`（背景音轨由主进程注入 HTML），`Project.videoMaterial` 退化为**历史字段**，`ProjectSetVideoResult` 已删除；`ConfigTarget = 'model' \| 'voice'` 定义在 `RuntimePackName` 之后（**没有 `'billing'`**：余额类不弹窗）。**历次改过的必填 `taskId: string`**：`ProjectAgentPayload` / `CastCreatePayload` / `CastRecreatePayload` / `CastActionGeneratePayload` / `HtmlProgressPayload`（进度按任务 id 分发）；`PreloadApi.projectTools` 的 `generateHtml` / `modifyHtml` 第三参是 `Omit<ProjectAgentPayload, 'name' \| 'prompt'>`（**必填**），`onTaskProgress(taskId, callback)` 返回退订函数 |
 | [errors.ts](./files/shared/errors.ts.md) | 225 | **全应用「原始报错 → 人话文案」唯一映射表**：`friendlyError(err, ctx)` / `configTargetOf(message)` / `configTitle(target)` + 类型 `FriendlyError` / `ErrorContext`；纯函数、无副作用、不 import electron；十档固定顺序判定，配置类带 `needConfig`（**余额 / 欠费不弹窗**，走内嵌状态行）（详见 `docs/error-mapping.md`） |
-| [constants.ts](./files/shared/constants.ts.md) | 89 | 应用级公共常量：品牌文案 `APP_NAME`（`'影坊'`）/ `APP_NAME_EN`（`'ShadowMill'`）/ `APP_SLOGAN` / `APP_SLOGAN_SHORT`、出网请求标识 `APP_USER_AGENT`（`APP_NAME_EN + '/1.0'`）、**项目素材三常量** `MAX_MATERIALS`（`20`，图片 + 视频合计上限）/ `IMAGE_MATERIAL_EXTS` / `VIDEO_MATERIAL_EXTS`、**成片画布四常量** `RENDER_CANVASES`（`['landscape', 'portrait', 'square']`）/ `CANVAS_SIZES`（横屏 `1920×1080`、竖屏 `1080×1920`、方形 `1080×1080`）/ `CANVAS_LABELS`（`'横屏 16:9'` / `'竖屏 9:16'` / `'方形 1:1'`）/ `DEFAULT_CANVAS`（`'landscape'`），以及**估时语速一常量 + 一纯函数** `EST_CHARS_PER_SEC`（`4`，字/秒；一个语速**三处消费方**）/ `estimateSubtitleDur(text)`（`max(2.4, 1.6 + 字数 ÷ 语速)`，**估时公式唯一真源**） |
+| [constants.ts](./files/shared/constants.ts.md) | **129** | 应用级公共常量：品牌文案 `APP_NAME`（`'影坊'`）/ `APP_NAME_EN`（`'ShadowMill'`）/ `APP_SLOGAN` / `APP_SLOGAN_SHORT`、出网请求标识 `APP_USER_AGENT`、**项目素材三常量** `MAX_MATERIALS`（`20`）/ `IMAGE_MATERIAL_EXTS` / `VIDEO_MATERIAL_EXTS`、**成片画布四常量** `RENDER_CANVASES` / `CANVAS_SIZES` / `CANVAS_LABELS` / `DEFAULT_CANVAS`、**估时语速一常量 + 一纯函数** `EST_CHARS_PER_SEC`（`4`）/ `estimateSubtitleDur(text)`，以及**角色动作的参数表与上限（本轮新增）**：接口 `CastActionParam`、`CAST_ACTION_PARAMS`（10 项：`dy` / `dx` / `aL` / `aR` / `rot` / `sq` / `walk` / `blink` 数字 + `eyes` / `mouth` 枚举，含方向与范围，`mouth` 多一个 `'auto'` = 不传该参数）、`CAST_ACTION_NAME_MAX`（`12`）、`CAST_ACTION_DURATION`（`{ min: 0.3, max: 30 }`）、`CAST_ACTION_MAX_PER_SCOPE`（`40`） |
 
-> 前两个文件是**契约**（频道名与载荷格式禁止改动）；`errors.ts` 是**纯函数映射表**（不含业务状态，改它不影响任何频道名或载荷格式，但改文案会同时影响 main 与 renderer 的显示）；`constants.ts` 是**文案、请求标识、成片画布尺寸、素材规则与估时语速**，改它不影响任何频道名或载荷格式（但改素材常量 / 画布尺寸 / 估时语速等于改产品规则：素材常量同时约束主进程校验与界面提示，画布尺寸必须与 HyperFrames CLI 的画布预设对齐（对不上或被覆盖时成片会是 1080×1920，CLI 的兜底尺寸），估时语速同时改渲染层预览的字幕时长、主进程落盘 / 导出 / 逐句对齐用的时间轴、AI 面板的估算时长与脚本 Agent 提示词的字数预算）。
+> 前两个文件是**契约**（频道名与载荷格式禁止改动）；`errors.ts` 是**纯函数映射表**（不含业务状态，改它不影响任何频道名或载荷格式，但改文案会同时影响 main 与 renderer 的显示）；`constants.ts` 是**文案、请求标识、成片画布尺寸、素材规则、估时语速与动作参数表**，改它不影响任何频道名或载荷格式（但改素材常量 / 画布尺寸 / 估时语速 / 动作参数表等于改产品规则：素材常量同时约束主进程校验与界面提示，画布尺寸必须与 HyperFrames CLI 的画布预设对齐，估时语速同时改渲染层预览的字幕时长、主进程落盘 / 导出 / 逐句对齐用的时间轴、AI 面板的估算时长与脚本 Agent 提示词的字数预算，动作参数表同时决定**关键帧编辑器的列**与**主进程落盘时的夹取 / 白名单**）。
 
 ---
 
 ## 2. `ipc.ts` —— 频道常量
 
-以冻结对象字面量导出（`as const`），按业务域分 **11 组**：
+以冻结对象字面量导出（`as const`），按业务域分 **12 组**：
 
 | 分组 | 频道数 | 频道 |
 |---|---|---|
@@ -29,17 +29,18 @@
 | `Settings` | 6 | `settings:get`、`settings:save`、`settings:save-render`、`settings:save-updater`、`settings:test`、`settings:pick-runtime-pack` |
 | `Voice` | 19 | `voice:get-config`、`voice:get-save-dir`、`voice:save-config`、`voice:pick-audio`、`voice:create`、`voice:list-system-voices`、`voice:list-models`、`voice:get-profiles`、`voice:save-profile`、`voice:delete-profile`、`voice:delete-cloud`、`voice:list`、`voice:list-all`、`voice:pick-dir`、`voice:list-generated`、`voice:synth`、`voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | `Whisper` | 12 | `whisper:status`、`whisper:download`、`whisper:delete`、`whisper:set-current`、`whisper:add-model`、`whisper:update-model`、`whisper:remove-model`、`whisper:open-dir`、`whisper:project-audio`、`whisper:pick-audio`、`whisper:transcribe`、`whisper:progress` |
-| `Project` | **30** | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:set-canvas`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-media`、`project:add-materials`、`project:save-materials`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、**`project:cast-library`、`project:promote-cast`、`project:import-cast`、`project:remove-cast-from-library`（本轮新增的全局角色库四条）**、`project:html-progress` |
+| `Project` | **27** | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:set-canvas`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-media`、`project:add-materials`、`project:save-materials`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、**`project:save-cast`（本片用哪几个全局角色，载荷 `[{ id, selected }]`）**、`project:html-progress`。**本轮下线 6 条角色频道**：`project:cast-library` / `project:promote-cast` / `project:import-cast` / `project:remove-cast-from-library` / `project:new-cast` / `project:cast-preview`（33 → 27） |
+| **`Cast`** | **11** | **角色 6 条（`projects/ipc/cast.ts`）**：`cast:list`（列库）/ `cast:create`（画一个新角色）/ `cast:recreate`（改画法、覆盖库里那份）/ `cast:save-meta`（只改元数据，不调模型）/ `cast:remove`（从库里删，**连带清它的专属动作**）/ `cast:preview`（静态预览页 `<id>.html`）；**动作示范 5 条（`projects/ipc/castActions.ts`，本轮新增）**：`cast:action-list`（列动作，回 `{ ok, shared, own }`；`shared` = 内置 14 条 + 用户自建公共动作，`own` = 该角色专属）/ `cast:action-save`（存一条**关键帧**动作，同 id 覆盖、id 空由主进程起 `actN`）/ `cast:action-remove`（删一条动作，内置动作删不掉）/ `cast:action-generate`（**唯一会调模型的动作路径**：读角色源码 → 生成一条 `function (t) { … }` → 存成专属动作；进度按 `taskId` 走 `project:html-progress`）/ `cast:demo`（会动的示范页 `<id>.demo.html`）。角色与动作都存 `<userData>/cast-library/`（`index.json` / `<id>.js` / **`actions.json`**），与项目无关 |
 | **`Script`** | **7** | **`script:generate`（生成）/ `script:load-chat`（读索引）/ `script:append-round`（写副本 + 更新索引）/ `script:read-version`（读某版副本）/ `script:set-active-version`（改 active）/ `script:clear-chat`（删整个 chat/）——内容脚本 Agent 的六条 `ipcMain.handle`；外加 `script:progress`（main → renderer 进度推送）**。注释明确：**生成只产出文本、不写文件——场景落盘走 `project:save-content`**；chat 系列管的是**对话记录** `projects/<项目名>/chat/`（`index.json` 索引 + `versions/<id>.json` 每版副本） |
 | `Video` | 4 | `dialog:open-html`、`video:show-in-folder`、`video:render`、`video:progress` |
 | `Runtime` | 4 | `runtime:status`、`runtime:prepare`（载荷 `packs?: RuntimePackName[]`，省略 = 全部）、`runtime:cancel`、`runtime:progress` |
 | `Legacy` | 2 | `legacy:status`、`legacy:resolve`（历史数据目录：问一次「有没有 / 是什么」+ 回传处置选择；**没有推送频道**，界面在渲染层） |
 
-合计 **100** 个频道（Window 4 + App 1 + Update 9 + Settings 6 + Voice 19 + Whisper 12 + Project **32** + **Script 7** + Video 4 + Runtime 4 + Legacy 2）。
+合计 **106** 个频道（Window 4 + App 1 + Update 9 + Settings 6 + Voice 19 + Whisper 12 + **Project 27** + **Cast 11** + **Script 7** + Video 4 + Runtime 4 + Legacy 2 = **106**，共 **12** 个分组）。
 
-**本轮（全局角色库）是「一个功能加一批频道」的第一次**：`Project` 组 **26 → 30**、全库 **94 → 98**，**分组数仍是 11**、preload 命名空间仍是 **12**（四个方法挂在既有 `projectTools` 下）。
+**`Cast` 组分两支**：角色本身 6 条（`ipc/cast.ts`，`cast:list` / `cast:create` / `cast:recreate` / `cast:save-meta` / `cast:remove` / `cast:preview`）+ **动作示范 5 条（`ipc/castActions.ts`，本轮新增：`cast:action-list` / `cast:action-save` / `cast:action-remove` / `cast:action-generate` / `cast:demo`）**——语义是「角色的唯一真源是 `<userData>/cast-library/`、动作存在同目录的 `actions.json`，两者都与项目无关」；`Project` 组只留 **`project:save-cast`**（本片用哪几个，载荷 `[{ id, selected }]`）。计数：`Cast` 组 **6 → 11**、全库 **101 → 106**、分组数 12 不变；preload 的 `castTools` 因此从 7 个方法变 **12** 个（角色 6 + 动作 5 + `onTaskProgress`）。更早的账：角色频道整体从 `Project` 组搬进新建的 `Cast` 组时，`Project` 组 33 → **27**、分组 11 → 12、频道总数仍是 101。
 
-**Script 组是「先加一组、再扩到七条」**：先新增 `Script` 分组（`Generate` / `Progress`），分组数 **10 → 11**、频道数 **87 → 89**；随后为对话记录补 `LoadChat` / `SaveChat`（组内 **2 → 4**、全库 **89 → 91**）；本轮对话记录改成「索引 + 每版副本」后，两条 `load-chat` / `save-chat` 扩成五条 chat handler（`LoadChat` / `AppendRound` / `ReadVersion` / `SetActiveVersion` / `ClearChat`），`Script` 组 **4 → 7**、全库 **91 → 94**（**分组数仍是 11**）。`Script` 的位置在 `Project` 之后、`Video` 之前，顺序与主进程的 `register()` 段（`projects.register(ctx)` → `agent.registerScript(projects.projectDir)` → `voice.register(ctx)`）呼应。历史净增记录保留：素材库「3 换 3」→ `update:changelog` → `project:set-canvas` → `script:*` 两条 → **对话记录扩到五条 chat handler** → **本轮角色库 4 条（94 → 98）**。
+**Script 组是「先加一组、再扩到七条」**：先新增 `Script` 分组（`Generate` / `Progress`），分组数 **10 → 11**、频道数 **87 → 89**；随后为对话记录补 `LoadChat` / `SaveChat`（组内 **2 → 4**、全库 **89 → 91**）；本轮对话记录改成「索引 + 每版副本」后，两条 `load-chat` / `save-chat` 扩成五条 chat handler（`LoadChat` / `AppendRound` / `ReadVersion` / `SetActiveVersion` / `ClearChat`），`Script` 组 **4 → 7**、全库 **91 → 94**（**分组数仍是 11**）。`Script` 的位置在 `Project` 之后、`Video` 之前，顺序与主进程的 `register()` 段（`projects.register(ctx)` → `agent.registerScript(projects.projectDir)` → `voice.register(ctx)`）呼应。历史净增记录保留：素材库「3 换 3」→ `update:changelog` → `project:set-canvas` → `script:*` 两条 → **对话记录扩到五条 chat handler** → **角色库 4 条（94 → 98）** → **项目角色 2 条（98 → 100）** → **角色预览 1 条（100 → 101）**。
 
 五个容易踩的点：
 
@@ -47,7 +48,7 @@
 2. **`IpcChannel` 类型是分组对象的并集**（`(typeof IPC)[keyof typeof IPC]`），即「`Window` 对象 | `App` 对象 | …」，而不是频道字符串的并集。它用于约束「必须传入 IPC 分组对象」，不要误当作字符串联合类型使用。
 3. **`Update.OpenLog`（`update:open-log`）排在 `Version` 与 `Progress` 之间**：它是「打开 `userData/updater.log` 所在位置」的排障出口，主进程侧**刻意不经过 `ensureUpdater()`**——更新失败时最常见的场景恰恰是 electron-updater 没加载起来，若挂在懒加载之后就打不开日志了。
 4. **「去充值」外链频道曾加过、又整条删掉**：`App.OpenExternal`（`app:open-external`）只服务配置类弹窗上的「去充值」按钮，而那个按钮**从未被用户同意过**，已按用户要求整条摘除。余额 / 欠费改为走内嵌状态行（文案说明去厂家控制台充值），因此 `ConfigTarget` 里也**没有 `'billing'`**——「弹窗」与「去设置能修好」严格等价。
-5. **文件头注释已同步**：`src/shared/ipc.ts` 第 2 行现在写的是「preload **12 命名空间**与渲染层调用依赖它们」，与实际情况一致（含 `scriptTools`）。核数字时仍以 `PreloadApi`（⑨ 节）与实际 `contextBridge` 调用为准；命名空间或分组再增减时，这行注释与本文都要一起改。
+5. **文件头注释已同步**：`src/shared/ipc.ts` 第 2 行写的是「preload **13 命名空间**与渲染层调用依赖它们」，与实际情况一致（含 `scriptTools` / `castTools`）。核数字时仍以 `PreloadApi`（⑨ 节）与实际 `contextBridge` 调用为准；命名空间或分组再增减时，这行注释与本文都要一起改。
 
 约束（源码注释明确写着）：频道名与现行实现逐一对应，**禁止改动**；preload 的命名空间与渲染层调用全部依赖这些字面量。
 
@@ -67,14 +68,16 @@
 | ⑧b 历史数据目录 | 旧数据扫描结论与处置契约 | `LegacyDataInfo`（`dir` / `entries` / `projects`）、`LegacyResolveAction`、`LegacyResolveResult` |
 | ④ 音色与配音 | 系统/克隆音色、映射、合成与逐句对齐 | `SystemVoice`、`SystemVoiceItem`、`VoiceModel`、`VoiceListItem`、`VoiceCreateResult`、`VoiceSynthResult`、`VoiceAlignPayload`、`VoiceAlignResult` |
 | ⑤ 语音识别 | whisper 模型状态与转录 | `WhisperModelItem`、`WhisperStatusResult`、`WhisperTranscribePayload`、`WhisperTranscribeResult` |
-| ⑥ 项目与字幕 | **`project.json` 索引（`ProjectIndex`）与完整视图 `Project`**、**项目素材库**、字幕行、HTML 生成载荷、**内容脚本 Agent 载荷**、**对话记录（索引元数据 / 索引 / 单版结果 / 追加载荷）** | `Scene`、`ContentScript`、`Project`、`ProjectIndex`、`ProjectMaterialKind` / `ProjectMaterial` / 素材三件套载荷 / `ProjectMaterialsResult`、`SubtitleLine`、`ProjectMeta`、`ProjectSetCanvasPayload`、`ProjectAgentPayload`、`ProjectHtmlMaterials`、`ProjectHtmlResult`、**`ScriptGeneratePayload`、`ScriptGenerateReply`（紧跟 `ProjectHtmlResult` 之后，带 `// ===== 内容脚本 Agent（script:generate）=====` 小标题）**、**`ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`（带 `// ===== 内容脚本对话记录（按项目持久化）=====` 小标题）** |
+| ⑥ 项目与字幕 | **`project.json` 索引（`ProjectIndex`）与完整视图 `Project`**、**项目素材库**、字幕行、HTML 生成载荷、**内容脚本 Agent 载荷**、**对话记录（索引元数据 / 索引 / 单版结果 / 追加载荷）**、**角色（`ProjectCastMember` / `ProjectCastSelection` / `CastLibrary*` / `Cast*Payload`）与动作示范** | `Scene`、`ContentScript`、`Project`、`ProjectIndex`、`ProjectMaterialKind` / `ProjectMaterial` / 素材三件套载荷 / `ProjectMaterialsResult`、`SubtitleLine`、`ProjectMeta`、`ProjectSetCanvasPayload`、`ProjectAgentPayload`、`ProjectHtmlMaterials`、`ProjectHtmlResult`、**`ScriptGeneratePayload`、`ScriptGenerateReply`（紧跟 `ProjectHtmlResult` 之后，带 `// ===== 内容脚本 Agent（script:generate）=====` 小标题）**、**`ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`（带 `// ===== 内容脚本对话记录（按项目持久化）=====` 小标题）**、**`CastLibraryMember` / `CastLibraryResult` / `ProjectCastSelection` / `ProjectSaveCastPayload` / `ProjectCastResult` / `CastCreatePayload` / `CastRecreatePayload` / `CastSaveMetaPayload` / `CastResult` / `CastPreviewPayload` / `CastPreviewResult`**、**`CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload` / `CastDemoResult`（带 `// ===== 角色动作示范（cast:action-* / cast:demo）=====` 小标题，紧接 `ScriptAppendRoundPayload` 之后）** |
 | ⑦ 预览 / 转视频 | 渲染载荷与结果、进度 | `VideoRenderPayload`（渲染档位 `quality?` / `fps?` + **项目属性 `canvas?`**）、`VideoRenderResult`（失败分支含可选 `needPacks?`）、`VideoProgressPayload` |
-| ⑧ 进度推送 | 源码小标题为「**5 路** main → renderer，均为单订阅语义」 | **通用层**：`AgentStage`（`'connecting' \| 'thinking' \| 'writing' \| 'retry' \| 'done'`）、`AgentProgressPayload`（`stage` / `thinkChars` / `contentChars` / `thinkText`）；**旧名别名**：`HtmlAgentStage = AgentStage`、`HtmlAgentProgress = AgentProgressPayload`；**两个 extends 变体**：`HtmlProgressPayload extends AgentProgressPayload { text: string }`、`ScriptProgressPayload extends AgentProgressPayload { text: string }`；另有 `WhisperProgressPayload`、`AlignProgressPayload`、`VideoProgressPayload` |
-| ⑨ `window.*` 契约 | **12** 个命名空间的完整方法签名 | `PreloadApi`（唯一真源；`projectTools` 含素材三件套 `pickMedia` / `addMaterials` / `saveMaterials` 与 `setCanvas(name, canvas)`、`onHtmlProgress`；**`scriptTools` = `generate(payload)` / `loadChat(name)` / `appendRound(payload)` / `readVersion(name, versionId)` / `setActiveVersion(name, versionId)` / `clearChat(name)` / `onProgress(cb)`（**7 个成员**）**；`updateTools` 含 `status` 与 `openLog`；`settingsTools` 含 `pickRuntimePack()`；`runtimeTools` = `status()` / `prepare(packs?)` / `cancel()` / `onProgress()`；`legacyTools` 对应旧数据处置；`appTools` = `copyText()`） |
+| ⑧ 进度推送 | 源码小标题（逐字，第 967–968 行）：「**⑧ 进度推送（5 路 main → renderer；其中 `project:html-progress` 是「一条频道 + 按任务 id 分发」，所以「生成 HTML」与「画角色」可以并行、各拿各的回调，其余 4 路仍是单订阅语义）」** | **通用层**：`AgentStage`（`'connecting' \| 'thinking' \| 'writing' \| 'retry' \| 'done'`）、`AgentProgressPayload`（`stage` / `thinkChars` / `contentChars` / `thinkText`）；**旧名别名**：`HtmlAgentStage = AgentStage`、`HtmlAgentProgress = AgentProgressPayload`；**两个 extends 变体**：`HtmlProgressPayload extends AgentProgressPayload { text: string; taskId: string }`（`taskId` **必填**，本次任务的 id）、`ScriptProgressPayload extends AgentProgressPayload { text: string }`；另有 `WhisperProgressPayload`、`AlignProgressPayload`、`VideoProgressPayload`。**`AgentProgressPayload` 本身未改** |
+| ⑨ `window.*` 契约 | **13** 个命名空间的完整方法签名 | `PreloadApi`（唯一真源；`projectTools` 共 **27** 个成员，含素材三件套 `pickMedia` / `addMaterials` / `saveMaterials`、`setCanvas(name, canvas)`、**`saveCast(name, cast)`**、**`onTaskProgress(taskId, callback)`（返回退订函数）**；`generateHtml` / `modifyHtml` 的第三参是 `Omit<ProjectAgentPayload, 'name' \| 'prompt'>`（**必填**）；**`castTools` 共 12 个成员**：`list()` / `create(brief)` / `recreate(id, request, taskId)` / `saveMeta(patch)` / `remove(id)` / `preview(id, options?)` / **`listActions(castId)` / `saveAction(payload)` / `removeAction(payload)` / `generateAction(payload)` / `demo(id, options?)`（本轮新增的 5 个动作方法）** / `onTaskProgress(taskId, callback)`；**`scriptTools` = `generate(payload)` / `loadChat(name)` / `appendRound(payload)` / `readVersion(name, versionId)` / `setActiveVersion(name, versionId)` / `clearChat(name)` / `onProgress(cb)`（**7 个成员**）**；`updateTools` 含 `status` 与 `openLog`；`settingsTools` 含 `pickRuntimePack()`；`runtimeTools` = `status()` / `prepare(packs?)` / `cancel()` / `onProgress()`；`legacyTools` 对应旧数据处置；`appTools` = `copyText()`） |
 
-**⑧ 的「5 路」要会读**：它指的是**⑧ 节里定义的 5 个进度载荷类型**（html / script / whisper / align / video）。`UpdateProgressPayload` 在 ③.5、`RuntimeProgressPayload` 在 ③.6，因此**整层进度通道实际是 7 路**（html / script / whisper / align / video / runtime / update）；preload 头注释的「6 个进度推送通道」指其中**有单订阅标志的 6 路**（不含直接 `ipcRenderer.on` 的 video）。三个数字口径不同，别混用。
+**⑧ 的「5 路」要会读**：它指的是**⑧ 节里定义的 5 个进度载荷类型**（html / script / whisper / align / video）。`UpdateProgressPayload` 在 ③.5、`RuntimeProgressPayload` 在 ③.6，因此**整层进度通道实际是 7 路**（html / script / whisper / align / video / runtime / update）；preload 头注释的「6 个进度推送通道」指其中**有模块级「只绑一次」标志的 6 路**（不含直接 `ipcRenderer.on` 的 video）。三个数字口径不同，别混用。**html 那一路的标志现在只保证监听器绑一次**：回调是 `taskId → 回调` 的 `Map`（见 `HtmlProgressPayload.taskId` 与 ⑨ 节的 `onTaskProgress`），不是单槽。
 
-**⑨ 节头部注释已同步**：源码现在写的是「**12 个命名空间 ↔ 11 组频道常量**」，与 `PreloadApi` 实际定义、`src/shared/ipc.ts` 的实际分组一致。
+**本轮动作示范加了 5 条频道**：`src/shared/ipc.ts` 的 `Cast` 组 **6 → 11**、全库 **101 → 106**（分组数 12 不变），其余频道名零改动；`project:html-progress` 的「按 `taskId` 分发」语义不变（「生成 HTML」「画角色」「编动作」三者可以并行）。
+
+**⑨ 节头部注释已经落后于实现**：源码那行仍写「**12 个命名空间 ↔ 11 组频道常量**」，而实际是 **13 个命名空间 / 12 个分组**（`PreloadApi` 与 `src/preload/index.ts` 的 `contextBridge` 对象都已含 `castTools`）。核数字时以 `PreloadApi` 与 `contextBridge` 调用为准，不要照抄这条注释。
 
 本轮 `Script*` 类型的形状（逐字）：
 
@@ -123,19 +126,45 @@ export interface ScriptAppendRoundPayload {
 
 `ScriptAppendRoundPayload.round` 刻意只用内联对象（不含 `versionId` / `sceneCount`）：这两项由主进程在写副本时确定（`versionId` 现生成、`sceneCount` 取落盘后的场景数），渲染层给不了也不该给。
 
+角色预览与动作示范的类型（按源码形状）：
+
+```ts
+export interface CastPreviewPayload {
+  id?: string
+  // 角色身高（高几 u）：只影响预览里画多大，不改任何文件
+  units?: number
+  // 角色名，只用于预览页的标题 / 无障碍文案，不参与绘制
+  title?: string
+  // 这个角色声明的随包库（只用来在预览页里提示「水彩角色只画得出 Canvas 2D 部分」）
+  uses?: string[]
+}
+export interface CastPreviewResult {
+  // 预览页相对 userData 的路径（cast-preview/<id>.html），渲染层用 userFileUrl 拼 URL
+  rel: string
+}
+// 动作示范：载荷与静态预览完全同形（别名），结果也只多一种文件名
+export type CastDemoPayload = CastPreviewPayload
+export interface CastDemoResult {
+  rel: string   // cast-preview/<id>.demo.html
+}
+```
+
+- **`name` / `id` 的可选性**：`CastPreviewPayload.id` 与 `CastDemoPayload.id` 是**可选**的，因为 preload 把方法参数合并进来（`{ id, ...(options || {}) }`）；`PreloadApi['castTools'].preview` / `.demo` 的第二参刻意写成 `Omit<CastPreviewPayload, 'id'>` / `Omit<CastDemoPayload, 'id'>`——`id` 已经由方法参数给了，不该再传一遍。
+- **动作的十个类型**：`CastActionKey`（`{ t, o }`）/ `CastActionDef`（`id` / `name` / `duration` / `loop` / `keys?` / `code?` / `from?`）/ `CastActionListResult`（`{ shared, own }`）/ `CastActionScope`（`'shared' \| 'own'`）/ `CastActionSavePayload`（`{ castId?, scope?, action }`）/ `CastActionRemovePayload`（`{ castId?, scope?, actionId }`）/ `CastActionGeneratePayload`（`{ castId, taskId, request, duration?, loop?, name? }`）/ `CastActionResult`（`{ action }`）/ `CastDemoPayload` / `CastDemoResult`。`keys` 与 `code` **二选一**：前者是关键帧表（所有角色通用），后者是 AI 生成的纯函数（只给这个角色）。
+
 五条关键约定：
 
 1. **载荷格式禁止改动**：线上载荷必须与现行实现逐字段一致；设置文件已落盘在用户 `userData`，改字段名等于丢配置。项目结构新增字段一律**可选**（如 `Project.materials?` / `Project.canvas?`），并由主进程读盘时规范化（`normalizeMaterials()` 把缺失 / 非法值收敛为合法列表），因此老项目不受影响。
 2. **「结构类型再导出」保引用面**：`src/main/projects.ts` 用 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'` 转发四个项目结构，`src/renderer/src/composables/useAppStore.ts` 用 `export type { ProjectMeta }` 转发列表项类型 —— `projects.Project` / `from './projects'` 等既有引用不需要改，但结构只定义一处（本文件）。
-3. **「本地类型」已清空**：`src/main/` 下不再有任何本地声明的 payload / result / progress 接口，各 IPC handler 的 `payload` 参数一律标注共享层的 `*Payload` 类型（`src/main/agent/script.ts` 的 `payload?: ScriptGeneratePayload` 同样如此）。
+3. **「本地类型」已清空**：`src/main/` 下不再有任何本地声明的 payload / result / progress 接口，各 IPC handler 的 `payload` 参数一律标注共享层的 `*Payload` 类型（`src/main/agent/script.ts` 的 `payload?: ScriptGeneratePayload`、`src/main/projects/ipc/castActions.ts` 的 `payload?: CastActionGeneratePayload` / `CastActionSavePayload` 同样如此）。
 4. **`message` / `detail` 分两层**：`IpcFail` 有可选 `detail`；`UpdateCheckResult` 的 `message` 是**必填**、`detail` 可选；约定是 **`message` 说人话给终端用户、`detail` 存原始报错给排障**（UI 用「查看详情」折叠展示）。
 5. **配置类错误再分一层**：`needConfig` / `title` 由主进程 `src/shared/errors.ts` 的 `friendlyError()` 单点产出。与 `needPacks` 的区别是**它不驱动流程**：`needPacks` 要用户下载完环境再「继续」重发本操作，`needConfig` 只是一个「去哪修」的分流标记。**余额 / 欠费刻意不给 `needConfig`**。这两个字段是**可选**的：preload 是纯转发，因此**加这两个字段不需要改 preload**。
 
 ---
 
-## 4. `constants.ts` —— 应用级公共常量（品牌文案 + 成片画布尺寸 + 素材白名单 + 估时语速唯一来源）
+## 4. `constants.ts` —— 应用级公共常量（品牌文案 + 成片画布尺寸 + 素材白名单 + 估时语速 + 动作参数表）
 
-纯字面量 + 一个纯函数模块（零副作用；顶部只有一处 `import type { RenderCanvas } from './types'`——纯类型导入不产生运行时代码），导出 **13 个常量 + 1 个纯函数**（6 个字符串 + 2 个数字 + 3 个字符串数组 + 2 个 `Record` + `estimateSubtitleDur()`），**共 89 行**：
+纯字面量 + 一个纯函数模块（零副作用；顶部只有一处 `import type { RenderCanvas } from './types'`——纯类型导入不产生运行时代码），导出 **17 个常量 + 1 个纯函数 + 1 个接口**（6 个字符串 + 2 个数字 + 3 个字符串数组 + 2 个 `Record` + `estimateSubtitleDur()` + 动作参数表的 `CastActionParam` / `CAST_ACTION_PARAMS` 与三个上限），**共 129 行**：
 
 | 常量 | 值 | 用途 |
 |---|---|---|
@@ -153,6 +182,11 @@ export interface ScriptAppendRoundPayload {
 | `DEFAULT_CANVAS` | `'landscape'` | 项目没设 `canvas` 时用的画布（老项目因此保持原有 16:9 观感）；主进程白名单校验失败、渲染层 `normalizeCanvas()` 遇到脏数据都落到它 |
 | `EST_CHARS_PER_SEC` | `4` | **估时语速（字/秒）**，一个语速三处用：① `estimateSubtitleDur()` 的分母（渲染层字幕页经 `helpers.ts` 的 `estDur`、主进程 `parseSubtitle`）② 内容脚本页「AI 创作」结果卡的「估算时长」= `totalChars ÷ 它`（`AiChatPanel.vue` → `ScriptRoundCard.vue` 的 `charsPerSecond`）③ 脚本 Agent 提示词的字数预算（`agent/script.ts` 的「目标总时长 × 它」）。上一轮取 3、更早是 `0.15` 秒/字 ≈ 6.7 字/秒（老系数，套到整段场景旁白上快一倍） |
 | `estimateSubtitleDur(text)` | `(text: string) => number` | **估时公式唯一真源**：`max(2.4, 1.6 + 字数 / EST_CHARS_PER_SEC)`；渲染层 `SubtitlePage/helpers.ts` 把它再导出为 `estDur`，主进程 `projects.ts` 的 `parseSubtitle` 直接调用 |
+| **`CastActionParam`** | 接口 | 一个动作参数的界面元数据：`key`（写进 `o` 的键）/ `label`（界面列名）/ `type`（`'number'` \| `'enum'`）/ `min` / `max` / `step` / `def` / `options` |
+| **`CAST_ACTION_PARAMS`** | `CastActionParam[]`（10 项） | **动作参数表（唯一真源）**：`dy` / `dx` / `aL` / `aR` / `rot` / `sq` / `walk` / `blink`（数字，带范围与步长）+ `eyes` / `mouth`（枚举）；**`mouth` 多一个 `'auto'` = 不传该参数**，让角色按 `eyes` 自己定嘴型。方向按角色端实现：`dy` 正 = 下移、`dx` 正 = 右移、`aL`/`aR` 正 = 向外抬起、`sq` 正 = 拉长变窄、`rot` 正 = 顺时针。**关键帧编辑器的列与主进程 `normalizeActionDef` 的夹取都读它** |
+| **`CAST_ACTION_NAME_MAX`** | `12` | 动作名长度上限（编辑器 `maxlength`、主进程起名截断） |
+| **`CAST_ACTION_DURATION`** | `{ min: 0.3, max: 30 }` | 一条动作的时长范围（秒）：编辑器输入框与主进程 `durationOf()` 都夹它 |
+| **`CAST_ACTION_MAX_PER_SCOPE`** | `40` | 同一作用范围（公共 / 某个角色专属）最多存几条动作，`upsertAction` 超限拒绝 |
 
 素材三常量的取值理由（源码注释逐字）：上限按「图片 + 视频合计」算，因为素材会逐个写进 Agent 提示词并成为页面元素，数量一多提示词过长、生成质量与渲染耗时都会明显变差，**20 是权衡后的取值**；图片白名单收 `svg` 是因为矢量图做图标 / 装饰最省体积且不涉及解码器；视频白名单**与原来的单个视频素材一致**。
 
@@ -176,10 +210,10 @@ export interface ScriptAppendRoundPayload {
 
 | 消费方 | 引入方式 | 归属 tsconfig |
 |---|---|---|
-| `src/main/*.ts` | `import { IPC } from '../shared/ipc'`、`import type { … } from '../shared/types'`；`whisper.ts` 另有 `APP_USER_AGENT`；`projects.ts` 另有素材 + 画布常量 + **`estimateSubtitleDur`**；`video.ts` 另有画布常量；**`agent/script.ts` 另有 `EST_CHARS_PER_SEC`（本轮新增，替代原来的本地语速常量 4.5，已删除）**；`errors.ts` 的消费方是 **`agent/chat.ts`** / `agent/html.ts`（经 `agent/chat.ts` 间接）/ `settings.ts` / `voice.ts` / `projects.ts` / **`agent/script.ts`（`configTargetOf`）** | `tsconfig.node.json` |
-| `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`（构建时内联）+ `import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, RenderCanvas, RenderOverride, RuntimePackName, RuntimeProgressPayload, **ScriptProgressPayload**, UpdateProgressPayload, VideoRenderPayload, WhisperProgressPayload } from '../shared/types'`；**不 import `errors.ts`**（错误分类只随 IPC 载荷转发） | `tsconfig.node.json` |
+| `src/main/*.ts` | `import { IPC } from '../shared/ipc'`、`import type { … } from '../shared/types'`；`whisper.ts` 另有 `APP_USER_AGENT`；`projects.ts` 另有素材 + 画布常量 + **`estimateSubtitleDur`**；`video.ts` 另有画布常量；**`agent/script.ts` 另有 `EST_CHARS_PER_SEC`（替代原来的本地语速常量 4.5，已删除）**；`errors.ts` 的消费方是 **`agent/chat.ts`** / `agent/html.ts`（经 `agent/chat.ts` 间接）/ `settings.ts` / `voice/api.ts` / `projects.ts` / **`agent/script.ts`（`configTargetOf`）** | `tsconfig.node.json` |
+| `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`（构建时内联）+ `import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, RenderCanvas, RenderOverride, RuntimePackName, RuntimeProgressPayload, **ScriptProgressPayload**, UpdateProgressPayload, VideoRenderPayload, WhisperProgressPayload } from '../shared/types'`；**不 import `errors.ts`**（错误分类只随 IPC 载荷转发）；**动作与预览的载荷类型也不需要 import**——`castTools.preview` / `demo` 的 `options` 参数借用 `PreloadApi['castTools']` 的上下文类型 | `tsconfig.node.json` |
 | `src/preload/index.d.ts` | `import type { PreloadApi } from '../shared/types'`，再 `interface Window extends PreloadApi {}`（**新增命名空间时它一行都不用改**） | `tsconfig.web.json` |
-| `src/renderer/src/**` | 主要经 `window.*` 类型（由 `index.d.ts` 挂载）；如需共享类型/常量可用别名 `@shared/*`（如 `useAppStore.ts` 的 `ProjectMaterial` / `ProjectMeta`、`MaterialsSection.vue` 的素材常量、`utils/render.ts` 的画布常量、`App.vue` 的 `APP_NAME`、`useConfigPrompt.ts` 的 `ConfigTarget`、**`SubtitlePage/helpers.ts` 的 `estimateSubtitleDur`**、**`SubtitlePage/index.vue` / `ContentPage/AiChatPanel.vue` 的 `EST_CHARS_PER_SEC`**、`ContentPage/helpers.ts` 的 `type Scene` / `type ScriptChatRoundMeta` 与 `AiChatPanel.vue` / `ScriptRoundCard.vue` 的 `type Scene` / `type ScriptChatRoundMeta`） | `tsconfig.web.json` |
+| `src/renderer/src/**` | 主要经 `window.*` 类型（由 `index.d.ts` 挂载）；如需共享类型/常量可用别名 `@shared/*`（如 `useAppStore.ts` 的 `ProjectMaterial` / `ProjectMeta`、`MaterialsSection.vue` 的素材常量、**`CastLibraryModal.vue` 的 `CastLibraryMember`**、**`CastCreateModal.vue` 的 `ProjectCastMember`**、`utils/render.ts` 的画布常量、`App.vue` 的 `APP_NAME`、`useConfigPrompt.ts` 的 `ConfigTarget`、**`SubtitlePage/helpers.ts` 的 `estimateSubtitleDur`**、**`SubtitlePage/index.vue` / `ContentPage/AiChatPanel.vue` 的 `EST_CHARS_PER_SEC`**、`ContentPage/helpers.ts` 的 `type Scene` / `type ScriptChatRoundMeta` 与 `AiChatPanel.vue` / `ScriptRoundCard.vue` 的 `type Scene` / `type ScriptChatRoundMeta`） | `tsconfig.web.json` |
 | `electron.vite.config.ts` | `import { APP_NAME, APP_NAME_EN, APP_SLOGAN_SHORT } from './src/shared/constants'`（构建配置是**第四个**消费端） | `tsconfig.node.json` |
 
 构建期行为：
@@ -192,7 +226,7 @@ export interface ScriptAppendRoundPayload {
 
 ## 6. 维护约定
 
-1. **新增 / 删除 IPC 都必须三处齐改**：`shared/ipc.ts` 加（删）频道常量 → 主进程对应 `register()` 内 `ipcMain.handle/on` → preload 命名空间加（删）方法，并在 `shared/types.ts` ⑨ 节 `PreloadApi` 同步签名（`index.d.ts` 只做 `extends`，无需再改）。**`script:*` 走完了两遍这条流程**：先加 `Script` 分组（`Generate` / `Progress`）→ `src/main/agent/script.ts` 的 `registerScript(getProjectDir)` 挂 `script:generate` 并 `sender.send('script:progress')` → `src/preload/index.ts` 加 `scriptTools`（含单订阅 `onProgress`）→ ⑨ 节签名 + ⑥ 节两个载荷类型 + ⑧ 节 `ScriptProgressPayload`；**对话记录先加两条**（`script:load-chat` / `script:save-chat`）→ 同一个 `registerScript()` 里补两条 `ipcMain.handle`（读写下沉到 `src/main/agent/chatLog.ts`）→ preload 的 `scriptTools.loadChat` / `saveChat`；**本轮再把它扩成五条 chat handler**（`load-chat` / `append-round` / `read-version` / `set-active-version` / `clear-chat`，`save-chat` 下线）→ preload 的 `scriptTools` 变 7 个方法 → ⑥ 节换成 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`（`ScriptChatRound` / `ScriptChatResult` 删除）。**频道总数 91 → 94、`Script` 组 4 → 7、分组数仍是 11。**
+1. **新增 / 删除 IPC 都必须三处齐改**：`shared/ipc.ts` 加（删）频道常量 → 主进程对应 `register()` 内 `ipcMain.handle/on` → preload 命名空间加（删）方法，并在 `shared/types.ts` ⑨ 节 `PreloadApi` 同步签名（`index.d.ts` 只做 `extends`，无需再改）。**`script:*` 走完了两遍这条流程**：先加 `Script` 分组（`Generate` / `Progress`）→ `src/main/agent/script.ts` 的 `registerScript(getProjectDir)` 挂 `script:generate` 并 `sender.send('script:progress')` → `src/preload/index.ts` 加 `scriptTools`（含单订阅 `onProgress`）→ ⑨ 节签名 + ⑥ 节两个载荷类型 + ⑧ 节 `ScriptProgressPayload`；**对话记录先加两条**（`script:load-chat` / `script:save-chat`）→ 同一个 `registerScript()` 里补两条 `ipcMain.handle`（读写下沉到 `src/main/agent/chatLog.ts`）→ preload 的 `scriptTools.loadChat` / `saveChat`；**再把它扩成五条 chat handler**（`load-chat` / `append-round` / `read-version` / `set-active-version` / `clear-chat`，`save-chat` 下线）→ preload 的 `scriptTools` 变 7 个方法 → ⑥ 节换成 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`（`ScriptChatRound` / `ScriptChatResult` 删除）。**频道总数 91 → 94、`Script` 组 4 → 7、分组数仍是 11。** **本轮角色预览同样走完三处齐改**：`ipc.ts` 的 `Project.CastPreview`（`'project:cast-preview'`）→ `src/main/projects.ts` 的 `ipcMain.handle(IPC.Project.CastPreview, …)` → preload 的 `castTools.preview` → ⑨ 节签名 + ⑥ 节 `ProjectCastPreviewPayload` / `ProjectCastPreviewResult`。**全库 100 → 101、`Project` 组 32 → 33、分组数仍是 11。** **而「进度按任务 id 分发」这一轮恰好是这条流程的反例**：只改 `shared/types.ts`（三个载荷加必填 `taskId` + ⑨ 节 `onTaskProgress`）→ `src/main/projects.ts` 三个 handler 从载荷取 `taskId`（缺则回内部错误）→ preload 把单槽换成 `Map` 分发，**`shared/ipc.ts` 一行未改**——没有新频道，变的只是一条频道内的分发方式。（**注**：上面这些角色批次在本轮「角色只有全局一份」的改造里已整体并入/下线——现行是 `Cast` 组 **11** 条 + `project:save-cast`；**本轮动作示范 5 条也走同一条流程**：`ipc.ts` 的 `Cast` 组 +5 → `projects/ipc/castActions.ts` 的 5 个 `ipcMain.handle` → preload 的 `castTools` +5 → ⑨ 节签名 + ⑥ 节十个动作类型，`Cast` 6 → 11、全库 101 → 106）
 2. **往 `IpcFail` 加字段不需要 preload 参与**：preload 只做 `ipcRenderer.invoke` 转发、原样返回主进程对象，因此 `needConfig` / `title` 只在 `shared/types.ts`（声明）、主进程（写入）、渲染层（读取）三处出现。
 3. **不要在本层放业务逻辑**：只放常量、类型与**纯函数**（`errors.ts` 的映射表与 `constants.ts` 的 `estimateSubtitleDur()` 是全层仅有的两处函数实现，都是纯函数、无副作用）；模型调用、脚本解析等实现放在 `src/main/`（`agent/chat.ts` / `agent/script.ts`），本层只给形状。
 4. **类型与实现同源**：`PreloadApi`（⑨ 节）是唯一真源 —— `preload/index.ts` 用 `PreloadApi['<命名空间>']` 标注实现、`preload/index.d.ts` 用 `interface Window extends PreloadApi` 交给渲染层；不要再在别处复制一份方法签名。
@@ -211,3 +245,11 @@ export interface ScriptAppendRoundPayload {
 - 频道总表（含方向与消费方）：[01-架构总览.md](./01-架构总览.md) 第 3.3 节
 - 品牌注入实现：[root/electron.vite.config.ts.md](./files/root/electron.vite.config.ts.md)
 - 错误映射设计文档：`docs/error-mapping.md`（仓库内，非 wiki）
+
+## 附录 · 角色与动作示范的现状（与上文冲突时以本节为准）
+
+- **分组 12 个、频道 106 条**：`Cast` 组 **11 条** = 角色本身 6 条（`cast:list` / `cast:create` / `cast:recreate` / `cast:save-meta` / `cast:remove` / `cast:preview`）+ **动作示范 5 条（`cast:action-list` / `cast:action-save` / `cast:action-remove` / `cast:action-generate` / `cast:demo`）**；`Project` 组 **27** 条（角色频道整体搬走后 33 → 27，只剩 `project:save-cast` 与本片相关的那些）。
+- **动作示范 5 条的职责一句话**：`action-list` 列动作（`{ ok, shared, own }`，`shared` = 内置 14 条 + 用户自建公共动作）、`action-save` 存一条关键帧动作（同 id 覆盖）、`action-remove` 删一条动作、`action-generate` **唯一会调模型**（读角色源码生成一条专属动作，进度按 `taskId` 走 `project:html-progress`，日志 `html-agent/cast-action.jsonl`）、`demo` 拼会动的示范页 `<userData>/cast-preview/<id>.demo.html`。动作数据存 `<userData>/cast-library/actions.json`，**不进 `project.json`**。
+- **`project:save-cast` 载荷**：`{ name, cast: [{ id, selected }] }`（`ProjectSaveCastPayload` 的 `cast` 是 `ProjectCastSelection[]`）。
+- **角色类型面**：`ProjectCastSelection` / `CastCreatePayload` / `CastRecreatePayload` / `CastSaveMetaPayload` / `CastResult` / `CastPreviewPayload` / `CastPreviewResult`；`ProjectNewCastPayload` / `ProjectNewCastResult` / `ProjectCastPreviewPayload` / `ProjectCastPreviewResult` 已删除；`ProjectCastMember` 多一个可选 `style`；`ProjectIndex.cast` 是 `ProjectCastSelection[]`。**动作面新增十个类型**：`CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload`（= `CastPreviewPayload` 的别名）/ `CastDemoResult`。
+- **preload 命名空间 13 个**（含 `castTools` **12** 个方法：角色 6 + 动作 5 + `onTaskProgress`），`PreloadApi` ⑨ 节同步。

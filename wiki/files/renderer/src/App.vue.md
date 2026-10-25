@@ -1,4 +1,7 @@
 # src/renderer/src/App.vue
+> **⚠️ 本轮角色改造对本文件的影响（以本块为准）**
+>
+> 侧栏菜单从 8 项变 **9 项**（顺序：首页 / 内容脚本 / 配音 / 字幕生成 / HTML生成 / **角色** / 视频预览 / 关于 / 设置）：`menuItems` 数组里新增 `{ key: 'cast', label: '角色', title: '角色（全局角色库：新建 / 改画法，与项目无关）' }`，位置在 `html-gen`（HTML生成）之后、`video-preview`（视频预览）之前；`App.vue` 现 **328 行**。菜单项仍由 `activeMenu`（`PageKey`，已含 `'cast'`）驱动高亮，`goPage('cast')` 切到 `pages/CastPage/index.vue`。
 
 > 应用外壳：自绘标题栏 + 运行环境横幅 + 侧边菜单 + 页面容器 + 旧数据弹窗 + Toast 宿主 + 启动初始化
 

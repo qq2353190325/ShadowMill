@@ -1,14 +1,21 @@
 # src/renderer/src/components/（通用组件）
+> **⚠️ 本轮角色改造对「通用组件」这一篇的影响（以本块为准）**
+>
+> - `components/CastShot.vue`（67 行）契约变了：props 为 `id` / `units` / `title?` / `uses?` / `epoch?` / `big?`——**`project` 与 `from` 已去掉**；内部改调 `window.castTools.preview(id, { units, title, uses })`，拿到 `{ rel }` 后用 `userFileUrl(rel) + '&e=' + epoch` 载入 iframe。
+> - 预览页不再落在项目目录：`<userData>/cast-preview/<id>.html`，由 `hgpreview://…?user=1` 放行（不再是 `<项目>/.cast-preview/<来源>-<id>.html`、也不再经 `previewUrl(project, rel)`）。
+> - 使用方从三处变成四处：「角色」页卡片墙 / 「角色」页新建与改画法弹窗 / 「角色」页改信息弹窗 / 「HTML生成」页角色勾选区 / 「内容脚本」页选角色弹窗（都是同一个组件，不再有 `from="lib"`）。
+> - 若本篇列过「已删除的弹窗」，本轮删除的是 `pages/HtmlGenPage/CastCreateModal.vue` 与 `pages/HtmlGenPage/CastLibraryModal.vue`（它们的职责搬到 `pages/CastPage/`）。
 
-> 目录级一篇：链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + 旧数据处置弹窗 `LegacyDataDialog.vue`
+> 目录级一篇：链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + 角色静态预览 `CastShot.vue` + 旧数据处置弹窗 `LegacyDataDialog.vue`
 
-- **覆盖文件**：`components/` 目录（链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + 旧版本数据弹窗 `LegacyDataDialog.vue`；文件行数随迭代变化，不写死）
+- **覆盖文件**：`components/` 目录（链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + **角色静态预览 `CastShot.vue`（本轮从 `pages/HtmlGenPage/` 搬来，67 行）** + 旧版本数据弹窗 `LegacyDataDialog.vue`；**共 5 个文件**，文件行数随迭代变化，不写死）
 - **所在目录**：`src/renderer/src/components/`
-- **类型**：通用组件（单文件组件，`<script setup lang="ts">`）。`StepBar.vue` / `NewProjectDialog.vue` **都没有 `<style>` 块**，样式来自全局 `assets/main.css`；`HfSelect.vue` **自带两个 `<style>` 块**（触发器用 `<style scoped>`、Teleport 弹层用不带 `scoped` 的 `<style>`），下拉的全部视觉不依赖 `main.css`；`LegacyDataDialog.vue` **自带一段 `<style scoped>`**（只放它私有的 `.path-line` / `.opt-list` / `.danger-text` 与危险按钮的描边重写，其余视觉复用 `main.css` 的 `.hf-modal*`）。
+- **类型**：通用组件（单文件组件，`<script setup lang="ts">`）。`StepBar.vue` / `NewProjectDialog.vue` / **`CastShot.vue`** **都没有 `<style>` 块**，样式来自全局 `assets/main.css`；`HfSelect.vue` **自带两个 `<style>` 块**（触发器用 `<style scoped>`、Teleport 弹层用不带 `scoped` 的 `<style>`），下拉的全部视觉不依赖 `main.css`；`LegacyDataDialog.vue` **自带一段 `<style scoped>`**（只放它私有的 `.path-line` / `.opt-list` / `.danger-text` 与危险按钮的描边重写，其余视觉复用 `main.css` 的 `.hf-modal*`）。
 - **对外导出**：
   - `StepBar`：默认导出组件；**props**：`page: PageKey`（必填）；**emits**：无（自身直接调用 `goPage` / `switchProject`）
   - `NewProjectDialog`：默认导出组件；**props**：`{ visible: boolean }`；**emits**：`update:visible(value: boolean)`、`created(name: string)`
   - `HfSelect`：默认导出组件；**props**：`modelValue: string`（必填，配 `v-model`）、`groups: HfSelectGroup[]`（必填）、`placeholder?: string`（默认 `'请选择…'`）、`emptyText?: string`（默认 `'（暂无可选项）'`）、`disabled?: boolean`（默认 `false`）、`title?: string`（默认 `''`）、`style?: string | Record<string, string>`（默认 `'flex:1'`）；**emits**：`update:modelValue(value: string)`、`change(value: string)`；**导出类型**：`HfSelectOption`（`value: string`、`label: string`、`disabled?: boolean`、`title?: string`）、`HfSelectGroup`（`label: string`、`options: HfSelectOption[]`）
+  - **`CastShot`**：默认导出组件；**props**：`project: string`、`id: string`、`units: number`、`title?: string`、`uses?: string[]`、`from?: 'project' | 'lib'`（默认按 `'project'` 处理）、`epoch?: number`、`big?: boolean`——**8 个 props、无 emits**（它只显示、不接收任何用户输入，点击一律穿透到外层卡片）
   - `LegacyDataDialog`：默认导出组件；**props**：无；**emits**：无（显隐与动作全部来自 `useLegacyData()` 单例）
 
 ## 1. 作用与职责
@@ -30,7 +37,15 @@
 
 替代原生 `<select>` 的通用下拉组件：`button` 触发器 + **Teleport 到 `body` 的 fixed 定位弹层**，用 `v-model` 读写值、用 `groups` 喂分组选项。之所以自绘，是因为原生 `<option>` 弹层由系统/浏览器绘制，行高、间距、圆角、配色与选中勾都无法用 CSS 控制，深色科技主题下会出现「选项挤在一起、选中态看不出」且改不动的问题（源码注释即写明这一点）。它对原生 `<select>` 的关键语义做了对齐：`v-model`、`disabled`、`title`、空值占位、`optgroup` 分组、`@change` **只在用户选择时触发**（程序化改值不触发，等价于原生 `v-model` 赋值不发 `change`）。
 
-### 1.4 `LegacyDataDialog.vue` —— 「发现旧版本数据」弹窗（应用内）
+### 1.4 `CastShot.vue` —— 角色静态预览（公共组件，两页共用）
+
+角色不是图片，而是 `cast/<id>.js` 里登记的绘制函数 `window.__cast[id](x, y, u, o)`——所以界面上「这个角色长什么样」只能靠**把这份代码真跑一遍**：主进程 `project:cast-preview` 把 `core.js` + 这份角色代码**内联**成一页自包含 HTML，落到 `<userData>/cast-preview/<id>.html`，本组件把那个地址交给 `iframe`，浏览器画出**静态一帧**。
+
+**它为什么在公共组件目录**（本轮搬家）：源码头部注释写明「两处在用：「HTML生成」页的角色卡片 / 新建角色弹窗 / 全局角色库弹窗，以及「内容脚本」页 · AI 创作 · 选角色弹窗（所以放在公共组件目录，不留在某一个页面目录下——跨页面互相 import 会让人分不清谁依赖谁）」。搬家前它在 `pages/HtmlGenPage/CastShot.vue`，现在四处使用点（`HtmlGenPage/CastSection.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue` + `ContentPage/CastPickerModal.vue`）一律写 `import CastShot from '@renderer/components/CastShot.vue'`。
+
+职责边界与其它通用组件一样窄：**只负责「取预览页地址 + 载入 iframe」**——一次 `castTools.preview()` 调用 + `previewUrl()` 拼 `hgpreview://` + `epoch` 强制重载 + `seq` 并发保护。**不拼 HTML、不读文件、不做交互**：预览页由主进程生成（`main/cast/preview.ts`），`iframe` 的 `pointer-events` 交给外层 CSS（点击穿透到卡片 / 行），尺寸也由外层 `.cast-shot` / `.cast-shot.big` 决定。
+
+### 1.5 `LegacyDataDialog.vue` —— 「发现旧版本数据」弹窗（应用内）
 
 品牌 / 目录改名后，老用户的数据可能还留在旧目录（如 `%APPDATA%\my-app`）。主进程扫到**确有应用数据**的老目录后不弹任何界面，只把结论放进 `legacy:status`；本组件在首屏渲染完之后问一次「迁移过来 / 删除旧数据 / 稍后再说」，用户的选择经 `legacy:resolve` 回传执行。
 
@@ -277,10 +292,53 @@
 - **成片画布这一次新增 1 处调用点（本次改动）**：`pages/HtmlGenPage/index.vue` 的「画布」下拉（`canvas`）⇒ 该文件由 3 处增到 4 处、**全库 21 个实例 / 11 个文件**（文件数不变）。它与其他下拉无结构差异：`groups` 由 `RENDER_CANVAS_OPTIONS` 包成单组 computed。
 - **素材库那一轮的两处结构性变化**：① `HtmlGenPage/index.vue` 由 5 处减到 3 处（`videoSel` 视频素材随单视频素材一起删除、`audioPick` 移到同目录子组件 `PreviewSection.vue`）；② `VideoPreviewPage/index.vue` 新增 1 处「预览项目」。**那一轮实例总数仍是 20（文件数由 10 增到 11）**——分布变了，改 `HfSelect` 时不要按旧清单核对；**加上本次画布下拉后全库是 21 个实例**（见上一条）。
 - 各调用方的 `groups` 均由 `computed`（或常量）构造为 `{ label, options: [{ value, label }] }`；`TextTtsPage/SynthSection.vue` 与 `AlignSection.vue` 的 `:groups="voiceGroups"` 也一样合规——`helpers.ts` 的 `VoiceOption` 直接以 `value` 为音色键（刻意与 `HfSelectOption` 同名），因此**可以直接透传**、无需中间映射。
+- **`CastShot.vue` 不在上面这份清单里**：它不用 `HfSelect`（角色预览只有一张图 + 一行元信息，没有可选项），所以「`components/` 下有 5 个组件」与「`HfSelect` 有 11 个使用方文件」是两件事。
 
-## 6. `LegacyDataDialog.vue`
+## 6. `CastShot.vue`（角色静态预览，公共组件）
 
-### 6.1 模板结构
+### 6.1 契约
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `project` | `string`（必填） | 项目名——`hgpreview://` 的路径段；**库里的角色也借当前项目目录的临时预览页**（`hgpreview://` 只放行项目目录） |
+| `id` | `string`（必填） | 角色 id（**同时是文件名词干**） |
+| `units` | `number`（必填） | 高几 u：**只决定预览里画多大**，不改任何文件 |
+| `title?` | `string` | 角色名，只用于 iframe 的 `title`（无障碍文案），不参与绘制 |
+| `uses?` | `string[]` | 角色声明的随包库（源码注释：「主进程据此在预览页里提示「水彩角色只画得出 Canvas 2D 部分」」） |
+| `from?` | `'project' \| 'lib'` | **代码从哪读：项目内 `cast/` 还是全局角色库**。缺省在 `load()` 里回落成 `'project'`（`from: props.from \|\| 'project'`）；「内容脚本」页选角色弹窗与「从全局角色库添加」弹窗都传 `lib` |
+| `epoch?` | `number` | 预览失效计数：父级在项目数据刷新后 +1，**地址一变 iframe 就必须重新载入**（见 6.3） |
+| `big?` | `boolean` | 大图模式：只往根节点加 `.big` 类，尺寸仍由外层 CSS 决定 |
+
+emits：**无**。它不接受任何用户输入——单击事件一律穿透到外层卡片（`.cast-shot-frame` 有 `pointer-events: none`）。
+
+### 6.2 模板与取地址流程
+
+| 项 | 内容 |
+| --- | --- |
+| 模板 | `div.cast-shot`（`:class="{ big }"`）里 `iframe.cast-shot-frame`：`:src="src"`、`sandbox="allow-scripts allow-same-origin"`、`:title="'角色预览：' + (title \|\| id)"`；**没有 `src` 时**渲染 `span.cast-shot-note`：生成中显示「…」、失败显示「无法预览」（原因在 `title`：`err \|\| '正在生成预览…'`） |
+| `load()` | `seq` 自增记下 `mine` → 清空 `src` / `err` → `project` 或 `id` 为空直接 return → `await window.castTools.preview(project, id, { units, title, from: from \|\| 'project', uses: uses \|\| [] }).catch(() => null)` → **`mine !== seq` 就丢弃**（并发保护）→ 失败写 `err`（`res.message` 或「预览生成失败」）→ 成功 `src.value = userFileUrl(res.rel) + '&e=' + (epoch \|\| 0)` |
+| `seq` | 模块内 `let seq = 0`：**并发保护**——同一个组件先后发起的两次请求，只让最后一次落地（否则会闪回旧角色的预览） |
+| 数据来源 | `window.castTools.preview(...)` → 主进程 `project:cast-preview`：只读角色代码 + `syncCoreLib()` 后取 `core.js`，把两者**内联**成一页自包含 HTML 写到 `<userData>/cast-preview/<id>.html`，回 `{ rel }`。**不复制任何文件、不改 `cast/`** |
+| URL 拼装 | `previewUrl(project, rel)`（`@renderer/utils/url`）→ `hgpreview://p/<编码项目名>/<逐段编码的相对路径>`；**逐段 `encodeURIComponent`**，与主进程 hgpreview 处理器「按段 decode」严格对应 |
+| 为什么带 `&e=` | ① 预览页每次都被重写，但 iframe 的**地址不变就不会重载**（源码注释）⇒ 附上 `epoch` 强制换地址（服务端本身 `no-store`）；② `userFileUrl` 已经带了 `?user=1`，**只能用 `&` 续接**：写成 `?e=` 会让查询串变成 `user=1?e=0`，主进程 `searchParams.get('user') === '1'` 判假 ⇒ 走「项目名 = cast-preview」分支 ⇒ 404，iframe 里显示 `Not Found` |
+
+### 6.3 `epoch` 与重载
+
+`watch(() => [props.project, props.id, props.units, props.from, props.epoch], load, { immediate: true })`——**注意 `title` / `uses` 不在 watch 里**：它们只影响提示文案与页标题，改了不必重走一遍主进程。
+
+`epoch` 由父级维护，覆盖的路径：「HTML生成」页的 `CastSection.vue` 用 `watch(() => appState.project)` 统一 +1（`refreshProject()` 每换一次 `appState.project` 对象就 +1，覆盖新建 / 导入 / 勾选 / 移除 / 改稿所有改文件路径），两个弹窗另有各自的 `epoch`（新建角色弹窗在文件刚写盘时局部 `epoch.value++`）。**它只是一个 props 数字，组件内部不增不减。**
+
+### 6.4 交互与尺寸
+
+| 项 | 内容 |
+| --- | --- |
+| 交互 | `.cast-shot-frame { pointer-events: none }`：**点击穿透到外层卡片 / 行本身**（预览窗口里没有可交互的东西） |
+| 尺寸 | 组件不定尺寸，由外层 CSS 决定：① 角色卡片预览位 `.cast-thumb .cast-shot` 撑满 `13:15` 的框（卡片列宽 130px ⇒ 130×150）；② 全局角色库 / 选角色弹窗的 `.cast-card .cast-shot` 是 `100% × 132px`；③ 弹窗大图 `.cast-shot.big` 是 **200×260**。`.cast-shot` 自身的 `56px × 72px` 只是基线尺寸，这三处使用点都把它覆盖掉了 |
+| 已知边界 | 预览只有**静态一帧**（只调用一次绘制函数，不播放、不循环）；声明了 `p5` / `p5.brush` 的水彩角色走 p5 的 WEBGL 画布，这条路径只画得出它传给 `o.ctx` 的 Canvas 2D 部分，页内会提示「只显示 Canvas 2D 部分」 |
+
+## 7. `LegacyDataDialog.vue`
+
+### 7.1 模板结构
 
 | 区块 | 关键标记 | 说明 |
 | --- | --- | --- |
@@ -291,7 +349,7 @@
 | 正文·选项说明 | `.panel-title-sm`「要怎么处理？」+ `ul.opt-list` | 三条说明：**迁移过来** / **删除旧数据**（`.danger-text` 标「不可恢复」）/ **稍后再说** |
 | 底部按钮 | `.hf-modal-foot`：`.hf-btn`「稍后再说」/ `.hf-btn.danger`「删除旧数据」/ `.hf-btn.hf-btn-primary`「迁移过来」 | 三枚按钮全部 `:disabled="busy"`；主按钮文案在 `busy` 时切为「处理中…」 |
 
-### 6.2 脚本成员
+### 7.2 脚本成员
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
@@ -300,7 +358,7 @@
 | `doMigrate()` | `async` | `resolve('migrate')` → 主进程无响应则 toast「迁移失败：主进程无响应」；否则**成败都**先 `await refreshProject()` → 按 `r.ok` 给 toast |
 | `doDelete()` | `async` | `resolve('delete')` → 失败 toast，成功 toast「旧数据目录已删除」 |
 
-### 6.3 样式（`<style scoped>`，本组件唯一一段）
+### 7.3 样式（`<style scoped>`，本组件唯一一段）
 
 | 类 | 说明 |
 | --- | --- |
@@ -310,16 +368,16 @@
 | `.hf-btn.danger` | **危险动作复用次要按钮骨架，只换前景与描边** |
 | `.hf-btn.danger:hover:not(:disabled)` | 必须**重写** hover（基础 `.hf-btn:hover:not(:disabled)` 特异性更高） |
 
-### 6.4 交互约定与取舍
+### 7.4 交互约定与取舍
 
 - **点遮罩 / `×` / 「稍后再说」三者等价**：都走 `resolve('later')`，什么都不动；下次启动重新扫描后**会再问一次**。
 - **迁移与删除都先收起弹窗**：`resolve()` 在成功与失败两条路径上都先 `visible = false`，结果交给 toast。
 - **迁移后立刻刷新项目列表**：`doMigrate()` 无论成败都 `await refreshProject()`。
 - **删除前主进程还有一道校验**：界面只回传 `'delete'`，不自己判断路径（见 [main/index.ts.md](../../main/index.ts.md) §3.1）。
 
-## 7. 依赖与协作
+## 8. 依赖与协作
 
-### 7.1 `StepBar.vue`
+### 8.1 `StepBar.vue`
 
 | 方向 | 对象 | 用途 |
 | --- | --- | --- |
@@ -332,7 +390,7 @@
 | 被使用 | 各页面组件（内容脚本 / 配音 / 字幕 / HTML / 视频预览） | 页面模板顶部 `<StepBar :page="..."/>` |
 | 间接协作 | `src/renderer/src/App.vue` | 菜单跳转改变 `currentPage`，页面重挂载后由新页面重新传入 `page` prop |
 
-### 7.2 `NewProjectDialog.vue`
+### 8.2 `NewProjectDialog.vue`
 
 | 方向 | 对象 | 用途 |
 | --- | --- | --- |
@@ -342,7 +400,7 @@
 | 依赖（样式） | `assets/main.css` | `.hf-modal-*`、`.hgen-input` / `.hgen-tip` / `.hf-btn*`、`.panel-title-sm` |
 | 被使用 | `components/StepBar.vue` | `v-model:visible` + `@created`；目前是唯一使用方 |
 
-### 7.3 `HfSelect.vue`
+### 8.3 `HfSelect.vue`
 
 | 方向 | 对象 | 用途 |
 | --- | --- | --- |
@@ -352,7 +410,18 @@
 | 被使用 | `components/StepBar.vue`、`pages/SettingsPage/components/{ModelSection,VoiceSection,RenderSection}.vue`、`pages/HtmlGenPage/index.vue`、**`pages/HtmlGenPage/PreviewSection.vue`**、`pages/SubtitlePage/TranscribeSection.vue`、`pages/TextTtsPage/{SynthSection,AlignSection,VoiceSection}.vue`、**`pages/VideoPreviewPage/index.vue`** | 共 **11 个文件 / 20 个下拉实例**（见 5.10）；无全局注册，逐个显式 import |
 | 协作（插入层） | `assets/main.css` 的 `.hf-modal-mask`（`z-index: 9000`） | 菜单 `z-index: 9500` 必须保持高于它；`TextTtsPage/VoiceSection.vue` 的 Teleport 弹窗里的下拉依赖这一点 |
 
-### 7.4 `LegacyDataDialog.vue`
+### 8.4 `CastShot.vue`
+
+| 方向 | 对象 | 用途 |
+| --- | --- | --- |
+| 依赖（Vue） | `ref`、`watch` | `src` / `err` 两个 ref；`watch(() => [project, id, units, from, epoch], load, { immediate: true })` 是唯一触发源 |
+| 依赖 | `@renderer/utils/url` | `previewUrl(project, res.rel)` → `hgpreview://p/…` |
+| 依赖（preload 桥） | `window.castTools.preview(project, id, { units, title, from, uses })` | `project:cast-preview`：取预览页相对路径 `{ rel }`（主进程只写 `cast-preview/`，**不动 `cast/`**） |
+| 依赖（样式） | `assets/main.css` | `.cast-shot`（基线 56×72）/ `.cast-shot.big` / `.cast-shot-frame`（`pointer-events: none`）/ `.cast-shot-note`；使用点的外层类 `.cast-thumb` / `.cast-card` / `.cast-shot.big` 决定实际尺寸 |
+| 被使用 | **`pages/HtmlGenPage/CastSection.vue`**（角色卡片缩略图）、**`pages/HtmlGenPage/CastLibraryModal.vue`**（全局库方格，`from="lib"`）、**`pages/HtmlGenPage/CastCreateModal.vue`**（新建成功后的大图，`big`）、**`pages/ContentPage/CastPickerModal.vue`**（「内容脚本」页 · AI 创作 · 选角色，`from="lib"`） | 共 **2 个页面 / 4 处使用点**；全部走 `@renderer/components/CastShot.vue` 别名，组件未全局注册 |
+| 不依赖 | `appState` / `useAppStore` / `toast` | **完全不碰全局状态**：项目名、id、units 全由 props 传入，组件的输出只有一个 `srcdoc` 级别的 `iframe` 地址 |
+
+### 8.5 `LegacyDataDialog.vue`
 
 | 方向 | 对象 | 用途 |
 | --- | --- | --- |
@@ -363,9 +432,9 @@
 | 被使用 | `src/renderer/src/App.vue` | 外壳模板里挂一次 `<LegacyDataDialog />`，不传任何 prop |
 | 依赖（Vue） | 无 | 组件不 import 任何 Vue API，状态全在 composable 单例里 |
 
-## 8. 注意事项与实现要点
+## 9. 注意事项与实现要点
 
-- **四个组件里只有 `HfSelect` 与 `LegacyDataDialog` 有 `<style>` 块**：`StepBar.vue` / `NewProjectDialog.vue` 的视觉全部通过全局 `main.css` 类 + 模板行内 `style` 实现；`HfSelect.vue` 的 `.hf-sel*` 样式全在组件内部，**且弹层那段故意不带 `scoped`**；`LegacyDataDialog.vue` 只有一段 `<style scoped>`。
+- **五个组件里只有 `HfSelect` 与 `LegacyDataDialog` 有 `<style>` 块**：`StepBar.vue` / `NewProjectDialog.vue` / **`CastShot.vue`** 的视觉全部通过全局 `main.css` 类 + 模板行内 `style` 实现（`CastShot` 的尺寸由外层 `.cast-shot` / `.cast-thumb` / `.cast-card` 决定，组件自己不定尺寸）；`HfSelect.vue` 的 `.hf-sel*` 样式全在组件内部，**且弹层那段故意不带 `scoped`**；`LegacyDataDialog.vue` 只有一段 `<style scoped>`。
 - **`.hf-select` / `.hgen-select` 已从 `main.css` 移除**：下拉（触发器 + 弹层）的视觉只归 `HfSelect` 管。
 - **`done` 与 `active-now` 由 store 判定，不在此组件内计算**。
 - **`selValue` 的 setter 仍是 no-op，这不是疏漏**：读新值必须走 HfSelect 给出的回调参数（旧文档里的 `event.target.value` 已不适用）。
@@ -380,10 +449,13 @@
 - **`busy` 期间三重防抖**：`close()` 提前返回、`submit()` 提前返回、两个按钮 `:disabled`。
 - **ESC 监听只在弹窗可见时生效**：`onKeydown` 内部判 `props.visible`（HfSelect 的 `Escape` 只作用于它自己的 listbox）。
 - **异步错误未捕获（与项目现状一致）**：`switchProject` / `goPage` / `projectTools.create` 均未包 `try/catch`。
-- **跨目录导入统一走 `@renderer` 别名**（遵循根 `AGENTS.md` 约定 7）。
-- **依赖分界遵循约定 8**：`useAppStore` / `useToast` 属于 `composables/`；`HfSelect` 自身不引入任何 composable / 工具函数。
+- **跨目录导入统一走 `@renderer` 别名**（遵循根 `AGENTS.md` 约定 7）。**`CastShot.vue` 就是这条约定的直接受益者**：它从 `pages/HtmlGenPage/` 搬到 `components/` 之后，四个使用点只改了 import 路径（`@renderer/components/CastShot.vue`），组件内部的 `previewUrl` 仍走 `@renderer/utils/url`，逻辑一行未动。
+- **`CastShot` 是「公共组件」而不是「某页的子组件」**：它同时被「HTML生成」页的三处角色界面与「内容脚本」页的选角色弹窗使用，所以放在 `components/` 而不是任一 `pages/<Page>/` 下（源码注释原文：「跨页面互相 import 会让人分不清谁依赖谁」）。**新增第三个使用方时不要再复制一份**。
+- **`CastShot` 的 `title` / `uses` 不在 watch 里**：它们只影响提示文案与页标题，改了不必重走一遍主进程——把五个字段的 watch 收紧成这五个是刻意的，别「顺手」补上 `title` / `uses`（那会让改个名字就重生成一次预览页）。
+- **`CastShot` 的并发保护靠 `seq`**：`load()` 开头 `const mine = ++seq`、回来时 `if (mine !== seq) return`——否则快速切换角色 / 项目时，先发的那次请求后到会把新预览顶回旧的。
+- **依赖分界遵循约定 8**：`useAppStore` / `useToast` 属于 `composables/`；`HfSelect` 自身不引入任何 composable / 工具函数，**`CastShot` 只引入 `@renderer/utils/url` 这个无状态纯函数模块**。
 - **HfSelect 的选项契约只认 `value`**：**调用方必须提供 `value`**，写成别名会让所有选项 `value === undefined`。现有 11 个调用方都满足该契约（`TextTtsPage` 的 `VoiceOption` 直接用 `value` 作音色键）。
-- **HfSelect 未全局注册**：每个使用方都要显式 import（含 `HfSelectGroup` 类型）。
+- **HfSelect 未全局注册**：每个使用方都要显式 import（含 `HfSelectGroup` 类型）。**`CastShot` 同样未全局注册**，四处使用点都显式 `import CastShot from '@renderer/components/CastShot.vue'`。
 - **旧数据弹窗刻意不走 props / emits**：改显隐语义要改 composable，而不是在 `App.vue` 里加 `v-if`。
 - **危险按钮的样式必须自己重写 hover**：与设计规范里「主按钮 hover 必须重写 `background`」是同一条规律。
 - **旧数据弹窗的「不可恢复」是有主进程兜底的**：界面只回传三种动作，路径校验与缓存清理都在 `src/main/index.ts`。

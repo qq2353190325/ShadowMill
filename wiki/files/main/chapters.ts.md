@@ -1,4 +1,10 @@
 # src/main/chapters.ts
+> **⚠️ 本轮角色改造对这个模块的影响（以本块为准）**
+>
+> - **骨架不变**：`buildSkeleton({ chapters, canvas, total, cast })` 的脚本顺序仍是 `gsap → 随包库（章节 uses ∪ 角色 uses）→ core.js → cast/<id>.js → pages/cNN.js`；但 `cast` 参数现在是「**本片勾选的全局角色**」（`cast.selectedMembers(proj.cast)`），角色代码来自**全局角色库**同步出来的项目副本。
+> - **改稿不再碰角色**：`applyChapterEdit` 的 `allPaths` 只剩 `pages/cNN.js`（白名单里没有 `cast/*.js`），角色表只作上下文；模型吐的 `cast/*.js` 文件块**一律忽略**（`parseFileBlocks` 只按章节校验）。
+> - **`cast.writeCastFiles` / `cast.removeCastFiles` 已删除**：项目 `cast/` 只由 `main/cast/library.ts` 的 `syncProjectCast` 维护，所以「角色副本的孤儿清理」不再由章节侧负责。
+> - `ProjectChapter.cast` 字段保留，但仍**不参与注入**（只进大纲文案）。
 
 > 章节化长片的**纯逻辑**：解析模型回复（结构规划 / 章节文件块）、校验章节清单与每章代码、读写项目里的 `pages/cNN.js`、装配应用生成的 `index.html` 骨架（含**共享绘制助手 `./core.js` 与角色脚本**的引入位置——角色「传谁引谁」）；导出单文件时把章节、角色与 `core.js` 一起内联
 
@@ -85,7 +91,7 @@
 - **`cast` 参数就是「要引入的那几个」**：调用方只传 `cast.selectedMembers(proj.cast)`（勾选参与本次生成的角色），骨架按这个数组的顺序写标签。
 - **必须排在章节脚本之前**：章节里 `window.__cast["hero"](x, y, u, {…})` 才拿得到函数——章节是互相隔离的 IIFE，作用域不共享，这是角色能「跨形态共用一份画法」的前提。
 - **`cast` 为空 / 缺省**：骨架不写任何 `cast/*.js`，`libTags` 里那一行变成空串被 `filter(Boolean)` 去掉（与没有角色时逐字一致的骨架）。
-- 单文件模式不经过本函数：那份 `index.html` 由 [castInject.ts](./castInject.ts.md) 注入同样的脚本。
+- 单文件模式不经过本函数：那份 `index.html` 由 [cast/inject.ts](./cast.md) 注入同样的脚本。
 
 ### 2.6 共享绘制助手 `./core.js` 的位置与原因（`libTags` 里的一行）
 
@@ -112,7 +118,7 @@ castTags
 ```
 project:generate-html
   → 规划一次（模型只交 PLAN JSON：mode + chapters，不产角色表）
-  → mode === 'single'：走单文件路径（整份 HTML，角色由 castInject 注入）
+  → mode === 'single'：走单文件路径（整份 HTML，角色由 cast/inject.ts 注入）
   → mode === 'chapters'：
        castList = cast.selectedMembers(proj.cast)      # 角色是项目素材，不在这里生成
        for i in 0..N-1:
@@ -149,7 +155,7 @@ project:generate-html
 ## 4. 依赖与协作
 
 - **被 `projects.ts` 调用**：生成 / 修改 / 导出 / 切回单文件模式四处都用它；`projects.ts` 负责模型调用、进度推送与 handler，`chapters.ts` 只做「解析 → 校验 → 落盘 → 装配」。
-- **给 `cast.ts` 提供一个通用解析**：`parseFileBlocksWith()` 被 `cast.ts` 复用（角色文件块与章节文件块同一套标记）。方向单向：`cast → chapters`，`chapters` 不知道角色，只把 `cast` 当骨架的一个可选参数。
+- **给 `cast/table.ts` 提供一个通用解析**：`parseFileBlocksWith()` 被 `cast/table.ts` 复用（角色文件块与章节文件块同一套标记）。方向单向：`cast → chapters`，`chapters` 不知道角色，只把 `cast` 当骨架的一个可选参数。
 - **不 import `projects.ts`**：否则与 `projects → chapters` 成环。项目目录一律作参数传入（`writeChapterFiles(dir, …)` / `readChapterCode(dir, …)`），模块自己不知道项目名。
 - **不调用模型**：模型调用在 `agent/html.ts` 的包装里（规划 / 单章 / 单章修改 / 角色 / 路由），本模块只消费模型回复；路由结果的解析在 `editRoute.ts`。
 - **不注册 IPC、不碰渲染层**：章节清单与角色表随 `project:load` 的 `Project.chapters` / `Project.cast` 回给渲染层，「HTML生成」页的 `ChapterSection.vue` / `CastSection.vue` 读写它们；进度仍走 `project:html-progress`，没有新增频道。

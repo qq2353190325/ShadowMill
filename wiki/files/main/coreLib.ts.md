@@ -9,7 +9,7 @@
 
 ## 1. 作用与职责
 
-章节模式下每个项目都有一份 `core.js`（页面里的全局对象是 **`MC`**）。它不是 npm 包、也不是 CDN 依赖，而是**影坊自己的绘制助手**：把「一个形状 = 一次 `MC.paint(点列, 选项)`」封起来，并提供几何点列、缓动与**确定性抖动**（替掉 `Math.random`，保证 `gsap` seek 到任意一帧都能重现）。真源随应用走（`vendor/shadowmill/core.js`，**270 行 / 13,366 字节，当前 `CORE_VERSION = '6'`**），项目里那份是副本。
+章节模式下每个项目都有一份 `core.js`（页面里的全局对象是 **`MC`**）。它不是 npm 包、也不是 CDN 依赖，而是**影坊自己的绘制助手**：把「一个形状 = 一次 `MC.paint(点列, 选项)`」封起来，并提供几何点列、缓动与**确定性抖动**（替掉 `Math.random`，保证 `gsap` seek 到任意一帧都能重现）。真源随应用走（`vendor/shadowmill/core.js`，**382 行 / 19,528 字节，当前 `CORE_VERSION = '7'`**），项目里那份是副本。
 
 **版本史（改这个文件就必须调大 `CORE_VERSION`）**：
 
@@ -18,14 +18,19 @@
 - **v4** 改用 `window.brush` **对外唯一存在**的 `brush.instance(p)` 显式激活实例——`window.brush` **没有** `activateInstance` / `deactivateInstance`（那两个名字在内部 runtime adapter 上，直接调会报 `is not a function`）；`paint()` 画之前先 `brush.instance(P)`，这样「在 `p.draw()` 之外调用」也能落到本实例上。
 - **v5** 让描边笔型名先过 `brushName()` 白名单：p5.brush 2.2.3 只有 **11 种笔型**（pen / rotring / 2B / HB / 2H / cpencil / pastel / crayon / charcoal / spray / marker），而 `ink` 在本文件里是**墨线颜色**（`o.ink`）、不是笔型名；写成笔型会报 `Brush "ink" not found`，导致**每个带描边的形状都少画描边**（水彩探针里就是 12 次 `[Browser:PAGEERROR] Brush "ink" not found`）。现在 `paint()` 的描边那一笔是 `brush.set(brushName(o.br), …)`、`inkLine()` 固定 `brush.set('pen', …)`，传错的名字一律退回 `pen`；`paint` 的 opts 注释也新增了 `br`（描边用的笔型，默认 `pen`，**不是颜色**）。
 - **v6** 新增**水彩参数预设**：`var PRESETS = { wash, soak, grain, light, inked }` 5 组（每组就是 `washOp` / `fillOp` / `bleed` / `tex` / `ink` / `sw` / `br` 里的几个键），配 `has(o, k)` 与 `withPreset(o)`——`paint(pts, o)` 开头 `if (o.preset) o = withPreset(o)`，把预设**垫在下面**、**opts 里显式写的键优先（含显式 `ink: null`)**；opts 注释新增 `preset` 一行。为什么要预设：「像不像水彩」全在 `bleed` / `tex` / `fillOp` 这几个数上、差一点就退化成平涂，让每个角色 / 每章自己拧会出现好几种质感。**`window.MC` 的导出键没有变化**——`PRESETS` / `withPreset` / `has` / `BRUSHES` / `brushName` 都留在闭包里，没有挂到 `MC` 上。
+- **v7** 新增**卡拍与卡拉OK 助手**（`window.MC` 多出 8 个键）：
+  - `MC.BPM` = **88** / `MC.OFF` = **0**（源码 `var DEFAULT_BPM = 88, DEFAULT_OFF = 0`，共享默认节拍）；`beatAt(t[, bpm[, offset]])` 拍位 `(t - off) * bpm / 60`（`bpm` 非正数退回 88、`offset` 缺省 0）、`beatN` 取整拍号、`pulse(t[, bpm[, offset[, decay]]])` 每拍给 1 再线性衰减（`decay` 默认 **0.35 拍**；`decay <= 0` 时只在整拍瞬间给 1）、`pulse2` 同一套换算但 BPM 翻倍（八分音符）。
+  - `karaoke(t, a, b, text)` → `{ p, chars, sungChars, dur }`：唱速**按字符估**，`dur = min(max(0.001, b - a - 0.1), 0.45 + 非空白字符数 * 0.075)` ⇒ **不需要词级时间戳**，句级起止就够（whisper 只输出 segment 级、`ttsAlign` 也是逐句对齐）；`karaokeBand(ctx, t, a, b, text, o)` 用 Canvas 2D 画一条扫色字幕条（圆角药丸底 + 已唱宽度 clip 后换色重绘），`o` 可选 `cx` / `cy` / `h` / `font` / `pad` / `bg` / `color` / `sung` / `radius` / `alpha`，默认居中贴底（`cy = 画布高 × 0.93`）、高 88、`800 44px` 粗体；空文本或 `ctx` 为 `null` 时返回 `null`。私有 `roundedRectPath(ctx, x, y, w, h, r)` **不导出**。
+  - **为什么给默认值**：章节是**一章一次调用**生成的，模型看不到别的章写了什么；不给默认值各章会各写一个 BPM，看上去就是「同一支片子换了三次拍」。要换节奏就**靠传参、全片同一个数**。应用**没有** BPM 项目属性 / 界面开关——BPM 只是这一层的默认常量与函数参数（参考实现 PDoomVideo 同样把 88 BPM / beat 0.682 s / `beats at 0.21 + n × 0.682` 写在代码里，它的输入只有 mp3 + 句级 `[start, end, text]` 歌词，没有节拍检测、也没有「节拍网格」这个输入）。
+  - 同轮改写文件头两条硬约定第 ② 条：**不许引入有状态的时间概念**（不读 `Date.now`、不自跑 rAF 与时间轴），但**纯函数式的「时间 → 拍位 / 扫色进度」允许且应在本层**；并补一段「**本文件必须保持单文件**」的理由（骨架按 `./core.js` 每个项目复制一份、按 `CORE_VERSION` 覆盖，拆开只会让每个项目多出几个引用与同步点）。**覆盖行为不变**：`syncCoreTo` 仍只比对 `CORE_VERSION`。
 
 - **`MC.paint` 的用法（v6 起）**：`MC.paint(pts, { preset: 'soak', wash: '#8EC3E6', fill: '#D97757' })`。**水彩质感一律用 `preset`，别自己拧 `bleed` / `tex`**；**质感来自 `fill`**（`bleed` / `tex` 只作用于填色那层，只给 `wash` 就是一片平的水彩底色）；`soak` 渗色最重、会把颜料糊出形状外，要干净轮廓的角色 / 物体用 `grain` 或 `wash`。
 - **为什么项目里必须有一份物理副本**（而不是让页面直接引用全局路径）：预览走 `hgpreview://` 自定义协议，只放行「项目目录内」（见 `main/index.ts` 的 `resolveHgPreviewPath`）；渲染走 HyperFrames CLI 的静态服务器，root 只有「编译产物目录 + 项目目录」两级。项目外的路径在这两条链路上都读不到，所以只能在用到之前把文件复制进项目。
-- **同步策略是「按版本号覆盖」**：`core.js` 里写着 `var CORE_VERSION = '6'`（v1 → v2 加了 `castLayer` / `clearLayer`，v2 → v3 把水彩分支改成 p5 实例模式，v3 → v4 改用 `brush.instance(p)` 激活实例，v4 → v5 换成 11 种笔型白名单，v5 → v6 加水彩参数预设），项目里记一份 `.core-version`；只有两者不一致（或文件丢了）才覆盖，并把 `from → to` 记进 `<userData>/core-lib.log`。好处是应用升级后所有项目在下一次生成 / 预览 / 导出 / 渲染时自动吃到新助手，而日志里能查「这条片子用的是哪个版本」。
+- **同步策略是「按版本号覆盖」**：`core.js` 里写着 `var CORE_VERSION = '7'`（v1 → v2 加了 `castLayer` / `clearLayer`，v2 → v3 把水彩分支改成 p5 实例模式，v3 → v4 改用 `brush.instance(p)` 激活实例，v4 → v5 换成 11 种笔型白名单，v5 → v6 加水彩参数预设，v6 → v7 收进卡拍 / 卡拉OK 助手），项目里记一份 `.core-version`；只有两者不一致（或文件丢了）才覆盖，并把 `from → to` 记进 `<userData>/core-lib.log`。好处是应用升级后所有项目在下一次生成 / 预览 / 导出 / 渲染时自动吃到新助手，而日志里能查「这条片子用的是哪个版本」。
 - **幂等**：版本一致 + 文件在 ⇒ 什么都不做（`copied: false`）。因此预览、渲染这类高频路径可以每次都调。
 - **本文件刻意不 import electron**（保持可离线测试）：真源路径由调用方给（`hfEnv.coreSource()`），本模块只做「读版本 / 比对 / 复制」。
 
-模块本身是**纯逻辑 + 文件读写**：不 import `projects.ts`（避免循环依赖）、不注册 IPC、不认识项目名。与 [castLibrary.ts](./castLibrary.ts.md) 同一套写法：目录一律作参数传入。
+模块本身是**纯逻辑 + 文件读写**：不 import `projects.ts`（避免循环依赖）、不注册 IPC、不认识项目名。与 [cast/library.ts](./cast.md) 同一套写法：目录一律作参数传入。
 
 ## 2. 导出与关键实现
 
@@ -94,11 +99,13 @@
 ## 5. 注意事项与实现要点
 
 - **改 `core.js` 必须调大 `CORE_VERSION`**：这是「应用要不要覆盖项目里那一份」的唯一判据。改了内容却不调版本号，所有项目都会继续用旧副本（`from === to` 且文件在 ⇒ 跳过）。
-- **版本号是字符串不是数字**：正则接受 `[0-9A-Za-z._-]+`（`'1'`、`'2'`、`'3'`、`'5'`、`'6'`、`'1.2'`、`'2026-10-23'` 都行），比较用 `===`，**不做数字大小比较**——只要和项目里记的不一样就覆盖。
+- **版本号是字符串不是数字**：正则接受 `[0-9A-Za-z._-]+`（`'1'`、`'2'`、`'3'`、`'5'`、`'6'`、`'7'`、`'1.2'`、`'2026-10-23'` 都行），比较用 `===`，**不做数字大小比较**——只要和项目里记的不一样就覆盖。
 - **`from === to` 但文件不在也会复制**：两个条件缺一不可（见 2.1 第 5 步）。
 - **拿不到真源不拦路**：`coreSource()` 返回 `null` / `syncCoreTo` 返回 error 时，`syncCoreLib` 只写日志就返回——生成与预览照常进行，页面里的 `MC` 会是 `undefined`（可接受的降级，比整次生成失败好）。
 - **`core.js` 故意不进 `VENDOR_LIBS`**（那张表在 `hfEnv.ts`）：表里的库在导出单文件时会被换回公共 CDN 地址，而 `core.js` 是影坊自己的文件、**没有 CDN 形态**，导出时必须**内联**（`DownloadHtml` 用 `readProjectCore()` 取项目里那份，交给 `chapters.inlineChapters()`）。
 - **两个文件一起写**：`core.js` 与 `.core-version` 都写完才算一次同步；只写其中一个会让下一次判定错乱（要么反复覆盖，要么永远不更新）。
 - **`readProjectCore()` 只读不校验**：它不看 `CORE_VERSION`，也不判断文件是不是最新——导出前那次 `syncCoreLib` 已经保证了「项目里那份是最新的」。
 - **v6 预设是「参数垫底」，不是新 API**：`preset` 只影响 `paint()` 内部那一组缺省值，`MC` 对外仍只有原来那些键；写 `preset` 的同时照样可以给 `wash` / `fill` / `ink` / `br`，**显式键优先**。别在章节 / 角色里自己拧 `bleed` / `tex`——那正是预设要替掉的东西；**质感来自 `fill`**，只给 `wash` 出来的是一层平的水彩底色。
-- **与 `castLibrary.ts` 的分工别混**：`core.js` 是**应用内置的基础设施**（随应用升级、按版本覆盖、用户不该改）；项目里的 `cast/<id>.js` 是**内容**（用户/模型生成、导入即复制、全局库改了不会自动改已导入的项目）。一个是「助手」，一个是「角色」。
+- **v7 是第一次新增 `MC` 对外键的版本**：`BPM` / `OFF` / `beatAt` / `beatN` / `pulse` / `pulse2` / `karaoke` / `karaokeBand` 共 8 个键挂上 `window.MC`（`roundedRectPath` 仍在闭包里）；`window.MC` 现在是 **27 个键**（`CORE_VERSION` / `version` / `hash` / `jit` / `clamp` / `lerp` / `ease` / `easeOut` / `easeIn` / `backOut` / `kf` / `ellPts` / `rrPts` / `starPts` / `linePts` / `paint` / `inkLine` / `BPM` / `OFF` / `beatAt` / `beatN` / `pulse` / `pulse2` / `karaoke` / `karaokeBand` / `castLayer` / `clearLayer`）。**覆盖行为没变**：`syncCoreTo()` 只读 `CORE_VERSION`，v6 的老项目在下一次生成 / 预览 / 导出 / 渲染时整份覆盖成 v7。
+- **卡拍 / 卡拉OK 不是项目属性**：应用**不提供** BPM 的项目级设置或界面开关，节奏写在页面代码里（常量或传参）；`.core-version` 也不记 BPM——它只回答「项目里这份 `core.js` 是哪个版本」。
+- **与 `cast/library.ts` 的分工别混**：`core.js` 是**应用内置的基础设施**（随应用升级、按版本覆盖、用户不该改）；项目里的 `cast/<id>.js` 是**内容**（用户/模型生成、导入即复制、全局库改了不会自动改已导入的项目）。一个是「助手」，一个是「角色」。

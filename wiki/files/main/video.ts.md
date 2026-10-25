@@ -41,7 +41,7 @@
 
 | 顺序 | 来源 | 成本 / 口径 |
 |---|---|---|
-| ① | 模型在 `<html data-composition-duration="…">` 里声明的（**应用就是从这一处读**：提示词要求模型写在那儿） | 零成本；提示词已要求模型写（见 [projects.ts.md](./projects.ts.md) 的【成片时长】条） |
+| ① | 模型在 `<html data-composition-duration="…">` 里声明的（**应用就是从这一处读**：提示词要求模型写在那儿） | 零成本；提示词已要求模型写（见 [projects.md](./projects.md) 的【成片时长】条） |
 | ② | 现场量 GSAP 时间轴 | 无头 Chromium 跑一次，**与预览脚本的 `clock()` 同一口径**（多个时间轴取最大）；不需要字幕，3~5 秒 |
 | ③ | 页面里最长媒体的时长 | 老页面没有时间轴时的兜底，即拆分前的行为（交给 CLI 自己裁定） |
 
@@ -161,9 +161,9 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 | 认哪些写法 | 只认 GSAP 的 `repeat: -1` / `repeat: Infinity`（`/repeat\s*:\s*(?:-1|Infinity)\b/i`，忽略大小写、冒号两侧可有空白） |
 | 扫哪些文件 | `index.html` + 章节模式下的 `pages/cNN.js`（同一正则一起扫——章节脚本也是页面的一部分，只扫 `index.html` 会漏掉章节里的无限循环） |
 | **不**拦什么 | CSS 的 `animation-iteration-count: infinite` **不拦**——HF 的 CSS 适配器只收 `endTime` 有限的动画，无限 CSS 动画本来就不会把时长撑大 |
-| 修完之后 | 用户到「HTML生成」页把循环改成有限次数（如 `repeat: 12, repeatDelay: 0.4`）再点「转视频」即可；提示词侧也已要求模型不许写无限循环（见 [projects.ts.md](./projects.ts.md) 的【禁止无限循环】块） |
+| 修完之后 | 用户到「HTML生成」页把循环改成有限次数（如 `repeat: 12, repeatDelay: 0.4`）再点「转视频」即可；提示词侧也已要求模型不许写无限循环（见 [projects.md](./projects.md) 的【禁止无限循环】块） |
 
-> 这是**判据放在渲染入口**、而不放在预览侧的第二个落点：预览侧的同类闸门在 `projects.ts` 的 `HG_PREVIEW_CTRL` 里（超长时长降级成 `--:--`，见 [projects.ts.md](./projects.ts.md) §3.2），两者各自独立、互不依赖。
+> 这是**判据放在渲染入口**、而不放在预览侧的第二个落点：预览侧的同类闸门在 `projects.ts` 的 `HG_PREVIEW_CTRL` 里（超长时长降级成 `--:--`，见 [projects.md](./projects.md) §5），两者各自独立、互不依赖。
 
 ## 2. 导出与关键实现
 
@@ -356,7 +356,7 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 ## 5. 渲染产物路径的语义变化（`project:save-video` 的配合）
 
 - **本模块只产出并返回成品绝对路径**：`{ ok: true, outputVideo: outMp4 (= <项目目录>\video\output.mp4), projectDir: projDir }`。**不写 `project.json`**。
-- 回写由渲染层「HTML生成」页负责：`res.ok` 后调 `window.projectTools.saveVideo(appState.currentName, res.outputVideo)`（`project:save-video`）→ 主进程把**项目目录内的绝对路径换算成项目内相对路径** `video/output.mp4` 存进 `project.json`（见 [projects.ts.md](./projects.ts.md) 的 `resolveVideoAbs()` 与 `project:save-video`）。
+- 回写由渲染层「HTML生成」页负责：`res.ok` 后调 `window.projectTools.saveVideo(appState.currentName, res.outputVideo)`（`project:save-video`）→ 主进程把**项目目录内的绝对路径换算成项目内相对路径** `video/output.mp4` 存进 `project.json`（见 [projects.md](./projects.md) 的 `resolveVideoAbs()` 与 `project:save-video`）。
 - 「视频预览」页取路径时拿到的又是绝对路径（`project:load` 返回前用 `resolveVideoAbs()` 还原），再经 `hgpreview://` 协议播放（见 [VideoPreviewPage.md](../renderer/src/pages/VideoPreviewPage.md)）。
 - 旧记录里指向 `hf-projects\…` 的绝对路径仍能被 `resolveVideoAbs()` 兼容读出（文件存在就用），但**新的渲染不会再产生那种目录**（磁盘上残留的 244 MB 旧目录已删）。
 
@@ -384,7 +384,7 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 
 | 使用方 | 用法 |
 |--------|------|
-| `src/main/index.ts` | `video.register(ctx)` 完成注册（依赖图注释：`hfEnv ← projects, voice, whisper, ttsAlign, video, runtime`） |
+| `src/main/index.ts` | `video.register(ctx)` 完成注册（依赖图注释：`hfEnv ← projects, voice, whisper, video, runtime`） |
 | `src/preload/index.ts` | 暴露 `openHtml` / `renderVideo` / `showInFolder` / `onProgress`，分别转发上述频道 |
 | `src/renderer/src/pages/HtmlGenPage/index.vue` | **发起渲染**（「转视频」按钮，带质量 / 帧率档位）、成功后回写产物并刷新项目；被无限循环守卫拒绝时，就把返回的 `message` 直接写进「预览」卡的状态行（见 [HtmlGenPage.md](../renderer/src/pages/HtmlGenPage.md) §6.7） |
 | `src/renderer/src/pages/VideoPreviewPage/index.vue` | **可选项目的**纯预览：下拉选择要看的项目（默认当前工作项目，只列 `hasVideo` 的项目）、展示 / 定位成品视频；**切换不改工作项目、也不发起渲染** |

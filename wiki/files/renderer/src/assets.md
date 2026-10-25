@@ -1,11 +1,20 @@
 # src/renderer/src/assets/（设计系统）
+> **⚠️ 本轮「角色动作示范」对 `main.css` 的影响（以本块为准；`main.css` 现 2351 行）**
+>
+> - **「角色」页 · 动作示范弹窗新增 20 个类**（`2200 → 2351`，+144 行之后又补了 7 行注释）：`.cast-demo-shot` / `.cast-demo-frame`（300×380 的动画 iframe）、`.cast-act` / `.cast-act-left` / `.cast-act-right`（两栏）、`.cast-act-now` / `.cast-act-now-name`（当前动作那行）、`.cast-act-list` / `.cast-act-item`（状态类 `.on`）/ `.cast-act-tag`（状态类 `.ai`）/ `.cast-act-item-meta` / `.cast-act-item-acts` / `.cast-act-link`（状态类 `.danger`）、`.cast-act-ai`（AI 生成面板）、`.cast-act-table` / `.cast-act-tr`（状态类 `.head`）/ `.cast-act-th` / `.cast-act-cell` / `.cast-act-del`（关键帧表与删帧按钮）。
+> - **`.cast-card.static` 的 `cursor` 由 `default` 改为 `pointer`**：卡片现在可双击看动作示范，得给出可点的暗示。
+>
+> **上一轮角色改造的影响（历史，保留备查）**
+>
+> - **新增 / 改动的类**：`.cast-grid`（`repeat(auto-fill, minmax(132px, 1fr))`，56vh 滚动）/ `.cast-grid.page`（取消高度上限，整页滚）/ `.cast-card`（可点）/ **`.cast-card.static`**（「角色」页整卡不可点、`overflow: visible` 让「…」菜单弹出）、**`.cast-menu`** / `.cast-menu-item`（含 `.danger`）、`.cast-thumb`（13:15 预览位）/ `.cast-mat-grid`（`repeat(auto-fill, 130px)`）、`.cast-card-missing`（缺失徽标）、**`.cast-style`**、`.cast-done` / `.cast-done-info` / `.cast-done-meta`、`.cast-shot`（56×72）/ `.cast-shot.big`（200×260）。
+> - 角色预览 iframe 一律 `pointer-events: none`（点击穿透到卡片）；**动作示范的 iframe 例外**（它要能暂停 / 重播，`pointer-events` 正常）。
 
 > ShadowMill（影坊）全局设计系统样式表，「Cyber UI / 深空科技」主题的唯一实现载体。
 
 - **覆盖文件**：`assets/main.css`（本目录唯一文件，全局设计系统样式表）
 - **所在目录**：src/renderer/src/assets/
 - **类型**：全局样式表（设计系统）
-- **规模**：2012 行（单文件设计系统随迭代持续增长；当前体量见 `[IO.File]::ReadAllLines` 实测；上一版 2010 行，本轮 **+2 行**：`.cast-row` 的网格加了勾选列 `24px` 与状态类 `.cast-row.off`）
+- **规模**：**2351 行**（单文件设计系统随迭代持续增长；当前体量见 `[IO.File]::ReadAllLines` 实测。**本轮 +144 行**：新增「角色」页动作示范的 20 个类（见 §3.5.1）；更早那次由 2164 → 2165 是 **+1 行**：**角色卡片格子从 100×150 放宽到 130×150**（用户反馈「被挤扁了，太窄了」，确认是格子形状太窄：宽 100 配 150 高显得细长）——`.cast-mat-grid` 的列宽 `100px → 130px`、`.cast-thumb` 的 `aspect-ratio` 由 `2 / 3` 改 **`13 / 15`**（**高度不变、只放宽**），并在 `.cast-mat-grid` 上方注释里写明「**不要收回到 100px**：100 宽配 150 高看着细长、下面两行字也挤成一团（用户实测反馈）」；再往前那次 2159 → 2164 是**角色卡片墙缩到 100×150**——新增 `.cast-mat-grid`（`repeat(auto-fill, 100px)`，覆盖素材 `.mat-grid` 的 `minmax(158px, 1fr)`）、`.cast-thumb` 的 `aspect-ratio` 由 `4 / 5` 改 **`2 / 3`**、「…」按钮缩到 `top/right: 5px`、动作菜单锚点上移到 `top: 28px` / `right: 5px`；更早那次由 2012 → 2159，是**角色区从「一行一个角色」的 7 列 grid 改成与「项目素材」同一套卡片墙**——新增 `.cast-mat` / `.cast-thumb` / `.cast-more` / `.cast-menu*`，**删掉** `.cast-list` / `.cast-row*` / `.cast-actions` / `.cast-units` / `.cast-file`，并清掉 `.lib-row*` / `.lib-missing` 与那条 `.lib-row input[type="checkbox"]`）
 
 ## 1. 作用与职责
 
@@ -14,7 +23,7 @@
 | 主题变量源 | 在 `:root` 中集中定义背景、品牌色、文字色、辉光、圆角、间距刻度等 CSS 变量（清单见 §2），是全应用配色的唯一出口 |
 | 全局重置与骨架 | `*` 归零、`html, body` 的字体族 + **全局字号基准 `font-size: 14px`** + 背景、`#app` 与 `.layout` 的 flex 列布局，决定「标题栏 + 侧栏 + 内容区」三段式结构；并在其后定义**全应用唯一一套滚动条**（`*::-webkit-scrollbar*`，见 §3 样式分区地图与 §6） |
 | 通用组件样式 | 卡片、按钮（`.hf-btn`）、文本域、弹窗（`.hf-modal-*`）、进度条、空态提示等跨页面复用类（**下拉不在本文件**：自绘下拉 `HfSelect.vue` 自带 `.hf-sel*` 组件级样式） |
-| 页面专有样式 | 首页 Hero 与流水线、HTML 生成工作台（含**项目素材库卡片墙**）、字幕/配音、设置页模型卡片等按注释分节组织 |
+| 页面专有样式 | 首页 Hero 与流水线、HTML 生成工作台（含**项目素材卡片墙**与**角色卡片墙**——两者本来就是同一套 `.mat-*`）、字幕/配音、设置页模型卡片等按注释分节组织 |
 | 视觉特效库 | 毛玻璃（`backdrop-filter: blur(12px)`）、霓虹辉光（`text-shadow` / `box-shadow`）、渐变文字、扫描线动画 |
 
 页面与样式节的对应关系（据各 `.vue` 模板实际使用的类名）：
@@ -28,7 +37,7 @@
 | **`pages/HtmlGenPage/MaterialsSection.vue`（本项目素材库，本轮新增）** | **新增节「HTML生成页：项目素材库（图片 / 视频卡片墙）」**：`.mat-grid` / `.mat-card`(+`.off`) / `.mat-thumb`(+`.mat-play`) / `.mat-meta` / `.mat-name` / `.mat-path` / `.mat-check`(+`.on`) / `.mat-del` / `.mat-add` / `.mat-count` / `.panel-title .dot.dot-img`；另复用 `.hgen-block`、`.panel-head` / `.panel-head-actions`、`.panel-title` / `.panel-title-sm`、`.hgen-tip`、`.hf-btn` / `.hf-btn-danger` |
 | **`pages/HtmlGenPage/PreviewSection.vue`（预览卡片）** | `.card.hgen-panel` 外壳、`.panel-title`、`.hgen-row`、`.sel-label`、`.hgen-input`（语速输入框）、`.hf-status`（+`.hf-ok` / `.hf-error`）、`.hf-btn`（语速 ± 两个小按钮；**「移除」按钮已删除**）、`.hg-help*`（**只剩「视角比例」行一处 `?`**；背景音频行的已删除）、`.hgen-tip`（`v-show="viewHint"`）、`.empty-hint`、`.hgen-frame-wrap` / `.hgen-frame`、`.hg-prev-*`（播放控制条三件套）、`.rate-spinner`（包裹，本文件无对应规则、样式由内联 `style` 提供）；**背景音频的占满整行下拉（`flex:1`）与「视角比例」下拉**都走 `components/HfSelect.vue`（前者触发器占满整行 ⇒ 弹层也随 `max(触发器宽, 220px)` 变宽）；AI 思考过程块用的是**行内 `style`**（无专有类）。**本组件不用 `.hf-file`、也没有值胶囊类**（值由下拉自己承载），也没有独立的「本地文件…」按钮（并入下拉分组） |
 | **`pages/HtmlGenPage/ChapterSection.vue`（章节列表，只读）** | 「HTML生成」页的章节行样式（`.ch-*` 一节）：一行 = 序号 / 标题 / 起止 / 时长 / `pages/cNN.js` / 「改这一章」；列宽 `minmax(0, Nfr)`；另复用 `.hgen-block`、`.panel-head*`、`.panel-title-sm`、`.hgen-tip`、`.ch-sub`、`.hf-btn.ch-pick` |
-| **`pages/HtmlGenPage/CastSection.vue`（「项目素材 · 角色」区 + 两个弹窗）** | **节「HTML生成页：角色列表（章节模式的角色库）」**：`.cast-list` / `.cast-row`（**本轮加勾选列 `24px` 与状态类 `.off`**） / `.cast-name` / `.cast-desc` / `.cast-units` / `.cast-file` / `.cast-actions`（行尾三个按钮的容器）+ `.lib-row` / `.lib-row.off` / `.lib-row input[type=checkbox]` / `.lib-missing`（「从全局库添加」弹窗的行）；**复用素材卡片那一组 `.mat-check`（勾选框）+ `.ch-sub` / `.hf-btn.ch-pick`（行内动作按钮）**，另复用 `.hgen-block`、`.panel-head` / `.panel-head-actions`、`.panel-title-sm`、`.hgen-tip` 与 `.hf-modal*`（两个弹窗的外壳） |
+| **`pages/HtmlGenPage/CastSection.vue` / `CastShot.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue`（「项目素材 · 角色」区 + 预览 + 两个弹窗）** | **节「HTML生成页：角色卡片墙」+「角色预览（静态一帧）」+「全局角色库弹窗：方格网格」+「新建角色成功后」**：角色区**不再有自己的版式**——直接复用素材那一组 `.mat-grid` / `.mat-card` / `.mat-meta` / `.mat-name` / `.mat-path` / `.mat-check`，只加这几样东西：**`.cast-mat`**（卡片级 modifier，`overflow: visible` 让「…」菜单能弹出卡片）+ **`.cast-mat-grid`**（卡片墙容器多加的一个类，把列宽定死 `repeat(auto-fill, 130px)`，素材那张 `.mat-grid` 仍用 `minmax(158px, 1fr)`）+ **`.cast-thumb`**（`13 / 15` 竖版预览位 ⇒ 人物位正好 130×150）+ **`.cast-more`**（右上角「…」按钮）+ **`.cast-menu` / `.cast-menu-item`(+`.danger`)**；`.cast-name` / `.cast-desc` 保留（新建弹窗大图旁边在用）；另有 **`.cast-shot` / `.cast-shot-frame` / `.cast-shot-note` / `.cast-shot.big`（200×260）** + **`.cast-grid` / `.cast-card`（`.on` / `.off`）/ `.cast-card-meta` / `.cast-card-name` / `.cast-card-sub` / `.cast-card-tick` / `.cast-card-missing`** + **`.cast-done` / `.cast-done-info` / `.cast-done-meta`**；另复用 `.hgen-block`、`.panel-head` / `.panel-head-actions`、`.panel-title-sm`、`.hgen-tip`、`.ch-sub` 与 `.hf-modal*`（两个弹窗的外壳） |
 | `pages/VideoPreviewPage/index.vue`（视频预览） | `.hf-toolbar`、`.hf-btn*`、`.hf-file`、`.hf-status`、`.hf-video*`、`.hf-tip`、`.card.hgen-panel` 外壳与 `.panel-title`；「预览项目」下拉走 `components/HfSelect.vue` |
 | `pages/SubtitlePage/index.vue` / `TranscribeSection.vue` | `.model-*`、`.whisper-*`、`.sub-list` / `.sub-row` 等字幕编辑器类、`.hf-modal-*` |
 | `pages/TextTtsPage/index.vue` / `{SynthSection,AlignSection,VoiceSection}.vue` | `.hf-tabs` / `.hf-tab`、`.align-*`、`.sub-textarea`、`.hgen-tip`、`.panel-head*` / `.voice-list*`（音色列表）；各处下拉走 `components/HfSelect.vue` |
@@ -111,7 +120,7 @@
 | 字幕配音（逐句对齐）：结果明细 | `.align-row*`、`.align-*`、`@keyframes whisper-slide` | 单行结果行 + 正常/告警徽标 |
 | **HTML生成页：项目素材库（图片 / 视频卡片墙）（本轮新增，排在文件末尾）** | **`.mat-grid`、`.mat-card`(+`.off`)、`.mat-thumb`(+`.mat-play`)、`.mat-meta`、`.mat-name`、`.mat-path`、`.mat-check`(+`.on`)、`.mat-del`、`.mat-add`、`.mat-count`、`.panel-title .dot.dot-img`** | 缩略图卡片墙：勾选框与「移除」叠在卡片两角；未勾选整卡压暗（`.off`）但仍可操作；列宽 `auto-fill + minmax(158px, 1fr)`，窄窗自动减列。**使用方只有 `pages/HtmlGenPage/MaterialsSection.vue`**（详见 3.2） |
 | **HTML生成页：章节列表行（`.ch-*`，本轮新增，排在文件末尾）** | **`.ch-*`（章节列表行样式）** | 「HTML生成」页的只读章节列表：一行 = 一章（序号 / 标题 / 起止 / 时长 / `pages/cNN.js` / 「改这一章」）；**列宽用 `minmax(0, Nfr)`**。使用方只有 `pages/HtmlGenPage/ChapterSection.vue`（详见 3.4） |
-| **HTML生成页：角色区 + 全局角色库弹窗（`.cast-*` / `.lib-*`，排在文件末尾）** | **`.cast-list`、`.cast-row`（+ 状态类 `.off`）、`.cast-name`、`.cast-desc`、`.cast-units`、`.cast-file`、`.cast-actions`；`.lib-row`、`.lib-row.off`、`.lib-missing`** | 「HTML生成」页的「项目素材 · 角色」块与它的两个弹窗（从全局库添加 / 新建角色）：一行 = 一个角色（**勾选框** / 名字 / 描述 / 高几 u / `cast/<id>.js` / **三个动作**）；**列宽 `24px minmax(0, 1.2fr) minmax(0, 2.6fr) 48px minmax(0, 1.3fr) auto`**（第一列是勾选框、定宽 24px；「高几 u」定宽 48px 右对齐）。**未勾选整行加 `.off`（`opacity: .55`）**，与素材卡片的 `.off` 同一语言。**与章节列表同一套语言**：复用 `.ch-sub` / `.hf-btn.ch-pick`；勾选框直接复用素材卡的 `.mat-check`（`.mat-check.on`）。使用方只有 `pages/HtmlGenPage/CastSection.vue`（详见 3.5） |
+| **HTML生成页：角色卡片墙 + 全局角色库弹窗（`.cast-*`，排在文件末尾）** | **`.cast-mat`、`.cast-mat-grid`、`.cast-thumb`、`.cast-more`、`.cast-menu` / `.cast-menu-item`(+`.danger`)、`.cast-name`、`.cast-desc`；`.cast-shot*`、`.cast-grid`、`.cast-card*`、`.cast-done*`** | 「HTML生成」页的「项目素材 · 角色」块与它的两个弹窗：**角色区与「项目素材」同一套卡片墙**——每张卡 = 左上角**勾选框**（复用 `.mat-check`）+ 右上角**「…」菜单**（三个动作：存为全局 / 改这个角色 / 移除）+ **`13:15` 竖版预览位（130×150）** + **名字 / `高几 u · 描述`**（复用 `.mat-name` / `.mat-path`）；未勾选整卡加 `.mat-card.off`。区别只有两处：**列宽定死 130px**（容器多挂一个 `.cast-mat-grid`，素材那张 `.mat-grid` 仍是 `minmax(158px, 1fr)`）、**预览位是 `13 / 15` 而不是素材的 16:9**。**卡片上不显示文件路径 `cast/<id>.js`**。使用方只有 `pages/HtmlGenPage/CastSection.vue`（详见 3.5） |
 
 > **toast**（`.toast-host` / `.toast-item`）定义在 `App.vue` 的 `<style scoped>` 中，不在本文件。下拉控件 `.hf-sel*` 在 `components/HfSelect.vue` 内（含一个**非 scoped** 的 `<style>` 块，因为弹层经 Teleport 挂到 `body`），本文件无下拉选择器。
 
@@ -315,40 +324,82 @@
 - 只读列表：点「改这一章」只是把「只改第 N 章（pages/cNN.js）：」填进「需求描述」，列表本身不发起生成 / 修改；
 - 使用方只有 `ChapterSection.vue`。
 
-### 3.5 「角色」区与全局角色库弹窗（`.cast-*` / `.lib-*`）
+### 3.5 「角色」区、预览与两个弹窗（`.cast-*`）
 
-「HTML生成」页的「项目素材 · 角色」区（`pages/HtmlGenPage/CastSection.vue`）与它的两个弹窗专用的一节，排在本文件**最末尾**（紧接章节列表 `.ch-*` 之后，是全文件的最后 **58** 行）：
+「HTML生成」页的「项目素材 · 角色」区（`pages/HtmlGenPage/CastSection.vue`）、预览组件（`CastShot.vue`）与两个弹窗（`CastLibraryModal.vue` / `CastCreateModal.vue`）共用的一节，排在本文件**最末尾**（紧接章节列表 `.ch-*` 之后）。这一节分三轮变过：先是角色区从「一行一个角色的 7 列 grid」换成**与「项目素材」完全同一套卡片墙**（人物在上、名字在下、勾选框在左上、三个动作收进右上「…」菜单），本节只剩 `.cast-mat` / `.cast-thumb` / `.cast-more` / `.cast-menu*` 四个东西、其余全部复用素材那一节；随后卡片**整体缩一号**——人物格从「弹性列宽（`minmax(158px, 1fr)`）+ `4 / 5`」缩成「**定死 100px + `2 / 3`**」，人物位 **100×150**：新增 **`.cast-mat-grid`**（只覆盖列宽，把 `.mat-grid` 的 `minmax(158px, 1fr)` 换成定死 `100px`，`display: grid` 与 `gap` 仍来自 `.mat-grid`）、`.cast-thumb` 的 `aspect-ratio` 由 `4 / 5` 改 **`2 / 3`**、「…」按钮与动作菜单各缩一号且菜单锚点上移；**本轮再把格子从 100×150 放宽到 130×150**（用户反馈「被挤扁了，太窄了」——100 宽配 150 高看着细长、下面两行字也挤成一团）：`.cast-mat-grid` 列宽改 **130px**、`.cast-thumb` 的 `aspect-ratio` 改 **`13 / 15`**（**高度不变、只放宽**），并在 `.cast-mat-grid` 上方注释里写明**不要收回 100px**；`.cast-more` / `.cast-menu` / `.cast-name` / `.cast-desc` 都没动。后面「角色预览（静态一帧）」「全局角色库弹窗：方格网格」「新建角色成功后」三段**这两轮都未动**（`.cast-card` 的 100%×132 与 `.cast-shot.big` 的 200×260 都不受影响）。
 
-节的注释头与行网格（源码原文）：
+节的注释头，以及卡片 / 列宽 / 预览位 / 「…」按钮 / 动作菜单（以下与 `main.css` 逐行一致；**列宽是本节唯一多出来的一条**——`.cast-mat-grid` 只覆盖列宽，`display: grid` 与 `gap` 仍来自素材卡片墙的 `.mat-grid`）：
 
 ```css
-/* ===== HTML生成页：角色列表（章节模式的角色库） =====
-   一行一个角色：名字 / 描述 / 高几 u / 文件 / 「改这个角色」。
-   与上面的章节列表同一套语言（同一组 .ch-sub / .ch-pick 复用），只是列不同：
-   角色没有时间窗，多了「高几 u」这一列（身高比例是它能和别章对齐的唯一凭据）。 */
-.cast-list { margin-top: var(--space-2); }
+/* ===== HTML生成页：角色卡片墙（「项目素材 · 角色」）=====
+   与图片 / 视频素材同一套 `.mat-grid` / `.mat-card`：**人物在上面、名字在下面**，
+   勾选框在左上角、三个动作（存为全局 / 改这个角色 / 移除）收进右上角的「…」菜单。
+   角色与素材本来就是同一类东西（项目资产），版式也跟着一样，扫起来不用换一套眼睛。 */
 
-.cast-row {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1.2fr) minmax(0, 2.6fr) 48px minmax(0, 1.3fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  font-size: 13px;
-  border: 1px solid rgba(0, 212, 255, 0.08);
-  border-bottom: 0;
-  background: rgba(10, 17, 32, 0.5);
+/* 卡片本身不裁剪：「…」菜单要从卡片里弹出去（`.mat-card` 默认 overflow:hidden 会把它切掉），
+   圆角与裁切交给下面的 .cast-thumb 自己做 */
+.cast-mat { overflow: visible; }
+
+/* 角色卡片比素材卡**小一号**：列宽定死 130px（素材那张 `.mat-grid` 是 minmax(158px, 1fr) 的弹性列），
+   一屏能并排放下更多角色；配合下面 13:15 的预览位，人物位正好 130×150。
+   **不要收回到 100px**：100 宽配 150 高看着细长、下面两行字也挤成一团（用户实测反馈）。 */
+.cast-mat-grid { grid-template-columns: repeat(auto-fill, 130px); }
+
+/* 预览位：角色是竖构图（8u 高的人 vs 约 4u 宽），13:15（130×150）比素材的 16:9 更省横向空间、人也更完整。
+   底色 #EEF2F7 与预览页一致（深色勾边 / 浅色皮肤在深底上会糊成一片） */
+.cast-thumb {
+  aspect-ratio: 13 / 15;
+  overflow: hidden;
+  border-radius: 10px 10px 0 0;
+  background: #EEF2F7;
 }
-/* 未勾选（本次不注入）：整行压暗，与素材卡片的 .off 同一语言 */
-.cast-row.off { opacity: 0.55; }
-.cast-row:first-child { border-radius: 10px 10px 0 0; }
-.cast-row:last-child { border-bottom: 1px solid rgba(0, 212, 255, 0.08); border-radius: 0 0 10px 10px; }
-.cast-row:only-child { border-radius: 10px; }
-```
+.cast-thumb .cast-shot { width: 100%; height: 100%; border: 0; border-radius: 0; }
 
-单元格与字号（源码原文）：
+/* 右上角「…」：与素材卡的「移除」同位置，但比它再小一号（卡片只有 130px 宽，按钮不能占太多） */
+.cast-more.hf-btn {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  border-radius: 5px;
+}
 
-```css
+/* 动作菜单：锚在「…」下方展开（z-index 抬过相邻卡片；点菜单外面收起，逻辑在 CastSection）。
+   卡片 130px 宽 + 菜单 118px + right:5px ⇒ 菜单整个落在卡片内，不会探到相邻卡片上 */
+.cast-menu {
+  position: absolute;
+  top: 28px;
+  right: 5px;
+  z-index: 20;
+  min-width: 118px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  background: rgba(11, 18, 32, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.cast-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cast-menu-item:hover:not(:disabled) { background: rgba(0, 212, 255, 0.12); }
+.cast-menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+/* 「移除」是危险动作：文字与 hover 底色都走警报红 */
+.cast-menu-item.danger { color: var(--color-danger); }
+.cast-menu-item.danger:hover:not(:disabled) { background: rgba(255, 77, 109, 0.14); }
+
+/* 名字 / 描述（新建角色弹窗里的大图旁边也在用） */
 .cast-name {
   color: var(--color-primary);
   font-weight: 600;
@@ -356,57 +407,204 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cast-desc, .cast-units, .cast-file {
+.cast-desc {
   font-size: 12px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cast-units, .cast-file { font-family: "JetBrains Mono", "Consolas", monospace; }
-.cast-units { text-align: right; }
 ```
 
-**角色库那一轮新增的两组（源码原文，本轮未改）**：
+**角色预览（源码原文）**——卡片预览位、全局库网格与大图共用同一个组件，尺寸全由外层决定（`.cast-thumb .cast-shot` / `.cast-card .cast-shot` / `.cast-shot.big`）：
 
 ```css
-/* 角色行尾的两个动作（存为全局 / 改这个角色）：并排、靠右，不与文本列争宽 */
-.cast-actions { display: flex; align-items: center; gap: 6px; flex: none; }
-
-/* 全局角色库弹窗里的一行：勾选框 + 名字 + 描述 + 高几 u（缺文件的整行压暗且不可选） */
-.lib-row {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1.2fr) minmax(0, 2.4fr) 48px auto;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  font-size: 13px;
-  border-bottom: 1px solid rgba(0, 212, 255, 0.08);
-  cursor: pointer;
+/* ===== 角色预览（静态一帧） =====
+   角色不是图片而是绘制代码（cast/<id>.js 里 window.__cast[id] = function (x, y, u, o) {…}），
+   预览由主进程拼好的 cast-preview/<来源>-<id>.html 在 iframe 里把它**真画一遍**得到
+   （见 main/cast/preview.ts）。底色用浅灰：角色多为深色勾边 / 浅色皮肤，深色底会糊成一片。
+   iframe 一律 pointer-events:none：点缩略图要穿透到卡片 / 行本身，预览窗口里没有可交互的东西。 */
+.cast-shot {
+  position: relative;
+  flex: none;
+  width: 56px;
+  height: 72px;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #EEF2F7;
 }
-.lib-row:last-of-type { border-bottom: 0; }
-.lib-row.off { opacity: 0.5; cursor: not-allowed; }
-.lib-row input[type="checkbox"] { accent-color: var(--color-primary); width: 14px; height: 14px; }
-.lib-missing { font-size: 11px; color: var(--color-warning); }
+.cast-shot-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #EEF2F7;
+  pointer-events: none;
+}
+.cast-shot-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 4px;
+  font-size: 11px;
+  color: #6B7A90;
+  text-align: center;
+}
+/* 弹窗里的大图（新建角色成功后） */
+.cast-shot.big { width: 200px; height: 260px; border-radius: 10px; }
+```
+
+**全局角色库弹窗的方格网格（源码原文）**：
+
+```css
+/* ===== 全局角色库弹窗：方格网格 =====
+   挑角色看的是长相，所以一格一张预览；描述 / 身高退到格子的 title 悬浮提示，不占格子。
+   列宽用 auto-fill + minmax：窄窗自动减列，不出现横向滚动（与素材卡片墙同一套写法）。 */
+.cast-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  margin-top: var(--space-2);
+  max-height: 56vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.cast-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(0, 212, 255, 0.14);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(10, 17, 32, 0.72);
+  cursor: pointer;
+  transition: border-color 0.2s ease, opacity 0.2s ease;
+}
+.cast-card:hover:not(.off) { border-color: rgba(0, 212, 255, 0.45); }
+/* 选中：主色描边 + 卡片辉光（与素材卡片的选中态同一套语言） */
+.cast-card.on { border-color: var(--color-primary); box-shadow: var(--glow-card); }
+/* 库里有索引、文件不在：整格压暗且不可点 */
+.cast-card.off { opacity: 0.5; cursor: not-allowed; }
+/* 格子里的预览撑满卡片宽度（高度固定，保证每格一样高） */
+.cast-card .cast-shot {
+  width: 100%;
+  height: 132px;
+  border: 0;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+  border-radius: 0;
+}
+.cast-card-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 8px 8px;
+}
+.cast-card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-card-sub {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "Consolas", monospace;
+}
+.cast-card-tick {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #03131a;
+  background: var(--color-primary);
+  box-shadow: var(--glow-primary);
+}
+.cast-card-missing {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--color-warning);
+  background: rgba(11, 18, 32, 0.82);
+}
+```
+
+**新建角色成功后的大图区（源码原文）**：
+
+```css
+/* ===== 新建角色成功后（弹窗里）：左边大图预览、右边名字与落地信息 ===== */
+.cast-done { display: flex; gap: 14px; align-items: flex-start; }
+.cast-done-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cast-done-meta { font-size: 12px; color: var(--text-secondary); }
+.cast-done-meta code { font-family: "JetBrains Mono", "Consolas", monospace; }
 ```
 
 其余要点：
 
 | 选择器 | 要点 |
 | --- | --- |
-| `.cast-row` | 一行一个角色的 grid：**勾选框 24px** / 名字 1.2fr / 描述 **2.6fr** / **`units` 48px 定宽** / 文件 **1.3fr** / 动作 `auto`（按钮不被压缩）；13px 正文 |
-| **`.cast-row.off`（本轮新增）** | 未勾选（本次不注入）：`opacity: .55` 整行压暗——**不是禁用**（还能点勾选框、还能点动作按钮），与素材卡片 `.mat-card.off` 的 `.5` 同一语言（角色行稍浅一点，因为行内还有动作按钮要读得清） |
-| `.cast-row` 的首 / 末 / 唯一行 | `first-child` / `last-child` 给上下圆角、`only-child` 单独给 10px 全圆角——**行之间靠 `border-bottom: 0` 拼成一张表**，末行再补回下描边 |
-| `.cast-name` | 角色名：主色 + 字重 600 + 单行省略（`text-overflow: ellipsis`） |
-| `.cast-desc` / `.cast-units` / `.cast-file` | 次要列：12px 雾蓝 + 单行省略；`units` 与文件路径走等宽字体，`units` 右对齐 |
-| **`.cast-actions`** | 行尾**三个**按钮（「存为全局」/「改这个角色」/「移除」）的容器：`flex` + `gap: 6px` + **`flex: none`**（不被文本列挤扁）。最初这里只有**一个**按钮，`auto` 那一列直接放 `.ch-pick`；两个按钮时加了包裹层，本轮到三个按钮仍是同一个包裹层 |
-| **`.lib-row`（本轮新增）** | 全局角色库弹窗的一行（`label`）：`18px` 放复选框 + 名字 1.2fr + 描述 2.4fr + `units` 48px + `auto`（放「文件缺失」标记）；`cursor: pointer`（整行可点 = 勾选）；行分隔线 `rgba(0,212,255,.08)`，末行去掉 |
-| **`.lib-row.off`（本轮新增）** | 库里「索引有、文件不在」的条目：`opacity: .5` + `cursor: not-allowed`，配合模板里 `:disabled="!!m.missing"` 的复选框——**压暗但不出列表**（用户得看见库里有坏记录） |
-| **`.lib-row input[type="checkbox"]`** | `accent-color: var(--color-primary)`（系统复选框染成主色）+ 14×14 |
-| **`.lib-missing`（本轮新增）** | 「文件缺失」标记：11px（设计规范 §3.1 的「最小」档）+ `var(--color-warning)` 信号橙 |
-| 复用的类 | **`.mat-check`（+ `.on`）**——行首勾选框直接复用素材卡片那个 18×18 圆角方块（本轮新增的复用，**不新造勾选样式**）；`.ch-sub`（章节 / 角色共用的副标题小字）与 `.hf-btn.ch-pick`（行内动作按钮）；两个弹窗复用 `.hf-modal*` 一整套 |
+| **`.cast-mat`** | 卡片级 modifier：`overflow: visible`。`.mat-card` 默认 `overflow: hidden`（素材卡要裁预览图），但角色卡的「…」菜单得从卡片里弹出去，所以只在这一类卡上放开；圆角与裁切交给下面的 `.cast-thumb` 自己做 |
+| **`.cast-mat-grid`** | 卡片墙**容器**级 modifier（用在 `CastSection.vue` 的 `<div class="mat-grid cast-mat-grid">` 上）：只写一条 `grid-template-columns: repeat(auto-fill, 130px)`——列宽定死 130px、一屏能并排放下更多角色；`display: grid` 与 `gap` 仍来自素材那张 `.mat-grid`（它是 `minmax(158px, 1fr)` 的弹性列，两者只差列宽）。**130 是下限、别再收回 100px**（100 宽配 150 高看着细长、下面两行字也挤成一团，用户实测反馈）。窄窗下 `auto-fill` 仍会自动减列，不出现横向滚动 |
+| **`.cast-thumb`** | `13:15`（**130×150**）竖版预览位：`aspect-ratio: 13 / 15` + `overflow: hidden` + 上圆角 `10px 10px 0 0` + 底色 `#EEF2F7`；里面的 `.cast-shot` 撑满（`width/height: 100%`、去掉自带描边与圆角）。为什么不用素材的 16:9：角色是竖构图（8u 高的人 vs 约 4u 宽），13:15 更省横向空间、人也更完整（卡片定宽 130px ⇒ 预览位正好 130×150，**高度保持 150 不变、只把宽从 100 放到 130**） |
+| **`.cast-more`** | 右上角「…」按钮（跟着卡片缩了一号）：`.hf-btn` + `position: absolute; top: 5px; right: 5px; z-index: 2`、`padding: 1px 6px`、**12px**、`line-height: 1.3`、**5px** 圆角。与素材卡的「移除」（`.mat-del` 的 `top/right: 7px` + `padding: 2px 7px` + 11px）同角，但**更贴角、内距更薄**——它只负责开菜单，真正动作都在菜单里 |
+| **`.cast-menu`** | 动作菜单（锚点上移到「…」下方 `top: 28px` / `right: 5px`）：`position: absolute; z-index: 20`（抬过相邻卡片）、`min-width: 118px`、4px 内边距、8px 圆角、1px 主色半透明描边 `rgba(0,212,255,.35)`、底 `rgba(11,18,32,.98)`、`box-shadow: 0 8px 24px rgba(0,0,0,.45)`。**本轮格子放宽到 130px、菜单尺寸没动**：`min-width: 118px` + `right: 5px` ⇒ 菜单（118px）整个落在 130px 的卡片内、不会探到相邻卡片上（源码注释**已随 130px 同步**：`.cast-more` 写「卡片只有 130px 宽，按钮不能占太多」，`.cast-menu` 写「卡片 130px 宽 + 菜单 118px + right:5px ⇒ 菜单整个落在卡片内」——CSS 代码块即按这两句照录）；点菜单外面收起（逻辑在 `CastSection.vue`） |
+| **`.cast-menu-item`（+ `.danger`）** | 菜单项：12px、`display: block`、`width: 100%`、左对齐、透明底；hover `rgba(0,212,255,.12)`、`:disabled` 走 `opacity: .45` + `not-allowed`；`.danger`（「移除」）文字 `var(--color-danger)`、hover `rgba(255,77,109,.14)` |
+| `.cast-name` / `.cast-desc` | **保留**的两个文字类（本轮拆成独立两条，`.cast-desc` 不再与 `.cast-units` / `.cast-file` 合并）：名字主色 + 600 + 单行省略；描述 12px 雾蓝 + 单行省略。**角色卡片上不再用它们**（名字走 `.mat-name`、`高几 u · 描述` 走 `.mat-path`），唯一使用点是新建角色弹窗的大图旁边 |
+| 勾选框 | 直接复用素材卡的 `.mat-check`（绝对定位在左上角 `top/left: 7px`）；**本轮不再有「行内改回正常流」的特例**，那条 `position: static` 覆盖规则已随 `.cast-row` 一起删除 |
+| **`.cast-shot` / `.cast-shot-frame` / `.cast-shot-note`** | 预览容器：基线尺寸 56×72、8px 圆角、浅灰底 `#EEF2F7`、描边 `rgba(0,212,255,.18)`——**本轮起三处使用点都把这个基线覆盖掉了**（`.cast-thumb` 里 100%×100%、`.cast-card` 里 100%×132px、弹窗大图 200×260）；`iframe` 铺满且 **`pointer-events: none`**（点击穿透到卡片）；没有 `src` 时显示 `.cast-shot-note`（11px 雾蓝，「…」/「无法预览」） |
+| **`.cast-shot.big`** | 新建角色成功后的 200×260 大图（圆角 10px）；尺寸只由这个修饰类改，组件本身不定尺寸 |
+| **`.cast-grid`** | 全局库弹窗的方格网格：`repeat(auto-fill, minmax(132px, 1fr))` + `gap: 10px` + **`max-height: 56vh` 可滚**（弹窗高度不失控）；窄窗自动减列，不出现横向滚动 |
+| **`.cast-card`（+ `.on` / `.off`）** | 每格一张预览 + 底部 `.cast-card-meta`；`.on` = 主色描边 + `--glow-card` 辉光（与素材卡片选中态同一套语言）+ 右上 `.cast-card-tick`（18px 主色圆底 ✓，深色字 `#03131a`）；`.off` = `opacity: .5` + `cursor: not-allowed` + 左上 `.cast-card-missing`「文件缺失」（11px 信号橙、深色胶囊底） |
+| **`.cast-card .cast-shot`** | 格子里的预览撑满卡片宽度、高固定 132px（保证每格一样高），去掉自己的描边与圆角 |
+| **`.cast-done*`** | 新建成功后的两栏：`.cast-done`（`flex` + `gap: 14px` + 顶对齐）、`.cast-done-info`（`flex:1; min-width:0`，名字 / 描述 / 身高与文件名 / 提示纵排）、`.cast-done-meta`（12px 雾蓝，`code` 用等宽字体） |
+| 复用的类 | **`.mat-check`（+ `.on`）**——卡片左上角勾选框直接复用素材卡片那个 18×18 圆角方块（**不新造勾选样式、也不改它的定位**）；**`.mat-grid` / `.mat-card` / `.mat-meta` / `.mat-name` / `.mat-path`**——角色卡片的版式整张都来自「项目素材」那一节，**只有列宽例外**（容器上再挂 `.cast-mat-grid` 把列宽定死 130px）；`.ch-sub`（角色块副标题小字）；两个弹窗复用 `.hf-modal*` 一整套 |
+| **已删除** | **本轮删的**：`.cast-list` / `.cast-row` / `.cast-row.off` / `.cast-row:first-child` / `.cast-row:last-child` / `.cast-row:only-child` / `.cast-row .mat-check` / `.cast-actions` / `.cast-units` / `.cast-file`——角色行版式整套撤掉，改成卡片墙时**没有新增任何版式类**（后来缩卡片时才加了容器级的 `.cast-mat-grid`）；**上一轮起就废弃、本轮一并清掉的**：`.lib-row` / `.lib-row:last-of-type` / `.lib-row.off` / `.lib-row input[type="checkbox"]` / `.lib-missing`。`grep` 在 `main.css` 里搜这些串都已无残留，**类名不要再用** |
 
-> **为什么列宽写 `minmax(0, Nfr)`**：`1fr` 的隐含下限是 `min-content`，描述或文件路径一长就会把列撑爆、`text-overflow: ellipsis` 直接失效——与 `.voice-list-*` / `.ch-*` / `.mat-grid` 是同一条取舍。
+### 3.5.1 「角色」页 · 动作示范（`.cast-demo-*` / `.cast-act-*`，本轮新增）
+
+> 使用方只有 `pages/CastPage/` 的四个组件：`CastActionModal.vue`（两栏外壳 + 两组列表 + AI 面板）、`CastDemoShot.vue`（动画 iframe）、`CastActionEditor.vue`（关键帧表）。这一节排在文件末尾（`.cast-style` 之后），是 `main.css` 最后一段。
+
+| 选择器 | 要点 |
+| --- | --- |
+| **`.cast-demo-shot`** | 会动的大图容器：`position: relative`、`flex: none`、**300×380**、1px 主色半透明描边、10px 圆角、`overflow: hidden`、底色 `#EEF2F7`（与静态预览一致：角色多为深色勾边 / 浅色皮肤） |
+| **`.cast-demo-frame`** | 里面的 `iframe`：`display: block`、`width/height: 100%`、`border: 0`、同色底。**与 `.cast-shot iframe` 不同，这里不加 `pointer-events: none`**——页内工具条（暂停 / 重播）要能点 |
+| **`.cast-act`** | 弹窗正文两栏：`display: flex; gap: 16px; align-items: flex-start` |
+| **`.cast-act-left`** / **`.cast-act-right`** | 左栏 `flex: none` + 纵向 `gap: 8px` + **宽 300px**（与 `.cast-demo-shot` 同宽）；右栏 `flex: 1; min-width: 0`（可收缩，否则长名字会撑破弹窗） |
+| **`.cast-act-now`** / **`.cast-act-now-name`** | 大图下方「当前动作名 + 时长/循环」：`baseline` 对齐 + gap 8；名字 14px / 600 / 主色 / 单行省略 |
+| **`.cast-act-list`** | 动作列表容器：纵向 `gap: 4px`、`margin-bottom: 10px`、**`max-height: 200px` 可滚**（两组列表各自滚，弹窗高度不失控） |
+| **`.cast-act-item`（+ `.on` / `:hover`）** | 一行一条：`width: 100%`、`padding: 6px 9px`、1px 主色半透明描边、8px 圆角、深色半透明底、13px、手型光标；hover 描边加亮 + 主色 6% 底；**`.on` = 主色描边 + `linear-gradient(90deg, rgba(0,212,255,.18), transparent)`**（与侧栏菜单选中态、音色列表同一套语言） |
+| **`.cast-act-tag`（+ `.ai`）** | 来源徽标：11px、`border-radius: 999px`、雾蓝描边（「内置」/「自建」）；**`.ai` 换成数据绿**（「AI」） |
+| **`.cast-act-item-meta`** | 时长那一段：12px 雾蓝 + 等宽字体（`tabular-nums` 的观感，时长数字不跳动） |
+| **`.cast-act-item-acts`** / **`.cast-act-link`（+ `.danger`）** | 行尾「改 / 删」：12px 主色文字链接、hover 下划线；`.danger` 换 `--color-danger`（删专属动作 / 删公共动作都用它） |
+| **`.cast-act-ai`** | 「AI 生成…」面板：`margin-bottom: 10px` + `padding: 10px` + 主色 25% 描边 + 10px 圆角 + 深色半透明底（与列表行区分开，但不抢主按钮的视觉） |
+| **`.cast-act-table`** | 关键帧表外框：`margin: 10px 0` + 主色 18% 描边 + 10px 圆角 + **`overflow-x: auto`**（参数多时横向滚，不撑破弹窗） |
+| **`.cast-act-tr`（+ `.head`）** | 一行：`display: grid` + `grid-template-columns: 74px`（时间列）+ `grid-auto-flow: column` + **`grid-auto-columns: 62px`**（每个参数一列，**参数表加减项时不用改 CSS**）+ gap 4 + 下分隔线；`.head` 用主色 5% 底 + 12px 雾蓝（表头） |
+| **`.cast-act-th`** | 表头单元格：单行省略（列宽固定 62px，长标签靠 `title` 给全文） |
+| **`.cast-act-cell`** | 表格里的输入框 / 下拉：`width: 100%`、12px、6px 圆角、深底主色 20% 描边 |
+| **`.cast-act-del`（+ `:disabled`）** | 删帧「×」：26×24、透明底 + 危险色 40% 描边、危险色文字；**`:disabled` 时 `opacity: .4` + `not-allowed`**（至少留两帧） |
+
+> **为什么用 `grid-auto-columns` 而不是给每个参数写死列宽**：列由 `CAST_ACTION_PARAMS` 渲染（10 项，且可能增减），写死 `nth-child` 会在加参数时错位；统一 62px 让「数字 / 下拉」都有可点的宽度。
+>
+> **`.cast-card.static` 的 `cursor` 改动**：由 `default` 改成 `pointer`——「角色」页的卡片现在**双击看动作示范**，可点的手势要跟上；选角色弹窗里的 `.cast-card` 本来就是整格可点（默认 `pointer`），两者不冲突。
+
+> **为什么列宽写 `minmax(0, Nfr)`**：`1fr` 的隐含下限是 `min-content`，描述或文件路径一长就会把列撑爆、`text-overflow: ellipsis` 直接失效——与 `.voice-list-*` / `.ch-*` / `.mat-grid` / `.cast-grid` 是同一条取舍。
 
 ## 4. 命名与约定
 
@@ -414,11 +612,11 @@
 | --- | --- | --- |
 | `hf-*` | 预览转视频、配音 Tab、弹窗 | 与 HyperFrames / 配音通用控件相关：`hf-btn`（含 `.hf-btn-primary` / `.hf-btn-danger`）、`hf-file`、`hf-status`、`hf-detail`、`hf-video*`、`hf-tabs`/`hf-tab`、`hf-modal-*`（下拉的 `hf-sel*` 前缀属 `components/HfSelect.vue`） |
 | `hgen-*` | HTML 生成页与工作台 | `hgen-grid`、`hgen-panel`、`hgen-subtitle`、`hgen-input`、`hgen-row`、`hgen-actions`、`hgen-tip`、`hgen-source`、`hgen-block`、`hgen-check`、`hgen-frame-wrap`、`hgen-frame` |
-| **`mat-*`** | **HTML生成页素材库（本轮新增）** | **素材卡片墙**：`mat-grid`、`mat-card`（状态类 `.off`）、`mat-thumb`、`mat-play`、`mat-meta`、`mat-name`、`mat-path`、`mat-check`（状态类 `.on`）、`mat-del`、`mat-add`、`mat-count`；图片组的点靠 `.dot.dot-img` 而非新前缀 |
+| **`mat-*`** | **HTML生成页素材库（本轮新增）** | **素材卡片墙**：`mat-grid`、`mat-card`（状态类 `.off`）、`mat-thumb`、`mat-play`、`mat-meta`、`mat-name`、`mat-path`、`mat-check`（状态类 `.on`）、`mat-del`、`mat-add`、`mat-count`；**角色卡片墙也整套复用它**（见 §3.5，角色只多 `.cast-mat` / `.cast-mat-grid` / `.cast-thumb` / `.cast-more` / `.cast-menu*`，其中 `.cast-mat-grid` 只覆盖列宽、`.mat-grid` 仍是 `minmax(158px, 1fr)`）；图片组的点靠 `.dot.dot-img` 而非新前缀 |
 | **`cl-*`** | **设置页更新日志弹窗** | **随包 `CHANGELOG.md` 的展示**：`cl-ver`（版本 + 时间抬头）、`cl-list`、`cl-item`、`cl-item-title`、`cl-date`、`cl-count`、`cl-tag`（配色档 `.cl-tag-ok` / `.cl-tag-err` / `.cl-tag-warn`）、`cl-more`、`cl-hist`、`cl-hist-head`、`cl-hist-body`、`cl-hist-block`、`cl-hist-ver`、`cl-hist-name`、`cl-caret` |
 | **`ch-*`** | **HTML生成页章节列表（本轮新增）** | **只读章节列表的行样式**：一行一章（序号 / 标题 / 起止 / 时长 / `pages/cNN.js` / 「改这一章」）；列宽用 `minmax(0, Nfr)`，使用方只有 `HtmlGenPage/ChapterSection.vue` |
-| **`cast-*`** | **HTML生成页「项目素材 · 角色」块** | **角色行的单元格样式**：`cast-list`、`cast-row`（状态类 **`.off`** = 本次不注入）、`cast-name`、`cast-desc`、`cast-units`、`cast-file`、**`cast-actions`（行尾三个按钮的容器）**；勾选框复用 `.mat-check`，行内动作按钮复用 `.hf-btn.ch-pick`，说明小字复用 `.ch-sub`，使用方只有 `HtmlGenPage/CastSection.vue` |
-| **`lib-*`** | **HTML生成页「从全局库添加」弹窗（本轮新增）** | **全局角色库弹窗的行样式**：`lib-row`（勾选框 + 名字 + 描述 + `u` + `auto`）、状态类 `.off`（缺文件压暗不可选）、`lib-missing`（「文件缺失」11px 信号橙）；弹窗外壳复用 `.hf-modal*`，使用方只有 `HtmlGenPage/CastSection.vue` |
+| **`cast-*`** | **HTML生成页「项目素材 · 角色」块 + 预览 + 两个弹窗** | **角色相关四组**：① 卡片墙：`cast-mat`（卡片级 modifier，`overflow: visible`）、**`cast-mat-grid`**（容器级列宽覆盖，定死 130px）、`cast-thumb`（`13:15` 预览位，130×150）、`cast-more`（右上「…」按钮）、**`cast-menu` / `cast-menu-item`（状态类 **`.danger`** = 移除）**、`cast-name` / `cast-desc`（只剩新建弹窗在用）；② 预览：**`cast-shot`**（状态类 `.big` = 200×260）、**`cast-shot-frame`**（`pointer-events:none`）、**`cast-shot-note`**；③ 全局库方格：**`cast-grid`**、**`cast-card`**（状态类 `.on` 选中 / `.off` 缺文件）、**`cast-card-meta` / `cast-card-name` / `cast-card-sub` / `cast-card-tick` / `cast-card-missing`**；④ 新建成功：**`cast-done` / `cast-done-info` / `cast-done-meta`**。勾选框与卡片版式复用素材那一组 `.mat-*`（`.mat-check` / `.mat-grid` / `.mat-card` / `.mat-meta` / `.mat-name` / `.mat-path`），说明小字复用 `.ch-sub`；使用方是 `HtmlGenPage/CastSection.vue` / `CastShot.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue`。**⑤ 动作示范（本轮新增、「角色」页专用）**：`cast-demo-shot` / `cast-demo-frame`（300×380 动画 iframe）、`cast-act` / `cast-act-left` / `cast-act-right`、`cast-act-now` / `cast-act-now-name`、`cast-act-list` / `cast-act-item`（状态类 `.on`）/ `cast-act-tag`（状态类 `.ai`）/ `cast-act-item-meta` / `cast-act-item-acts` / `cast-act-link`（状态类 `.danger`）、`cast-act-ai`、`cast-act-table` / `cast-act-tr`（状态类 `.head`）/ `cast-act-th` / `cast-act-cell` / `cast-act-del`；使用方是 `CastPage/CastActionModal.vue` / `CastDemoShot.vue` / `CastActionEditor.vue` |
+| ~~`lib-*`~~ | （已删除） | 旧的「从全局库添加」整行勾选列表：`lib-row` / `lib-row.off` / `lib-row input[type="checkbox"]` / `lib-missing`。本轮全局库改成 `.cast-grid` / `.cast-card` 方格网格后**整套删除**，与本文件其他节的 `input[type="checkbox"]` 规则一并清掉（`.mat-check` 等仍是自绘方块）。**不要再新增 `lib-*` 类** |
 | `hg-prev-*` | 预览播放控制条 | `hg-prev-ctl`、`hg-prev-bar`（状态类 `.seeking`）、`hg-prev-track`、`hg-prev-bar-fill`、`hg-prev-time`、`hg-prev-hint` |
 | `hg-help*` | HTML 生成页（**动作按钮内部 2 处 + 卡片标题「用法」+ 画布行**） | 行内帮助 `?`：`hg-help`、`hg-help-icon`、`hg-help-pop`；显隐靠 `.hg-help:hover` 后代选择器。设计系统本身未变：后两处是**非按钮锚点**，靠模板内联覆盖——`letter-spacing:0`（锚在带 2px 字距的 `.panel-title` 里）与 `top:calc(100% + 8px);bottom:auto`（**向下**展开，避免顶出滚动容器 `.content` 的 `overflow-y:auto` 被整块裁掉） |
 | `step-*` / `project-bar*` | 项目链路状态条 | `project-bar*`、`step-chain`、`step-node`、`step-dot`、`step-arrow`；状态用修饰类 `.done` / `.active-now` / `.clickable` |
@@ -447,7 +645,7 @@
 
 ## 6. 注意事项与实现要点
 
-- **`!important` 共两处**：`.hero-sub`（压过 `.hero p` 的 14px）与 `.whisper-bar.indeterminate .whisper-bar-fill`（压过 JS 写的行内宽度）；素材节、更新日志节与**角色列表节都没有**用 `!important`。
+- **`!important` 共两处**：`.hero-sub`（压过 `.hero p` 的 14px）与 `.whisper-bar.indeterminate .whisper-bar-fill`（压过 JS 写的行内宽度）；素材节、更新日志节与**角色卡片墙节都没有**用 `!important`。
 - **滚动条只有一套、全局继承**：`main.css` 基础段（`html, body` 之后、`body` 之前）用 `*::-webkit-scrollbar` 系列定义唯一一套——宽高 8px、轨道与角落透明、`border-radius: 999px` 的滑块 `rgba(0,212,255,.25)`、悬停 `rgba(0,212,255,.45)`；`.content`（右侧整页内容区）、`.sub-list`（字幕条目列表）、`.voice-list-body`（我的音色列表）等所有滚动容器一律继承，不在任何容器上重复定义。**全局刻意不写 `scrollbar-width` / `scrollbar-color`**：Chromium（Electron 31 = Chromium 126）里这两个标准属性会顶掉 `::-webkit-*` 伪元素的自定义效果，写了就退回默认灰白滚动条。确需「不显示滚动条但仍可滚动」时，才在该容器上单独写 `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`（目前没有容器在用）；预览 iframe（`hgpreview://` 协议的 HTML 预览页）是独立文档，不受这条全局规则影响。
 - **毛玻璃写法固定为双写**：`backdrop-filter: blur(12px)` 后紧跟 `-webkit-backdrop-filter`（`.card`、`.flow-node`、`.metric-card`）。**素材卡片没有用毛玻璃**——它整卡 `overflow: hidden` 且深底不透明感更强。
 - **`.card` 的 `backdrop-filter` 会捕获后代的 `position: fixed`**：带 `backdrop-filter` 的元素会成为 `fixed` 后代的包含块 ⇒ 挂在卡片里的弹窗（`.hf-modal-mask` 是 `position: fixed`）会被卡片框住、顶部跑到窗口外。**解法是弹窗组件自己 `Teleport` 到 `<body>`**，落地见 `pages/SettingsPage/components/{UpdateSection,ChangelogDialog}.vue`（设置页的「自定义更新源」与「更新日志」弹窗）与配音页 `VoiceSection.vue` 的两个弹窗（各处都留了同样的注释）。渲染层现有 **5 处** `<Teleport to="body">` 里只有 `components/HfSelect.vue` 的弹层是为避开祖先 `overflow: hidden` 而挂，其余 4 处都是这个坑。本文件不改 `.card` 的双写写法。

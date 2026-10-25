@@ -12,10 +12,11 @@
 ```
 
 - **五个节点 ↔ 五个页面**（认功能先认页面，再认代码）：① 内容脚本 = 侧栏「内容脚本」页（左边自己写场景 / 右边「AI 创作」对话生成）→ ② 配音 = 「配音」页（文字生音频）→ ③ 字幕 = 「字幕生成」页 → ④ HTML 生成 = 「HTML生成」页（**生成 HTML / 按需求修改 / 转视频三个按钮都只在这一页**；「全局视觉风格」「画布」「需求描述」「项目素材」也都在这儿）→ ⑤ 成片在「视频预览」页看（那一页只能看和导出，不能转视频）。
-- **项目化管理**：每个「项目」对应 `userData/projects/<项目名>/` 一个目录，统一存放 `project.json`（只存索引）、`subtitle.txt`、`content.json`、`index.html`、`audio/`、`video/`。
+- **另有一个不属于流水线的全局页**：侧栏「角色」= **全局角色库**（`userData/cast-library/`）。角色只有全局一份、与项目无关；「角色」页负责新建 / 改画法 / 改信息 / 删除，「HTML生成」页只做「本片用哪几个」的勾选。项目里的 `<项目>/cast/<id>.js` 是**产物副本**（生成前由主进程从库同步），界面上不可编辑——详见 `src/main/cast/library.ts` 头部。
+- **项目化管理**：每个「项目」对应 `userData/projects/<项目名>/` 一个目录，统一存放 `project.json`（只存索引）、`subtitle.txt`、`content.json`、`index.html`、`audio/`、`video/`、`cast/`（角色副本）。
 - **本机完成重活**：语音识别（whisper.cpp）与视频渲染（HyperFrames + FFmpeg）均在本机 CPU 运行，不消耗 API 额度；内容脚本与 HTML 动画页面由用户自配置的 OpenAI 兼容模型 Agent 流式生成/修改（AI 只产出文本 / JSON，落盘一律由主进程做）。
 - **技术栈**：Electron 31 + Vue 3 + electron-vite 5 + TypeScript（全量 TS；main/preload 输出 CJS）；无 vue-router / pinia，导航用页面注册表 + `goPage()`，全局状态为模块级 `reactive` 单例。
-- **源码分层**：`src/main`（主进程 13 个模块：`index` + 11 个业务模块 + `agent/` 与 `updater/` 两个目录，共 21 个 `.ts`）· `src/preload`（12 个命名空间的桥接层）· `src/renderer`（Vue 界面：外壳 / 8 页面 / 设计系统）· `src/shared`（IPC 频道常量与跨进程类型）· `src/agent`（独立实验脚本，不进构建图、不打包）。
+- **源码分层**：`src/main`（主进程共 50 个 `.ts`：根目录 9 个单文件 + `cast/` 6 个 + `voice/` 10 个 + `projects/` 15 个 + `agent/` 6 个 + `updater/` 4 个；`cast/`、`voice/`、`projects/`、`agent/`、`updater/` 都是「同名目录 + `index.ts` 出口」的模块，对外只暴露具名导出）· `src/preload`（13 个命名空间的桥接层）· `src/renderer`（Vue 界面：外壳 / 9 页面 / 设计系统）· `src/shared`（IPC 频道常量与跨进程类型）· `src/agent`（独立实验脚本，不进构建图、不打包）。
 - **运行**：`npm install` → `npm run dev`（开发）/ `npm run build`（构建）/ `npm run typecheck`（类型检查）；打包用 `npm run pack` 或 `npm run dist`。
 
 ## 二、wiki 地址
@@ -60,7 +61,7 @@
 
 ## 五、关键约定
 
-1. **IPC 契约不改**：频道名集中在 `src/shared/ipc.ts`，载荷格式与 `src/preload/index.ts` 的 12 个命名空间方法一一对应；新增接口需主进程 `register()`、`shared/ipc.ts`、preload 三处齐改。
+1. **IPC 契约不改**：频道名集中在 `src/shared/ipc.ts`，载荷格式与 `src/preload/index.ts` 的 13 个命名空间方法一一对应；新增接口需主进程 `register()`、`shared/ipc.ts`、preload 三处齐改。
 2. **preload 必须 CJS**：全工程不设 `"type": "module"`（仅 `src/agent/package.json` 单独声明 ESM）。
 3. **改代码前先查 wiki 索引与更新日志**：动任何源码前，先看 `wiki/README.md` 的索引定位受影响的文档，再看 [`CHANGELOG.md`](CHANGELOG.md) 当前版本区块确认「这个版本已经改了什么」，再动手。
 4. **更新日志必记一条**：改完（并通过 typecheck）后，在 [`CHANGELOG.md`](CHANGELOG.md) 的**当前版本区块**追加一条 `[标签]` 记录（影响范围 + 验证方式）；改到第 2 次的功能标 `[完整版]`，仍在一个版本内演进的标 `[待续]`——**详细规则见第三节「更新日志」**，漏记视同改动未完成。
@@ -70,7 +71,7 @@
    - **主 agent 不主动查，子 agent 结束再检查**：运行期间不轮询（不看 `list_agents` / `job_output`、不盯中间产物）；等它**结束那一次**再抽查它报告里**可核对的断言**——行数（用 `[IO.File]::ReadAllLines`，别用 `Get-Content .Count`）、文档里的代码块是否与源码逐行一致、`git diff` 与残留字符串检索。**后台 agent 的报告不是证据**：已两次出现自述与事实不符（一次用 `write` 把 400 行文档截断成 11 行、一次声称类型代码块"与源码逐字一致"却在里面写了源码中不存在的注释）。
    - 主 agent 在代码改动收尾时留一份**给后台 agent 的简明变更清单**（新增/删除/改名的文件、页面键/注册表变化、新增组件与其契约），这就是派发任务的输入。
    - 为什么：wiki 同步是机械但量大的活（一次页面级重构能牵动数十个文档），逐行改的往返开销远大于重写；而后台 agent 独立核读源码时也更容易发现主 agent 的疏漏。
-6. **wiki 文档粒度**：渲染层——**每个页面一篇**（该页面自己的子组件与助手并入同一篇，代码侧对应 `src/renderer/src/pages/<PageName>/` 一页一目录、入口 `index.vue`，代码与文档同构）、**目录级一篇**（`wiki/files/renderer/src/assets.md` 覆盖 `assets/`、`wiki/files/renderer/src/components.md` 覆盖 `components/`）、**公共方法与工具一篇**（`wiki/files/renderer/src/common.md`，覆盖 composables / utils / 页面注册表）；主进程、preload、shared 仍按源文件逐篇。
+6. **wiki 文档粒度**：渲染层——**每个页面一篇**（该页面自己的子组件与助手并入同一篇，代码侧对应 `src/renderer/src/pages/<PageName>/` 一页一目录、入口 `index.vue`，代码与文档同构）、**目录级一篇**（`wiki/files/renderer/src/assets.md` 覆盖 `assets/`、`wiki/files/renderer/src/components.md` 覆盖 `components/`）、**公共方法与工具一篇**（`wiki/files/renderer/src/common.md`，覆盖 composables / utils / 页面注册表）；主进程——**单个源文件一篇**（如 `wiki/files/main/settings.ts.md`），**同名目录模块一篇**（`src/main/cast/`、`src/main/voice/`、`src/main/projects/`、`src/main/agent/`、`src/main/updater/` 各自只写 `wiki/files/main/<目录名>.md`，内部文件在那一篇里列成表，**一拆文件就多写一页的情况不该出现**）；preload、shared 仍按源文件逐篇。
 7. **跨目录导入用别名**：渲染层跨目录导入统一走 `@renderer/...`（如 `@renderer/composables/useAppStore`、`@renderer/utils/time`、`@renderer/components/StepBar.vue`、`@renderer/pages`）；仅同页面/同目录内部使用相对路径（`./Xxx.vue`）。
 8. **`composables` 与 `utils` 的分界**：依赖 Vue 响应式 API（`ref`/`reactive`/`computed`/`watch`/生命周期）或有状态、带副作用（IPC 订阅、localStorage）的复用逻辑放 `src/renderer/src/composables/`，文件名以 **`use`** 开头（如 `useAppStore.ts`、`useToast.ts`、`useRenderProgress.ts`）；无状态纯函数放 `src/renderer/src/utils/`（如 `escape.ts`、`time.ts`、`rate.ts`）。
 9. **文件行数：300 行考虑拆，500 行是硬上限**：
