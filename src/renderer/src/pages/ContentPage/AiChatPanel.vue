@@ -69,8 +69,34 @@
       <input v-model="sceneCount" class="hgen-input ct-num" :disabled="busy" placeholder="自动" />
       <label class="sel-label">目标时长(秒)</label>
       <input v-model="targetSeconds" class="hgen-input ct-num" :disabled="busy" placeholder="不限" />
+      <button
+        class="hf-btn ct-cast-btn"
+        :disabled="busy"
+        :title="pickedCast.length ? '已选角色：' + castNames + '（只写进提示词，不导入本项目）' : '从全局角色库挑角色：只影响这一版怎么写，不导入本项目'"
+        @click="castOpen = true"
+      >角色：{{ pickedCast.length ? pickedCast.length + ' 个' : '选择' }}</button>
       <span class="ct-hint">Ctrl+Enter 发送</span>
     </div>
+    <!-- 已选角色：一眼看到「这一版会按谁写」，点 × 就能移出（只影响提示词，不动项目里的角色） -->
+    <div v-if="pickedCast.length" class="ct-cast-row">
+      <span>本片角色</span>
+      <span
+        v-for="m in pickedCast"
+        :key="m.id"
+        class="ct-cast-chip"
+        :title="(m.desc || '（未描述）') + ' · 高 ' + m.units + 'u'"
+      >
+        {{ m.name }}
+        <button class="ct-cast-x" :disabled="busy" title="移出本次写稿" @click="removeCast(m.id)">×</button>
+      </span>
+    </div>
+
+    <CastPickerModal
+      :open="castOpen"
+      :selected="castIds"
+      @close="castOpen = false"
+      @confirm="onCastConfirm"
+    />
   </div>
 </template>
 
@@ -84,7 +110,7 @@ import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 import { toast } from '@renderer/composables/useToast'
 // 「估算时长」的字/秒口径与字幕估时同一份（@shared/constants），别在这里另写一个常数
 import { EST_CHARS_PER_SEC } from '@shared/constants'
-import type { Scene, ScriptChatRoundMeta } from '@shared/types'
+import type { Scene, ScriptCastRef, ScriptChatRoundMeta } from '@shared/types'
 import {
   scenes,
   applyScenes,
@@ -95,7 +121,10 @@ import {
   setActiveChatVersion,
   clearChatRecords
 } from './helpers'
+// 本次会话已选的角色（模块级单例：切 Tab / 切页面不丢，不落盘）
+import { pickedCast } from './castPick'
 import ScriptRoundCard from './ScriptRoundCard.vue'
+import CastPickerModal from './CastPickerModal.vue'
 
 const EXAMPLES = ['60 秒讲清什么是大模型幻觉', '3 分钟产品介绍，口吻克制', '把一段技术文档讲成人话，90 秒'];
 
@@ -112,6 +141,10 @@ const thinkOpen = ref(false);
 const errorMsg = ref('');
 const errorRaw = ref('');
 const rawOpen = ref(false);
+// 选角色弹窗开关；已选清单本身在 ./castPick（模块级，切页面不丢）
+const castOpen = ref(false);
+const castIds = computed(() => pickedCast.value.map((m) => m.id));
+const castNames = computed(() => pickedCast.value.map((m) => m.name).join('、'));
 // 展开的轮次下标 + 它对应的场景（懒加载；null = 正在读）
 const expanded = ref(-1);
 const expandedScenes = ref<Scene[] | null>(null);
@@ -200,6 +233,15 @@ async function clearChat(): Promise<void> {
   toast('对话记录已清空');
 }
 
+// 选完角色：整份替换（弹窗里已按 id 收敛过；库里删掉的角色自然不会回来）
+function onCastConfirm(list: ScriptCastRef[]): void {
+  pickedCast.value = list;
+}
+
+function removeCast(id: string): void {
+  pickedCast.value = pickedCast.value.filter((m) => m.id !== id);
+}
+
 async function send(): Promise<void> {
   if (busy.value) return;
   const text = request.value.trim();
@@ -218,7 +260,9 @@ async function send(): Promise<void> {
       // 上下文 = 编辑器当前内容（AI 面板与编辑器共用同一份 scenes）
       scenes: scenes.value.map((s) => ({ ...s })),
       sceneCount: numOf(sceneCount.value),
-      targetSeconds: numOf(targetSeconds.value)
+      targetSeconds: numOf(targetSeconds.value),
+      // 角色只作写稿上下文：主进程把它拼成【角色】块，既不落盘、也不导入项目
+      cast: pickedCast.value.map((m) => ({ ...m }))
     });
     if (!res || !res.ok) {
       const msg = (res && res.message) || '生成失败';
@@ -369,5 +413,43 @@ onMounted(async () => {
   margin-left: auto;
   font-size: 12px;
   color: var(--text-secondary);
+}
+/* 「角色」按钮与已选角色 chips：按钮在参数行里（与场景数 / 目标时长同排），chips 单独一行 */
+.ct-cast-btn {
+  flex: none;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.ct-cast-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.ct-cast-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  background: rgba(0, 212, 255, 0.08);
+  color: var(--color-primary);
+  font-size: 12px;
+}
+.ct-cast-x {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1;
+}
+.ct-cast-x:hover:not(:disabled) {
+  color: var(--color-danger);
 }
 </style>

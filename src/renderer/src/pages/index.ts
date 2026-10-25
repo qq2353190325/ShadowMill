@@ -10,10 +10,12 @@ import ContentPage from './ContentPage/index.vue'
 import TextTtsPage from './TextTtsPage/index.vue'
 import SubtitlePage from './SubtitlePage/index.vue'
 import HtmlGenPage from './HtmlGenPage/index.vue'
+import CastPage from './CastPage/index.vue'
 import VideoPreviewPage from './VideoPreviewPage/index.vue'
 import SettingsPage from './SettingsPage/index.vue'
 
 // 音色管理不再是独立页：已并入 TextTtsPage 的第三个 Tab（原 SoundCopyPage 下线）
+// 角色（cast）是全局角色库的管理页：角色只有全局一份，与项目无关（见 main/cast/library.ts）
 export const pages: Record<PageKey, Component> = {
   home: HomePage,
   about: AboutPage,
@@ -21,6 +23,7 @@ export const pages: Record<PageKey, Component> = {
   'text-tts': TextTtsPage,
   subtitle: SubtitlePage,
   'html-gen': HtmlGenPage,
+  cast: CastPage,
   'video-preview': VideoPreviewPage,
   settings: SettingsPage
 };

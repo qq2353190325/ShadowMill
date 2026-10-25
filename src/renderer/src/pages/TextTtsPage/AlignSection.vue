@@ -71,7 +71,7 @@ import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import { escTxt } from '@renderer/utils/escape'
 import { useEnvGate } from '@renderer/composables/useEnvGate'
 import { fmtTime, fmtTimeMs } from '@renderer/utils/time'
-import { ttsUrl } from '@renderer/utils/url'
+import { userPathUrl } from '@renderer/utils/url'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import { activeProviderLabel, activeTtsTab, firstVoiceId, loadVoices, refreshVoiceKeyState, requireCfg, voiceGroups, voiceKeyReady, voiceModelOf } from './helpers'
 
@@ -229,8 +229,8 @@ async function startAlign(skipEnvGuard = false): Promise<void> {
     });
     if (res && res.ok) {
       alignResult.value = res as unknown as AlignResult;
-      // 整轨试听走 hgpreview://tts/…（对齐产物在 userData/voice/align-*/，见 utils/url.ts）
-      alignAudioSrc.value = ttsUrl(String(res.audioPath || ''));
+      // 整轨试听走 hgpreview://…?user=1（对齐产物在 userData/voice/align-*/，见 utils/url.ts）
+      alignAudioSrc.value = userPathUrl(String(res.audioPath || ''));
       showAlignBar({ text: '对齐完成：' + ((res as unknown as AlignResult).details || []).length + ' 句', kind: 'done' }, false);
       setStatus(res.message || '对齐完成', 'hf-ok');
     } else if (res && res.canceled) {
@@ -268,7 +268,7 @@ function onCancel(): void {
 function playSeg(path: string): void {
   const el = segAudioEl.value;
   if (!el) return;
-  const url = ttsUrl(path);   // 对齐产物在 userData/voice/align-*/ 下，走 hgpreview://tts/…
+  const url = userPathUrl(path);   // 对齐产物在 userData/voice/align-*/ 下，走 hgpreview://…?user=1
   if (!url) { toast('这一句的试听文件不在可预览目录里'); return; }
   el.src = url;
   // 失败原因别只报"文件失效"：dev 下以前是 http 页读 file:// 被 Chromium 拒（现已改走协议），

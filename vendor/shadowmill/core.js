@@ -13,7 +13,12 @@
 // 两条硬约定：
 //   ① 有 p5 + p5.brush 时用笔刷画（水彩质感的来源）；没有时传 opts.ctx（Canvas 2D 上下文）也能画，
 //      只是变成平涂 + 描边。**同一个形状两种模式都该能画出来。**
-//   ② 不许在这里引入时间概念（这是纯绘制层）：动画由章节的 GSAP 时间轴驱动。
+//   ② 不许引入**有状态**的时间概念：不读 Date.now / 不自己跑 rAF 与时间轴（动画由章节的时间轴驱动）。
+//      **纯函数式**的「时间 → 拍位 / 扫色进度」换算是允许且必须在这一层做的，见 v7 的
+//      beatAt / beatN / pulse / pulse2 / karaoke / karaokeBand。
+//
+// 本文件**必须保持单文件**：骨架按 `./core.js` 给每个项目复制一份、按 CORE_VERSION 覆盖（见 coreLib.ts）。
+// 拆成多文件会让每个项目多出几个引用与同步点，而且没有第二个入口去聚合它们。
 (function () {
   'use strict';
 
@@ -28,7 +33,11 @@
   //     默认改成 `pen`，传错的名字一律退回 `pen`（别让一次笔型拼错把整个形状的描边炸掉）。
   // v6：加 `PRESETS`（wash / soak / grain / light / inked）+ `paint` 的 `preset` 选项。实测「平涂还是水彩」
   //     全看 bleed / tex / fillOp 这几个数，把好用的组合命好名，模型用名字而不是每次自己拧。
-  var CORE_VERSION = '6';
+  // v7：卡拍与卡拉OK 收进这一层：`beatAt / beatN / pulse / pulse2`（BPM + 偏移 → 拍位 / 击拍脉冲，**BPM 由调用方自己定**）、
+  //     `karaoke / karaokeBand`（按字符估唱速的扫色进度与字幕条绘制）。理由：参考实现（PDoomVideo）就是
+  //     把 88 BPM / 0.21s 写死在代码里，并不存在「节拍网格」输入；而每章手写这套换算必然踩同一个坑
+  //     （把拍和小节搞混、用 Math.random 抖动、读 Date.now 让 seek 后不可重现）。
+  var CORE_VERSION = '7';
 
   // ===== 确定性随机：同一个 seed 永远同一个结果（禁 Math.random 的替代品） =====
   function hash(n) {
@@ -68,6 +77,100 @@
       }
     }
     return keys[keys.length - 1][1];
+  }
+
+  // ===== 节奏与字幕扫色（纯函数：给时间，出拍位 / 脉冲 / 唱到第几个字）=====
+  // 为什么放在这一层：卡拍只是一次「时间 → 拍位」换算，但每章手写一遍迟早出三种错——
+  // 把「拍」和「小节」搞混、给抖动用 Math.random、读 Date.now（seek 到任意一帧就不可重现）。
+  // **BPM 与偏移由调用方自己定**：整片用一个常量写在文件顶部（参考实现 PDoomVideo 就是把
+  // 88 BPM / 0.21s 写死在代码里的），别每章各拧一个——那是「整支片子的节奏」，不是「一章的参数」。
+  // 为什么这里还给一份默认值：章节是**一章一次调用**生成的，模型看不到别的章写了什么；
+  // 不给默认值，各章会各写一个 BPM，视觉上就是"同一支片子换了三次拍"。不传 bpm/offset 就用 MC.BPM / MC.OFF。
+  var DEFAULT_BPM = 88, DEFAULT_OFF = 0;
+  function beatAt(t, bpm, offset) {
+    var b = bpm > 0 ? bpm : DEFAULT_BPM;
+    var off = offset === undefined ? DEFAULT_OFF : offset;
+    return (t - off) * b / 60;
+  }
+  function beatN(t, bpm, offset) { return Math.floor(beatAt(t, bpm, offset)); }
+  // 击拍脉冲：每次踩到拍给 1，之后线性衰减回 0。decay 的单位是「拍」（默认 0.35 拍 ≈ 240ms @ 88BPM）
+  function pulse(t, bpm, offset, decay) {
+    var p = beatAt(t, bpm, offset), k = p - Math.floor(p);
+    var d = decay === undefined ? 0.35 : decay;
+    if (!(d > 0)) return k < 1e-9 ? 1 : 0;
+    return Math.max(0, 1 - k / d);
+  }
+  // 八分音符脉冲：同一套换算，BPM 翻倍（这就是参考实现的 pulse2）
+  function pulse2(t, bpm, offset, decay) { return pulse(t, (bpm > 0 ? bpm : DEFAULT_BPM) * 2, offset, decay); }
+  // 卡拉OK 扫色进度：一条字幕 [a, b] + 文本 → 已经唱了几个字。
+  // 唱速按字符估（0.45s 起步 + 每字 0.075s，与参考实现一致）⇒ **不需要词级时间戳**，
+  // 句级起止时间就够；中英文混排都按「非空白字符数」算。
+  function karaoke(t, a, b, text) {
+    var txt = (text === undefined || text === null) ? '' : String(text);
+    var chars = txt.replace(/\s+/g, '').length;
+    var dur = Math.min(Math.max(0.001, b - a - 0.1), 0.45 + chars * 0.075);
+    var p = clamp(dur > 0 ? (t - a) / dur : 1);
+    return { p: p, chars: chars, sungChars: Math.floor(p * chars), dur: dur };
+  }
+  // 圆角矩形路径（卡拉OK 字幕条的底；不引 paint，免得没有 p5 就画不出来）
+  function roundedRectPath(ctx, x, y, w, h, r) {
+    var rad = Math.min(r, w / 2, h / 2);
+    ctx.moveTo(x + rad, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rad);
+    ctx.arcTo(x + w, y + h, x, y + h, rad);
+    ctx.arcTo(x, y + h, x, y, rad);
+    ctx.arcTo(x, y, x + w, y, rad);
+    ctx.closePath();
+  }
+  // 直接画一条扫色字幕条（Canvas 2D）：圆角药丸底 + 已唱部分换色重绘一遍。
+  // o 全部可选：{ cx, cy, h, font, pad, bg, color, sung, radius, alpha }
+  //   默认居中贴底（cy = 画布高 × 0.93）、高 88、44px 粗体。
+  // 「哪条字幕、什么时候出现」仍由章节的时间轴决定，这里只负责把**当前这条**画对。
+  function karaokeBand(ctx, t, a, b, text, o) {
+    if (!ctx) return null;
+    o = o || {};
+    var txt = (text === undefined || text === null) ? '' : String(text);
+    if (!txt) return null;
+    var K = karaoke(t, a, b, txt);
+    var W = ctx.canvas.width, H = ctx.canvas.height;
+    var font = o.font || '800 44px "Microsoft YaHei UI", "PingFang SC", sans-serif';
+    var pad = o.pad === undefined ? 36 : o.pad;
+    var h = o.h === undefined ? 88 : o.h;
+    var cy = o.cy === undefined ? H * 0.93 : o.cy;
+    ctx.save();
+    if (o.alpha !== undefined) ctx.globalAlpha = ctx.globalAlpha * o.alpha;
+    ctx.font = font;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    var tw = ctx.measureText(txt).width;
+    var w = Math.min(W - 40, tw + pad * 2);
+    var x = (o.cx === undefined ? W / 2 : o.cx) - w / 2;
+    var r = o.radius === undefined ? h / 2 : o.radius;
+    // 底：圆角药丸
+    ctx.beginPath();
+    roundedRectPath(ctx, x, cy - h / 2, w, h, r);
+    ctx.fillStyle = o.bg || 'rgba(11, 18, 32, 0.82)';
+    ctx.fill();
+    // 文字：裁在药丸内；先整句暗色，再把「已唱宽度」裁出来重画一遍亮色（扫色效果）
+    ctx.save();
+    ctx.beginPath();
+    roundedRectPath(ctx, x, cy - h / 2, w, h, r);
+    ctx.clip();
+    var tx = x + pad, ty = cy;
+    ctx.fillStyle = o.color || '#E6F1FF';
+    ctx.fillText(txt, tx, ty);
+    if (K.chars > 0 && K.sungChars > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(tx - 2, ty - h, tw * (K.sungChars / K.chars) + 2, h * 2);
+      ctx.clip();
+      ctx.fillStyle = o.sung || '#00D4FF';
+      ctx.fillText(txt, tx, ty);
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.restore();
+    return K;
   }
 
   // ===== 几何：生成点列（不画，只出点） =====
@@ -264,6 +367,15 @@
     linePts: linePts,
     paint: paint,
     inkLine: inkLine,
+    // v7：卡拍（BPM + 偏移由调用方给）与卡拉OK 扫色
+    BPM: DEFAULT_BPM,
+    OFF: DEFAULT_OFF,
+    beatAt: beatAt,
+    beatN: beatN,
+    pulse: pulse,
+    pulse2: pulse2,
+    karaoke: karaoke,
+    karaokeBand: karaokeBand,
     castLayer: castLayer,
     clearLayer: clearLayer
   };

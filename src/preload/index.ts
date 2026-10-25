@@ -1,5 +1,5 @@
 // src/preload/index.ts —— 预加载脚本：通过 contextBridge 向渲染进程暴露安全 API
-// 12 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/scriptTools/updateTools/runtimeTools/legacyTools）
+// 13 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/castTools/scriptTools/updateTools/runtimeTools/legacyTools）
 // 与 6 个进度推送通道的单订阅语义（重复注册仅替换回调，避免页面切换叠加监听）。
 // 类型契约：每个对象都以 PreloadApi['<命名空间>'] 标注（见 src/shared/types.ts ⑨ 节），
 //           渲染层拿到的 window.* 签名由 preload/index.d.ts 挂载同一份契约 —— 两处不会漂移。
@@ -163,25 +163,41 @@ const projectTools: PreloadApi['projectTools'] = {
   setRender: (name: string, render: RenderOverride | null) => ipcRenderer.invoke(IPC.Project.SetRender, { name, render }),
   // 成片画布方向（项目属性）：白名单校验在主进程（RENDER_CANVASES）
   setCanvas: (name: string, canvas: RenderCanvas) => ipcRenderer.invoke(IPC.Project.SetCanvas, { name, canvas }),
-  // 全局角色库（跨项目复用）：列库 / 把项目里的角色存为全局 / 把全局角色导入项目 / 从库删除。
-  // 库是**用户资产**，落在 <userData>/cast-library/，与项目里的 cast/<id>.js 是两层（见 main/castLibrary.ts）。
-  listCastLibrary: () => ipcRenderer.invoke(IPC.Project.CastLibrary),
-  promoteCast: (name: string, id: string) => ipcRenderer.invoke(IPC.Project.PromoteCast, { name, id }),
-  importCast: (name: string, ids: string[]) => ipcRenderer.invoke(IPC.Project.ImportCast, { name, ids }),
-  removeCastFromLibrary: (id: string) => ipcRenderer.invoke(IPC.Project.RemoveCastFromLibrary, { id }),
-  // 项目角色（角色是项目资产，与单文件 / 章节化无关）：新建一个（调一次模型画 cast/<id>.js）、整份列表回写（勾选/删除/改名）
-  newCast: (name: string, brief) => ipcRenderer.invoke(IPC.Project.NewCast, { name, ...(brief || {}) }),
+  // 本片用到哪几个全局角色（角色只有全局一份，见下面的 castTools）：传 [{ id, selected }]，
+  // 主进程按 id 从库补全元数据、把 selected 的那些复制进 <项目>/cast/ 并重刷页面
   saveCast: (name: string, cast) => ipcRenderer.invoke(IPC.Project.SaveCast, { name, cast }),
-  // HTML 生成/修改过程进度（单订阅：重复注册仅替换回调，避免页面切换叠加监听）
-  onHtmlProgress: (callback) => {
-    _htmlProgressCb = callback;
-    if (!_htmlProgressBound) {
-      _htmlProgressBound = true;
-      ipcRenderer.on(IPC.Project.HtmlProgress, (_event, data) => { if (typeof _htmlProgressCb === 'function') _htmlProgressCb(data); });
-    }
-  }
+  // HTML 生成 / 修改 / 画角色的进度：**一条频道 + 按任务 id 分发**（不是单订阅）。
+  // 每个发起方自己生成 taskId（utils/taskId.ts）、先订阅再调用；主进程把每条进度带上同一个 taskId，
+  // 这里按 id 找到订阅者再回调——所以「生成 HTML」与「画角色」可以并行，谁的进度回谁那里、互不覆盖。
+  // 返回的函数用于退订：调用方在自己的 finally 里调用（任务结束就摘掉，不在后台攒订阅）。
+  // 画角色那边（castTools.onTaskProgress）与这里是**同一张订阅表、同一条频道**。
+  onTaskProgress: (taskId, callback) => subscribeTaskProgress(taskId, callback)
 };
 contextBridge.exposeInMainWorld('projectTools', projectTools);
+
+// 全局角色库（<userData>/cast-library/）：角色**只有全局一份**，与项目无关——没有当前项目也能建 / 改 / 预览。
+// 项目里只记「本片用了哪几个角色」，那份勾选走 projectTools.saveCast。
+const castTools: PreloadApi['castTools'] = {
+  list: () => ipcRenderer.invoke(IPC.Cast.List),
+  create: (brief) => ipcRenderer.invoke(IPC.Cast.Create, brief || {}),
+  recreate: (id: string, request: string, taskId: string) => ipcRenderer.invoke(IPC.Cast.Recreate, { id, request, taskId }),
+  saveMeta: (patch) => ipcRenderer.invoke(IPC.Cast.SaveMeta, patch || {}),
+  remove: (id: string) => ipcRenderer.invoke(IPC.Cast.Remove, { id }),
+  // 预览（静态一帧）：主进程把 core.js + 这个角色的代码拼成一页 HTML 落盘，这里只回它的相对路径
+  preview: (id: string, options) => ipcRenderer.invoke(IPC.Cast.Preview, { id, ...(options || {}) }),
+  // 动作示范（「角色」页 · 双击卡片 / 「…」菜单）：动作 = 「时间 → 动画参数」的曲线，与角色代码分开存
+  // （公共动作在 actions.json 的 shared、这个角色的专属动作在 byCast[<id>]，见 main/cast/actions.ts）
+  listActions: (castId: string) => ipcRenderer.invoke(IPC.Cast.ActionList, { castId }),
+  saveAction: (payload) => ipcRenderer.invoke(IPC.Cast.SaveAction, payload || {}),
+  removeAction: (payload) => ipcRenderer.invoke(IPC.Cast.RemoveAction, payload || {}),
+  // 唯一一条会调模型的：读角色源码 → 生成一条它专属的动作（能用到它自己的 o 参数）
+  generateAction: (payload) => ipcRenderer.invoke(IPC.Cast.GenerateAction, payload || {}),
+  // 会动的示范页：返回相对路径，渲染层用 userFileUrl(rel) + '&e=<epoch>#<动作id>' 载进 iframe
+  demo: (id: string, options) => ipcRenderer.invoke(IPC.Cast.Demo, { id, ...(options || {}) }),
+  // 画角色 / 改画法的进度：与 projectTools.onTaskProgress 是同一张订阅表（一条频道 + 按 taskId 分发）
+  onTaskProgress: (taskId, callback) => subscribeTaskProgress(taskId, callback)
+};
+contextBridge.exposeInMainWorld('castTools', castTools);
 
 // 内容脚本 Agent：对话式生成/修改场景脚本（generate 只造文本，落盘走 projectTools.saveContent）
 // 另有对话记录读写（项目目录 chat/ 下的索引与版本副本，与 content.json 无关）
@@ -253,9 +269,30 @@ const legacyTools: PreloadApi['legacyTools'] = {
 };
 contextBridge.exposeInMainWorld('legacyTools', legacyTools);
 
-// ===== 进度通道单订阅状态（模块级标志，避免页面切换叠加监听） =====
-let _htmlProgressCb: ((data: HtmlProgressPayload) => void) | null = null;
+// ===== 进度通道订阅状态（模块级标志，避免页面切换叠加监听） =====
+// project:html-progress 走「一条频道 + 按任务 id 分发」：taskId → 订阅者（见 onTaskProgress）。
+// 监听只绑一次；没带 taskId 的推送（不该再有）直接丢弃，不再有"全局单槽"这种会互相顶掉的写法。
+const _progressCbs = new Map<string, (data: HtmlProgressPayload) => void>();
 let _htmlProgressBound = false;
+
+// 按 taskId 订阅「生成 HTML / 按需求修改 / 画角色」的进度。
+// projectTools.onTaskProgress 与 castTools.onTaskProgress 都走这一个函数：同一条频道、同一张订阅表，
+// 所以两边各自的回调互不覆盖（任务结束由调用方退订，见返回的函数）。
+function subscribeTaskProgress(taskId: string, callback: (data: HtmlProgressPayload) => void): () => void {
+  if (!taskId || typeof callback !== 'function') return () => {};
+  _progressCbs.set(taskId, callback);
+  if (!_htmlProgressBound) {
+    _htmlProgressBound = true;
+    ipcRenderer.on(IPC.Project.HtmlProgress, (_event, data) => {
+      const d = data as HtmlProgressPayload | undefined;
+      const fn = (d && d.taskId) ? _progressCbs.get(d.taskId) : null;
+      if (fn) fn(d as HtmlProgressPayload);
+    });
+  }
+  return () => {
+    if (_progressCbs.get(taskId) === callback) _progressCbs.delete(taskId);
+  };
+}
 let _scriptProgressCb: ((data: ScriptProgressPayload) => void) | null = null;
 let _scriptProgressBound = false;
 let _whisperProgressCb: ((data: WhisperProgressPayload) => void) | null = null;

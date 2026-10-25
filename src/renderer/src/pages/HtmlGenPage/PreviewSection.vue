@@ -19,9 +19,18 @@
       </span>
     </div>
     <div class="hf-status" :class="statusDisplayClass">{{ statusDisplay }}</div>
+    <!-- AI 思考过程：**标题行本身就是开关**（不另设按钮）。默认收起，只有生成/修改进行中才自动展开；
+         一轮结束（running 由真变假）自动收起，想看上一轮的思考点一下标题行即可。 -->
     <div v-show="showThink" style="margin-top:10px;padding:10px 12px;border:1px solid rgba(0,212,255,.22);border-radius:8px;background:rgba(0,212,255,.05)">
-      <div style="font-size:12px;color:#00D4FF;margin-bottom:6px">AI 思考过程（实时）</div>
-      <pre ref="thinkPreEl" style="margin:0;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;font-size:12px;line-height:1.7;color:rgba(255,255,255,.82)">{{ thinkText }}</pre>
+      <div
+        class="hg-think-head"
+        :title="thinkOpen ? '收起思考过程' : '展开思考过程'"
+        @click="thinkOpen = !thinkOpen"
+      >
+        <span class="hg-think-arrow">{{ thinkOpen ? '▾' : '▸' }}</span>
+        <span>AI 思考过程{{ running ? '（实时）' : '' }}</span>
+      </div>
+      <pre v-show="thinkOpen" ref="thinkPreEl" style="margin:6px 0 0;white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;font-size:12px;line-height:1.7;color:rgba(255,255,255,.82)">{{ thinkText }}</pre>
     </div>
     <div class="empty-hint" v-show="emptyVisible">{{ emptyText }}</div>
     <!-- 视角比例（**不再显示「画布」值**：画布是项目属性、入口在「HTML · Agent」卡片，预览卡里不重复它）。
@@ -66,9 +75,10 @@
 
 <script setup lang="ts">
 // pages/HtmlGenPage/PreviewSection.vue —— 「预览」卡片（从 index.vue 整块搬来，行为逐字不变）
-// 职责：iframe 预览副本 + 播放控制条（暂停/重播/拖动 seek）+ AI 思考过程 + 背景音频选定与试听。
-// 契约：status / statusClass / thinkText / rendering 由父页传入（生成与渲染两套状态都归父页写，
-//       因为发起生成与渲染的按钮都在父页）；defineExpose({ reload }) 供父页在 Agent 成功或
+// 职责：iframe 预览副本 + 播放控制条（暂停/重播/拖动 seek）+ AI 思考过程（可折叠）+ 背景音频选定与试听。
+// 契约：status / statusClass / thinkText / rendering / running 由父页传入（生成与渲染两套状态都归父页写，
+//       因为发起生成与渲染的按钮都在父页；running 只是「Agent 正在跑」这一个布尔，
+//       用于思考区的自动展开 / 自动收起）；defineExpose({ reload }) 供父页在 Agent 成功或
 //       项目状态变化后重新载入预览（原 index.vue 里的 syncPreview()）。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { RenderCanvas } from '@shared/types'
@@ -85,6 +95,8 @@ const props = defineProps<{
   statusClass: string
   thinkText: string
   rendering: boolean
+  // Agent（生成 / 修改）是否正在进行：只用来决定思考区自动展开还是自动收起
+  running: boolean
 }>();
 
 // 状态区文案：渲染中优先显示全局 trace（[Render:trace] 解析结果），其余时候显示父页给的状态
@@ -100,10 +112,19 @@ const emptyVisible = ref(true);
 const emptyText = ref('尚未生成 HTML。');
 const ctlVisible = computed(() => frameVisible.value);
 
-// AI 思考过程：父页把流式原文传进来，这里只负责展示与自动滚到底部
+// AI 思考过程：父页把流式原文传进来，这里只负责展示与自动滚到底部。
+// 展开状态（用户定稿）：**生成中自动展开**（看得见 AI 在想什么）、**一轮结束自动收起**（不占位置），
+// 其余时候由用户点标题行自己开关。开关只有这一份状态，收起后不再跟着流式文本滚动。
 const thinkPreEl = ref<HTMLElement | null>(null);
+const thinkOpen = ref(false);
 const showThink = computed(() => props.thinkText.length > 0);
+// running 变真 = 新一轮开始 → 展开；变假 = 这一轮结束 → 收起（手动展开过的也收，保持一致）
+watch(() => props.running, (now, was) => {
+  if (now) thinkOpen.value = true;
+  else if (was) thinkOpen.value = false;
+});
 watch(() => props.thinkText, () => {
+  if (!thinkOpen.value) return;   // 收起时不必滚（元素尺寸为 0，滚了也没有意义）
   if (thinkPreEl.value) thinkPreEl.value.scrollTop = thinkPreEl.value.scrollHeight;
 });
 

@@ -48,7 +48,7 @@ export const VIDEO_MATERIAL_EXTS = ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi'];
 // 为什么放在 shared：三个消费点必须用同一组数——
 //   ① 主进程往渲染入口注入舞台 data-width/data-height（成片宽高的真正来源）与 <html data-resolution>
 //      （src/main/video.ts；CLI 只认前者，读不到就兜底 1080x1920）
-//   ② 主进程把它写进生成提示词，让模型按同一块画布排版式（src/main/projects.ts）
+//   ② 主进程把它写进生成提示词，让模型按同一块画布排版式（src/main/projects/prompts.ts 的 buildCanvasBlock）
 //   ③ 渲染层选项表与预览 iframe 的画布尺寸（renderer/utils/render.ts、HtmlGenPage/PreviewSection.vue）
 // 改这里的尺寸/取值时，CLI 那边若对不上，成片会退回 CLI 自己的兜底 1080x1920 竖屏（见 video.ts 的注释）。
 export const RENDER_CANVASES: RenderCanvas[] = ['landscape', 'portrait', 'square'];
@@ -86,4 +86,44 @@ export function estimateSubtitleDur(text: string): number {
   const n = String(text == null ? '' : text).length;
   return Math.max(2.4, 1.6 + n / EST_CHARS_PER_SEC);
 }
+
+// ===== 角色动作的参数表（「角色」页 · 动作示范 · 关键帧编辑器，**唯一真源**）=====
+// 角色是纯绘制函数 `window.__cast[id](x, y, u, o)`，动画全靠调用方把这几项塞进 o 里驱动
+// （契约见 src/main/agent/html.ts 的 HTML_CAST_SYSTEM 第 4 条）。一条动作 = 这组参数随时间的曲线，
+// 所以「界面能填哪些参数」「主进程落盘时收哪些参数」必须是同一份清单——就是这里。
+// 方向与量纲都按角色端实际实现写（不是随手给的宽松区间）：
+//   dy 正 = 下移（负才是跳起来）/ dx 正 = 右移 / aL、aR 正 = 向外抬起 / sq 正 = 拉长变窄 /
+//   rot 弧度、正 = 顺时针（绕脚底）/ walk 相位 1 = 一个完整步。
+// mouth 多一个 'auto'：**不传这个参数**，让角色自己按 eyes 定嘴型（多数角色是 mouth 跟随 eyes，
+// 显式给 'normal' 会把笑眼配成平嘴）。
+export interface CastActionParam {
+  key: string;
+  label: string;
+  type: 'number' | 'enum';
+  // type = number 时的取值范围与输入步长
+  min?: number;
+  max?: number;
+  step?: number;
+  // type = number 时的默认值（关键帧编辑器新建一行时用它预填，与角色端"没传 = 0"一致）
+  def?: number;
+  // type = enum 时的取值（'auto' = 不传这个参数）
+  options?: string[];
+}
+export const CAST_ACTION_PARAMS: CastActionParam[] = [
+  { key: 'dy', label: '上下 dy', type: 'number', min: -3, max: 3, step: 0.05, def: 0 },
+  { key: 'dx', label: '左右 dx', type: 'number', min: -3, max: 3, step: 0.05, def: 0 },
+  { key: 'aL', label: '左臂 aL', type: 'number', min: -2, max: 2, step: 0.05, def: 0 },
+  { key: 'aR', label: '右臂 aR', type: 'number', min: -2, max: 2, step: 0.05, def: 0 },
+  { key: 'rot', label: '旋转 rot', type: 'number', min: -0.8, max: 0.8, step: 0.02, def: 0 },
+  { key: 'sq', label: '挤压 sq', type: 'number', min: -1, max: 1, step: 0.05, def: 0 },
+  { key: 'walk', label: '摆腿 walk', type: 'number', min: 0, max: 4, step: 0.05, def: 0 },
+  { key: 'blink', label: '眨眼 blink', type: 'number', min: 0, max: 1, step: 0.05, def: 0 },
+  { key: 'eyes', label: '表情 eyes', type: 'enum', options: ['normal', 'happy', 'sad', 'angry', 'surprise'] },
+  { key: 'mouth', label: '嘴型 mouth', type: 'enum', options: ['auto', 'normal', 'happy', 'sad', 'angry', 'surprise'] }
+];
+// 动作名的长度上限、一条动作的时长范围、同一作用范围内最多存几条（主进程校验，渲染层照它挡）
+export const CAST_ACTION_NAME_MAX = 12;
+export const CAST_ACTION_DURATION = { min: 0.3, max: 30 } as const;
+export const CAST_ACTION_MAX_PER_SCOPE = 40;
+
 

@@ -28,6 +28,7 @@ import type {
   IpcResult,
   Scene,
   ScriptAppendRoundPayload,
+  ScriptCastRef,
   ScriptChatIndex,
   ScriptChatRoundMeta,
   ScriptGeneratePayload,
@@ -38,6 +39,8 @@ import type {
 
 // 一次最多产出多少场景（防模型跑飞：把整部剧塞进一个数组）
 const MAX_SCENES = 50;
+// 一次最多带多少个角色进提示词（防清单跑飞；一部片子的角色远少于这个数）
+const MAX_CAST = 20;
 // 语速口径来自 @shared/constants（与字幕估时、内容脚本页「估算时长」同一份），这里只用于把
 // 「目标总时长」换算成提示词里的字数预算——别在本文件另写一个 4.5 / 4 之类的常数。
 
@@ -48,7 +51,7 @@ export const SCRIPT_AGENT_SYSTEM = [
   '1. 只输出一个 JSON 对象，形如 {"scenes":[{"narration":"…","visual":"…"}]}；不要 Markdown 代码块、不要任何解释文字。',
   '2. 每个场景的 narration 是该场景的旁白 / 配音稿：口语、可直接朗读；不要写序号、小标题、括号说明、emoji，也不要写"（停顿）"这类舞台提示。',
   // 第 3 条为什么要求「一行一个镜头、行首带时长」：visual 是「HTML生成」页生成 / 修改时的画面依据
-  // （projects.ts 的 buildContentBlock 把它原样拼进【内容脚本】块）。写成一大段时，模型只能自己猜
+  // （projects/ 的 buildContentBlock 把它原样拼进【内容脚本】块）。写成一大段时，模型只能自己猜
   // 「该拆几个画面、每个占多久」；按行拆开、行首给时长，画面节奏才是用户能指定的。
   // 注意：这里只规定「怎么写」，主进程**不做任何解析**——多行文本原样进提示词，由模型按行读。
   '3. 每个场景的 visual 是该场景的画面分镜，后面要照着它做页面与动画，所以必须写具体、能照着画出来：',
@@ -64,13 +67,33 @@ export const SCRIPT_AGENT_SYSTEM = [
   '9. 输出形状参考（下面这段只是**两场景的格式示例**，主题与你无关，照这个形状写、不要照抄内容，也不要照抄它的场景数）：',
   '{"scenes":[{"narration":"你有没有想过，同样一句话，为什么有的回答听起来那么像真的？","visual":"2.0s 深空蓝黑的背景，画面中央先浮出一个由细线描出的问号，线条带一层青色微光。\\n2.5s 问号向四周散成几十个细小光点，光点缓慢向右上方飘出画面。\\n2.0s 左下角淡入一行小字「听起来像真的」，几秒后被一个白色方框圈住；整场偏冷调，底部有缓慢流动的星尘。"},{"narration":"因为模型更擅长把话补完整，而不是先把事实核对一遍。","visual":"2.0s 画面从上一场的星尘切到一张半透明的信息卡，卡片从右侧滑入、停在画面中央偏左。\\n2.5s 卡片上的一句话被逐字打出来，其中关键词「补完整」先变成青色，再放大到两倍并罩上一层光晕。\\n2.0s 卡片右侧同时浮出三条浅灰色细线，代表被略过的核对步骤，闪一下后暗下去；镜头不动，只留卡片边缘一层呼吸感的微光。"}]}',
   '10. 允许静音场景：需要纯画面、不放配音的场景，把该场 narration 留空字符串（""），visual 照常写清楚——不要为了凑旁白硬写话。每个场景（包括静音场景）的 visual 都必须写，并按第 3 条一行一个镜头写清楚（2–5 行，每行行首带时长），不能留空、不能只写一行。',
-  '11. 错误示例（都会被判为不合格）：用 Markdown 代码块（三反引号）包裹；在 JSON 前后写"好的，这是脚本："之类的解释；额外输出 title、duration、bgm 等字段；把 narration 写成要点列表；把 visual 写成一大段而不是分行、或让某一行只写「深色背景 + 标题浮入」这类骨架子、或行首不带时长（后面做不出这一场的画面节奏）。'
+  '11. 错误示例（都会被判为不合格）：用 Markdown 代码块（三反引号）包裹；在 JSON 前后写"好的，这是脚本："之类的解释；额外输出 title、duration、bgm 等字段；把 narration 写成要点列表；把 visual 写成一大段而不是分行、或让某一行只写「深色背景 + 标题浮入」这类骨架子、或行首不带时长（后面做不出这一场的画面节奏）。',
+  // 第 12 条只在用户选了角色时才有对象：【角色】块由 buildScriptPrompt 按用户挑选生成。
+  // 为什么必须约束「名字与外观以表为准」：角色是后面照着写稿结果画的共享绘制代码，
+  // 同一角色在旁白与分镜里换名字 / 换配色，画出来就对不上，用户也认不出是同一个人。
+  '12. 用户给了【角色】表时：角色的称呼与外观一律以表为准（同一角色全片同一个名字、同一套外观，不要另起名字或改写外观）；只让表里的角色登场，表外的人只能匿名泛称（如"路人""一群人"），不要给表外的人取名或写外形细节；也不要为了用满角色表让每个场景都出现角色，没出场的场景不要硬塞。'
 ].join('\n');
 
 // 构造用户提示：要求 + 当前脚本 + 参数（场景数 / 目标总时长换算的字数预算）
 export function buildScriptPrompt(payload: ScriptGeneratePayload): string {
   const parts: string[] = [];
   parts.push('【要求】' + String(payload.request || '').trim());
+
+  // 角色（用户在「AI 创作」里从全局角色库挑）：只作写稿上下文，不进 scenes、不落盘。
+  // **空数组 = 没选角色，整块省略**——没选角色时提示词必须与加这个字段之前逐字一致（老行为不变）。
+  const cast = Array.isArray(payload.cast) ? payload.cast : [];
+  if (cast.length) {
+    parts.push('【角色】（本片有哪些角色；称呼与外观以这里为准）');
+    cast.forEach((m) => {
+      const desc = String(m.desc || '').trim();
+      parts.push('- ' + m.name + '（id ' + m.id + '，高 ' + m.units + 'u）：' + (desc || '（未描述，外观自行拟定并全片保持一致）'));
+    });
+    parts.push('【角色使用约定】');
+    parts.push('- 旁白和画面分镜里提到某个角色时，一律用上表的名字称呼，外观按上表的描述写。');
+    parts.push('- 只让上表里的角色登场；表外的人只能匿名泛称（如「路人」「一群人」），不要给它们取名或写外形细节。');
+    parts.push('- 不要为了用满角色表让每个场景都出现角色；某个场景不需要角色就别写。');
+    parts.push('- 分镜要写清角色在画面里的位置、动作和镜头关系（角色后面是照着分镜画的，写得越具体越画得出来）。');
+  }
 
   const scenes = Array.isArray(payload.scenes) ? payload.scenes : [];
   const valid = scenes.filter((s) => s && (String(s.narration || '').trim() || String(s.visual || '').trim()));
@@ -164,7 +187,7 @@ export function parseScriptReply(text: string): Scene[] {
   return out;
 }
 
-// 五阶段进度 → 界面文案（与 projects.ts 的 progressText 同一个口径，只是"生成 HTML"换成"生成脚本"）
+// 五阶段进度 → 界面文案（与 projects/ 的 progressText 同一个口径，只是"生成 HTML"换成"生成脚本"）
 function progressText(info: AgentProgressPayload): string {
   const stage = info && info.stage;
   return stage === 'connecting' ? '正在连接模型…'
@@ -205,12 +228,25 @@ export function registerScript(getProjectDir: (name: string) => string): void {
         durHint: (s.durHint === undefined || s.durHint === null) ? '' : String(s.durHint)
       }));
 
+    // 角色上下文：只收形状合法的（名字非空），上限 MAX_CAST，描述截 300 字（一条超长描述会挤爆提示词）。
+    // 与 scenes 一样**只认载荷**：主进程不读项目的 cast/、不读全局角色库——用户选了什么就是什么。
+    const cast: ScriptCastRef[] = (payload && Array.isArray(payload.cast) ? payload.cast : [])
+      .filter((m) => m && typeof m.name === 'string' && m.name.trim())
+      .slice(0, MAX_CAST)
+      .map((m) => ({
+        id: typeof m.id === 'string' ? m.id.trim() : '',
+        name: m.name.trim(),
+        desc: typeof m.desc === 'string' ? m.desc.trim().slice(0, 300) : '',
+        units: (typeof m.units === 'number' && isFinite(m.units) && m.units > 0) ? m.units : 8
+      }));
+
     const userPrompt = buildScriptPrompt({
       name,
       request,
       scenes,
       sceneCount: payload && payload.sceneCount,
-      targetSeconds: payload && payload.targetSeconds
+      targetSeconds: payload && payload.targetSeconds,
+      cast
     });
 
     const sender = event.sender;

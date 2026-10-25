@@ -176,6 +176,7 @@ const menuItems: { key: PageKey; label: string; title: string }[] = [
   { key: 'text-tts', label: '配音', title: '配音（文字生音频）' },
   { key: 'subtitle', label: '字幕生成', title: '字幕生成' },
   { key: 'html-gen', label: 'HTML生成', title: 'HTML生成' },
+  { key: 'cast', label: '角色', title: '角色（全局角色库：新建 / 改画法，与项目无关）' },
   { key: 'video-preview', label: '视频预览', title: '视频预览（转视频入口在 HTML生成页）' },
   { key: 'about', label: '关于', title: '关于' },
   { key: 'settings', label: '设置', title: '设置' }

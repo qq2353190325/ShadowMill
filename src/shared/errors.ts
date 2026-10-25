@@ -209,7 +209,7 @@ export function configTitle(target?: ConfigTarget): string {
   return (target && CONFIG_TITLE[target]) || '需要先完成设置'
 }
 
-// 给「已经翻译过、只剩 message 文本」的上游用（典型：projects.ts 捕获 chatWithCustomModel 抛出的错，
+// 给「已经翻译过、只剩 message 文本」的上游用（典型：projects/ 捕获 chatWithCustomModel 抛出的错，
 // 到那里只剩一句中文 message）。复用同一张码表跑分类，不重复拼 label，故不返回 message。
 // 判定文本是**中文文案**（没有数字状态码可判），所以按本文件产出的句式逐条认。
 // **余额 / 欠费不在其中**：那类不弹窗，界面保持内嵌状态行。

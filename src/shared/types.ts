@@ -51,22 +51,28 @@ export interface RegisterCtx {
 // ============================================================
 // ③ 设置（userData/settings.json）
 // ============================================================
+// 思考强度：原样作为请求体的 reasoning_effort 下发给 OpenAI 兼容端点（取值口径同 DeepSeek：
+// none = 不产生思考、low / high / max 依次加大思考量，high 是它的接口默认）。
+export type ReasoningEffort = 'none' | 'low' | 'high' | 'max'
+
 export interface CustomModelConfig {
   baseUrl: string
   modelId: string
   apiKey: string
   enabled: boolean
+  /** 思考强度（设置页「思考强度」下拉）：none 不思考最省、high 默认、max 思考额度更大 */
+  reasoningEffort: ReasoningEffort
 }
 
 // ===== 语音服务：按厂家（厂商）组织 =====
-// 一家 = 一条记录：只有一把 API Key；模型表与系统音色表都在厂家的目录里（main/voiceCatalog.ts 的 VOICE_PROVIDERS）。
+// 一家 = 一条记录：只有一把 API Key；模型表与系统音色表都在厂家的目录里（main/voice/catalog.ts 的 VOICE_PROVIDERS）。
 // **不再有「厂家默认模型」这种全局设置**：系统音色与模型是固定的对应关系（目录里写死），
 // 克隆音色按其本地映射/云端 target_model 走，都没有时才落到目录里该厂家的出厂默认模型。
 export interface VoiceProviderConfig {
   apiKey: string
 }
 export interface VoiceSettings {
-  /** 当前选中的厂家 key（对应 voiceCatalog 的 VoiceProviderDef.key） */
+  /** 当前选中的厂家 key（对应 voice/catalog 的 VoiceProviderDef.key） */
   active: string
   /** 厂家 key → 该厂家已保存的配置 */
   providers: Record<string, VoiceProviderConfig>
@@ -147,7 +153,7 @@ export type RenderOverride = Partial<RenderOptions>
 // 为什么它不是渲染档位：项目覆盖 / 全局默认那套层级（RenderOverride）是给「质量 / 帧率」的，
 // 而画布是**这个项目长什么样**——只在一处选（「HTML生成」页的「画布」下拉，生成/修改前定），
 // 落进 project.json 的 canvas，并且同一个值同时决定三件事：
-//   ① 生成提示词里给模型的版式尺寸（projects.ts 的 buildMaterialPrompt）
+//   ① 生成提示词里给模型的版式尺寸（projects/ 的 buildMaterialPrompt）
 //   ② 预览 iframe 的画布（pages/HtmlGenPage/PreviewSection.vue）
 //   ③ 渲染入口注入的 <html data-resolution>（main/video.ts）
 // 因此「预览看到的画布」与「成片画布」必然是同一个尺寸。
@@ -290,9 +296,9 @@ export interface LegacyResolveResult {
 }
 
 // ============================================================
-// ④ 音色与配音（voice.ts / ttsAlign.ts）
+// ④ 音色与配音（voice/ 目录模块）
 // ============================================================
-// Qwen-TTS 系统音色（内置表 systemVoices.ts 的条目结构）
+// Qwen-TTS 系统音色（内置表 voice/systemVoices.ts 的条目结构）
 export interface SystemVoice {
   voice: string
   desc: string
@@ -550,7 +556,7 @@ export interface WhisperProjectAudioResult {
 }
 
 // ============================================================
-// ⑥ 项目与字幕（projects.ts）
+// ⑥ 项目与字幕（projects/）
 // ============================================================
 export interface Scene {
   id: string
@@ -589,20 +595,23 @@ export interface Project {
   // 非空 = 章节模式：动画拆在 pages/cNN.js，index.html 只是应用生成的骨架（见 ProjectChapter 的说明）。
   // 两种模式由「生成 HTML」时模型在规划阶段选择，用户也可以在需求描述里指定。
   chapters?: ProjectChapter[]
-  // 角色库（章节模式才用）：空/缺省 = 本片没有共享角色。非空时每个角色一份 cast/<id>.js，
-  // 骨架按各章 ProjectChapter.cast 的并集引入（见 ProjectCastMember 的说明）。
+  // 本片用到哪几个**全局角色**：这里存的是**解析后的完整成员**（元数据来自全局角色库，
+  // 见 CastLibraryMember 的说明）。project.json 里只落 [{ id, selected }]（ProjectCastSelection），
+  // 读项目时由主进程按 id 从库里补全——库里改名 / 改身高，所有项目立刻跟着变。
   cast?: ProjectCastMember[]
   createdAt: string
   updatedAt?: string
 }
 
 // 磁盘上 project.json 的实际形状：**只有索引**，没有 subtitle / content 正文。
-// 正文位置：字幕 → subtitle.txt，内容脚本 → content.json（见 main/projects.ts 顶部说明）。
+// 正文位置：字幕 → subtitle.txt，内容脚本 → content.json（见 main/projects/index.ts 顶部说明）。
 // subtitle / content 两个可选字段只作为**老项目的内联旧格式**存在：读取时当回退来源，
 // writeProject() 写回时一律剥掉，所以它们不会在新数据里再出现。
-export type ProjectIndex = Omit<Project, 'subtitle' | 'content'> & {
+// cast 同理降级：磁盘上只存 [{ id, selected }]（角色元数据在全局角色库里，见 ProjectCastSelection）。
+export type ProjectIndex = Omit<Project, 'subtitle' | 'content' | 'cast'> & {
   subtitle?: string
   content?: ContentScript
+  cast?: ProjectCastSelection[]
 }
 
 // ===== 项目素材（HTML 生成用的图片 / 视频）=====
@@ -619,7 +628,7 @@ export interface ProjectMaterial {
   addedAt: string
 }
 
-// 字幕行（projects.ts parseSubtitle 输出）：time / end 为秒，可带小数
+// 字幕行（projects/ parseSubtitle 输出）：time / end 为秒，可带小数
 export interface SubtitleLine {
   n: number
   text: string
@@ -705,10 +714,12 @@ export interface ProjectOpenFolderOfResult {
 }
 
 // ===== 全局角色库（<userData>/cast-library/）=====
-// 与项目内的角色（Project.cast + cast/<id>.js）是**两层**：
-//   · 全局库是用户资产（可备份、可迁移、跨项目复用），不是安装包内容；
-//   · 导入 = 把库里那份**复制**进项目目录（预览协议与渲染静态服务器都只认项目目录内的文件），
-//     之后它就是这个项目的角色，全局库再改也不会自动动它（要更新就再导入一次）。
+// 角色**只有全局一份**：元数据在库索引 index.json 里，绘制代码在库目录的 <id>.js。
+// 项目不再有自己的角色文件：project.json 只记「本片用了哪几个角色」（ProjectCastSelection），
+// 生成 / 预览 / 渲染前由主进程把选中的那些从库**复制**进 <项目>/cast/ ——
+// 这一步是技术必需（hgpreview:// 协议与转视频的静态服务器都只放行项目目录内的文件），
+// 那份副本是产物、归应用维护，界面上不出现"导入 / 存为全局"这类动作。
+// 库是用户资产：可备份、可迁移、跨项目复用，不是安装包内容。
 export interface CastLibraryMember extends ProjectCastMember {
   // 库里有索引但缺文件时为 true（界面据此显示「文件缺失」，而不是静默消失）
   missing?: boolean
@@ -716,36 +727,156 @@ export interface CastLibraryMember extends ProjectCastMember {
 export interface CastLibraryResult {
   members: CastLibraryMember[]
 }
-// 导入后的项目角色表（应用据此原地刷新 appState，不必整份重载项目）
+// 项目 ↔ 全局角色：project.json 里只存这一对（元数据一律从库读）
+export interface ProjectCastSelection {
+  id: string
+  // 是否参与生成（缺省 = 参与）。空/缺省整个字段 = 本片不用任何角色。
+  selected?: boolean
+}
+// 本片角色列表回写（勾选 / 增删都走这一条）
+export interface ProjectSaveCastPayload {
+  name?: string
+  cast?: ProjectCastSelection[]
+}
+// 本片角色表（解析后：元数据已从库补全）
 export interface ProjectCastResult {
   cast: ProjectCastMember[]
 }
 
-// ===== 项目角色（「HTML生成」页 · 项目素材 · 角色）=====
-// 角色是**项目资产**，与图片/视频素材并列，但与「单文件 / 章节化」两种产物形态都无关：
-//   · 生成前在素材区勾选「参与本次生成」；
-//   · 生成时应用把 core.js + 被勾选角色的 cast/<id>.js 注入页面（单文件模式注入 index.html，章节模式写进骨架）；
-//   · 模型只负责「调用」角色（window.__cast["hero"](x, y, u, { ctx })），不再各自重画。
-// 角色代码由用户手动「新建角色」时调一次模型生成（也可从全局角色库导入），**不再由规划自动建表**。
-export interface ProjectNewCastPayload {
-  name?: string
+// ===== 全局角色库的接口载荷（cast:* 频道）=====
+// 新建一个角色：调一次模型画出 <id>.js 并写进库（与项目无关，没有当前项目也能建）
+export interface CastCreatePayload {
+  // 本次模型调用的任务 id（渲染层生成，见 utils/taskId.ts）：进度按它路由给订阅了同一个 id 的回调
+  taskId: string
   // 角色名（中文，界面上显示；也可当 prompt 里的称呼）
   title?: string
   // 外形 / 配色 / 关键特征描述
   desc?: string
+  // 画风说明（可选）：角色的【全局视觉风格】——角色与项目解耦后由角色自己带，留空则让模型自定
+  style?: string
   // 高几个 u（缺省 8）
   units?: number
   // 是否要用水彩笔刷（true = 声明 p5 + p5.brush）
   watercolor?: boolean
 }
-export interface ProjectNewCastResult {
-  // 新角色（已加入 project.cast，selected = true）
-  member: ProjectCastMember
-  cast: ProjectCastMember[]
+// 改画法：在库里这个角色的现有代码上按用户要求重画，覆盖库里的那份
+export interface CastRecreatePayload {
+  taskId: string
+  id: string
+  // 这次要怎么改（必填）：一句话描述，模型只改画法、不改 id / 身高
+  request: string
 }
-export interface ProjectSaveCastPayload {
+// 改元数据（不调模型）：名字 / 描述 / 画风 / 身高 / 是否水彩
+export interface CastSaveMetaPayload {
+  id: string
   name?: string
-  cast?: ProjectCastMember[]
+  desc?: string
+  style?: string
+  units?: number
+  // 给了就按它设 uses（true = p5 + p5.brush，false = 清空）
+  watercolor?: boolean
+}
+export interface CastResult {
+  member: CastLibraryMember
+}
+// 角色预览（「这个角色长什么样」）：角色不是图片，而是 <id>.js 里登记的绘制函数
+// `window.__cast[id](x, y, u, o)`——不真的跑一遍，界面上就只有一个文件名可看。
+// 主进程把「共享助手 core.js + 这个角色的代码」拼成一页**自包含** HTML，
+// 落到 <userData>/cast-preview/<id>.html，渲染层用 hgpreview://…?user=1 载进 iframe（静态一帧）。
+// 为什么不引用 ./cast/<id>.js：那要页面同目录有文件，而角色库在 userData 下、与任何项目无关；
+// 内联后一页就能独立跑，也不必为 p5 之类的依赖再铺文件。
+export interface CastPreviewPayload {
+  // 角色 id（slug，同时是角色文件的词干）
+  id?: string
+  // 角色身高（高几 u）：只影响预览里画多大，不改任何文件
+  units?: number
+  // 角色名，只用于预览页的标题 / 无障碍文案，不参与绘制
+  title?: string
+  // 这个角色声明的随包库（只用来在预览页里提示「水彩角色只画得出 Canvas 2D 部分」）
+  uses?: string[]
+}
+export interface CastPreviewResult {
+  // 预览页相对 userData 的路径（cast-preview/<id>.html），渲染层用 utils/url.ts 的 userFileUrl 拼 URL
+  rel: string
+}
+
+// ===== 角色动作示范（cast:action-* / cast:demo）=====
+// 角色本身是**纯绘制函数**（`window.__cast[id](x, y, u, o)`），不含动画：动画由调用方按时间算出
+// 一组参数塞进 `o`（walk 摆腿相位 / aL、aR 摆臂角度 / eyes、mouth 表情 / blink 眨眼 / dy、dx 位移 /
+// rot 旋转 / sq 挤压，见 main/agent/html.ts 的 HTML_CAST_SYSTEM 第 4 条）。所以一条「动作」=
+// 「时间 → 这组参数」的曲线，两种写法：
+//   · keys —— 关键帧表（时间点 + 参数值），所有角色通用，不调模型（「新建动作」写的就是它）；
+//   · code —— 一段纯函数 `function (t) { return { … } }`，由 AI 读这个角色的源码后生成，
+//     能用到它自己的参数（猫的尾巴、四只脚），所以只能演给这个角色看（存在角色的专属列表里）。
+// 演示页在 <userData>/cast-preview/<id>.demo.html，与静态预览页同一目录、同一套 hgpreview 放行规则。
+export interface CastActionKey {
+  // 时间点（秒，从 0 开始，落在 [0, duration] 内）
+  t: number
+  // 这一刻的动画参数：键只允许 shared/constants.ts 的 CAST_ACTION_PARAMS + 角色自定义键（AI 生成的动作才有）
+  o: Record<string, number | string>
+}
+export interface CastActionDef {
+  // 动作 id（slug）：公共动作跨角色唯一，专属动作在角色内唯一
+  id: string
+  name: string
+  // 时长（秒）：循环动作是"一轮"的长度
+  duration: number
+  // 是否循环播放（false = 演一遍停在最后一帧）
+  loop: boolean
+  // 关键帧表（按 t 升序；与 code 二选一）
+  keys?: CastActionKey[]
+  // AI 生成的动作脚本：function (t) { return { … } }（与 keys 二选一）
+  code?: string
+  // 来源：preset 内置 / user 用户自建 / ai 模型生成（只用于界面分组与文案）
+  from?: 'preset' | 'user' | 'ai'
+}
+// 动作列表（按角色问，一次给全：公共的 + 这个角色专属的）
+export interface CastActionListResult {
+  // 公共动作（内置 + 用户自建，所有角色都能演）
+  shared: CastActionDef[]
+  // 这个角色的专属动作（AI 生成，或用户「只给这个角色」建的关键帧动作）
+  own: CastActionDef[]
+}
+// 动作的作用范围：shared = 公共动作库（跨角色），own = 某个角色专属
+export type CastActionScope = 'shared' | 'own'
+export interface CastActionSavePayload {
+  // 从哪个角色进来的（专属动作要它；公共动作也带上，便于主进程校验这个角色在不在库里）
+  castId?: string
+  scope?: CastActionScope
+  // 整条回写（同 id 覆盖；id 为空表示新建，由主进程起一个）
+  action: CastActionDef
+}
+export interface CastActionRemovePayload {
+  castId?: string
+  scope?: CastActionScope
+  actionId: string
+}
+// 让 AI 读这个角色的源码后生成一条**专属**动作（唯一的对模型调用）
+export interface CastActionGeneratePayload {
+  // 角色 id（也是角色文件名干）
+  castId: string
+  // 本次模型调用的任务 id（渲染层生成，见 utils/taskId.ts）
+  taskId: string
+  // 要什么动作，一句话，如「四脚交替跑起来，尾巴左右甩」
+  request: string
+  // 动作时长（秒）：t 的取值范围就是 [0, duration)
+  duration?: number
+  // 是否循环播放（缺省 = 循环）
+  loop?: boolean
+  // 动作名（留空 = 拿 request 的前几个字当名字）
+  name?: string
+}
+// 会动的示范页：拼一页 <userData>/cast-preview/<id>.demo.html（内嵌全部动作），
+// 渲染层用 hgpreview://…?user=1&e=<epoch>#<动作id> 载进 iframe；换动作只换 hash（不重新加载文档）。
+// 载荷与静态预览完全一致（同一个角色、同样的尺寸信息），只是产物换成了会动的那一页。
+export type CastDemoPayload = CastPreviewPayload
+export interface CastDemoResult {
+  // 示范页相对 userData 的路径（cast-preview/<id>.demo.html）
+  rel: string
+}
+// 保存 / 生成一条动作的回执：action 恒为落盘后的那一条（渲染层直接用它替换本地状态）
+export interface CastActionResult {
+  action: CastActionDef
 }
 
 // ===== 项目素材（图片 / 视频素材库）=====
@@ -785,6 +916,10 @@ export interface ProjectHtmlMaterials {
 export interface ProjectAgentPayload extends ProjectHtmlMaterials {
   name: string
   prompt: string
+  // 本次模型调用的任务 id（渲染层生成，见 utils/taskId.ts）：进度按它路由。
+  // 一次生成/修改可能包含「规划 + 逐章 + 改稿」多次模型调用，**全部共用同一个 id**
+  // （界面看到的是"这一次操作"的进度，不是某一次调用的进度）。
+  taskId: string
 }
 export interface ProjectHtmlResult {
   htmlPath: string
@@ -817,13 +952,13 @@ export interface ProjectChapter {
   // 这件事只能由规划/修改时声明、由骨架去引；没声明就没有 p5 可用。
   // three.js 暂不支持（它要 importmap + module，加载是异步的，章节脚本可能先跑）。
   uses?: string[]
-  // 本章用到哪些**项目内角色**（ProjectCastMember.id）：骨架按它把 cast/<id>.js 按需引入，
-  // 章节里直接 window.__cast["hero"](x, y, u, {…}) 调用。空 = 本章不出现角色。
+  // 本章用到哪些角色（ProjectCastMember.id）：只作内容记录（哪几个角色在本章出场），
+  // 不决定注入——骨架按「本片勾选了哪些角色」统一注入它们，章节里直接 window.__cast["hero"](…) 调用。
   cast?: string[]
 }
 
-// ===== 角色库（PDoom 式的参数化角色绘制代码）=====
-// 一个角色 = 一份**共享的绘制函数**，不是图片：`cast/<id>.js` 里登记
+// ===== 角色（PDoom 式的参数化角色绘制代码）=====
+// 一个角色 = 一份**共享的绘制函数**，不是图片：全局角色库里 `<id>.js` 登记
 //   window.__cast["hero"] = function (x, y, u, o) { … }
 // 约定（写死在提示词里，否则多角色比例与站位一定乱）：
 //   · (x, y) = 脚底中点；u = 1 个"单位"的像素高度（调用方给）；
@@ -831,25 +966,42 @@ export interface ProjectChapter {
 //   · o 里可放表情 / 手势 / 翻转 / 颜色等参数（具体由角色自己定义）。
 // 为什么必须有这一层：章节是互相隔离的 IIFE，作用域不共享；没有共享角色层，同一角色在
 // 各章会被各画一遍，长相就散了（参考项目 PDoomVideo 也是把 clawd.js / cast.js 放在章节之前引入）。
+// **真源是全局角色库**（<userData>/cast-library/），项目只记 id 与勾选（见 ProjectCastSelection）；
+// 本类型同时表示「库成员」与「项目里解析后的成员」（后者由主进程按 id 从库补全，所以元数据不会各项目一套）。
 export interface ProjectCastMember {
-  // 角色 id（同时是文件名词干）：小写 slug，如 hero / researcher / cat → cast/hero.js
+  // 角色 id（同时是文件名词干）：小写 slug，如 hero / researcher / cat → <id>.js
   id: string
   // 中文显示名（界面上给用户看的）
   name: string
   // 一句话描述：外形 / 配色 / 特征（逐章生成时给模型看，保证它画的时候认得这个角色）
   desc: string
+  // 画风说明（这个角色自己的【全局视觉风格】）：角色与项目解耦后由角色自带，留空 = 让模型按描述自定。
+  // 只在「画这个角色」的提示词里用，不进章节 / 改稿提示词。
+  style?: string
   // 角色高度 = 多少个单位 u（如 8 表示 8u 高）
   units: number
   // 这个角色自己要用哪些随包库（同 ProjectChapter.uses，只认 'p5' / 'p5.brush'）。
   // 骨架取「各章 uses ∪ 各角色 uses」，否则"只有角色用水彩、没有任何章声明 p5"时 p5 不会被引入。
   uses?: string[]
   // 是否参与本次生成（与 ProjectMaterial.selected 同一语义）：
-  // **只有勾选的角色才会被注入页面**（单文件模式注入 index.html、章节模式写进骨架），没勾的就只是躺在项目里。
+  // **只有勾选的角色才会被注入页面**（单文件模式注入 index.html、章节模式写进骨架）。
   // 不填按"参与"处理（老数据/新建时默认 true）。
   selected?: boolean
 }
 
 // ===== 内容脚本 Agent（script:generate）=====
+// 「AI 创作」里可以选角色（用户从全局角色库挑）：选中项**只作提示词上下文**，让模型按这些角色的
+// 名字与外观写旁白 / 画面分镜。它**不是**项目角色（ProjectCastMember）：不落盘、不导入项目、
+// 也不参与「HTML生成」页的角色注入；这里只取写稿需要的三样——名字、外观描述、身高（u）。
+export interface ScriptCastRef {
+  id: string
+  name: string
+  // 一句话外观描述（配色 / 特征）
+  desc: string
+  // 高几个 u：让模型写得出「谁高谁矮、差多少」
+  units: number
+}
+
 // 输入 = 「要写什么」+ 当前脚本（上下文由渲染层给，主进程不读项目文件）。
 // 输出 = 结构化场景数组；落盘仍走 project:save-content（模型永远不写文件）。
 export interface ScriptGeneratePayload {
@@ -861,6 +1013,8 @@ export interface ScriptGeneratePayload {
   // 目标场景数 / 目标总时长（秒）：都可空，空则由模型决定
   sceneCount?: number
   targetSeconds?: number
+  // 本片可用的角色（空/缺省 = 没选角色，提示词里不会出现【角色】块，行为与加这个字段之前完全一致）
+  cast?: ScriptCastRef[]
 }
 // 失败分支带上模型原文（raw）——解析失败时界面要把原文摆给用户，不能静默吞掉
 export type ScriptGenerateReply =
@@ -915,9 +1069,10 @@ export type VideoRenderResult =
   | { ok: false; message: string; compatible?: boolean; needPacks?: RuntimePackName[] }
 
 // ============================================================
-// ⑧ 进度推送（5 路 main → renderer，均为单订阅语义）
+// ⑧ 进度推送（5 路 main → renderer；其中 `project:html-progress` 是「一条频道 + 按任务 id 分发」，
+//    所以「生成 HTML」与「画角色」可以并行、各拿各的回调，其余 4 路仍是单订阅语义）
 // ============================================================
-// project:html-progress —— HTML 生成/修改的五阶段（projects.ts 额外补 text 文案字段）
+// project:html-progress —— HTML 生成/修改的五阶段（projects/ 额外补 text 文案字段）
 // 两个 Agent（HTML / 内容脚本）共用同一套五阶段进度：connecting / thinking / writing / retry / done
 // （`main/agent/chat.ts` 统一产出，`HtmlAgentStage` / `HtmlAgentProgress` 保留为旧名别名，旧引用零改动）
 export type AgentStage = 'connecting' | 'thinking' | 'writing' | 'retry' | 'done'
@@ -936,9 +1091,13 @@ export interface AgentProgressPayload {
 }
 export type HtmlAgentStage = AgentStage
 export type HtmlAgentProgress = AgentProgressPayload
-// project:html-progress —— HTML 生成/修改（projects.ts 额外补 text 文案字段）
+// project:html-progress —— HTML 生成/修改（projects/ 额外补 text 文案字段）
+// **一条频道 + 按任务 id 分发**：一次操作（生成 / 修改 / 画角色）一个 taskId，渲染层各自订阅各自的 id，
+// 所以多个任务可以并行、谁的进度回谁那里（不要再退回"单订阅、后注册覆盖前一个"的语义）。
 export interface HtmlProgressPayload extends AgentProgressPayload {
   text: string
+  // 本次任务的 id：与发起时传入的 taskId 相同（html-… / cast-…）
+  taskId: string
 }
 // script:progress —— 内容脚本生成/修改（main/agent/script.ts 额外补 text 文案字段）
 export interface ScriptProgressPayload extends AgentProgressPayload {
@@ -1093,8 +1252,9 @@ export interface PreloadApi {
     load(name: string): Promise<Project | null>
     saveSubtitle(name: string, subtitle: string, title: string): Promise<IpcResult<ProjectSaveResult>>
     saveContent(name: string, content: unknown): Promise<IpcResult<ProjectSaveResult>>
-    generateHtml(name: string, prompt: string, materials?: ProjectHtmlMaterials): Promise<IpcResult<ProjectHtmlResult>>
-    modifyHtml(name: string, prompt: string, materials?: ProjectHtmlMaterials): Promise<IpcResult<ProjectHtmlResult>>
+    // 素材与任务 id 一起给：taskId 必填（进度按它路由，见 onTaskProgress），素材可选
+    generateHtml(name: string, prompt: string, materials: Omit<ProjectAgentPayload, 'name' | 'prompt'>): Promise<IpcResult<ProjectHtmlResult>>
+    modifyHtml(name: string, prompt: string, materials: Omit<ProjectAgentPayload, 'name' | 'prompt'>): Promise<IpcResult<ProjectHtmlResult>>
     downloadHtml(name: string): Promise<IpcResult<ProjectDownloadResult>>
     exportSrt(name: string, srt: string): Promise<IpcResult<ProjectDownloadResult>>
     readHtml(name: string): Promise<IpcResult<ProjectReadHtmlResult>>
@@ -1117,17 +1277,42 @@ export interface PreloadApi {
     setRender(name: string, render: RenderOverride | null): Promise<IpcResult<ProjectSaveResult>>
     // 成片画布方向（项目属性，不是渲染档位）：非法值由主进程忽略
     setCanvas(name: string, canvas: RenderCanvas): Promise<IpcResult<ProjectSaveResult>>
-    // 全局角色库（<userData>/cast-library/）：跨项目复用同一份角色绘制代码。
-    // 与项目内的 cast/<id>.js 是两层——导入 = 把库里那份**复制**进项目（预览与渲染都只认项目目录内的文件）。
-    listCastLibrary(): Promise<IpcResult<CastLibraryResult>>
-    promoteCast(name: string, id: string): Promise<IpcResult>
-    importCast(name: string, ids: string[]): Promise<IpcResult<ProjectCastResult>>
-    removeCastFromLibrary(id: string): Promise<IpcResult>
-    // 项目角色（角色是项目资产，与单文件 / 章节化无关）：
-    // newCast 调一次模型画 cast/<id>.js（结果 selected = true）；saveCast 整份列表回写（勾选 / 删除 / 改名）
-    newCast(name: string, brief?: ProjectNewCastPayload): Promise<IpcResult<ProjectNewCastResult>>
-    saveCast(name: string, cast: ProjectCastMember[]): Promise<IpcResult<ProjectCastResult>>
-    onHtmlProgress(callback: (data: HtmlProgressPayload) => void): void
+    // 本片用到哪几个**全局角色**（角色只有全局一份，见下面的 castTools）：
+    // cast 传 [{ id, selected }]，主进程按 id 从库补全元数据、把 selected 的那些复制进 <项目>/cast/ 并重刷页面
+    saveCast(name: string, cast: ProjectCastSelection[]): Promise<IpcResult<ProjectCastResult>>
+    // HTML 生成 / 修改 / 画角色的过程进度：**一条频道 + 按任务 id 分发**（不是单订阅）。
+    // 调用方自己生成 taskId（utils/taskId.ts）、**先订阅再调用**；返回的函数用于退订（在自己的 finally 里调）。
+    // 同一个 taskId 重复订阅以最后一次为准（与原有的单订阅语义一致，但不影响别的 taskId）。
+    // ⚠ 画角色（castTools）用的是同一条频道与同一张订阅表，两边都从这里订阅即可。
+    onTaskProgress(taskId: string, callback: (data: HtmlProgressPayload) => void): () => void
+  }
+  // 全局角色库（main/cast/library.ts）：角色**只有全局一份**，与项目无关（没有当前项目也能用）。
+  // 库在 <userData>/cast-library/：index.json 存元数据、<id>.js 存绘制代码。
+  // 项目侧只记「本片用了哪几个角色」，生成时由主进程把选中的复制进 <项目>/cast/（见 projectTools.saveCast）。
+  castTools: {
+    // 列库；**首次调用**会顺带把旧项目 cast/ 里尚未全局化的角色迁进库（幂等，只跑一次）
+    list(): Promise<IpcResult<CastLibraryResult>>
+    // 调一次模型画一个新角色并写进库（brief.taskId 必填，进度按它路由）
+    create(brief: CastCreatePayload): Promise<IpcResult<CastResult>>
+    // 调一次模型按 request 重画库里这个角色（覆盖库里的那份代码；id / 身高不变）
+    recreate(id: string, request: string, taskId: string): Promise<IpcResult<CastResult>>
+    // 只改元数据（名字 / 描述 / 画风 / 身高 / 是否水彩），不调模型
+    saveMeta(patch: CastSaveMetaPayload): Promise<IpcResult<CastResult>>
+    remove(id: string): Promise<IpcResult>
+    // 角色预览：主进程只读源码 + 拼一页预览 HTML 落盘，返回它的相对路径（静态一帧，见 CastPreviewPayload）
+    preview(id: string, options?: Omit<CastPreviewPayload, 'id'>): Promise<IpcResult<CastPreviewResult>>
+    // ===== 动作示范（「角色」页 · 双击卡片 / 「…」菜单 · 动作示范）=====
+    // 列动作：公共动作 + 这个角色专属的动作（见 CastActionListResult）
+    listActions(castId: string): Promise<IpcResult<CastActionListResult>>
+    // 保存一条关键帧动作（同 id 覆盖；id 为空 = 新建，主进程起 id）
+    saveAction(payload: CastActionSavePayload): Promise<IpcResult<CastActionResult>>
+    removeAction(payload: CastActionRemovePayload): Promise<IpcResult>
+    // 让 AI 读这个角色的源码后生成一条专属动作（要一次模型调用，进度按 taskId 路由）
+    generateAction(payload: CastActionGeneratePayload): Promise<IpcResult<CastActionResult>>
+    // 会动的示范页：返回相对路径，渲染层自行拼 URL（换动作只换 #hash，不重新加载）
+    demo(id: string, options?: Omit<CastDemoPayload, 'id'>): Promise<IpcResult<CastDemoResult>>
+    // 画角色 / 改画法的进度：与 projectTools.onTaskProgress 是同一条频道、同一张订阅表
+    onTaskProgress(taskId: string, callback: (data: HtmlProgressPayload) => void): () => void
   }
   // 内容脚本 Agent（main/agent/script.ts）：对话式生成/修改场景脚本。
   // generate 只做「模型调用 + 解析」，不写项目文件；落盘走 projectTools.saveContent。

@@ -59,8 +59,9 @@
       </div>
       <!-- 项目素材库（图片 / 视频）：增删与勾选都在子组件里完成，落盘后刷新全局项目状态 -->
       <MaterialsSection />
-      <!-- 角色也是素材（与图片/视频并列）：项目资产、勾选参与本次生成，与「单文件 / 章节化」无关 -->
-      <CastSection v-model:prompt="prompt" :status="status" :think-text="thinkText" />
+      <!-- 角色：**只勾选**（角色只有全局一份，新建 / 改画法都在「角色」页）。
+           勾上 = 本片用到它：生成时应用把那份共享绘制代码复制进项目并注入页面 -->
+      <CastSection />
       <!-- 章节列表（仅章节化产物才有）：只读列表，点「改这一章」把范围写回下面的需求描述 -->
       <ChapterSection v-model:prompt="prompt" />
       <div class="hgen-block">
@@ -99,6 +100,7 @@
       :status-class="statusClass"
       :think-text="thinkText"
       :rendering="rendering"
+      :running="agentRunning"
     />
 
     <!-- 转视频弹窗：把「渲染档位」摆在这里确认一遍再开始（档位文案随「设置页默认 / 本项目覆盖」实时变化） -->
@@ -155,6 +157,8 @@ import {
   renderOptionsText
 } from '@renderer/utils/render'
 import { effectiveRenderOptions, renderDefaults, saveProjectRenderOverride } from '@renderer/composables/useRenderOptions'
+import { useProjectMeta } from '@renderer/composables/useProjectMeta'
+import { newTaskId } from '@renderer/utils/taskId'
 import StepBar from '@renderer/components/StepBar.vue'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import MaterialsSection from './MaterialsSection.vue'
@@ -243,54 +247,34 @@ const promptPlaceholder = computed(() => (hasHtml.value
   ? '描述这次要改什么，例如：\n· 换成紫色霓虹配色，并把标题放大\n· 字幕出现得太快，节奏放慢一些'
   : '描述你想要的 HTML 效果，例如：\n· 深空科技风格的标题动画页，标题为“我的作品集”\n· 每条字幕间隔两秒，依次从下方上浮淡入'));
 
-// 项目状态条（原 renderMeta）：素材一栏同时反映字幕 / 背景音频 / 素材库勾选情况
-const meta = computed(() => {
-  const p = appState.project;
-  const c = (p && p.content) || { scenes: [] };
-  // 有内容的场景（旁白或画面分镜非空）：「两个字段都空」的空壳不算——loadScenes 会给空项目补一个空场景。
-  const filled = (Array.isArray(c.scenes) ? c.scenes : [])
-    .filter((s) => s && (String(s.narration || '').trim() || String(s.visual || '').trim()));
-  // 场景数口径与主进程 buildContentBlock 一致：**画面分镜非空**才算一场（旁白可以为空 = 静音段）。
-  // 早先只数旁白非空，静音段被漏掉，这个格子写的「N 个场景（生成时自动附带）」就与实际附带的对不上。
-  const sceneN = filled.filter((s) => String(s.visual || '').trim()).length;
-  // 「写了旁白、但一场都没填画面分镜」是真会发生的情形（画面才是附带门槛）：这时报「无内容脚本」会
-  // 让人以为自己的脚本白写了，得单独说清楚缺什么。
-  const missVisual = filled.length > 0 && sceneN === 0;
-  const mats = (p && p.materials) || [];
-  const images = mats.filter((m) => m.kind === 'image').length;
-  const videos = mats.filter((m) => m.kind === 'video').length;
-  const picked = mats.filter((m) => m.selected).length;
-  const subCount = (p && p.subtitleCount) || 0;
-  const parts: string[] = [];
-  if (subCount) parts.push('字幕 ' + subCount + ' 条');
-  if (p && p.audioFile) parts.push('已配背景音频');
-  if (mats.length) parts.push('素材 ' + mats.length + ' 个（图片 ' + images + ' · 视频 ' + videos + '，参与生成 ' + picked + '）');
-  return {
-    hasH: hasHtml.value,
-    sceneN,
-    missVisual,
-    subCount,
-    matN: mats.length,
-    matText: parts.length ? parts.join(' · ') : '无素材（可先到「字幕生成」页添加字幕，或在上方「项目素材」里添加图片 / 视频）'
-  };
-});
-
-// 「用法」说明（原 .proj-meta 的第 4 个状态格）：操作引导不是项目数据，现挂在标题右侧的 ? 气泡里
-const usageHint = computed(() => (meta.value.hasH
-  ? '填写需求后点「按需求修改」（在当前页面上改）；想整页重来点「生成 HTML」（会直接覆盖当前页面，点一次即执行），也可「下载 HTML」备份。'
-  : '在「项目素材」里选好素材（可多张图片 / 多个视频，勾选决定这次用哪些），再填写需求描述点「生成 HTML」；背景音频在下方「预览」里选定。'));
+// 项目状态条 + 标题右侧的「用法」气泡：纯派生逻辑在 composables/useProjectMeta.ts
+// （口径与主进程 buildContentBlock 一致：画面分镜非空才算一场；拆出去也是为了本页守住 500 行上限）
+const { meta, usageHint } = useProjectMeta();
 
 // 预览子组件的对外契约只有 reload()（Agent 成功后按新的 HTML 重载预览副本）
 const previewRef = ref<{ reload: () => void } | null>(null);
 
 // ===== 生成 / 修改 =====
-let agentRunning = false;
+// 用 ref 而不是普通 let：预览卡的思考区要按它决定「自动展开 / 自动收起」（下传给 PreviewSection 的 running）
+const agentRunning = ref(false);
 async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
-  if (agentRunning) { toast('上一个请求还在处理中，请稍候'); return; }
+  if (agentRunning.value) { toast('上一个请求还在处理中，请稍候'); return; }
   if (rendering.value) { toast('正在渲染视频，请等它结束再提交需求'); return; }
   const p = prompt.value.trim();
   if (!p) { toast('请先填写需求描述（上方提示词输入框）'); return; }
-  agentRunning = true;
+  agentRunning.value = true;
+  // 任务 id：本页的进度只认它（见 preload 的 onTaskProgress 与 shared/types 的 HtmlProgressPayload）。
+  // 「角色」页画角色时用它自己的 id，两条流可以并行、状态与思考各归各的（同一条频道 + 按 id 分发）。
+  const taskId = newTaskId('html');
+  thinkText.value = '';
+  const off = window.projectTools.onTaskProgress(taskId, (info) => {
+    if (!info) return;
+    if (info.text) {
+      status.value = String(info.text);
+      statusClass.value = '';
+    }
+    thinkText.value = String(info.thinkText || '');
+  });
   const sceneN = meta.value.sceneN;
   // 方案B：生成/修改前提示将附带当前项目内容脚本（脚本为 HTML 的整体内容源）。
   // 附带门槛是「画面分镜非空」，所以「有旁白但都没填画面」要单独说一句，否则会显示成"无内容脚本"，
@@ -305,7 +289,9 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
   // 音轨不在其中：主进程在 HTML 落盘后按 project.audioFile 注入 <audio id="myv-bgm">。
   const materials = {
     subtitleProject: subSel.value,
-    materialIds: ((appState.project && appState.project.materials) || []).filter((m) => m.selected).map((m) => m.id)
+    materialIds: ((appState.project && appState.project.materials) || []).filter((m) => m.selected).map((m) => m.id),
+    // 进度按它路由（必填）：主进程每条进度都带回这个 id
+    taskId
   };
   try {
     const call = (mode === 'generate')
@@ -315,7 +301,8 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
     if (res && res.ok) {
       await refreshProject();
       previewRef.value?.reload();
-      status.value = 'Agent 已更新 HTML' + (res.htmlPath ? '：' + res.htmlPath : '');
+      // 状态行直接用主进程回的消息（章节模式下会带回「已生成 N 章」这类信息）
+      status.value = (res.message || 'Agent 已更新 HTML') + (res.htmlPath ? '：' + res.htmlPath : '');
       statusClass.value = 'hf-ok';
       toast(mode === 'generate' ? 'HTML 已生成' : 'HTML 已修改');
     } else {
@@ -334,7 +321,8 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
       if (!appState.project?.htmlExists) previewRef.value?.reload();
     }
   } finally {
-    agentRunning = false;
+    off();               // 任务结束就退订：不留后台回调，也不影响其它 taskId（「角色」页那一路）
+    agentRunning.value = false;
   }
 }
 // 「生成 HTML」：不参考现有页面，从零做一版新的（覆盖 index.html）。
@@ -397,7 +385,7 @@ async function onResetOptions(): Promise<void> {
 const renderModalVisible = ref(false);
 function openRenderModal(): void {
   if (rendering.value) return;
-  if (agentRunning) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
+  if (agentRunning.value) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
   const htmlPath = appState.project && appState.project.htmlPath;
   if (!htmlPath || !(appState.project && appState.project.htmlExists)) { toast('还没有 HTML，请先「生成 HTML」'); return; }
   renderModalVisible.value = true;
@@ -417,7 +405,7 @@ function onModalKeydown(e: KeyboardEvent): void {
 
 async function onRenderVideo(skipEnvGuard = false): Promise<void> {
   if (rendering.value) return;
-  if (agentRunning) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
+  if (agentRunning.value) { toast('Agent 正在处理 HTML，请等它结束再转视频'); return; }
   const htmlPath = appState.project && appState.project.htmlPath;
   if (!htmlPath || !(appState.project && appState.project.htmlExists)) { toast('还没有 HTML，请先「生成 HTML」'); return; }
   const options = { quality: quality.value, fps: fps.value, canvas: canvas.value };
@@ -478,15 +466,8 @@ onMounted(() => {
   syncFromEffective();     // 渲染档位显示：项目覆盖 > 设置页全局默认
   syncCanvas();            // 画布显示：项目属性（缺省横屏）
   syncStyle();             // 全局视觉风格显示：项目属性（content.style）
-  // 生成/修改过程的实时状态与 AI 思考过程：本页（子组件）自己订阅，主进程为单订阅语义
-  window.projectTools.onHtmlProgress((info) => {
-    if (!info) return;
-    if (info.text) {
-      status.value = String(info.text);
-      statusClass.value = '';
-    }
-    thinkText.value = String(info.thinkText || '');
-  });
+  // 进度订阅不在这里做：进度按任务 id 分发（见 preload 的 onTaskProgress），
+  // 谁发起任务谁在发起处订阅、结束时退订（runAgent 里），这样「角色」页画角色那一路不会影响本页的状态行。
   document.addEventListener('keydown', onModalKeydown);   // 「转视频」弹窗的 ESC 关闭
 });
 

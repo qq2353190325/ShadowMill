@@ -1,5 +1,5 @@
 // src/shared/ipc.ts —— IPC 频道名常量（main / preload / 渲染层三端共享）
-// 频道名与现行实现逐一对应，禁止改动（preload 12 命名空间与渲染层调用依赖它们）。
+// 频道名与现行实现逐一对应，禁止改动（preload 13 命名空间与渲染层调用依赖它们）。
 
 export const IPC = {
   // 窗口控制（renderer → main，send）+ 最大化状态回推（main → renderer）
@@ -108,17 +108,41 @@ export const IPC = {
     ReadHtml: 'project:read-html',
     PreviewHtml: 'project:preview-html',
     SaveHtml: 'project:save-html',
-    // 全局角色库（main/castLibrary.ts）：库在 <userData>/cast-library/，与项目角色 cast/<id>.js 是两层。
-    // 只有这四件事需要跨进程：列库、把项目里的角色存为全局、把全局角色导入项目、从库删除。
-    CastLibrary: 'project:cast-library',
-    PromoteCast: 'project:promote-cast',
-    ImportCast: 'project:import-cast',
-    RemoveCastFromLibrary: 'project:remove-cast-from-library',
-    // 项目角色（角色是**项目资产**，与单文件 / 章节化无关）：
-    //   NewCast = 手动新建一个角色（调一次模型画 cast/<id>.js），SaveCast = 整份角色表回写（勾选 / 删除 / 改名）
-    NewCast: 'project:new-cast',
+    // 本片用到哪几个**全局角色**（角色只有全局一份，见下面的 Cast 组）：整份列表回写，
+    // 载荷是 [{ id, selected }]，主进程据此把选中的角色从库里复制进 <项目>/cast/ 并重刷页面。
+    // 勾选 / 取消勾选 / 增删角色都走这一条（没有"导入""存为全局"这些动作了）。
     SaveCast: 'project:save-cast',
     HtmlProgress: 'project:html-progress'
+  },
+  // 全局角色库（main/cast/library.ts）：角色**只有全局一份**，落 <userData>/cast-library/
+  // （index.json 存元数据 + <id>.js 存绘制代码），与项目无关——不依赖"当前项目"也能用。
+  // 项目里只记「本片用了哪几个角色」（project.cast = [{ id, selected }]），生成时由主进程
+  // 把选中的那些从库复制进 <项目>/cast/（预览协议与渲染静态服务器只认项目目录内的文件）。
+  Cast: {
+    // 列库（首次调用会把旧项目 cast/ 里尚未全局化的角色迁进库，见 ipc/cast.ts 的 migrate）
+    List: 'cast:list',
+    // 调一次模型画一个新角色，直接写进库（taskId 必填，进度按它路由）
+    Create: 'cast:create',
+    // 调一次模型按用户要求**重画库里这个角色**（覆盖库里的那份代码）
+    Recreate: 'cast:recreate',
+    // 只改元数据（名字 / 描述 / 画风 / 身高 / 是否水彩），不调模型
+    SaveMeta: 'cast:save-meta',
+    // 从库里删掉（不动任何项目里已同步的副本）
+    Remove: 'cast:remove',
+    // 静态预览页：主进程把 core.js + 这份角色代码拼成一页自包含 HTML，
+    // 落 <userData>/cast-preview/<id>.html，渲染层用 hgpreview://…?user=1 载进 iframe（见 main/cast/preview.ts）
+    Preview: 'cast:preview',
+    // ===== 动作示范（「角色」页 · 双击卡片 / 「…」菜单 · 动作示范）=====
+    // 角色是纯绘制函数、不含动画：一条动作 = 「时间 → 动画参数」的曲线（见 shared/types.ts 的 CastActionDef）。
+    // 公共动作存 <userData>/cast-library/actions.json 的 shared，专属动作存 byCast[<角色id>]。
+    ActionList: 'cast:action-list',
+    // 保存 / 覆盖一条关键帧动作（同 id 覆盖；id 为空 = 新建，由主进程起 id）
+    SaveAction: 'cast:action-save',
+    RemoveAction: 'cast:action-remove',
+    // 调一次模型，读这个角色的源码后生成一条**它专属**的动作（能用到角色自己的参数，如尾巴 / 四只脚）
+    GenerateAction: 'cast:action-generate',
+    // 会动的示范页：core.js + 角色代码 + 全部动作拼成 <userData>/cast-preview/<id>.demo.html
+    Demo: 'cast:demo'
   },
   // 内容脚本 Agent（main/agent/script.ts）：对话式生成 / 修改场景脚本。
   // generate 只产出文本（落盘走 project:save-content）；chat 系列管 projects/<名>/chat/ 下的

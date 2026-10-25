@@ -36,9 +36,11 @@ export interface AgentChatOptions {
   onProgress?: (p: AgentProgressPayload) => void
 }
 
-// 生成类任务 max_tokens 升档序列：推理模型可能把配额全耗在 reasoning 导致 content 为空，
-// 8192/16384 实测会被 thinking 阶段耗尽（reasoning_tokens=16384 仍无输出），故直接 32768 起步
-const MAX_TOKEN_TRIES = [32768, 65536];
+// 生成类任务 max_tokens 档位：推理模型常把配额全耗在 reasoning 上导致 content 为空，所以起步就给足——
+// 128K / 256K（该模型上下文 1M、输出上限 384K）。**max_tokens 是上限不是配额**：模型自然 stop 就停、
+// 按实际生成计费，抬上限本身不花钱；反而是"先给小的、烧光了再换大的"要付两次输出费（实测约 26% 的输出费
+// 花在被丢弃的那一档上）。仍留第二档兜底：第一档真被截断时再试一次，失败才报错。
+const MAX_TOKEN_TRIES = [131072, 262144];
 
 // 对话记录落盘：每次调用追加一行 jsonl，含完整会话与全过程记录——
 //   messages：完整输入（system + 多轮 user/assistant）；attempts：每档 max_tokens 尝试的完整思考原文
@@ -122,6 +124,8 @@ async function chatWithModel(messages: ChatMessage[], opts: AgentChatOptions): P
         const client = new OpenAI({ apiKey: m.apiKey, baseURL: m.baseUrl });
         const stream = await client.chat.completions.create({
           model: m.modelId, messages, max_tokens: maxTokens, stream: true,
+          // 思考强度（设置页「思考强度」）：none = 不产生思考，省掉 reasoning 那部分输出费；high 是接口默认
+          reasoning_effort: m.reasoningEffort,
           stream_options: { include_usage: true } // 末块回传 usage（prompt/completion/reasoning tokens），供分析
         });
         for await (const chunk of stream as AsyncIterable<any>) {
@@ -147,7 +151,7 @@ async function chatWithModel(messages: ChatMessage[], opts: AgentChatOptions): P
         const resp = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + m.apiKey },
-          body: JSON.stringify({ model: m.modelId, messages, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true } })
+          body: JSON.stringify({ model: m.modelId, messages, max_tokens: maxTokens, stream: true, reasoning_effort: m.reasoningEffort, stream_options: { include_usage: true } })
         });
         if (!resp.ok) {
           // 非 2xx：把响应体留作排障详情（解析不出 JSON 时保留前 300 字符原文）

@@ -21,9 +21,9 @@ function encodeRelPath(rel: string): string {
     .join('/')
 }
 
-// `hgpreview://tts/...` 能读的 userData 子目录白名单——**必须与 main/index.ts 的 TTS_PREVIEW_DIRS 一致**
+// `?user=1` 能读的 userData 子目录白名单——**必须与 main/index.ts 的 USER_PREVIEW_DIRS 一致**
 // （那边是真正的安全边界，这里是渲染层用来把绝对路径换算成相对路径的前缀识别；两处都要改才算加了一类产物）
-const TTS_DIRS = ['tts-output', 'voice']
+const USER_DIRS = ['tts-output', 'voice', 'cast-preview']
 
 /**
  * 项目内相对路径 → `hgpreview://p/<项目名>/<相对路径>`（应用自己的只读文件协议，见 main/index.ts）。
@@ -35,22 +35,30 @@ export function previewUrl(projectName: string, rel: string, bust = false): stri
 }
 
 /**
- * 项目**外**的语音产物（TTS 合成结果 / 生成记录 / 逐句对齐）→ `hgpreview://<任意>/<相对路径>?tts=1`。
+ * userData 下的产物（语音 / 对齐 / **角色预览页**）→ `hgpreview://<任意>/<相对路径>?user=1`。
  * **为什么用查询标记而不是 `hgpreview://tts/...`**：主进程按 `new URL(url).pathname` 取段，
  * 而 `hgpreview://tts/voice/x.wav` 里的 `tts` 在 **host 位**、`pathname` 只有 `/voice/x.wav`
  * ⇒ 会被当成"项目名 = voice"去找项目目录，直接 404（这是 2026-10 实现时踩到的坑）。
- * 用 `?tts=1` 走查询串，与 `?v=<时间戳>` 一样不影响 pathname，路由判定不含糊。
+ * 用 `?user=1` 走查询串，与 `?v=<时间戳>` 一样不影响 pathname，路由判定不含糊
+ * （`?tts=1` 是这条路由早期的写法，主进程仍兼容）。
  *
- * 白名单在**主进程**（只允许读 userData 下的 `tts-output` 与 `voice`，见 main/index.ts 的 TTS_PREVIEW_DIRS）；
- * 这里只负责从绝对路径里认出该目录、取它之后的相对路径——对齐产物是多级的
- * （`voice/align-<时间戳>/raw/0000.wav`），只取最后两段会拼错。
+ * 白名单在**主进程**（只允许读 userData 下的 `tts-output` / `voice` / `cast-preview`，
+ * 见 main/index.ts 的 USER_PREVIEW_DIRS）；这里只负责拼相对路径——`rel` 本身就是相对 userData 的，
+ * 例如角色预览页的 `cast-preview/hero.html`（见 main/cast/preview.ts 的 previewRelPath）。
+ */
+export function userFileUrl(rel: string): string {
+  return 'hgpreview://user/' + encodeRelPath(rel) + '?user=1'
+}
+
+/**
+ * 从**绝对路径**认出白名单目录并换算成 userFileUrl（音频试听那类只知道磁盘路径的调用方用）。
  * 认不出来（用户在别处自定义了保存目录）就返回空串，调用方据此不给试听入口——**不猜**。
  */
-export function ttsUrl(absPath: string): string {
+export function userPathUrl(absPath: string): string {
   const parts = String(absPath || '').replace(/\\/g, '/').split('/').filter(Boolean)
   for (let i = parts.length - 2; i >= 0; i--) {
-    if (TTS_DIRS.indexOf(parts[i]) >= 0) {
-      return 'hgpreview://tts/' + encodeRelPath(parts.slice(i).join('/')) + '?tts=1'
+    if (USER_DIRS.indexOf(parts[i]) >= 0) {
+      return userFileUrl(parts.slice(i).join('/'))
     }
   }
   return ''

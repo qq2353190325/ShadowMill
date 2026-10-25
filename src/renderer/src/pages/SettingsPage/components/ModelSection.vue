@@ -1,7 +1,7 @@
 <template>
   <div class="card hgen-panel">
     <div class="panel-title"><span class="dot"></span>自定义模型</div>
-    <div class="hgen-tip">配置「HTML 生成 / 修改」使用的模型服务。只支持 OpenAI 格式的端点，Anthropic 格式暂不支持。Base URL 与模型 ID 可从常见服务商直接选，也可手填自己的服务地址；填好 API Key 并勾选「启用」后，HTML 生成页就用这个模型工作。API Key 只保存在本电脑。</div>
+    <div class="hgen-tip">配置「HTML 生成 / 修改」使用的模型服务。只支持 OpenAI 格式的端点，Anthropic 格式暂不支持。Base URL 与模型 ID 可从常见服务商直接选，也可手填自己的服务地址；填好 API Key 并勾选「启用」后，HTML 生成页就用这个模型工作。API Key 只保存在本电脑。「思考强度」控制模型是否先思考再答：思考内容同样按输出计费（推理模型里它常占输出的大头），脚本这类结构化任务可以调到「不思考」省钱，生成 / 修改长代码页面建议保持「高」。</div>
     <div class="hgen-row">
       <label class="sel-label">Base URL</label>
       <HfSelect
@@ -33,6 +33,10 @@
       <input v-model="apiKey" type="password" class="hgen-input" style="flex:1" placeholder="sk-..." />
     </div>
     <div class="hgen-row">
+      <label class="sel-label">思考强度</label>
+      <HfSelect :model-value="reasoningEffort" :groups="effortGroups" @change="onEffortPick" />
+    </div>
+    <div class="hgen-row">
       <label class="sel-label">启用</label>
       <label class="hgen-check"><input v-model="enabled" type="checkbox" /> 使用自定义模型生成 / 修改 HTML</label>
     </div>
@@ -51,11 +55,15 @@ import { computed, onMounted, ref } from 'vue'
 import { MODEL_PROVIDERS } from '@renderer/constants'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 import { CUSTOM_VALUE } from '../constants'
+import type { ReasoningEffort } from '@shared/types'
 
 const baseUrl = ref('');
 const modelId = ref('');
 const apiKey = ref('');
 const enabled = ref(false);
+// 思考强度：原样作为 reasoning_effort 下发（取值口径同 DeepSeek）。思考内容也按输出 token 计费，
+// 所以「不思考」是省钱档；默认 high 与接口默认一致。
+const reasoningEffort = ref<ReasoningEffort>('high');
 const status = ref('');
 const statusClass = ref('');
 
@@ -112,17 +120,33 @@ function onModelPick(v: string): void {
   modelCustom.value = false;
 }
 
+// 思考强度下拉：四个档位直接对应接口的 reasoning_effort，说明写在 title 里（不占界面常驻文字）
+const effortGroups: HfSelectGroup[] = [{
+  label: '',
+  options: [
+    { value: 'none', label: '不思考（最省）', title: '不产生思考内容，reasoning 不计费；适合脚本这类结构化任务，生成长代码页面质量会下降' },
+    { value: 'low', label: '低', title: '思考得少一些，费用低于默认' },
+    { value: 'high', label: '高（默认）', title: '接口默认强度' },
+    { value: 'max', label: '最高', title: '思考额度更大，费用最高' }
+  ]
+}];
+
+function onEffortPick(v: string): void {
+  reasoningEffort.value = v as ReasoningEffort;
+}
+
 function setStatus(text: string, kind: string): void {
   status.value = text || '';
   statusClass.value = kind;
 }
 
-function collectCustomModel(): { baseUrl: string; modelId: string; apiKey: string; enabled: boolean } {
+function collectCustomModel(): { baseUrl: string; modelId: string; apiKey: string; enabled: boolean; reasoningEffort: ReasoningEffort } {
   return {
     baseUrl: baseUrl.value.trim(),
     modelId: modelId.value.trim(),
     apiKey: apiKey.value.trim(),
-    enabled: enabled.value
+    enabled: enabled.value,
+    reasoningEffort: reasoningEffort.value
   };
 }
 
@@ -152,6 +176,8 @@ onMounted(async () => {
     modelId.value = m.modelId || '';
     apiKey.value = m.apiKey || '';
     enabled.value = !!m.enabled;
+    // 老配置没有这个字段：主进程读设置时已落回 high，这里兜一层免得下拉显示空占位
+    reasoningEffort.value = (m.reasoningEffort as ReasoningEffort) || 'high';
     // 已保存的值不在预设里 ⇒ 默认进手填态。不这么做下拉会显示空占位，用户看到的是"我配的地址/模型没了"
     baseUrlCustom.value = !!baseUrl.value && !MODEL_PROVIDERS.some((p) => p.baseUrls.includes(baseUrl.value));
     modelCustom.value = !!modelId.value && !(currentProvider.value && currentProvider.value.models.includes(modelId.value));

@@ -85,7 +85,7 @@ import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 import { applyRate, stepRate } from '@renderer/utils/rate'
-import { ttsUrl } from '@renderer/utils/url'
+import { userPathUrl } from '@renderer/utils/url'
 import { goPage } from '@renderer/pages'
 import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import HfSelect, { type HfSelectGroup, type HfSelectOption } from '@renderer/components/HfSelect.vue'
@@ -230,9 +230,9 @@ async function onSynth(): Promise<void> {
       setStatus('合成完成，' + where, 'hf-ok');
       ttsResultShown.value = true;
       resultPath.value = res.savePath || '';
-      // 试听走 hgpreview://tts/…（dev 下 http 页读不了 file://，见 CHANGELOG #25）；
-      // 产物若落在白名单目录之外（用户自定义保存目录），ttsUrl 返回空串 ⇒ 不显示试听行
-      resultSrc.value = res.savePath ? ttsUrl(res.savePath) : '';
+      // 试听走 hgpreview://…?user=1（dev 下 http 页读不了 file://，见 CHANGELOG #25）；
+      // 产物若落在白名单目录之外（用户自定义保存目录），userPathUrl 返回空串 ⇒ 不显示试听行
+      resultSrc.value = res.savePath ? userPathUrl(res.savePath) : '';
       fillGenAudios(true);
     } else {
       // 配置类（Key 无效 / 未配置…）：弹「去设置」；状态行照旧留着，不叠 toast
@@ -300,7 +300,7 @@ function updateGenSel(): void {
   genInfo.value = it.path;
   genSetDisabled.value = false;
   genOpenDisabled.value = false;
-  genAudioSrc.value = ttsUrl(it.path);   // 同上：只服务白名单目录内的产物
+  genAudioSrc.value = userPathUrl(it.path);   // 同上：只服务白名单目录内的产物
   genPlayRowVisible.value = false;
 }
 async function fillGenAudios(silent: boolean): Promise<void> {

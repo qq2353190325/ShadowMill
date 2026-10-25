@@ -1050,6 +1050,31 @@ body {
   opacity: 0.8;
 }
 
+/* ===== AI 思考过程（「预览」卡片内）=====
+   标题行**本身就是开关**（不另设按钮）：默认收起，只有生成/修改进行中才自动展开，一轮结束自动收起
+   （状态在 PreviewSection.vue，这里只管样子）。箭头只标当前展开态，点整行都是切换。 */
+.hg-think-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.hg-think-head:hover {
+  color: #33ddff;
+}
+
+.hg-think-arrow {
+  display: inline-block;
+  width: 10px;
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+}
+
 .empty-hint {
   padding: 20px;
   border: 1px dashed rgba(0, 212, 255, 0.3);
@@ -1952,29 +1977,74 @@ body {
 }
 .ch-pick { padding: 2px 10px; font-size: 12px; flex: none; }
 
-/* ===== HTML生成页：角色列表（章节模式的角色库） =====
-   一行一个角色：名字 / 描述 / 高几 u / 文件 / 「改这个角色」。
-   与上面的章节列表同一套语言（同一组 .ch-sub / .ch-pick 复用），只是列不同：
-   角色没有时间窗，多了「高几 u」这一列（身高比例是它能和别章对齐的唯一凭据）。 */
-.cast-list { margin-top: var(--space-2); }
+/* ===== 「HTML生成」页：角色勾选卡片墙（本片用哪几个全局角色）=====
+   与图片 / 视频素材同一套 `.mat-grid` / `.mat-card`：**人物在上面、名字在下面**，勾选框在左上角。
+   角色卡片只做勾选（新建 / 改画法在「角色」页），所以没有「…」菜单与动作按钮。 */
 
-.cast-row {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1.2fr) minmax(0, 2.6fr) 48px minmax(0, 1.3fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  font-size: 13px;
-  border: 1px solid rgba(0, 212, 255, 0.08);
-  border-bottom: 0;
-  background: rgba(10, 17, 32, 0.5);
+/* 卡片本身不裁剪：「文件缺失」徽标压在右上角、要不被切掉（`.mat-card` 默认 overflow:hidden），
+   圆角与裁切交给下面的 .cast-thumb 自己做 */
+.cast-mat { overflow: visible; }
+
+/* 角色卡片比素材卡**小一号**：列宽定死 130px（素材那张 `.mat-grid` 是 minmax(158px, 1fr) 的弹性列），
+   一屏能并排放下更多角色；配合下面 13:15 的预览位，人物位正好 130×150。
+   **不要收回到 100px**：100 宽配 150 高看着细长、下面两行字也挤成一团（用户实测反馈）。 */
+.cast-mat-grid { grid-template-columns: repeat(auto-fill, 130px); }
+
+/* 预览位：角色是竖构图（8u 高的人 vs 约 4u 宽），13:15（130×150）比素材的 16:9 更省横向空间、人也更完整。
+   底色 #EEF2F7 与预览页一致（深色勾边 / 浅色皮肤在深底上会糊成一片） */
+.cast-thumb {
+  aspect-ratio: 13 / 15;
+  overflow: hidden;
+  border-radius: 10px 10px 0 0;
+  background: #EEF2F7;
 }
-/* 未勾选（本次不注入）：整行压暗，与素材卡片的 .off 同一语言 */
-.cast-row.off { opacity: 0.55; }
-.cast-row:first-child { border-radius: 10px 10px 0 0; }
-.cast-row:last-child { border-bottom: 1px solid rgba(0, 212, 255, 0.08); border-radius: 0 0 10px 10px; }
-.cast-row:only-child { border-radius: 10px; }
+.cast-thumb .cast-shot { width: 100%; height: 100%; border: 0; border-radius: 0; }
 
+/* 右上角「…」：与素材卡的「移除」同位置，但比它再小一号（卡片只有 130px 宽，按钮不能占太多） */
+.cast-more.hf-btn {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
+  padding: 1px 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  border-radius: 5px;
+}
+
+/* 动作菜单：锚在「…」下方展开（z-index 抬过相邻卡片；点菜单外面收起，逻辑在 CastPage/index.vue）。
+   「…」固定在右上角，菜单右对齐贴着它展开，所以格子宽窄都能整块落在卡片内、不探到相邻卡片上 */
+.cast-menu {
+  position: absolute;
+  top: 28px;
+  right: 5px;
+  z-index: 20;
+  min-width: 118px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  background: rgba(11, 18, 32, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.cast-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cast-menu-item:hover:not(:disabled) { background: rgba(0, 212, 255, 0.12); }
+.cast-menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+/* 「移除」是危险动作：文字与 hover 底色都走警报红 */
+.cast-menu-item.danger { color: var(--color-danger); }
+.cast-menu-item.danger:hover:not(:disabled) { background: rgba(255, 77, 109, 0.14); }
+
+/* 名字 / 描述（新建角色弹窗里的大图旁边也在用） */
 .cast-name {
   color: var(--color-primary);
   font-weight: 600;
@@ -1982,31 +2052,300 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cast-desc, .cast-units, .cast-file {
+.cast-desc {
   font-size: 12px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cast-units, .cast-file { font-family: "JetBrains Mono", "Consolas", monospace; }
-.cast-units { text-align: right; }
 
-/* 角色行尾的两个动作（存为全局 / 改这个角色）：并排、靠右，不与文本列争宽 */
-.cast-actions { display: flex; align-items: center; gap: 6px; flex: none; }
-
-/* 全局角色库弹窗里的一行：勾选框 + 名字 + 描述 + 高几 u（缺文件的整行压暗且不可选） */
-.lib-row {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1.2fr) minmax(0, 2.4fr) 48px auto;
+/* ===== 角色预览（静态一帧） =====
+   角色不是图片而是绘制代码（角色库里 <id>.js 的 window.__cast[id] = function (x, y, u, o) {…}），
+   预览由主进程拼好的 <userData>/cast-preview/<id>.html 在 iframe 里把它**真画一遍**得到
+   （见 main/cast/preview.ts）。底色用浅灰：角色多为深色勾边 / 浅色皮肤，深色底会糊成一片。
+   iframe 一律 pointer-events:none：点缩略图要穿透到卡片 / 行本身，预览窗口里没有可交互的东西。 */
+.cast-shot {
+  position: relative;
+  flex: none;
+  width: 56px;
+  height: 72px;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #EEF2F7;
+}
+.cast-shot-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #EEF2F7;
+  pointer-events: none;
+}
+.cast-shot-note {
+  display: flex;
   align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 4px;
+  font-size: 11px;
+  color: #6B7A90;
+  text-align: center;
+}
+/* 弹窗里的大图（新建角色成功后） */
+.cast-shot.big { width: 200px; height: 260px; border-radius: 10px; }
+
+/* ===== 角色方格网格（「角色」页的卡片墙 / 「选择角色（写稿用）」弹窗）=====
+   挑角色看的是长相，所以一格一张预览；描述 / 身高退到格子的 title 悬浮提示，不占格子。
+   列宽用 auto-fill + minmax：窄窗自动减列，不出现横向滚动（与素材卡片墙同一套写法）。 */
+.cast-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   gap: 10px;
-  padding: 7px 10px;
-  font-size: 13px;
+  margin-top: var(--space-2);
+  max-height: 56vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+/* 「角色」页是整页卡片墙：页面自己会滚（.content），这里不要再套一层 56vh 的滚动区 */
+.cast-grid.page { max-height: none; overflow: visible; }
+
+.cast-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(0, 212, 255, 0.14);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(10, 17, 32, 0.72);
+  cursor: pointer;
+  transition: border-color 0.2s ease, opacity 0.2s ease;
+}
+.cast-card:hover:not(.off) { border-color: rgba(0, 212, 255, 0.45); }
+/* 选中：主色描边 + 卡片辉光（与素材卡片的选中态同一套语言） */
+.cast-card.on { border-color: var(--color-primary); box-shadow: var(--glow-card); }
+/* 库里有索引、文件不在：整格压暗且不可点 */
+.cast-card.off { opacity: 0.5; cursor: not-allowed; }
+/* 「角色」页的卡片：**双击卡片**打开动作示范（见 CastPage/index.vue 的 openActions），其余动作在右上「…」菜单里，
+   所以这里用可点的手势光标；选角色弹窗里的卡片是整格可点的，保持 `.cast-card` 默认的 pointer。
+   另外菜单要从卡片里弹出去（默认 overflow:hidden 会把它切掉），圆角改由预览位自己负责 */
+.cast-card.static { cursor: pointer; overflow: visible; }
+.cast-card.static .cast-shot { border-radius: 10px 10px 0 0; }
+/* 格子里的预览撑满卡片宽度（高度固定，保证每格一样高） */
+.cast-card .cast-shot {
+  width: 100%;
+  height: 132px;
+  border: 0;
   border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+  border-radius: 0;
+}
+.cast-card-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 8px 8px;
+}
+.cast-card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-card-sub {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "Consolas", monospace;
+}
+.cast-card-tick {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #03131a;
+  background: var(--color-primary);
+  box-shadow: var(--glow-primary);
+}
+.cast-card-missing {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--color-warning);
+  background: rgba(11, 18, 32, 0.82);
+}
+/* 素材卡片（.mat-card）的勾选框在左上角：'文件缺失' 改挂右上角，别压住勾选框 */
+.mat-card .cast-card-missing { left: auto; right: 6px; }
+
+/* ===== 新建 / 改画法成功后（弹窗里）：左边大图预览、右边名字与落地信息 ===== */
+.cast-done { display: flex; gap: 14px; align-items: flex-start; }
+.cast-done-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cast-done-meta { font-size: 12px; color: var(--text-secondary); }
+.cast-done-meta code { font-family: "JetBrains Mono", "Consolas", monospace; }
+/* 画风说明那一行：比描述更"配置"，用 12px 雾蓝（与 .cast-done-meta 同档） */
+.cast-style { font-size: 12px; color: var(--text-secondary); }
+
+/* ===== 「角色」页 · 动作示范（双击卡片 / 「…」菜单）=====
+   左边一张**会动**的大图（CastPage/CastDemoShot.vue，iframe 里跑主进程拼的 cast-preview/<id>.demo.html），
+   右边动作列表（公共动作 + 本角色专属）。底色与静态预览一致（#EEF2F7）：角色多为深色勾边 / 浅色皮肤。 */
+.cast-demo-shot {
+  position: relative;
+  flex: none;
+  width: 300px;
+  height: 380px;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #EEF2F7;
+}
+.cast-demo-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #EEF2F7;
+}
+
+.cast-act { display: flex; gap: 16px; align-items: flex-start; }
+.cast-act-left { flex: none; display: flex; flex-direction: column; gap: 8px; width: 300px; }
+.cast-act-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cast-act-now { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.cast-act-now-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+/* 动作列表：一行一条（名字 + 来源徽标 + 时长 + 改/删），正在演的那条左 3px 主色 + 渐变高亮
+   （与侧栏菜单选中态、音色列表同一套语言） */
+.cast-act-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.cast-act-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid rgba(0, 212, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(10, 17, 32, 0.6);
+  color: var(--text-primary);
+  /* 按钮不继承 body 的字体（UA 默认是系统字体），这里显式跟上全局字体 */
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.cast-act-item:hover { border-color: rgba(0, 212, 255, 0.4); background: rgba(0, 212, 255, 0.06); }
+.cast-act-item.on {
+  border-color: var(--color-primary);
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.18) 0%, rgba(0, 212, 255, 0) 100%);
+}
+.cast-act-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cast-act-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(138, 155, 181, 0.5);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.cast-act-tag.ai { border-color: rgba(0, 229, 160, 0.5); color: var(--color-success); }
+.cast-act-item-meta {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "Consolas", monospace;
+}
+.cast-act-item-acts { flex: none; display: flex; gap: 8px; }
+.cast-act-link { font-size: 12px; color: var(--color-primary); cursor: pointer; }
+.cast-act-link:hover { text-decoration: underline; }
+.cast-act-link.danger { color: var(--color-danger); }
+
+/* AI 生成专属动作的小面板：一句话 + 时长 + 是否循环（一次模型调用） */
+.cast-act-ai {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  border-radius: 10px;
+  background: rgba(10, 17, 32, 0.6);
+}
+
+/* 关键帧表（CastPage/CastActionEditor.vue）：一行一个时间点、一列一个参数。
+   列宽由 grid-auto-flow: column + grid-auto-columns 统一给：
+   **必须写 `grid-template-rows: auto`**——只有一列显式列 + 没有显式行时，column 流会把所有单元格竖着摞成一列。
+   这样参数表（shared/constants.ts 的 CAST_ACTION_PARAMS）加减项时不用改这里。 */
+.cast-act-table {
+  margin: 10px 0;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.cast-act-tr {
+  display: grid;
+  grid-template-rows: auto;
+  grid-template-columns: 74px;
+  grid-auto-flow: column;
+  grid-auto-columns: 62px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+}
+.cast-act-tr:last-child { border-bottom: 0; }
+.cast-act-tr.head { background: rgba(0, 212, 255, 0.05); font-size: 12px; color: var(--text-secondary); }
+.cast-act-th { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cast-act-cell {
+  width: 100%;
+  padding: 3px 4px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(11, 18, 32, 0.9);
+  color: var(--text-primary);
+  /* 输入框 / 下拉同样不继承 body 字体，显式跟上（数字用等宽，秒数与参数值才对得齐） */
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 12px;
+}
+.cast-act-del {
+  justify-self: start;
+  width: 26px;
+  height: 24px;
+  border: 1px solid rgba(255, 77, 109, 0.4);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-danger);
+  font-size: 12px;
   cursor: pointer;
 }
-.lib-row:last-of-type { border-bottom: 0; }
-.lib-row.off { opacity: 0.5; cursor: not-allowed; }
-.lib-row input[type="checkbox"] { accent-color: var(--color-primary); width: 14px; height: 14px; }
-.lib-missing { font-size: 11px; color: var(--color-warning); }
+.cast-act-del:disabled { opacity: 0.4; cursor: not-allowed; }

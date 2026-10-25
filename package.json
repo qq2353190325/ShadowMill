@@ -1,6 +1,6 @@
 {
   "name": "shadowmill",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "ShadowMill（影坊）：Electron 桌面应用，以「项目」为粒度的一站式音视频创作流水线",
   "main": "out/main/index.js",
   "scripts": {

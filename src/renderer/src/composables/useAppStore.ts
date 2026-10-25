@@ -8,8 +8,9 @@ import { normalizeCanvas, pickRenderOverride } from '@renderer/utils/render'
 
 // ===== 页面键（与菜单 data-page 一致）======
 // 视频环节的页面键是 video-preview（页名「视频预览」）：转视频动作已并入「HTML生成」页，本页只做预览。
+// 「角色」（cast）是**全局角色库**的管理页，与项目无关（没有当前项目也能用）。
 // 原「音色管理」独立页（sound-copy）已并入「配音」页的第三个 Tab，页面键随之下线。
-export type PageKey = 'home' | 'about' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'video-preview' | 'settings'
+export type PageKey = 'home' | 'about' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'cast' | 'video-preview' | 'settings'
 
 // ===== 项目状态结构（与主进程 project.json 字段对应） =====
 export interface ProjectState {

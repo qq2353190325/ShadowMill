@@ -1,5 +1,5 @@
 // src/main/agent/index.ts
-// Agent 层的统一出口：外部（projects.ts、main/index.ts）只从 './agent' 取，
+// Agent 层的统一出口：外部（projects/、main/index.ts）只从 './agent' 取，
 // 不关心内部怎么分文件——与 src/main/updater/ 同一套「同名目录 + index.ts」约定。
 //
 // 目录结构（依赖单向，chat 在最上游，chatLog 是纯文件模块，html / script 只依赖 chat）：
@@ -12,5 +12,10 @@ export { chatWithModel, MAX_TOKEN_TRIES } from './chat'
 export type { ChatMessage, AgentChatOptions } from './chat'
 export { HTML_AGENT_SYSTEM, extractHtmlFromReply, chatWithCustomModel } from './html'
 export { HTML_PLAN_SYSTEM, HTML_CHAPTER_SYSTEM, HTML_CHAPTER_EDIT_SYSTEM, HTML_CAST_SYSTEM, HTML_ROUTE_SYSTEM, chatWithChapterPlan, chatWithChapter, chatWithChapterEdit, chatWithCast, chatWithRoute } from './html'
+// 动作脚本（「角色」页 · 动作示范 · AI 生成专属动作）：读角色源码 → 一条返回参数对象的纯函数。
+// 单独一个文件（castAction.ts）而不是塞进 html.ts：那边已经顶到 500 行硬上限，且这是另一件事。
+export { HTML_CAST_ACTION_SYSTEM, chatWithCastAction } from './castAction'
+// 单文件模式的「按需求修改」：可交整页 HTML，也可只交 cast/<id>.js（角色与单文件 / 章节化无关）
+export { chatWithHtmlEdit } from './htmlEdit'
 export type { AgentOpts, AgentProgress } from './html'
 export { SCRIPT_AGENT_SYSTEM, buildScriptPrompt, parseScriptReply, registerScript } from './script'
