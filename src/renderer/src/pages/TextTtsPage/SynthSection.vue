@@ -85,7 +85,7 @@ import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { useConfigPrompt } from '@renderer/composables/useConfigPrompt'
 import { applyRate, stepRate } from '@renderer/utils/rate'
-import { userPathUrl } from '@renderer/utils/url'
+import { previewUrl, userPathUrl } from '@renderer/utils/url'
 import { goPage } from '@renderer/pages'
 import { requestSettingsSection } from '@renderer/composables/useNavIntent'
 import HfSelect, { type HfSelectGroup, type HfSelectOption } from '@renderer/components/HfSelect.vue'
@@ -230,9 +230,18 @@ async function onSynth(): Promise<void> {
       setStatus('合成完成，' + where, 'hf-ok');
       ttsResultShown.value = true;
       resultPath.value = res.savePath || '';
-      // 试听走 hgpreview://…?user=1（dev 下 http 页读不了 file://，见 CHANGELOG #25）；
-      // 产物若落在白名单目录之外（用户自定义保存目录），userPathUrl 返回空串 ⇒ 不显示试听行
-      resultSrc.value = res.savePath ? userPathUrl(res.savePath) : '';
+      // 试听 URL 按落盘位置分派：项目 audio/ 产物走 hgpreview://p/<项目>/audio/<名>；
+      // userData 白名单产物（tts-output）走 userPathUrl；自定义保存目录不在白名单内 ⇒ 空串、不显示试听行。
+      if (res.savePath) {
+        if (res.savedTo === 'project' && res.projectName) {
+          const fname = String(res.savePath).replace(/\\/g, '/').split('/').filter(Boolean).pop() || '';
+          resultSrc.value = previewUrl(res.projectName, 'audio/' + fname);
+        } else {
+          resultSrc.value = userPathUrl(res.savePath);
+        }
+      } else {
+        resultSrc.value = '';
+      }
       fillGenAudios(true);
     } else {
       // 配置类（Key 无效 / 未配置…）：弹「去设置」；状态行照旧留着，不叠 toast
@@ -266,7 +275,9 @@ function onOpenResultDir(): void {
 }
 
 // ===== 已生成音频（复用为背景音频） =====
-interface GenAudioItem { path: string; name: string; group: string; size: number; mtime: number }
+// 试听 URL 按来源分派：src=user（userData 白名单产物）用 userPathUrl；src=project（项目 audio/）用 previewUrl；
+// src=custom（自定义保存目录）不在 hgpreview 白名单内、没有试听通道，genAudioSrc 置空、点击试听给出明确提示。
+interface GenAudioItem { path: string; name: string; group: string; size: number; mtime: number; src?: 'user' | 'project' | 'custom'; projectName?: string; rel?: string }
 const genAudios = ref<GenAudioItem[]>([]);
 const genSelIdx = ref('');
 const genInfo = ref('');
@@ -295,12 +306,20 @@ function updateGenSel(): void {
     genInfo.value = '';
     genSetDisabled.value = true;
     genOpenDisabled.value = true;
+    genAudioSrc.value = '';
+    genPlayRowVisible.value = false;
     return;
   }
   genInfo.value = it.path;
   genSetDisabled.value = false;
   genOpenDisabled.value = false;
-  genAudioSrc.value = userPathUrl(it.path);   // 同上：只服务白名单目录内的产物
+  // 试听 URL 按来源分派：项目 audio/ 走 hgpreview://p/<项目名>/<rel>（userPathUrl 只认 userData 白名单，
+  // 项目路径解析不到会返回空串，正是「已选音频却提示请先选择」的根因）；自定义目录不在白名单内，无试听通道。
+  if (it.src === 'project' && it.projectName && it.rel) {
+    genAudioSrc.value = previewUrl(it.projectName, it.rel);
+  } else {
+    genAudioSrc.value = userPathUrl(it.path);
+  }
   genPlayRowVisible.value = false;
 }
 async function fillGenAudios(silent: boolean): Promise<void> {
@@ -322,11 +341,17 @@ async function fillGenAudios(silent: boolean): Promise<void> {
   updateGenSel();
 }
 function onGenPlay(): void {
+  const it = genAudios.value[Number(genSelIdx.value)];
+  if (!it) { toast('请先选择已生成音频'); return; }
   const el = genAudioEl.value;
-  if (!el || !genAudioSrc.value) { toast('请先选择已生成音频'); return; }
+  if (!genAudioSrc.value) {
+    // 已选中但拿不到试听 URL：自定义保存目录不在 hgpreview 白名单内，无合法播放通道（userPathUrl 返回空串）
+    toast(it.src === 'custom' ? '该音频位于自定义保存目录，暂不支持试听' : '该音频暂不支持试听（不在可预览目录内）');
+    return;
+  }
   genPlayRowVisible.value = true;
-  if (el.paused) { el.play().catch(() => toast('音频试听失败（可能文件已被移动）')); }
-  else el.pause();
+  if (el && el.paused) { el.play().catch(() => toast('音频试听失败（可能文件已被移动）')); }
+  else if (el) el.pause();
 }
 async function onGenSetBg(): Promise<void> {
   const it = genAudios.value[Number(genSelIdx.value)];

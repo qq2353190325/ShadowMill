@@ -267,12 +267,14 @@ export function registerVoicesIpc(ctx?: RegisterCtx): void {
   });
 
   // 扫描已生成 TTS 音频：默认输出目录 + 自定义保存目录 + 各项目 audio/（供渲染层复用为背景音频）
+  // 每个条目带 src 来源标记：渲染层据此选择试听 URL 拼法（见 SynthSection.vue 的 updateGenSel）——
+  // user=userData 白名单产物（userPathUrl）；project=项目 audio/（previewUrl(项目名, rel)）；custom=自定义目录（无试听通道）。
   ipcMain.handle(IPC.Voice.ListGenerated, async () => {
     const projectsRoot = projects.projectsRoot();
     const AUDIO_RE = /\.(wav|mp3|m4a|aac|ogg|flac|mp4)$/i;
-    const items: { path: string; name: string; group: string; size: number; mtime: number }[] = [];
+    const items: { path: string; name: string; group: string; size: number; mtime: number; src: 'user' | 'project' | 'custom'; projectName?: string; rel?: string }[] = [];
     const seen = new Set<string>();
-    const pushDir = (dir: string, group: string) => {
+    const pushDir = (dir: string, group: string, src: 'user' | 'project' | 'custom', projectName?: string) => {
       if (!dir || !fs.existsSync(dir)) return;
       let names: string[];
       try { names = fs.readdirSync(dir); } catch (e) { return; }
@@ -284,20 +286,29 @@ export function registerVoicesIpc(ctx?: RegisterCtx): void {
         let st: fs.Stats | null = null;
         try { st = fs.statSync(p); } catch (e) { return; }
         if (!st.isFile()) return;
-        items.push({ path: p, name: f, group: group, size: st.size, mtime: st.mtimeMs });
+        items.push({
+          path: p,
+          name: f,
+          group: group,
+          size: st.size,
+          mtime: st.mtimeMs,
+          src: src,
+          // 项目 audio/ 附带相对项目根的路径，渲染层直接拼 hgpreview://p/<项目名>/<rel>
+          ...(src === 'project' && projectName ? { projectName: projectName, rel: path.posix.join('audio', f) } : {})
+        });
       });
     };
-    // 默认输出目录
-    pushDir(path.join(app.getPath('userData'), 'tts-output'), '音频输出目录');
+    // 默认输出目录（userData 白名单内）
+    pushDir(path.join(app.getPath('userData'), 'tts-output'), '音频输出目录', 'user');
     // 自定义保存目录（若已设置；与厂家无关，全局一份）
     const custom = String(settings.getVoiceSettings().saveDir || '').trim();
-    if (custom) pushDir(custom, '自定义目录');
+    if (custom) pushDir(custom, '自定义目录', 'custom');
     // 各项目 audio/
     if (fs.existsSync(projectsRoot)) {
       let projs: string[];
       try { projs = fs.readdirSync(projectsRoot); } catch (e) { projs = []; }
       projs.forEach((proj) => {
-        pushDir(path.join(projectsRoot, proj, 'audio'), '项目 · ' + proj);
+        pushDir(path.join(projectsRoot, proj, 'audio'), '项目 · ' + proj, 'project', proj);
       });
     }
     items.sort((a, b) => b.mtime - a.mtime);
