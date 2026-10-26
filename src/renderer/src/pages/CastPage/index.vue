@@ -14,7 +14,7 @@
       </div>
 
       <!-- 卡片墙：与「HTML生成」页的角色区同一套版式（人物在上、名字在下、动作在右上「…」菜单），
-           区别是这里管的是**库里的角色本身**（新建 / 改画法 / 改信息 / 删除），不是"本片用哪些" -->
+           区别是这里管的是**库里的角色本身**（新建 / 修改 / 删除），不是"本片用哪些" -->
       <div v-if="members.length" class="cast-grid page">
         <div
           v-for="m in members"
@@ -35,8 +35,7 @@
           <!-- 动作菜单：从「…」下方展开；点菜单以外的任何地方会收起（见 menuFor 的 watch） -->
           <div v-if="menuFor === m.id" class="cast-menu" @click.stop @dblclick.stop="closeMenu">
             <button class="cast-menu-item" :disabled="busy || !!m.missing" title="看这个角色动起来的样子：公共动作随便挑，也能给它编专属动作" @click="act(m, 'actions')">动作示范…</button>
-            <button class="cast-menu-item" :disabled="busy || !!m.missing" title="调一次模型，在这个角色现有的代码上按你说的重画（覆盖库里的那份）" @click="act(m, 'recreate')">改画法…</button>
-            <button class="cast-menu-item" title="改名字 / 描述 / 画风 / 身高 / 是否水彩（不调模型）" @click="act(m, 'meta')">改信息…</button>
+            <button class="cast-menu-item" :disabled="busy || !!m.missing" title="改名 / 描述 / 画风 / 身高 / 笔刷（不调模型），或者让它按你的要求重画一遍" @click="act(m, 'edit')">修改角色…</button>
             <button class="cast-menu-item" title="把角色 id 复制到剪贴板（id 就是页面里 window.__cast 的键）" @click="act(m, 'copy')">复制 id</button>
             <button class="cast-menu-item danger" :disabled="busy" title="从全局角色库删除（删了就没了；用到它的项目下次生成时会把它的副本收走）" @click="act(m, 'remove')">删除</button>
           </div>
@@ -52,16 +51,16 @@
         动作与角色代码分开存，所以换动作不用重画角色。
         一个角色 = 一份共享绘制代码（<code>cast/&lt;id&gt;.js</code>，页面里由 <code>window.__cast["id"]</code> 调用），
         所以同一角色在任何一章都由同一份代码画出来，长相不会各章一个样。
-        在这里新建 / 改画法 / 删除都只动<b>全局角色库</b>；「本片用哪几个」在「HTML生成」页勾选。
+        在这里新建 / 修改 / 删除都只动<b>全局角色库</b>；「本片用哪几个」在「HTML生成」页勾选。
       </div>
     </div>
 
-    <!-- 三个弹窗各管一件事：动作示范（看它动）/ 新建与改画法（调模型）/ 改信息（不调模型） -->
+    <!-- 两个弹窗各管一件事：动作示范（看它动 / 改动作）/ 新建与修改角色（调模型或只改信息） -->
     <CastActionModal
       :open="actionsOpen"
       :member="active"
       @close="actionsOpen = false"
-      @recreate="onRecreate"
+      @edit="onEditCast"
     />
     <CastEditModal
       :open="editOpen"
@@ -70,18 +69,12 @@
       @close="editOpen = false"
       @changed="onChanged"
     />
-    <CastMetaModal
-      :open="metaOpen"
-      :member="active"
-      @close="metaOpen = false"
-      @changed="onChanged"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
 // pages/CastPage/index.vue —— 「角色」页：全局角色库的管理界面（与项目无关）。
-// 角色只有全局一份（<userData>/cast-library/）：新建 / 改画法 / 改信息 / 删除都在这里，
+// 角色只有全局一份（<userData>/cast-library/）：新建 / 修改 / 删除都在这里，
 // 「HTML生成」页的角色区只负责"本片用哪几个"的勾选（见 HtmlGenPage/CastSection.vue），
 // 生成时由主进程把勾中的从库复制进 <项目>/cast/（预览与渲染只认项目目录内的文件）。
 // 数据全部走 castTools（cast:* 频道）；任务进度按 taskId 订阅（与「生成 HTML」互不干扰）。
@@ -92,7 +85,6 @@ import { toast } from '@renderer/composables/useToast'
 import CastShot from '@renderer/components/CastShot.vue'
 import CastActionModal from './CastActionModal.vue'
 import CastEditModal from './CastEditModal.vue'
-import CastMetaModal from './CastMetaModal.vue'
 
 const members = ref<CastLibraryMember[]>([])
 const busy = ref(false)
@@ -128,16 +120,14 @@ function toggleMenu(id: string): void {
 
 const active = ref<CastLibraryMember | null>(null)
 const editOpen = ref(false)
-const editMode = ref<'create' | 'recreate'>('create')
-const metaOpen = ref(false)
+const editMode = ref<'create' | 'edit'>('create')
 const actionsOpen = ref(false)
 
-function act(m: CastLibraryMember, kind: 'actions' | 'recreate' | 'meta' | 'copy' | 'remove'): void {
+function act(m: CastLibraryMember, kind: 'actions' | 'edit' | 'copy' | 'remove'): void {
   closeMenu()
   active.value = m
   if (kind === 'actions') { actionsOpen.value = true; return }
-  if (kind === 'recreate') { editMode.value = 'recreate'; editOpen.value = true; return }
-  if (kind === 'meta') { metaOpen.value = true; return }
+  if (kind === 'edit') { editMode.value = 'edit'; editOpen.value = true; return }
   if (kind === 'copy') { void onCopyId(m); return }
   void onRemove(m)
 }
@@ -151,11 +141,11 @@ function openActions(m: CastLibraryMember): void {
   actionsOpen.value = true
 }
 
-// 动作示范弹窗里的「改画法…」：先收起示范弹窗，再打开原有的改画法弹窗（不叠两层弹窗）
-function onRecreate(m: CastLibraryMember): void {
+// 动作示范弹窗里的「修改角色…」：先收起示范弹窗，再打开修改角色弹窗（不叠两层弹窗）
+function onEditCast(m: CastLibraryMember): void {
   actionsOpen.value = false
   active.value = m
-  editMode.value = 'recreate'
+  editMode.value = 'edit'
   editOpen.value = true
 }
 
@@ -182,7 +172,7 @@ function openCreate(): void {
   editOpen.value = true
 }
 
-// 弹窗里改过角色（新建 / 改画法 / 改信息）：列表重读，预览按 id 换地址重载
+// 弹窗里改过角色（新建 / 改信息 / 重画）：列表重读，预览按 id 换地址重载
 async function onChanged(m: CastResult['member']): Promise<void> {
   epochs[m.id] = (epochs[m.id] || 0) + 1
   await load()

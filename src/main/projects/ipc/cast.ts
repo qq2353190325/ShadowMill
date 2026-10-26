@@ -102,7 +102,8 @@ export function registerCastIpc(ctx: RegisterCtx): void {
     }
   });
 
-  // 改画法：在库里这个角色的现有代码上按用户要求重画，**覆盖库里的那份**。
+  // 改画法（「角色」页 ·「修改角色…」·「按这个要求重画」）：在库里这个角色的现有代码上按用户要求重画，
+  // **覆盖库里的那份**。渲染层会先存一次元数据（含画风）再调这条，所以这里读到的是刚存的成员信息。
   // 这是「改角色」的唯一入口 —— HTML 生成 / 按需求修改都不许动角色（见 main/cast/edit.ts 的说明）。
   ipcMain.handle(IPC.Cast.Recreate, async (event, payload?: CastRecreatePayload) => {
     const id = String((payload && payload.id) || '').trim().toLowerCase();
@@ -127,10 +128,10 @@ export function registerCastIpc(ctx: RegisterCtx): void {
       const want = cast.castRelPath(id);
       const hit = parsed.files.find((f) => f.path === want);
       const bad = cast.validateCastCode(hit ? hit.code : '');
-      if (bad) return { ok: false, message: '角色「' + member.name + '」改画法失败：' + bad + '。把要求写得更具体后重试。' };
+      if (bad) return { ok: false, message: '角色「' + member.name + '」重画失败：' + bad + '。把要求写得更具体后重试。' };
       const w = cast.writeMemberCode(root, id, (hit as { code: string }).code);
       if (!w.ok) return { ok: false, message: w.message };
-      // 元数据不改（名字 / 身高 / 画风都由「改信息」管）：这里只换了画法
+      // 元数据不在这里改：名字 / 描述 / 画风 / 身高 / 笔刷由渲染层先走 cast:save-meta 落库，这里只换画法
       return { ok: true, member: withMissing(member) } as { ok: true; member: CastLibraryResult['members'][number] };
     } catch (e) {
       const msg = 'Agent 调用失败：' + ((e as Error) && (e as Error).message ? (e as Error).message : String(e));

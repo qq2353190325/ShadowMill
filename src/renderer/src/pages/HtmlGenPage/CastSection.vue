@@ -6,7 +6,7 @@
         <span class="ch-sub">本片勾选 {{ pickedCount }} / {{ members.length }} 个 · 生成时由应用注入页面</span>
       </div>
       <div class="panel-head-actions">
-        <button class="hf-btn" title="去「角色」页新建 / 改画法 / 删除（角色是全局的，跟项目无关）" @click="goCastPage">
+        <button class="hf-btn" title="去「角色」页新建 / 修改 / 删除（角色是全局的，跟项目无关）" @click="goCastPage">
           管理角色
         </button>
       </div>
@@ -14,7 +14,7 @@
 
     <!-- 卡片墙：与「角色」页同一套版式（人物在上、名字在下），这里是**勾选**语义：
          勾上 = 本片用到它（生成时从全局角色库复制进 <项目>/cast/ 并注入页面），取消 = 后续生成不再带它。
-         新建 / 改画法 / 删除都在「角色」页——这里只管"本片用哪几个"（用户明确要求 HTML 这边不许增改角色）。 -->
+         新建 / 修改 / 删除都在「角色」页——这里只管"本片用哪几个"（用户明确要求 HTML 这边不许增改角色）。 -->
     <div v-if="members.length" class="mat-grid cast-mat-grid">
       <div v-for="m in members" :key="m.id" class="mat-card cast-mat" :class="{ off: !isPicked(m.id) }">
         <button
@@ -49,7 +49,7 @@
 // pages/HtmlGenPage/CastSection.vue —— 「HTML生成」页 · 角色（**只勾选，不增改**）
 // 角色只有全局一份（<userData>/cast-library/，见 main/cast/library.ts），所以这里列出**库里全部角色**，
 // 勾上 = 本片用到它：主进程把勾中的复制进 <项目>/cast/ 并注入页面（预览 / 渲染只认项目目录内的文件）。
-// 新建 / 改画法 / 改信息 / 删除都在「角色」页（cast:* 频道）。用户明确要求 HTML 这边不许新增和修改角色，
+// 新建 / 修改 / 删除都在「角色」页（cast:* 频道）。用户明确要求 HTML 这边不许新增和修改角色，
 // 所以这里没有「新建角色」「存为全局」「改这个角色」，也不再把需求描述写进 prompt。
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { CastLibraryMember, ProjectCastSelection } from '@shared/types'

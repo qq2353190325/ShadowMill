@@ -75,14 +75,17 @@ export function registerCastActionIpc(ctx: RegisterCtx): void {
 
   // AI 生成**专属**动作：把角色源码发给模型，让它写一条返回动画参数对象的纯函数。
   // 生成的动作存进 byCast[<角色id>]（只这个角色能演：它可能用了角色自己的参数，如尾巴）。
+  // 带 actionId 时是**改一条已有专属动作**（动作示范里「改」AI 动作那条路）：拼提示词时把那条现有脚本
+  // 一起发过去，用同一个 id 覆盖（名字 / 来源沿用，时长与循环按本次入参）。
   // 进度按 taskId 分发（见 preload 的 onTaskProgress）：与「生成 HTML」「画角色」并行也不互相顶掉。
   ipcMain.handle(IPC.Cast.GenerateAction, async (event, payload?: CastActionGeneratePayload) => {
     const id = String((payload && payload.castId) || '').trim().toLowerCase();
     const request = String((payload && payload.request) || '').trim();
+    const wantId = String((payload && payload.actionId) || '').trim().toLowerCase();
     const taskId = payload && typeof payload.taskId === 'string' ? payload.taskId : '';
     if (!taskId) return { ok: false, message: '内部错误：缺少任务 id（进度无法回传），请刷新页面后重试' };
     if (!cast.isCastPath('cast/' + id + '.js')) return { ok: false, message: '角色 id 不合法：' + String(payload && payload.castId) };
-    if (!request) return { ok: false, message: '请写一句「要什么动作」' };
+    if (!request) return { ok: false, message: wantId ? '请写一句「要改成什么样」' : '请写一句「要什么动作」' };
     const root = castLibraryRoot();
     const lib = cast.readLibrary(root);
     if (lib.error) return { ok: false, message: lib.error };
@@ -90,11 +93,16 @@ export function registerCastActionIpc(ctx: RegisterCtx): void {
     if (!member) return { ok: false, message: '角色库里没有这个角色：' + id };
     const code = cast.readMemberCode(root, id);
     if (!code.trim()) return { ok: false, message: '角色库里找不到这个角色的代码：' + id + '.js' };
+    // 要改的那条必须在**这个角色的专属列表**里（防止拿公共动作或别人的动作 id 来覆盖）
+    const prev = wantId ? cast.listActionsFor(root, id).own.find((a) => a.id === wantId) : undefined;
+    if (wantId && !prev) return { ok: false, message: '要改的动作不在了：' + wantId + '（可能已被删掉，刷新后重试）' };
     const duration = durationOf(payload && payload.duration);
     try {
       const onProgress = progressSender(event, { taskId });
-      pushStatus(event, '正在给「' + member.name + '」编动作…', { taskId });
-      const prompt = buildCastActionPrompt({ member, code, request, duration });
+      pushStatus(event, (prev ? '正在改「' : '正在给「') + member.name + (prev ? '」的动作…' : '」编动作…'), { taskId });
+      const prompt = buildCastActionPrompt({
+        member, code, request, duration, previous: prev && prev.code ? prev.code : ''
+      });
       const reply = await chatWithCastAction(prompt, { onProgress, meta: { action: 'cast-action-' + id } });
       const script = cast.parseCastActionReply(reply);
       if (!script) return { ok: false, message: '模型没有交回动作脚本：把要求写得更具体后重试' };
@@ -102,8 +110,8 @@ export function registerCastActionIpc(ctx: RegisterCtx): void {
       if (bad) return { ok: false, message: '动作生成失败：' + bad + '。把要求写得更简单后重试。' };
       const name = (String((payload && payload.name) || '').trim() || request).slice(0, CAST_ACTION_NAME_MAX);
       const action: CastActionDef = {
-        id: cast.nextActionId(takenIds('own', id)),
-        name,
+        id: prev ? prev.id : cast.nextActionId(takenIds('own', id)),
+        name: prev ? prev.name : name,
         duration,
         loop: payload ? payload.loop !== false : true,
         code: script,
