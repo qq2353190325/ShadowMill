@@ -19,7 +19,7 @@
 // pages/CastPage/CastDemoShot.vue —— 「角色」页 · 动作示范弹窗里那张**会动**的图。
 // 与 components/CastShot.vue（静态一帧）的分工：那个回答"这个角色长什么样"，这个回答"它动起来什么样"。
 // 尺寸由外层 CSS 决定；本组件只负责取示范页地址、按 actionId 换 #hash、以及 epoch 变化时重载。
-import { ref, watch } from 'vue'
+import { ref, toRaw, watch } from 'vue'
 import { userFileUrl } from '@renderer/utils/url'
 
 const props = defineProps<{
@@ -53,11 +53,18 @@ async function load(): Promise<void> {
   err.value = ''
   base = ''
   if (!props.id) return
-  const res = await window.castTools.demo(props.id, {
-    units: props.units,
-    title: props.title,
-    uses: props.uses || []
-  }).catch(() => null)
+  // uses 必须是**普通数组**（toRaw + slice）：响应式 Proxy 过不了 IPC 的结构化克隆，
+  // invoke 会直接抛、示范页永远停在「…」——与 components/CastShot.vue 同一个坑（那里有完整说明）
+  let res: Awaited<ReturnType<typeof window.castTools.demo>> | null = null
+  try {
+    res = await window.castTools.demo(props.id, {
+      units: props.units,
+      title: props.title,
+      uses: Array.isArray(props.uses) ? toRaw(props.uses).slice() : []
+    })
+  } catch (e) {
+    res = null
+  }
   if (mine !== seq) return
   if (!res || !res.ok) {
     err.value = (res as { message?: string } | null)?.message || '示范页生成失败'

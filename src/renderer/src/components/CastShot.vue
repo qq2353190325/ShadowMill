@@ -22,7 +22,7 @@
 // 由 hgpreview 的 `?user=1` 白名单放行（见 main/cast/preview.ts 与 main/index.ts 的 USER_PREVIEW_DIRS）。
 // 尺寸由外层 CSS 决定（.cast-shot / .cast-shot.big）；本组件只负责「取预览页地址 + 载入 iframe」。
 // epoch 由父级在角色被重画后 +1：文件被覆盖后 iframe 必须重新载入（地址一变就会重载）。
-import { ref, watch } from 'vue'
+import { ref, toRaw, watch } from 'vue'
 import { userFileUrl } from '@renderer/utils/url'
 
 const props = defineProps<{
@@ -47,11 +47,21 @@ async function load(): Promise<void> {
   src.value = ''
   err.value = ''
   if (!props.id) return
-  const res = await window.castTools.preview(props.id, {
-    units: props.units,
-    title: props.title,
-    uses: props.uses || []
-  }).catch(() => null)
+  // ⚠️ uses 必须交**普通数组**：它通常是库成员的响应式数组（ref/reactive 包出来的 Proxy），
+  // 而 IPC 参数要过结构化克隆，代理**不可克隆** ⇒ invoke 直接抛 "could not be cloned."，
+  // 主进程的 handler 根本不会执行，卡片就永远停在「…」占位符上（用户实测：史蒂夫改成名水彩后卡片空白）。
+  // 与 composables/useRuntime.ts 的 plainPacks 是同一个坑（那里也写了注释）。
+  let res: Awaited<ReturnType<typeof window.castTools.preview>> | null = null
+  try {
+    res = await window.castTools.preview(props.id, {
+      units: props.units,
+      title: props.title,
+      uses: Array.isArray(props.uses) ? toRaw(props.uses).slice() : []
+    })
+  } catch (e) {
+    // 同步抛（结构化克隆失败）与异步拒绝都收在这里：不许让 load() 半路死掉、界面停在「…」
+    res = null
+  }
   if (mine !== seq) return
   if (!res || !res.ok) {
     err.value = (res as { message?: string } | null)?.message || '预览生成失败'
