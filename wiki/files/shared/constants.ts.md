@@ -1,10 +1,10 @@
 # src/shared/constants.ts
 
-> 应用级公共常量：品牌文案（中文名 / 英文名 / 口号）+ 出网请求 User-Agent + **项目素材的类型白名单与合计上限** + **成片画布的取值与尺寸（`RenderCanvas`）** + **估时语速（4 字/秒，一个语速三处用）与估时公式** + **角色动作的参数表与三类上限（`CAST_ACTION_*`）**的唯一来源
+> 应用级公共常量：品牌文案（中文名 / 英文名 / 口号）+ 出网请求 User-Agent + **项目素材的类型白名单与合计上限** + **成片画布的取值与尺寸（`RenderCanvas`）** + **估时语速（4 字/秒，一个语速三处用）与估时公式** + **角色动作的参数表与三类上限（`CAST_ACTION_*`，参数表含朝向 `face`、髋角 `hip`、抱团 `tuck`）**的唯一来源
 
 - **所在目录**：`src/shared/`
 - **类型**：共享常量 + 一个纯函数（`estimateSubtitleDur`，零副作用；顶部只有一处 `import type { RenderCanvas } from './types'`，纯类型导入不产生运行时代码）
-- **规模**：**129 行**（89 → 129 是本轮新增「角色动作的参数表」一节：`CastActionParam` 接口 + `CAST_ACTION_PARAMS`（10 项）+ `CAST_ACTION_NAME_MAX` / `CAST_ACTION_DURATION` / `CAST_ACTION_MAX_PER_SCOPE` 三个上限）
+- **规模**：**136 行**（89 → 129 是新增「角色动作的参数表」一节：`CastActionParam` 接口 + `CAST_ACTION_PARAMS` + `CAST_ACTION_NAME_MAX` / `CAST_ACTION_DURATION` / `CAST_ACTION_MAX_PER_SCOPE` 三个上限；129 → 132 是加**朝向 `face`**（参数表 1 行 + 文件头注释 2 行）；132 → 136 是加**髋角 `hip` 与抱团 `tuck`**（参数表 2 行 + 文件头注释 2 行：hip = 弧度、正 = 大腿向前抬、只在侧面视图生效，下蹲 = hip 与膝盖同角 + dy 下沉；tuck = 0..1、≥0.5 画成球、球心 = 脚底中点、半径约 1.25u，贴地滚给 dy = -1.25、dx = 1.25 × 转角）
 - **对外导出**：**17 个常量 + 1 个函数 + 1 个接口**——`APP_NAME`、`APP_NAME_EN`、`APP_SLOGAN`、`APP_SLOGAN_SHORT`、`APP_USER_AGENT`（5 个字符串常量）+ `MAX_MATERIALS`、`IMAGE_MATERIAL_EXTS`、`VIDEO_MATERIAL_EXTS`（3 个素材常量）+ `RENDER_CANVASES`、`CANVAS_SIZES`、`CANVAS_LABELS`、`DEFAULT_CANVAS`（4 个画布常量）+ **`EST_CHARS_PER_SEC`** + `estimateSubtitleDur(text)` + **`CastActionParam`（接口）、`CAST_ACTION_PARAMS`、`CAST_ACTION_NAME_MAX`、`CAST_ACTION_DURATION`、`CAST_ACTION_MAX_PER_SCOPE`（本轮新增）**
 
 ## 1. 作用与职责
@@ -48,7 +48,7 @@
 | `EST_CHARS_PER_SEC` | `4` | `number` | **估时语速（字/秒）**，一个语速三处用（见 §2.3） |
 | `estimateSubtitleDur` | `(text: string) => number` | 函数 | **估时公式唯一真源**：`max(2.4, 1.6 + 字数 / EST_CHARS_PER_SEC)` |
 | **`CastActionParam`** | `{ key; label; type; min?; max?; step?; def?; options? }` | **接口** | 一个动作参数的界面元数据（见 §2.5） |
-| **`CAST_ACTION_PARAMS`** | 10 项（`dy` / `dx` / `aL` / `aR` / `rot` / `sq` / `walk` / `blink` 数字 + `eyes` / `mouth` 枚举） | **`CastActionParam[]`** | **动作参数表（唯一真源）**：关键帧编辑器的列、`normalizeActionDef` 的逐参数校验都用它 |
+| **`CAST_ACTION_PARAMS`** | 13 项（`dy` / `dx` / `aL` / `aR` / `rot` / `sq` / `walk` / `face` / `hip` / `tuck` / `blink` 数字 + `eyes` / `mouth` 枚举） | **`CastActionParam[]`** | **动作参数表（唯一真源）**：关键帧编辑器的列、`normalizeActionDef` 的逐参数校验都用它 |
 | **`CAST_ACTION_NAME_MAX`** | `12` | **`number`** | 动作名长度上限（编辑器 `maxlength`、主进程起名时截断） |
 | **`CAST_ACTION_DURATION`** | `{ min: 0.3, max: 30 }` | **只读对象** | 一条动作的时长范围（秒）：编辑器输入框与主进程 `durationOf()` 都夹它 |
 | **`CAST_ACTION_MAX_PER_SCOPE`** | `40` | **`number`** | 同一作用范围（公共 / 某个角色专属）最多存几条动作，`upsertAction` 超限拒绝 |
@@ -140,6 +140,10 @@ export function estimateSubtitleDur(text: string): number {
 // 方向与量纲都按角色端实际实现写（不是随手给的宽松区间）：
 //   dy 正 = 下移（负才是跳起来）/ dx 正 = 右移 / aL、aR 正 = 向外抬起 / sq 正 = 拉长变窄 /
 //   rot 弧度、正 = 顺时针（绕脚底）/ walk 相位 1 = 一个完整步。
+//   face 0 = 正面、1 = 侧面（角色按 ≥0.5 切到侧面；侧面固定朝角色局部 +x，朝左交给 flip）。
+//   中间值不是"平滑旋转"——角色没有 3D，通常按阈值硬切，转身那一瞬由 sq 压窄遮挡（见演示/章节提示词）。
+//   hip 髋角（弧度，正 = 大腿向前抬，只在侧面视图生效）：下蹲 = hip 与膝盖同角（大腿前 45°）+ dy 下沉。
+//   tuck 抱团 0..1：角色在 ≥0.5 时画成球（球心 = 脚底中点、半径约 1.25u），调用方给 dy = -1.25、dx = 1.25 × 转角就能贴地滚。
 // mouth 多一个 'auto'：**不传这个参数**，让角色自己按 eyes 定嘴型（多数角色是 mouth 跟随 eyes，
 // 显式给 'normal' 会把笑眼配成平嘴）。
 ```
@@ -153,6 +157,9 @@ export function estimateSubtitleDur(text: string): number {
 | `rot` | 旋转 rot | number | `-0.8 ~ 0.8`，步长 0.02，默认 0 | 弧度，**正 = 顺时针**（绕脚底转） |
 | `sq` | 挤压 sq | number | `-1 ~ 1`，步长 0.05，默认 0 | 正 = 拉长变窄、负 = 压矮变宽 |
 | `walk` | 摆腿 walk | number | `0 ~ 4`，步长 0.05，默认 0 | 摆腿相位（1 = 一个完整步） |
+| `face` | 朝向 face | number | `0 ~ 1`，步长 0.1，默认 0 | **0 = 正面、1 = 侧面**（角色按 ≥0.5 切）；侧面朝局部 +x，朝左交给 `flip`；中间值不会平滑旋转，靠 `sq` 压窄遮硬切 |
+| `hip` | 髋角 hip | number | `-2 ~ 2`，步长 0.05，默认 0 | 弧度，**正 = 大腿向前抬**；**只在侧面视图生效**；下蹲 = hip 与膝盖同角（大腿前 45°）+ `dy` 下沉 |
+| `tuck` | 抱团 tuck | number | `0 ~ 1`，步长 0.1，默认 0 | **≥0.5 时画成球**（球心 = 脚底中点、半径约 1.25u）；要贴地滚就给 `dy = -1.25`、`dx = 1.25 × 累计转角` |
 | `blink` | 眨眼 blink | number | `0 ~ 1`，步长 0.05，默认 0 | 0 = 睁眼、1 = 闭眼 |
 | `eyes` | 表情 eyes | enum | `normal` / `happy` / `sad` / `angry` / `surprise` | 表情 |
 | `mouth` | 嘴型 mouth | enum | `auto` + 上面五个 | **`auto` = 不传这个参数**（让角色按 `eyes` 自己定嘴型），落盘时丢弃 |
@@ -167,11 +174,12 @@ export function estimateSubtitleDur(text: string): number {
 | `CAST_ACTION_DURATION` | `{ min: 0.3, max: 30 }` | 编辑器的时长输入（`min` / `max`）、`projects/ipc/castActions.ts` 的 `durationOf()`、`cast/actions.ts` 的 `normalizeActionDef`（两位小数） |
 | `CAST_ACTION_MAX_PER_SCOPE` | `40` | `cast/actions.ts` 的 `upsertAction`：同一作用范围超 40 条直接拒绝 |
 
-**三条推论**：
+**四条推论**：
 
 1. **改参数表等于改三处**：编辑器的列（`CastActionEditor.vue` 直接遍历 `CAST_ACTION_PARAMS`）、主进程的夹取 / 白名单（`normalizeActionDef`：数字夹到 `min`–`max`、枚举查 `options`、`'auto'` 丢弃）、内置动作的量级（`presets.ts` 照同一套方向写）。
 2. **`mouth` 的 `'auto'` 是「不传」，不是「一个值」**：编辑器里选「自动」会 `delete row.o[key]`，主进程落盘时也把它丢掉——这样角色才会按 `eyes` 定嘴型。
-3. **方向不是随口写的**：`dy` 正 = 下、`dx` 正 = 右、`aL`/`aR` 正 = 向外、`sq` 正 = 拉长变窄、`rot` 正 = 顺时针，都按角色端实际实现（`ctx.translate(x + dx*u, y + dy*u)` 之类）写；写反了动作会朝反方向演。
+3. **方向不是随口写的**：`dy` 正 = 下、`dx` 正 = 右、`aL`/`aR` 正 = 向外、`sq` 正 = 拉长变窄、`rot` 正 = 顺时针、`hip` 正 = 大腿向前抬，都按角色端实际实现（`ctx.translate(x + dx*u, y + dy*u)` 之类）写；写反了动作会朝反方向演。
+4. **`face` / `hip` / `tuck` 都是「角色读了才生效」的参数**：角色代码里不读它们就一直按老样子画——**不报错**，其它参数照常生效。**库里目前只有 `cast1.js` 实现了 `hip` 与抱团（`tuck`）分支**，`cast2` / `cast3` 仍是旧代码，给它们填这两个参数不会生效（`face` 同理：不读就一直画正面）。要等角色按 `HTML_CAST_SYSTEM` 第 4 条补出侧面 / 抱团画法；内置的 14 条动作也都没有这三项（缺省 = 0），老动作不受影响。
 
 ## 3. 品牌注入链路（三条路径）
 
@@ -225,7 +233,7 @@ export function estimateSubtitleDur(text: string): number {
 - **不是 IPC 契约**：`ipc.ts` / `types.ts` 的「禁止改动」约束不适用于本文件——改品牌名不需要动任何频道名或载荷格式。但**素材常量改的是产品规则**、**画布常量更硬**（`CANVAS_SIZES` 必须与 CLI 的 `CANVAS_DIMENSIONS` 一致，改错等于成片尺寸错）、**估时语速会一起改三处**、**动作参数表会一起改编辑器的列与落盘校验**。
 - **上限只有一个来源**：不要在渲染层或主进程另写 `20` / `40` / `12`；渲染层只做展示，真正的截断在主进程。
 - **估时公式只有一个来源，语速也只有一个来源**：不要另写 `0.15` / `1.6` / `2.4` / `4` / `4.5` 这类字面量；渲染层保留的 `estDur` 只是别名。
-- **动作参数不要在两个地方各写一份**：`CAST_ACTION_PARAMS` 是界面与主进程的共同真源；新增一个参数（比如某个角色自己的 `tail`）若只加在编辑器里，主进程落盘时会把它过滤掉。
+- **动作参数不要在两个地方各写一份**：`CAST_ACTION_PARAMS` 是界面与主进程的共同真源；新增一个参数（比如某个角色自己的 `tail`）若只加在编辑器里，主进程落盘时会把它过滤掉。`face`（朝向）、`hip`（髋角）、`tuck`（抱团）是近两版陆续加进通用清单的：「怎么画」（侧面视图 / 下蹲 / 圆球）归角色画师提示词（`HTML_CAST_SYSTEM` 第 4 条），这里只管「能填 / 能收」。**参数在表里 ≠ 每个角色都生效**：目前只有 `cast1.js` 实现了 `hip` 与 `tuck`，`cast2` / `cast3` 填了不会动。
 - **零运行时开销**：常量被各端打包器内联，main / preload / renderer 各自持有副本。
 - **不要在 shared 放业务逻辑**：唯一允许的函数是 `estimateSubtitleDur()`——纯函数、无副作用、无外部依赖。
 - **`productName` 的漂移只能告警、不能报错**：`checkBrandConsistency()` 内部 `try/catch` 并不一致时 `console.warn`。

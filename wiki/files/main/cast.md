@@ -6,7 +6,7 @@
 
 - **所在目录**：`src/main/cast/`（**同名目录 + `index.ts` 出口**，与 `agent/`、`updater/`、`projects/` 同一套约定；拆法见根 `AGENTS.md` 关键约定 9）
 - **类型**：纯逻辑 + 库/项目文件读写（`table.ts` / `library.ts` / `actions.ts` 碰盘；`edit.ts` / `inject.ts` / `preview.ts` / `demo.ts` 只做字符串；`presets.ts` 只有数据）+ 一个只再导出的出口
-- **规模**：**9 个文件、合计 1408 行、最长 263 行**（`table.ts` 158 / `edit.ts` 47 / `inject.ts` 54 / `library.ts` **241** / `preview.ts` 151 / `index.ts` **66** / **`presets.ts` 172** / **`actions.ts` 256** / **`demo.ts` 263**；实测 `[IO.File]::ReadAllLines`。上一版是 6 个文件、691 行）
+- **规模**：**9 个文件、合计 1409 行、最长 263 行**（`table.ts` 158 / `edit.ts` 48 / `inject.ts` 54 / `library.ts` **241** / `preview.ts` 151 / `index.ts` **66** / **`presets.ts` 172** / **`actions.ts` 256** / **`demo.ts` 263**；实测 `[IO.File]::ReadAllLines`。上一版是 6 个文件、691 行）
 - **对外导出**：**37 个具名导出**（`index.ts` 把八份文件的具名导出**扁平合并**，无重名），外部一律 `import * as cast from '../cast'`
 - **目录级一篇**：本篇即 `src/main/cast/` 的唯一说明文档——**内部怎么分文件对外不可见**，调用方不要 `import '../cast/table'` 这种子文件路径
 
@@ -16,7 +16,7 @@
 
 | 界面上的位置 | 背后是本目录的哪份文件 |
 |---|---|
-| 侧栏**「角色」页** · 卡片墙（新建 / 改画法… / 改信息… / 复制 id / 删除） | `library.ts`（`upsertMember` / `writeMemberCode` / `updateMemberMeta` / `removeFromLibrary` / `nextAutoId`）；页面本体见 [CastPage.md](../renderer/src/pages/CastPage.md) |
+| 侧栏**「角色」页** · 卡片墙（新建 / 修改角色… / 复制 id / 删除） | `library.ts`（`upsertMember` / `writeMemberCode` / `updateMemberMeta` / `removeFromLibrary` / `nextAutoId`）；页面本体见 [CastPage.md](../renderer/src/pages/CastPage.md) |
 | 「角色」页 / 「HTML生成」页 · 角色区 / 「内容脚本」页 · 选角色弹窗里的**卡片预览**（`<userData>/cast-preview/<id>.html` 在 iframe 里把角色代码**真跑一遍**） | `preview.ts`（拼那一页）+ `library.ts` 的 `readMemberCode` |
 | 「角色」页 · **卡片双击**（或右上「…」菜单 ·「动作示范…」）→ 弹窗左边那张**会动的图** | `demo.ts`（拼示范页）+ `actions.ts` 的 `listActionsFor` + `library.ts` 的 `readMemberCode`；落盘在 `projects/ipc/castActions.ts` 的 `cast:demo` |
 | 同一个弹窗右边的**公共动作列表**（内置 14 条 + 用户自建） | `presets.ts`（`PRESET_ACTIONS`，只读）+ `actions.ts`（`actions.json` 的 `shared`） |
@@ -38,10 +38,10 @@ window.__cast["hero"] = function (x, y, u, o) { /* 在 o.ctx 上画 */ };
 ```
 
 - **为什么角色要单独一份代码**：章节是互相隔离的 IIFE，作用域不共享；不共享角色代码，同一个人会在各章被各画一遍，长相对不上。所以角色脚本必须**先于**用到它的代码加载（与参考项目把 `clawd.js` / `cast.js` 放在 `ch/*.js` 之前同理）。
-- **它不再是「项目素材」**：角色是**全局资产**（可备份、可迁移、跨项目复用），项目里那份只是产物副本。所以新建 / 改画法 / 删除都只在「角色」页做，**都不经过「生成 HTML」**。
+- **它不再是「项目素材」**：角色是**全局资产**（可备份、可迁移、跨项目复用），项目里那份只是产物副本。所以新建 / 修改 / 删除都只在「角色」页做，**都不经过「生成 HTML」**。
 - **坐标约定写死在提示词里**：`(x, y)` 是**脚底中点**，`u` 是**1 个单位的像素高度**；角色表的 `units` 声明「高几个 u」（主角 8u、配角 6u），多角色的身高比例靠它对齐。
-- **它是纯绘制函数、自己不含时间轴**：调用方按时间把 `o.walk / aL / aR / eyes / mouth / blink / dy / dx / rot / sq` 传进去，它才动（契约见 `agent/html.ts` 的 `HTML_CAST_SYSTEM`）。方向按角色端实际实现：`dy` 正 = 下移、`dx` 正 = 右移、`aL`/`aR` 正 = 向外抬起、`sq` 正 = 拉长变窄、`rot` 正 = 顺时针、`walk` 是摆腿相位。
-- **id 是可读 slug**（`^[a-z][a-z0-9_]{0,23}$`，如 `hero` / `researcher` / `cat`），不是序号——角色是命名实体，「改画法」要能叫出名字；章节才是序号（`c01`）。
+- **它是纯绘制函数、自己不含时间轴**：调用方按时间把 `o.walk / aL / aR / eyes / mouth / blink / dy / dx / rot / sq / face / hip / tuck` 传进去，它才动（契约见 `agent/html.ts` 的 `HTML_CAST_SYSTEM`）。方向按角色端实际实现：`dy` 正 = 下移、`dx` 正 = 右移、`aL`/`aR` 正 = 向外抬起、`sq` 正 = 拉长变窄、`rot` 正 = 顺时针、`walk` 是摆腿相位、`face` 0 = 正面 / 1 = 侧面（≥0.5 画侧面，侧面朝局部 +x，朝左交给 `flip`）、`hip` 是髋角弧度（正 = 大腿向前抬、只在侧面视图生效，下蹲 = 髋与膝盖同角 + `dy` 下沉）、`tuck` 是抱团 0..1（≥0.5 画成半径约 1.25u 的球，球心 = 脚底中点；贴地滚给 `dy = -1.25`、`dx = 1.25 × 累计转角`）。**`face` 要角色自己读过才生效**：现存三个角色（`cast1.js` / `cast2.js` / `cast3.js`）仍只画正面，对它们填 `face` 暂时不会转身——等它们按新契约补出侧面视图。**`hip` / `tuck` 同理、而且更窄：目前只有 `cast1.js` 实现了髋角与抱团分支**，`cast2.js` / `cast3.js` 仍是旧代码，给它们填这两个参数不会生效（不读不等于报错，其它参数照常生效）。
+- **id 是可读 slug**（`^[a-z][a-z0-9_]{0,23}$`，如 `hero` / `researcher` / `cat`），不是序号——角色是命名实体，「改名字 / 让它重画」要能叫出名字；章节才是序号（`c01`）。
 
 ### 1.2 三层关系（别混）
 
@@ -63,9 +63,9 @@ window.__cast["hero"] = function (x, y, u, o) { /* 在 o.ctx 上画 */ };
 |---|---|---|---|
 | `index.ts` | **66** | **统一出口**：把八份文件的具名导出扁平合并成 37 个，**只再导出、不写逻辑** | `./table` `./edit` `./inject` `./library` `./preview` `./presets` `./actions` `./demo` |
 | `table.ts` | 158 | **角色表与角色文件**：解析 / 规范化 / 校验 / **读**项目副本 / 提示词大纲 | `../chapters`（`parseFileBlocksWith`）、`node:fs` / `node:path`、共享类型——**目录内最上游（与 `presets.ts` 并列）** |
-| `edit.ts` | 47 | **改稿用的只读角色块**：剥掉回复里的角色文件块 + 拼【项目角色】表（【角色调用方式】要求**驱动 `o` 的动画参数** `walk` / `aL`、`aR` / `eyes`、`blink` / `dy`…，且「页面里已有的调用保留并沿用原来的动画参数」） | `./table`（`castRelPath`）、共享类型；**不读盘、不调模型** |
+| `edit.ts` | 48 | **改稿用的只读角色块**：剥掉回复里的角色文件块 + 拼【项目角色】表（【角色调用方式】要求**驱动 `o` 的动画参数** `walk` / `aL`、`aR` / `eyes`、`blink` / `dy` / **`face`**…，且「页面里已有的调用保留并沿用原来的动画参数」；本版补了 `o.face` 与「要"转身走"就用 `o.face`」一行） | `./table`（`castRelPath`）、共享类型；**不读盘、不调模型** |
 | `inject.ts` | 54 | **单文件模式注入**：`core.js` + 角色脚本整组插在模型第一个 `<script>` 之前（纯字符串） | **无**（不 import 任何模块） |
-| `library.ts` | **241** | **全局角色库** `<userData>/cast-library/`：读库 / 新建与改画法落盘 / 改元数据 / 删除（**连带清掉这个角色的专属动作**）/ **同步项目副本** | `node:path` / `node:fs`、共享类型、**`./actions` 的 `removeActionsOfCast`**（删角色时清 `actions.json` 的 `byCast[<id>]`）；**刻意不 import `electron`**，库根由调用方给，可离线测 |
+| `library.ts` | **241** | **全局角色库** `<userData>/cast-library/`：读库 / 新建与重画落盘 / 改元数据 / 删除（**连带清掉这个角色的专属动作**）/ **同步项目副本** | `node:path` / `node:fs`、共享类型、**`./actions` 的 `removeActionsOfCast`**（删角色时清 `actions.json` 的 `byCast[<id>]`）；**刻意不 import `electron`**，库根由调用方给，可离线测 |
 | `preview.ts` | 151 | **角色静态预览页拼装**：内联 `core.js` + 角色代码 → 一页自包含 HTML（落盘在 `projects/ipc/cast.ts`） | **无**（纯字符串，不读写文件、不 import `electron`） |
 | **`presets.ts`** | **172** | **内置动作数据**（14 条公共动作，**只读**）：只有数据、没有逻辑 | `../../shared/types`（`CastActionDef`）；**目录内最上游之一** |
 | **`actions.ts`** | **256** | **动作库**：规范化 / 静态校验 / 生成回复解析 / 读写 `<userData>/cast-library/actions.json` / 列某角色的动作 / 起 id / 增删 / 删角色时清专属动作 | `./presets`（`PRESET_ACTIONS`）、`../../shared/{types,constants}`、`node:path` / `node:fs`；**不 import `electron`、不 import `library.ts`** |
@@ -118,7 +118,7 @@ window.__cast["hero"] = function (x, y, u, o) { /* 在 o.ctx 上画 */ };
 | `selectedMembers(list)` | `(ProjectCastMember[] \| undefined) => ProjectCastMember[]` | 参与本次生成的角色：**只有 `selected === false` 才算不参与**，`undefined` 当参与（老数据） |
 | `normalizeCastList(raw)` | `(raw) => { cast; error? }` | 整份角色表规范化：≤12 个、id slug 不重复、`units` 1–30 缺省 8、`uses` 只认 `p5` / `p5.brush`（声明 `p5.brush` 自动补 `p5`）、`selected` 缺省参与 |
 | `parseCastTable(reply)` | `(reply) => { cast \| null; error? }` | 从回复里读角色表（认 `<<<CAST>>>` 块 / `<<<PLAN>>>` 块 / ```` ```json ```` 围栏 / 裸 JSON）。**生成流程已不再使用**，留作历史回复解析与人工排查的退路 |
-| `parseCastFiles(reply, fallbackId?)` | `(reply, fallbackId?) => { files; badPaths }` | 解析 `<<<FILE cast/<id>.js>>>` 块（复用 `chapters.parseFileBlocksWith`）；`fallbackId` 用于块里没写路径时兜底（新建 / 改画法都传当前 id） |
+| `parseCastFiles(reply, fallbackId?)` | `(reply, fallbackId?) => { files; badPaths }` | 解析 `<<<FILE cast/<id>.js>>>` 块（复用 `chapters.parseFileBlocksWith`）；`fallbackId` 用于块里没写路径时兜底（新建 / 重画都传当前 id） |
 | `validateCastCode(code)` | `(code) => string \| null` | 写盘前硬校验：非空、必须含 `__cast`、必须含函数、不许 HTML 标签、不许 `repeat: -1`、≤1200 行 |
 | `readCastCode(dir, cast)` | `(dir, list) => { id; name; code }[]` | **只读** `<项目>/cast/<id>.js`（读不到给空串），供「下载 HTML」内联用 |
 | `castOutlineText(cast)` | `(list) => string` | 提示词用的角色表（`- id（名字，高 Nu）：描述`）；空表给一行「本片没有共享角色…」 |
@@ -153,22 +153,22 @@ window.__cast["hero"] = function (x, y, u, o) { /* 在 o.ctx 上画 */ };
 - 全部函数都是**纯函数或只读盘**，不调模型、不写盘、不注册 IPC。
 - 唯一的外部依赖是 `chapters.parseFileBlocksWith`（章节与角色共用同一套 `<<<FILE …>>>` 标记）：方向 `cast → chapters`。
 
-### 4.2 `edit.ts` —— 改稿用的只读角色块（47 行）
+### 4.2 `edit.ts` —— 改稿用的只读角色块（48 行）
 
-改稿链路上与角色有关的**只剩「只读」这一层**：告诉模型页面里已经有哪些角色可以调用、不许重画，**不发角色源码、也不收角色文件块**。为什么：角色只有全局一份，改画法走「角色」页的 `cast:recreate`；用户明确要求「HTML 那边不允许新增和修改角色」。
+改稿链路上与角色有关的**只剩「只读」这一层**：告诉模型页面里已经有哪些角色可以调用、不许重画，**不发角色源码、也不收角色文件块**。为什么：角色只有全局一份，改角色的画法走「角色」页的 `cast:recreate`（「修改角色…」·「按这个要求重画」）；用户明确要求「HTML 那边不允许新增和修改角色」。
 
 #### 4.2.1 导出清单与契约（2 个）
 
 | 导出 | 签名 | 说明 |
 |---|---|---|
 | `stripCastFileBlocks(reply)` | `(reply) => string` | 两条正则、按顺序：① 整个 `<<<FILE cast/<id>.js>>>…<<<END FILE>>>` 段 → `''`；② 残留的 `<<<FILE …>>>` / `<<<END FILE>>>` 标记 → `''`。为什么还要剥：提示词已说明不许交角色块，但模型仍可能顺手裹一个进来，不剥的话标记会跟着 HTML 落进 `index.html`（页面上看得见） |
-| `buildCastTableBlock(list)` | `(ProjectCastMember[]) => string` | 【项目角色】整段：角色表（`cast/<id>.js`（名字，高 Nu）：描述，未勾选的加「〔本次未勾选：不注入页面〕」）→【角色调用方式】→【硬要求】两条（**沿用不许重画** / **角色文件不归你改，要换样子请去「角色」页**）；【角色调用方式】列出 `o` 里的动画参数（`o.walk` 摆腿相位 / `o.aL`、`o.aR` 摆臂角度 / `o.eyes`、`o.mouth` 表情 / `o.blink` 眨眼 / `o.dy`、`o.dx` 位移 / `o.rot` 旋转 / `o.sq` 挤压）、写明「**光传 `ctx`，角色就是一张不会动的立绘**」、**「页面里已有的调用保留并沿用原来的动画参数」**（新写 / 改写的调用要按 `t` 算出呼吸、眨眼与摆臂，参数必须由 `t` 直接算，**确实要静止才只传 `ctx`**）。空表只回一行「本项目还没有角色（不要写 `window.__cast` 的调用，也不要新建角色文件）」 |
+| `buildCastTableBlock(list)` | `(ProjectCastMember[]) => string` | 【项目角色】整段：角色表（`cast/<id>.js`（名字，高 Nu）：描述，未勾选的加「〔本次未勾选：不注入页面〕」）→【角色调用方式】→【硬要求】两条（**沿用不许重画** / **角色文件不归你改，要换样子请去「角色」页**）；【角色调用方式】列出 `o` 里的动画参数（`o.walk` 摆腿相位 / `o.aL`、`o.aR` 摆臂角度 / `o.eyes`、`o.mouth` 表情 / `o.blink` 眨眼 / `o.dy`、`o.dx` 位移 / `o.rot` 旋转 / `o.sq` 挤压 / **`o.face` 朝向：0 正面、1 侧面**）、写明「**光传 `ctx`，角色就是一张不会动的立绘**」、**「页面里已有的调用保留并沿用原来的动画参数」**（新写 / 改写的调用要按 `t` 算出呼吸、眨眼与摆臂，参数必须由 `t` 直接算，**确实要静止才只传 `ctx`**），**本版另加一行**「要"转身走"就用 `o.face`：0.12~0.18 秒内从 0 推到 1（0.5 处切侧面），切换那几帧 `o.sq` 0.4~0.6 压窄遮硬切，转完 `sq` 回 0 再给 `walk` 与 `dx`；往左走加 `o.flip: true`」。空表只回一行「本项目还没有角色（不要写 `window.__cast` 的调用，也不要新建角色文件）」 |
 
 #### 4.2.2 与旧版（已删）的差别
 
 | | 旧版 | 现在 |
 |---|---|---|
-| 发不发源码 | 发：`readCastSources(dir, list, budget?)` 读 `<项目>/cast/<id>.js` 包成 `<<<CURRENT …>>>` 块（`CAST_SOURCE_BUDGET = 100000` 字符预算、按角色表顺序截断） | **不发**：只发角色表（元数据）；源码只在「改画法」时由 `projects/prompts.ts` 的 `buildCastEditPrompt` 发那一**份** |
+| 发不发源码 | 发：`readCastSources(dir, list, budget?)` 读 `<项目>/cast/<id>.js` 包成 `<<<CURRENT …>>>` 块（`CAST_SOURCE_BUDGET = 100000` 字符预算、按角色表顺序截断） | **不发**：只发角色表（元数据）；源码只在「修改角色…」·「按这个要求重画」时由 `projects/prompts.ts` 的 `buildCastEditPrompt` 发那一**份** |
 | 收不收代码 | 收：回复里的 `cast/*.js` 块先校验后写盘（`writeCastFiles`） | **不收**：`projects/ipc/html.ts` 只 `stripCastFileBlocks` + 判有没有 HTML；没有 HTML 直接报错 |
 | 硬要求 | 三条（沿用 / 只能改不能新增 / 只改画法就交整份） | 两条（沿用不许重画 / 角色文件不归你改） |
 
@@ -220,7 +220,7 @@ window.__cast["hero"] = function (x, y, u, o) { /* 在 o.ctx 上画 */ };
 |---|---|---|
 | `readLibrary(root)` | `(root) => { members; error? }` | 读索引并逐条规范化；文件缺失 / 损坏都当空库并回 `error`（不抛）。**索引里有、文件不在的条目照样列出来**（界面据此显示「文件缺失」，而不是静默消失）。也解析并规范化 `style` |
 | `libraryFileExists(root, id)` | `(root, id) => boolean` | 某个角色文件是否真的在库里（`projects/ipc/cast.ts` 用它给条目补 `missing`） |
-| `readMemberCode(root, id)` | `(root, id) => string` | 读一个角色的绘制代码（预览 / 改画法 / **动作示范**用）；id 不合法 / 不存在 / 读失败一律空串，调用方自己判空 |
+| `readMemberCode(root, id)` | `(root, id) => string` | 读一个角色的绘制代码（预览 / 重画 / **动作示范**用）；id 不合法 / 不存在 / 读失败一律空串，调用方自己判空 |
 | `writeMemberCode(root, id, code)` | `(root, id, code) => { ok; message }` | **覆盖写** `<id>.js`（`trim() + '\n'`），**不建索引**（索引由 `upsertMember` 维护） |
 | `upsertMember(root, member, code?)` | `(root, member, code?) => { ok; message }` | 新建 / 覆盖一条库成员：写索引（同 id 就地替换、新成员追加在末尾——列表顺序对用户稳定）＋ 可选写代码文件；**`code` 省略时要求库里已有 `<id>.js`**，否则报「库里找不到这个角色的代码」 |
 | `updateMemberMeta(root, id, patch)` | `(root, id, patch: {name?, desc?, style?, units?, watercolor?}) => { ok; message; member? }` | **只改元数据**、不碰代码文件。`watercolor: true` → `uses = ['p5','p5.brush']`、`false` → 删掉 `uses`；`style` 为空则删字段 |
@@ -430,7 +430,7 @@ syncProjectCast(root, projectDirPath, ids):
 
 - **`requestAnimationFrame` 循环**：`dt` 上限 0.1 秒（切回后台再回来不会一下跳完）；`loop` 时 `elapsed %= duration`，否则演到 `duration` 停下并把按钮改成「继续」；只在「在播 / 尺寸变了 / 脏」时才重画，时间条每 100ms 刷一次。
 - **按 URL 的 `#hash` 选动作**：页面监听 `hashchange` → `pick(actionId)`（换动作只改 hash，不重新加载文档）；首帧也按当前 hash 选。
-- **参数插值**（`paramsAt`）：对**每个参数**各找「前后两个写了它的关键帧」——数字用 smoothstep（`f*f*(3-2f)`）在两点之间平滑，枚举到点才换。这样一条关键帧只写它关心的参数（比如只写 `aR` 不会把别的参数打回 0）。
+- **参数插值**（`paramsAt`）：对**每个参数**各找「前后两个写了它的关键帧」——数字用 smoothstep（`f*f*(3-2f)`）在两点之间平滑，枚举到点才换。这样一条关键帧只写它关心的参数（比如只写 `aR` 不会把别的参数打回 0）。**`face` 也是数字参数**：关键帧表加上它之后示范页立刻会演，`demo.ts` 一行没改；它是否真的转身取决于角色代码读没读 `o.face`。**`hip` / `tuck` 同为数字参数**，加进参数表后示范页同样零改动（演不演得出来仍取决于角色代码，目前只有 `cast1.js` 读了它们）。
 - **代码动作**：`var got = FNS[<id>](elapsed)`，返回对象就用它（脚本报错在页内 `#note` 里显示原因）。
 - **画布与基线**：`u = H * 0.72 / UNITS`、基线 `H - H * 0.11`（比静态预览留更多上方空间——跳跃动作的 `dy` 是负的、要往上走）；`o.ctx` 由页面塞进去。
 - **工具条**：动作名 + `时间 / 时长 秒`（循环的加「· 循环」）+「暂停 / 继续」+「重播」；换动作的列表在应用那一侧（`CastActionModal.vue`），页内不重复。
@@ -464,7 +464,7 @@ index.ts = 37 个导出的扁平出口（只再导出）
 | `projects/ipc/cast.ts` | 角色本身的 6 条 `cast:*` + `project:save-cast`；模型调用与落盘编排 |
 | `projects/ipc/castActions.ts` | **动作示范的 5 条 `cast:*`**（`action-list` / `action-save` / `action-remove` / `action-generate` / `demo`）：装配、唯一那次模型调用、示范页落盘 |
 | `projects/store.ts` | `project.json` 里裁成 `[{ id, selected }]`、读项目时按 id 从库补全（无迁移） |
-| `projects/prompts.ts` | `buildCastPrompt`（新建）/ `buildCastEditPrompt`（改画法，带【当前角色源码】+【本次改动】）/ **`buildCastActionPrompt`**（动作脚本，带【角色源码】+【输出格式】） |
+| `projects/prompts.ts` | `buildCastPrompt`（新建）/ `buildCastEditPrompt`（「修改角色」·「按这个要求重画」，带【当前角色源码】+【本次改动】）/ **`buildCastActionPrompt`**（动作脚本，带【角色源码】+【输出格式】；改一条已有 AI 动作时多一段【当前动作脚本】） |
 | `projects/htmlWrite.ts` | 两处 `syncProjectCast` + 单文件注入 + 勾选变化后重刷页面 |
 | `projects/ipc/html.ts` | 生成时挑角色、改稿时发只读角色表、导出时内联角色 |
 | `projects/chaptersFlow.ts` | 角色表只作上下文（`castOutlineText`），不解析、不收角色文件块 |
@@ -472,11 +472,11 @@ index.ts = 37 个导出的扁平出口（只再导出）
 
 ## 6. 合并后的注意事项
 
-1. **真源只有一个**：要角色改名字 / 改身高 / 改画法，去「角色」页（`updateMemberMeta` / `writeMemberCode`）；**不要**在任何项目目录里直接改 `cast/<id>.js`——下一次同步就被覆盖，界面也读不到你的改动。
+1. **真源只有一个**：要角色改名字 / 改身高 / 让它重画，去「角色」页（`updateMemberMeta` / `writeMemberCode`）；**不要**在任何项目目录里直接改 `cast/<id>.js`——下一次同步就被覆盖，界面也读不到你的改动。
 2. **副本是产物**：清空项目 `cast/` 是安全的（`syncProjectCast` 会补回来），但别手工往里面塞库里没有的文件——它们不会被删（`syncProjectCast` 只删库里认得的 id），却也不会进提示词与界面。
 3. **`withCore` 的分工**：单文件模式「没有勾选角色」时不注入 `core.js`；章节模式的骨架一律引 `./core.js`（章节可能用到 `MC.*`）。
 4. **`parseCastTable` 是遗留退路**：生成流程一次都不调它；改它时注意别把校验规则（`normalizeCastList`）写松。
-5. **改画法与改信息分家**：`cast:recreate` 只换代码、**不改元数据**；`cast:save-meta` 只改元数据、**不调模型**。想让「改画法」顺带改画风，是渲染层在成功后另发一次 `save-meta`（见 [CastPage.md](../renderer/src/pages/CastPage.md)）。
+5. **「只换代码」与「只改元数据」分家，顺序由渲染层定**：`cast:recreate` 只换代码、**不改元数据**；`cast:save-meta` 只改元数据、**不调模型**。界面上「修改角色…」的两个按钮正好对应这两条：「保存」只发 `save-meta`；「按这个要求重画」**先发 `save-meta`（把整份表单含画风落库）再发 `recreate`**——`cast:recreate` 的提示词读的是**库里的** `member.style`，所以先落库才能让「这次填的画风这次生效」（见 [CastPage.md](../renderer/src/pages/CastPage.md) §2.4）。
 6. **`syncProjectCast` 的「不删库里没有的 id」不是疏漏**：它保证手工塞进项目的文件不会被应用悄悄删掉；要让某个角色进页面，仍然只能「库里先有它 + 本片勾上它」。
 7. **动作与角色分开存**：别把动作数据塞进 `<id>.js`，也别指望动作会自动进正片——这一版动作只服务「动作示范」弹窗，生成 HTML 时的角色动画仍由章节按 `t` 自己算。
 8. **内置动作只读**：`PRESET_ACTIONS` 是代码里的数据，改它等于改所有角色的公共动作列表；用户想定制请走「另存为副本」。

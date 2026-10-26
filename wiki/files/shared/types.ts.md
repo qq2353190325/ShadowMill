@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：**1333 行**（实测 `[IO.File]::ReadAllLines`；上一版实测 1244 行，本轮 **+89 行**：⑥ 节新增十个动作相关类型、⑨ 节 `castTools` 补 5 个方法签名。更早一轮 +15 行是：⑥ 节新增 **`ScriptCastRef`**（含 3 行注释，说明它**不是** `ProjectCastMember`：不落盘、不导入项目、不参与 HTML 生成的角色注入，只用于写稿）与 **`ScriptGeneratePayload.cast?: ScriptCastRef[]`**（空 / 缺省 = 提示词里没有【角色】块）。**而本轮动作示范改了 `src/shared/ipc.ts`**：`Cast` 组 6 → 11 条（新增动作 5 条），全库频道 101 → 106，分组数不变）
+- **规模**：**1337 行**（实测 `[IO.File]::ReadAllLines`；本版 **+4 行** = `CastActionGeneratePayload` 新增可选 **`actionId?`**——带它就是「改一条已有专属动作、覆盖同一条」，不带是新建；再上一版 1244 → 1333 是 **+89 行**：⑥ 节新增十个动作相关类型、⑨ 节 `castTools` 补 5 个方法签名。更早一轮 +15 行是：⑥ 节新增 **`ScriptCastRef`**（含 3 行注释，说明它**不是** `ProjectCastMember`：不落盘、不导入项目、不参与 HTML 生成的角色注入，只用于写稿）与 **`ScriptGeneratePayload.cast?: ScriptCastRef[]`**（空 / 缺省 = 提示词里没有【角色】块）。**而本轮动作示范改了 `src/shared/ipc.ts`**：`Cast` 组 6 → 11 条（新增动作 5 条），全库频道 101 → 106，分组数不变）
 - **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 3 个（`IpcFail`、`IpcResult`、**`ConfigTarget`**）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含**思考强度 `ReasoningEffort`**、`UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位 `RenderQuality` / `RenderFps` / `RenderOptions` / `RenderOverride` 与**成片画布 `RenderCanvas`**）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境（**分包**）4 个（`RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕（含素材库 `ProjectMaterial*` 一族、**章节 `ProjectChapter` 与角色 `ProjectCastMember`（含 `selected?`）**、**全局角色库 `CastLibraryMember` / `CastLibraryResult` / `ProjectCastResult`**、**项目角色的三件套 `ProjectNewCastPayload` / `ProjectNewCastResult` / `ProjectSaveCastPayload`**、**角色预览 `ProjectCastPreviewPayload` / `ProjectCastPreviewResult`**、**`ScriptCastRef`（内容脚本写稿用的角色引用——不是项目角色）**、`ScriptGeneratePayload` / `ScriptGenerateReply` 与**对话记录的 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`**）⑦ 预览 / 转视频 2 个（`VideoRenderPayload`——含 `canvas?`、`VideoRenderResult`）⑧ 进度推送（**通用：`AgentStage` / `AgentProgressPayload` + 旧名别名 `HtmlAgentStage` / `HtmlAgentProgress` + `HtmlProgressPayload`（**本轮加必填 `taskId`**）/ `ScriptProgressPayload` 两个 `extends` 变体**）⑨ `PreloadApi` 1 个（**12 个命名空间**）；另有 ① 节 `IpcFail.needPacks`（缺哪个运行环境包）与 `IpcFail.needConfig` / `title`（配置类错误）、⑨ 节 `settingsTools.pickRuntimePack`、**`projectTools` 的 4 个角色库成员**与 **`scriptTools` 的 7 个成员**、**动作示范的十个类型**（`CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload` / `CastDemoResult`）与 **`castTools` 的 5 个动作方法**（`listActions` / `saveAction` / `removeAction` / `generateAction` / `demo`）等
 
 ## 1. 作用与职责
@@ -372,7 +372,7 @@
 | `CastActionScope` | `type` | `'shared' \| 'own'`——动作的作用范围：公共动作库（跨角色）/ 某个角色专属 |
 | `CastActionSavePayload` | `interface` | `cast:action-save` 载荷：`castId?`（从哪个角色进来的；专属动作要它）/ `scope?` / `action`（整条回写；**同 id 覆盖；`id` 为空表示新建，由主进程起一个**） |
 | `CastActionRemovePayload` | `interface` | `cast:action-remove` 载荷：`castId?` / `scope?` / `actionId` |
-| `CastActionGeneratePayload` | `interface` | **`cast:action-generate` 载荷（让 AI 读角色源码后生成一条专属动作）**：`castId`（角色 id，也是文件名词干）/ `taskId`（本次模型调用的任务 id，渲染层用 `utils/taskId.ts` 生成）/ `request`（要什么动作，一句话）/ `duration?`（动作时长秒：`t` 的取值范围就是 `[0, duration)`）/ `loop?`（缺省 = 循环）/ `name?`（留空 = 拿 `request` 的前几个字当名字） |
+| `CastActionGeneratePayload` | `interface` | **`cast:action-generate` 载荷（让 AI 读角色源码后生成 / 改写一条专属动作）**：`castId`（角色 id，也是文件名词干）/ `taskId`（本次模型调用的任务 id，渲染层用 `utils/taskId.ts` 生成）/ **`actionId?`（改一条**已有**专属动作时给它的 id：带上那条现有脚本、按 `request` 改完**覆盖同一条**；不给就是新建一条）** / `request`（要什么动作，一句话；给了 `actionId` 时是「要改成什么样」）/ `duration?`（动作时长秒：`t` 的取值范围就是 `[0, duration)`）/ `loop?`（缺省 = 循环）/ `name?`（留空 = 拿 `request` 的前几个字当名字） |
 | `CastActionResult` | `interface` | 保存 / 生成一条动作的回执：`action` 恒为落盘后的那一条（渲染层直接用它替换本地状态） |
 | `CastDemoPayload` | `type` | `= CastPreviewPayload`——示范页的载荷与静态预览完全一致（同一个角色、同样的尺寸信息），只是产物换成了会动的那一页 |
 | `CastDemoResult` | `interface` | `cast:demo` 成功分支：`rel`（示范页相对 userData 的路径，`cast-preview/<id>.demo.html`）；渲染层用 `hgpreview://…?user=1&e=<epoch>#<动作id>` 载进 iframe，**换动作只换 hash** |
@@ -382,7 +382,7 @@
 | | 关键帧动作（`keys`） | 代码动作（`code`） |
 | --- | --- | --- |
 | 是什么 | 时间点 + 参数值的表 | 一段纯函数 `function (t) { return { … } }` |
-| 谁能用 | **所有角色通用**（只用 `CAST_ACTION_PARAMS` 里的十个参数） | **只有这个角色**（存在 `byCast[<角色id>]`，能用到角色自己的参数，如猫的尾巴） |
+| 谁能用 | **所有角色通用**（只用 `CAST_ACTION_PARAMS` 里的十三个参数：`face` / `hip` / `tuck` 也在内；其中 `hip`、`tuck` 目前只有 `cast1.js` 实现了，cast2 / cast3 填了不生效） | **只有这个角色**（存在 `byCast[<角色id>]`，能用到角色自己的参数，如猫的尾巴） |
 | 谁写 | 「新建动作…」的关键帧编辑器（不调模型） | 只有「AI 生成…」（**唯一会调模型的动作路径**） |
 | 落盘校验 | `normalizeActionDef`：id 正则、时长 0.3–30、至少 2 帧、参数白名单 | 另加 `validateActionCode` 的静态白名单（禁 `window` / `document` / 定时器 / 循环 / `Math.random`，≤60 行） |
 
@@ -525,7 +525,7 @@
 | `listActions(castId: string)` | `Promise<IpcResult<CastActionListResult>>`——**列动作**：`{ ok, shared, own }`；`shared` = 内置 14 条 + 用户自建公共动作，`own` = 这个角色的专属动作 |
 | `saveAction(payload: CastActionSavePayload)` | `Promise<IpcResult<CastActionResult>>`——保存一条**关键帧**动作（同 id 覆盖；`action.id` 为空 = 新建，由主进程起 id），成功分支 `{ ok, action }` |
 | `removeAction(payload: CastActionRemovePayload)` | `Promise<IpcResult>`——删一条动作（专属动作要带 `castId`；内置动作删不掉） |
-| `generateAction(payload: CastActionGeneratePayload)` | `Promise<IpcResult<CastActionResult>>`——**让 AI 读这个角色的源码后生成一条专属动作**（**唯一会调模型的动作路径**：一次模型调用，进度按 `taskId` 路由，日志 `html-agent/cast-action.jsonl`），成功分支 `{ ok, action }` |
+| `generateAction(payload: CastActionGeneratePayload)` | `Promise<IpcResult<CastActionResult>>`——**让 AI 读这个角色的源码后生成一条专属动作**，或（带 `actionId` 时）**在一条已有专属动作的现有脚本上按新要求改写、覆盖同一条**（**唯一会调模型的动作路径**：一次模型调用，进度按 `taskId` 路由，日志 `html-agent/cast-action.jsonl`），成功分支 `{ ok, action }` |
 | `demo(id: string, options?: Omit<CastDemoPayload, 'id'>)` | `Promise<IpcResult<CastDemoResult>>`——**会动的示范页**：返回相对路径 `rel`（`cast-preview/<id>.demo.html`），渲染层自行拼 `hgpreview://…?user=1&e=<epoch>#<动作id>`；换动作只改 hash、不重新加载文档 |
 | `onTaskProgress(taskId, callback)` | `() => void` 退订函数——**与 `projectTools.onTaskProgress` 是同一条频道、同一张订阅表**（画角色 / 编动作 / 生成 HTML 可以并行，互不顶掉） |
 
@@ -623,10 +623,10 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 
 1. **磁盘形状**：`<userData>/cast-library/index.json`（`{ members: ProjectCastMember[] }`）+ `<id>.js`（角色绘制代码）+ **`actions.json`**（`{ shared: CastActionDef[], byCast: { [角色id]: CastActionDef[] } }`）。它**不在项目目录里**，也不进 `project.json`：库是**用户资产**（可备份、可迁移、跨项目复用），`vendor/` 是应用资源（升级会覆盖），两者刻意分开。
 2. **列库**：`castTools.list()` → `cast:list`，主进程读索引、逐条 `libraryFileExists()` 判文件在不在，映射成 `CastLibraryMember`（多一个 `missing`）回 `IpcResult<CastLibraryResult>`。**纯读**，不写任何东西。
-3. **新建 / 改画法 / 改信息 / 删除**：`castTools.create` / `recreate` / `saveMeta` / `remove`；删除时主进程连带清掉这个角色在 `actions.json` 里的专属动作。
+3. **新建 / 修改 / 删除**：`castTools.create` / `recreate` / `saveMeta` / `remove`；**修改角色**在界面上是「保存」（只 `saveMeta`，不调模型）与「按这个要求重画」（**渲染层先 `saveMeta` 把整份表单含画风落库、再 `recreate`**，这样重画读到的就是新画风，id / 身高不变）；删除时主进程连带清掉这个角色在 `actions.json` 里的专属动作。
 4. **静态预览**：`castTools.preview(id, { units, title, uses })` → `cast:preview`，读库里那份代码 + 内置 `core.js`，拼一页自包含 HTML 写到 `<userData>/cast-preview/<id>.html`，回 `{ rel }`（**一帧**）。
-5. **动作列表 / 保存 / 删除**：`castTools.listActions(castId)` / `saveAction(payload)` / `removeAction(payload)` → `cast:action-list` / `save-action` / `remove-action`；关键帧动作由界面「新建动作…」写，**不调模型**。
-6. **AI 生成专属动作（唯一会调模型的动作路径）**：`castTools.generateAction(payload)` → `cast:action-generate`，读角色源码 → 提示词 → 模型回一段 `function (t) { … }` → 静态校验 → 存进 `byCast[<角色id>]`，回 `{ action }`；进度按 `taskId` 路由，日志 `html-agent/cast-action.jsonl`。
+5. **动作列表 / 保存 / 删除**：`castTools.listActions(castId)` / `saveAction(payload)` / `removeAction(payload)` → `cast:action-list` / `save-action` / `remove-action`；关键帧动作由界面「新建动作…」与「改」（自建公共动作 / 关键帧专属动作）写，**不调模型**。
+6. **AI 生成 / 改写专属动作（唯一会调模型的动作路径）**：`castTools.generateAction(payload)` → `cast:action-generate`，读角色源码 → 提示词 → 模型回一段 `function (t) { … }` → 静态校验 → 存进 `byCast[<角色id>]`，回 `{ action }`；**载荷带 `actionId` 就是改一条已有专属动作**（主进程先在该角色的 `own` 列表里校验归属，再把那条现有脚本一起发过去，用同一个 id 覆盖，名字 / 来源沿用），不带才是新建；进度按 `taskId` 路由，日志 `html-agent/cast-action.jsonl`。
 7. **会动的示范页**：`castTools.demo(id, { units, title, uses })` → `cast:demo`，把 `core.js` + 角色代码 + 全部动作拼成 `<userData>/cast-preview/<id>.demo.html`，回 `{ rel }`；渲染层用 `hgpreview://…?user=1&e=<epoch>#<动作id>` 载进 iframe，**换动作只改 hash**。
 8. **为什么是「复制」不是「引用」**：预览 / 示范走 `hgpreview://` 自定义协议、只放行项目目录（`?user=1` 那组白名单目录除外）；渲染走 HyperFrames CLI 的静态服务器、root 只有「编译产物目录 + 项目目录」两级。所以生成前必须把选中的角色**复制**进 `<项目>/cast/`，而预览页只能由主进程内联成一页落在放行目录里。
 7. **看长相（本轮新增，本轮不复制任何文件）**：`castTools.preview(name, id, { units, title, from: 'project' | 'lib', uses })` → `project:cast-preview`，主进程按 `from` 读**项目或库里**那份 `cast/<id>.js`（库里那份只读，**不复制**），`syncCoreLib()` 后取项目里的 `core.js`（没有就退回 `hfEnv.coreSource()`），用 `main/cast/preview.ts` 把「core.js + 角色代码 + 一次调用」拼成一页自包含 HTML，写到 `<userData>/cast-preview/<id>.html`，回 `IpcResult<ProjectCastPreviewResult>`（`{ rel }`）。渲染层用 `rel` 拼 `hgpreview://p/…` 载进 `iframe`，由浏览器把代码真跑一遍（**静态一帧**）。为什么不用 `<script src="./cast/<id>.js">` 直接引：库里那份在 `<userData>/cast-library/` 下，`hgpreview://` 只放行项目目录，页面根本读不到——内联才让同一个模板同时服务「项目角色」与「库里的角色」。
@@ -730,7 +730,7 @@ export function register(ctx: RegisterCtx): void { /* 用 ctx.getWindow() 拿窗
 | **`CastActionKey` / `CastActionDef`** | **`interface`（本轮新增）** | 一条动作的两种写法：`CastActionKey = { t, o }`；`CastActionDef = { id, name, duration, loop, keys?, code?, from? }`（`keys` 与 `code` 二选一） |
 | **`CastActionListResult` / `CastActionScope`** | **`interface` / `type`（本轮新增）** | 列表 `{ shared, own }`；作用范围 `'shared' \| 'own'` |
 | **`CastActionSavePayload` / `CastActionRemovePayload`** | **`interface`（本轮新增）** | 保存 `{ castId?, scope?, action }`（`id` 空 = 新建）；删除 `{ castId?, scope?, actionId }` |
-| **`CastActionGeneratePayload` / `CastActionResult`** | **`interface`（本轮新增）** | 生成 `{ castId, taskId, request, duration?, loop?, name? }`；回执 `{ action }` |
+| **`CastActionGeneratePayload` / `CastActionResult`** | **`interface`（本轮新增）** | 生成 `{ castId, taskId, actionId?, request, duration?, loop?, name? }`（`actionId` = 改一条已有专属动作、覆盖同一条）；回执 `{ action }` |
 | **`CastDemoPayload` / `CastDemoResult`** | **`type` / `interface`（本轮新增）** | 载荷 = `CastPreviewPayload`（别名）；结果 `{ rel }`（`cast-preview/<id>.demo.html`） |
 
 `PreloadApi` ⑨ 节同步变化：`castTools` 现在是 **12 个成员**（`list` / `create` / `recreate` / `saveMeta` / `remove` / `preview` / **`listActions` / `saveAction` / `removeAction` / `generateAction` / `demo`** / `onTaskProgress`）；`projectTools` 去掉 6 个角色方法、只剩 `saveCast(name, cast: ProjectCastSelection[])`。

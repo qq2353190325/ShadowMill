@@ -4,7 +4,7 @@
 > - 「HTML生成」页 ·「角色」区**只剩勾选**（`CastSection.vue`，118 行）：顶部「管理角色」按钮跳「角色」页；原来的「新建角色」「从全局库添加」「存为全局」「改这个角色」**全部下线**，`pages/HtmlGenPage/CastCreateModal.vue` 与 `CastLibraryModal.vue` **已删除**，`<CastSection />` 不再接 `prompt`。
 > - 勾选 / 取消 → `projectTools.saveCast(appState.currentName, [{ id }...])` → `project:save-cast` → `refreshProject()`；主进程按 id 从全局库补全元数据、把选中的复制进 `<项目>/cast/`、重刷页面。
 > - 角色卡片的预览组件搬到公共目录：`components/CastShot.vue`（props `id` / `units` / `title?` / `uses?` / `epoch?` / `big?`，**没有 `project` / `from`**），内部调 `window.castTools.preview(id, { units, title, uses })`。
-> - 新建 / 改画法 / 改信息 / 删除都在**侧栏「角色」页**（见 [CastPage.md](./CastPage.md)）；角色预览页落 `<userData>/cast-preview/<id>.html`，URL 是 `hgpreview://user/cast-preview/<id>.html?user=1`（`utils/url.ts` 的 `userFileUrl`）。
+> - 新建 / 修改 / 删除都在**侧栏「角色」页**（见 [CastPage.md](./CastPage.md)）——新建与修改共用 `CastEditModal.vue` 一个弹窗（修改里含「保存」与「按这个要求重画」两条按钮）；角色预览页落 `<userData>/cast-preview/<id>.html`，URL 是 `hgpreview://user/cast-preview/<id>.html?user=1`（`utils/url.ts` 的 `userFileUrl`）。
 > - 相关频道：`cast:list` / `cast:create` / `cast:recreate` / `cast:save-meta` / `cast:remove` / `cast:preview`（`Cast` 组 6 条）+ `project:save-cast`。
 
 > HTML 生成 / 修改 + **画布（成片尺寸，项目属性：只在本页生成侧选一次）** + **全局视觉风格（整片视觉基调，项目属性 `content.style`：也只在本页生成侧编辑）** + **项目素材（图片 / 视频 / 角色三类并列，勾选决定本次用哪些）** + 背景音频选定（音轨由主进程注入 HTML）+ 实时预览（iframe 视口 = **页面自己声明的画布**，含**视角比例切换**、播放控制与拖动 seek；**页面里有 GSAP 的 `repeat: -1` 时总时长显示 `--:--` 并在播放控制条下方多一行说明**）+ AI 思考过程（标题行可折叠，生成中展开、结束收起） + **转视频（点按钮先开「渲染档位」弹窗，确认后渲染；弹窗里没有画布）** + **章节列表（只读，章节模式下才有内容）**。
@@ -21,7 +21,7 @@
   | `HtmlGenPage/PreviewSection.vue` | 470 | 「预览」卡片：**背景音频行（一个占满整行的下拉：当前音频 = 「已生成音频」里的选中项 + 清空/本地两项动作）**、状态行、AI 思考过程（标题行可折叠：生成 / 修改进行中自动展开、一轮结束自动收起）、**「视角比例」行**（**不显示画布值**）、iframe 预览副本（**视口 = 页面声明的画布**；**容器高度上限 800px、宽度按比例、水平居中**，页面按 contain 缩放 + 居中）、播放控制条（**一个三态键** + 进度条 + 时间）、**控制条下方的「总时长无法确定」提示行（`v-if="prevDurUnknown"`，只在页面里有无限循环动画时出现）** |
 - **所在目录**：`src/renderer/src/pages/HtmlGenPage/`（一页一目录，入口 `index.vue`）
 - **类型**：页面组件（SFC，`<script setup lang="ts">`）
-- **规模**：7 个文件合计 1654 行（`index.vue` 477 + `CastCreateModal.vue` 169 + `CastLibraryModal.vue` 116 + `CastSection.vue` 184 + `MaterialsSection.vue` 167 + `ChapterSection.vue` 71 + `PreviewSection.vue` 470）；**`CastShot.vue`（67 行）已不在本目录**——它搬到了公共组件目录 `src/renderer/src/components/CastShot.vue`（见 [components.md](../components.md)），本页三处（`CastSection.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue`）都通过别名 `@renderer/components/CastShot.vue` 引入
+- **规模**：7 个文件合计 1654 行（`index.vue` 477 + `CastCreateModal.vue` 169 + `CastLibraryModal.vue` 116 + `CastSection.vue` 184 + `MaterialsSection.vue` 167 + `ChapterSection.vue` 71 + `PreviewSection.vue` 470）；**`CastShot.vue`（77 行）已不在本目录**——它搬到了公共组件目录 `src/renderer/src/components/CastShot.vue`（见 [components.md](../components.md)），本页三处（`CastSection.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue`）都通过别名 `@renderer/components/CastShot.vue` 引入
 - **对外导出**：`index.vue` 默认导出组件（无 props，模板内渲染 `StepBar` / `MaterialsSection` / `CastSection` / `ChapterSection` / `PreviewSection`）；子组件的契约分别是——`MaterialsSection`「无 props / 无 emits」、`PreviewSection`「5 个 props + `reload()`」、`ChapterSection`「`v-model:prompt` 只写不读」、**`CastSection`「只有 `prompt?` 一个 prop（`v-model:prompt` 的接收端，只写不读）；不再接父页的 `status` / `thinkText`」**、**`CastShot`（`@renderer/components/CastShot.vue`，公共组件）「8 个 props、无 emits」**、**`CastLibraryModal`「`open` / `project` / `epoch?` props + `close` / `imported` emits」**、**`CastCreateModal`「`open` / `project` 两个 props + `close` / `created` emits（不再收 `status`）」**
 
 ## 1. 作用与职责
@@ -631,7 +631,7 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 
 - **章节列表只读、点击只填需求描述**：`ChapterSection` 不发起生成 / 修改；章节模式下 `index.html` 由主进程生成，本页动作仍是原来的四个按钮。
 
-- **「角色」区可预览、可勾选、可增删，但「改画法」的修改链只有一条**：`CastSection` 读 `appState.project.cast`；点「改这个角色」把「只改角色 <id>（cast/<id>.js）：」写回同一个需求描述，**它不自己调修改接口**。角色是跨章共用的一份绘制代码，页面只展示「缩略图 / 名字 / 描述 / 高几 u / 文件」这五项，**没有就地编辑框**——改画法由模型在改稿时完成。页面新增的是「新建角色」（一次模型调用）与「从全局库添加」（搬文件）两条**不经「生成 HTML」**的入口，以及缩略图 / 大图这条**只读预览**路径（`project:cast-preview`，只写 `cast-preview/`，不动 `cast/` 下任何文件）。
+- **「角色」区现在只有勾选（改法见本页顶部 ⚠️ 块）**：`CastSection` 读 `appState.project.cast`，点卡片左上勾选框 → `projectTools.saveCast(...)`；卡片只展示「缩略图 + 名字」，**没有就地编辑框、也没有「改这个角色」/「新建角色」/「从全局库添加」**——新建、改信息、重画与删除全在侧栏「角色」页。缩略图走只读预览（`cast:preview`，只写 `<userData>/cast-preview/`，不动 `<项目>/cast/` 下任何文件）。
 - **预览是「真跑一遍代码」，所以有两条已知边界**：① 只有**静态一帧**（动画写在章节里，角色本身是纯绘制函数）；② 声明了 `p5` / `p5.brush` 的水彩角色走 p5 的 WEBGL 画布，这条预览路径只画得出它传给 `o.ctx` 的那部分，页内会提示「只显示 Canvas 2D 部分」/「生成后的页面里才看得到」。预览位若窄到 `W < 120` 页内只显示 `⚠` / `空` / `水彩` 短标记——但**现在三处预览位都不窄**（角色卡片 130px、全局库方格 132px、大图 200×260），这条分支不触发、留作更小格子的兜底；完整原因也可看大图或 `CastShot` 的 `title`。
 
 ## 9. 运行环境缺包守卫（`useEnvGate`）
@@ -712,7 +712,7 @@ function bump(): void {
 | **位置 / 引用** | `src/renderer/src/components/CastShot.vue`（**公共组件**，被「HTML生成」页三处 + 「内容脚本」页选角色弹窗共用）；四处都用跨目录别名 `@renderer/components/CastShot.vue` 引入，**没有页面内副本** |
 | props | `id`（角色 id，同时是文件名词干）/ `units`（高几 u，只决定预览里画多大）/ `title?` / `uses?`（角色声明的随包库，主进程据此提示水彩）/ `epoch?` / `big?` |
 | 模板 | `div.cast-shot`（`:class="{ big }"`）里 `iframe.cast-shot-frame`（`:src="src"`、`sandbox="allow-scripts allow-same-origin"`、`:title="'角色预览：' + (title \|\| id)"`）；**没有 `src` 时**显示 `span.cast-shot-note`：生成中「…」、失败「无法预览」（原因在 `title`，即 `err \|\| '正在生成预览…'`） |
-| 取地址 | `load()`：`seq` 自增并记下 `mine` → 清空 `src` / `err` → 缺 `id` 直接返回 → `await window.castTools.preview(id, { units, title, uses: uses \|\| [] }).catch(() => null)` → **`mine !== seq` 就丢弃**（并发保护，避免闪回旧角色的预览）→ 失败写 `err`（`res.message` 或「预览生成失败」）→ 成功 `src = userFileUrl(res.rel) + '&e=' + (epoch \|\| 0)` |
+| 取地址 | `load()`：`seq` 自增并记下 `mine` → 清空 `src` / `err` → 缺 `id` 直接返回 → `try { await window.castTools.preview(id, { units, title, uses: Array.isArray(props.uses) ? toRaw(props.uses).slice() : [] }) } catch { res = null }` → **`mine !== seq` 就丢弃**（并发保护，避免闪回旧角色的预览）→ 失败写 `err`（`res.message` 或「预览生成失败」）→ 成功 `src = userFileUrl(res.rel) + '&e=' + (epoch \|\| 0)`。**`uses` 必须先归一化成普通数组**：库成员的 `uses` 常是响应式数组（Vue Proxy），`invoke` 的参数要过结构化克隆、代理不可克隆 ⇒ 同步抛 `DataCloneError`、`load()` 在 `await` 处中断、卡片停在「…」；`try/catch` 是为了让失败落到「无法预览」而不是静默卡住 |
 | 重载 | `watch(() => [props.id, props.units, props.epoch], load, { immediate: true })`——**注意 `title` / `uses` 不在 watch 里**：它们只影响提示文案与页标题，改了不必重走一遍主进程 |
 | 为什么带 `&e=` | ① 预览页每次都是重写的，但 `iframe` 地址不变就不会重载；`epoch` 一变地址就变（服务端本身 `no-store`）；② `userFileUrl` 自带 `?user=1`，**只能用 `&` 续接**——写成 `?e=` 会让查询串变成 `user=1?e=0`，主进程认不出 `?user=1` ⇒ 把 `cast-preview` 当项目名 ⇒ 404、iframe 里显示 `Not Found` |
 | 交互 | CSS `.cast-shot-frame { pointer-events: none }`：**点击穿透到卡片 / 行本身**（预览窗口里没有可交互的东西） |
@@ -767,6 +767,6 @@ function bump(): void {
 | 「角色跟着章节化」——角色表由规划产出，`v-if="chapters.length > 0 \|\| cast.length > 0"` 才显示，且由骨架按各章 `cast` 并集引入 | **角色是项目素材**：常显、规划不产角色、两种形态都注入（章节模式「传谁引谁」、单文件模式由 `cast/inject.ts` 注入），角色脚本的引入只看 `cast.selectedMembers()` |
 | 角色只有名字 / 描述 / 身高 / 文件名可看，「画成什么样」要等生成 HTML | **每张卡一块 13:15 竖版预览位（130×150）**；新建成功后**弹窗不关**、直接看 200×260 大图；全局库弹窗改成**方格网格**、每格一张预览 |
 | 全局库弹窗是整行勾选（`.lib-row` + 复选框） | **方格网格**（`.cast-grid` / `.cast-card`）：点格子选中、主色描边 + 勾角标，缺文件格子压暗不可点；`.lib-row*` 样式已随旧列表删除 |
-| 两个弹窗都写在 `CastSection.vue` 里（262 行） | **拆成独立组件**（`CastLibraryModal.vue` 116 行 / `CastCreateModal.vue` **169 行**——因自带 `taskId` 订阅从 155 涨到 169），`CastSection.vue` 回到 154 行、把角色行改成卡片墙后到 187 行、**现在 184 行**（状态投影交还给弹窗后减了 3 行）；预览单独抽 `CastShot.vue`（**现 67 行、已搬到公共组件目录 `src/renderer/src/components/CastShot.vue`**——「内容脚本」页选角色弹窗也要用，留在页面目录里就变成页面互相 import）给缩略图与大图共用 |
+| 两个弹窗都写在 `CastSection.vue` 里（262 行） | **拆成独立组件**（`CastLibraryModal.vue` 116 行 / `CastCreateModal.vue` **169 行**——因自带 `taskId` 订阅从 155 涨到 169），`CastSection.vue` 回到 154 行、把角色行改成卡片墙后到 187 行、**现在 184 行**（状态投影交还给弹窗后减了 3 行）；预览单独抽 `CastShot.vue`（**现 77 行、已搬到公共组件目录 `src/renderer/src/components/CastShot.vue`**——「内容脚本」页选角色弹窗也要用，留在页面目录里就变成页面互相 import）给缩略图与大图共用 |
 | 角上的勾选框只是普通复选框，新建 / 导入后要手动刷新才看到新缩略图 | 勾选框直接复用素材卡那个 `.mat-check`（绝对定位在卡片左上角，不再需要 `.cast-row .mat-check { position: static }` 那种行内特例）；`epoch` + `watch(appState.project)` 让缩略图自动重载 |
 | 角色是「一行一个角色」的竖排列表：勾选框 + 缩略图 + 名字 / 描述 / 高几 u / `cast/<id>.js` + 行内三个按钮（7 列 grid） | **卡片墙**（与「项目素材」同一套 `.mat-*`）：人物在上、名字在下，勾选框在左上、三个动作收进右上「…」菜单，卡片上**不再显示文件路径**；`.cast-list` / `.cast-row*` / `.cast-actions` / `.cast-units` / `.cast-file` 已删除 |

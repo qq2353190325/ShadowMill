@@ -1,14 +1,15 @@
 # src/renderer/src/components/（通用组件）
 > **⚠️ 本轮角色改造对「通用组件」这一篇的影响（以本块为准）**
 >
-> - `components/CastShot.vue`（67 行）契约变了：props 为 `id` / `units` / `title?` / `uses?` / `epoch?` / `big?`——**`project` 与 `from` 已去掉**；内部改调 `window.castTools.preview(id, { units, title, uses })`，拿到 `{ rel }` 后用 `userFileUrl(rel) + '&e=' + epoch` 载入 iframe。
+> - `components/CastShot.vue`（**77 行**）契约变了：props 为 `id` / `units` / `title?` / `uses?` / `epoch?` / `big?`——**`project` 与 `from` 已去掉**；内部改调 `window.castTools.preview(id, { units, title, uses })`，拿到 `{ rel }` 后用 `userFileUrl(rel) + '&e=' + epoch` 载入 iframe。
+> - **交给 IPC 的 `uses` 必须是普通数组**：`uses: Array.isArray(props.uses) ? toRaw(props.uses).slice() : []`。库成员的 `uses` 常是响应式数组（Vue 的 Proxy），`invoke` 的参数要过结构化克隆、**代理不可克隆** ⇒ 同步抛 `DataCloneError`，`load()` 在 `await` 处中断、`src` 与 `err` 都还是空 ⇒ 卡片永远停在「…」（用户实测「史蒂夫的卡片空白」）。现在 `preview(...)` 包了 `try/catch`，失败会落到「无法预览」而不是静默卡住。
 > - 预览页不再落在项目目录：`<userData>/cast-preview/<id>.html`，由 `hgpreview://…?user=1` 放行（不再是 `<项目>/.cast-preview/<来源>-<id>.html`、也不再经 `previewUrl(project, rel)`）。
-> - 使用方从三处变成四处：「角色」页卡片墙 / 「角色」页新建与改画法弹窗 / 「角色」页改信息弹窗 / 「HTML生成」页角色勾选区 / 「内容脚本」页选角色弹窗（都是同一个组件，不再有 `from="lib"`）。
+> - 使用方从三处变成四处：「角色」页卡片墙 / 「角色」页**「修改角色」弹窗**（新建与修改是**同一个弹窗** `CastEditModal.vue`，大图用 `big`）/ 「HTML生成」页角色勾选区 / 「内容脚本」页选角色弹窗（都是同一个组件，不再有 `from="lib"`）。
 > - 若本篇列过「已删除的弹窗」，本轮删除的是 `pages/HtmlGenPage/CastCreateModal.vue` 与 `pages/HtmlGenPage/CastLibraryModal.vue`（它们的职责搬到 `pages/CastPage/`）。
 
 > 目录级一篇：链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + 角色静态预览 `CastShot.vue` + 旧数据处置弹窗 `LegacyDataDialog.vue`
 
-- **覆盖文件**：`components/` 目录（链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + **角色静态预览 `CastShot.vue`（本轮从 `pages/HtmlGenPage/` 搬来，67 行）** + 旧版本数据弹窗 `LegacyDataDialog.vue`；**共 5 个文件**，文件行数随迭代变化，不写死）
+- **覆盖文件**：`components/` 目录（链路状态条 `StepBar.vue` + 新建项目弹窗 `NewProjectDialog.vue` + 全局自定义下拉 `HfSelect.vue` + **角色静态预览 `CastShot.vue`（本轮从 `pages/HtmlGenPage/` 搬来，77 行）** + 旧版本数据弹窗 `LegacyDataDialog.vue`；**共 5 个文件**，文件行数随迭代变化，不写死）
 - **所在目录**：`src/renderer/src/components/`
 - **类型**：通用组件（单文件组件，`<script setup lang="ts">`）。`StepBar.vue` / `NewProjectDialog.vue` / **`CastShot.vue`** **都没有 `<style>` 块**，样式来自全局 `assets/main.css`；`HfSelect.vue` **自带两个 `<style>` 块**（触发器用 `<style scoped>`、Teleport 弹层用不带 `scoped` 的 `<style>`），下拉的全部视觉不依赖 `main.css`；`LegacyDataDialog.vue` **自带一段 `<style scoped>`**（只放它私有的 `.path-line` / `.opt-list` / `.danger-text` 与危险按钮的描边重写，其余视觉复用 `main.css` 的 `.hf-modal*`）。
 - **对外导出**：
@@ -453,6 +454,7 @@ emits：**无**。它不接受任何用户输入——单击事件一律穿透�
 - **`CastShot` 是「公共组件」而不是「某页的子组件」**：它同时被「HTML生成」页的三处角色界面与「内容脚本」页的选角色弹窗使用，所以放在 `components/` 而不是任一 `pages/<Page>/` 下（源码注释原文：「跨页面互相 import 会让人分不清谁依赖谁」）。**新增第三个使用方时不要再复制一份**。
 - **`CastShot` 的 `title` / `uses` 不在 watch 里**：它们只影响提示文案与页标题，改了不必重走一遍主进程——把五个字段的 watch 收紧成这五个是刻意的，别「顺手」补上 `title` / `uses`（那会让改个名字就重生成一次预览页）。
 - **`CastShot` 的并发保护靠 `seq`**：`load()` 开头 `const mine = ++seq`、回来时 `if (mine !== seq) return`——否则快速切换角色 / 项目时，先发的那次请求后到会把新预览顶回旧的。
+- **`CastShot` 交给 IPC 的 `uses` 必须是普通数组**（`uses: Array.isArray(props.uses) ? toRaw(props.uses).slice() : []`），并且 `preview(...)` 现在包了 `try/catch`：`props.uses` 常常是库成员的**响应式数组**（Vue 的 Proxy），而 `invoke` 的参数要过结构化克隆、**代理不可克隆** ⇒ 同步抛 `DataCloneError: [object Array] could not be cloned.`，`load()` 在 `await` 处中断、`src` 与 `err` 都还是空 ⇒ 卡片永远停在「…」（用户实测「史蒂夫的卡片空白」）。只有 **`uses` 非空**的角色（声明了 p5 / p5.brush 的水彩角色）才会踩到——`uses` 为 undefined 时过去那句 `props.uses || []` 造的是普通数组，所以早年几个角色都没事。归一化在组件内部完成，四个调用处（「角色」页卡片墙 / 「修改角色」弹窗 / 「HTML生成」页角色区 / 「内容脚本」页选角色弹窗）照旧把成员对象或字面量交给它，不用自己先 `toRaw`。这与 `composables/useRuntime.ts` 的 `plainPacks()`（`toRaw(list).slice()`，注释里早就写过同一件事）是同一个坑。
 - **依赖分界遵循约定 8**：`useAppStore` / `useToast` 属于 `composables/`；`HfSelect` 自身不引入任何 composable / 工具函数，**`CastShot` 只引入 `@renderer/utils/url` 这个无状态纯函数模块**。
 - **HfSelect 的选项契约只认 `value`**：**调用方必须提供 `value`**，写成别名会让所有选项 `value === undefined`。现有 11 个调用方都满足该契约（`TextTtsPage` 的 `VoiceOption` 直接用 `value` 作音色键）。
 - **HfSelect 未全局注册**：每个使用方都要显式 import（含 `HfSelectGroup` 类型）。**`CastShot` 同样未全局注册**，四处使用点都显式 `import CastShot from '@renderer/components/CastShot.vue'`。

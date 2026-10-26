@@ -4,8 +4,8 @@
 >
 > **角色不在这些文件里定义**（真源在 `main/cast/` 的全局角色库）：项目里只记「本片用了哪几个角色」（`project.json` 的 `cast = [{ id, selected }]`），读项目时按 id 从库补全，写盘前把勾中的复制成 `<项目>/cast/` 副本。**动作**（`main/cast/actions.ts` 的动作库）也只存 `<userData>/cast-library/actions.json`，不碰项目。
 
-- **覆盖文件**（16 个 `.ts`，行数为工作区实测 `[IO.File]::ReadAllLines`）：`projects/index.ts`（38 行）、`projects/paths.ts`（57）、`projects/store.ts`（**239**）、`projects/materials.ts`（87）、`projects/prompts.ts`（**354** 行 / **27,844** 字节，全目录最长）、`projects/bgm.ts`（65）、`projects/previewScript.ts`（159）、`projects/progress.ts`（45）、`projects/htmlWrite.ts`（127）、`projects/chaptersFlow.ts`（192）、**`projects/register.ts`（19）**、`projects/ipc/project.ts`（121）、`projects/ipc/html.ts`（**247**）、`projects/ipc/media.ts`（218）、`projects/ipc/cast.ts`（**223**）、**`projects/ipc/castActions.ts`（154）**
-- **规模**：**16 个文件、合计 2345 行**，最长 354 行（`prompts.ts`，过了 300 行「考虑拆分」线但未触 500 行硬上限）
+- **覆盖文件**（16 个 `.ts`，行数为工作区实测 `[IO.File]::ReadAllLines`）：`projects/index.ts`（38 行）、`projects/paths.ts`（57）、`projects/store.ts`（**239**）、`projects/materials.ts`（87）、`projects/prompts.ts`（**369** 行 / **29,828** 字节，全目录最长）、`projects/bgm.ts`（65）、`projects/previewScript.ts`（159）、`projects/progress.ts`（45）、`projects/htmlWrite.ts`（127）、`projects/chaptersFlow.ts`（192）、**`projects/register.ts`（19）**、`projects/ipc/project.ts`（121）、`projects/ipc/html.ts`（**249**）、`projects/ipc/media.ts`（218）、`projects/ipc/cast.ts`（**224**）、**`projects/ipc/castActions.ts`（162）**
+- **规模**：**16 个文件、合计 2371 行**，最长 369 行（`prompts.ts`，过了 300 行「考虑拆分」线但未触 500 行硬上限）
 - **所在目录**：src/main/projects/
 - **类型**：业务域模块（`register(ctx)` 装配模式）；形态为「同名目录 + `index.ts` 统一出口」，与 `src/main/agent/`、`src/main/updater/` 同一套工程约定（见根 `AGENTS.md` 关键约定 9）
 - **对外导出**（全部由 `index.ts` 再导出，**13 个值 + 4 个类型**）：`register`、`scanProjects`、`projectsRoot`、`projectDir`、`projectFilePath`、`readProject`、`writeProject`、`ensureProject`、`parseSubtitle`、`normalizeContent`、`copyAudioIntoProject`、`copyMaterialIntoProject`、`normalizeMaterials`；类型 `ContentScript` / `Project` / `Scene` / `SubtitleLine`（定义在 `src/shared/types.ts`，此处只转发）
@@ -20,17 +20,17 @@
 | `paths.ts` | 57 | **路径层 / 依赖最上游**：只拼路径、不读写文件；项目根故意写成**函数**（惰性求值，见 §5） | `projectsRoot`、`projectDir`、`projectFilePath`、`contentFilePath`、`resolveVideoAbs`、**`castLibraryRoot`**、**`castPreviewDir`** |
 | `store.ts` | 239 | **项目读写**：`project.json`（索引）+ `subtitle.txt` / `content.json`（两个正文）的读、写、补齐、扫描与规范化；**角色在磁盘上只落 `[{ id, selected }]`、读项目时按 id 从库补全** | `readProject`、`readSubtitle`、`readContent`、`writeContent`、`writeProject`、`normalizeCastSelections`、`resolveProjectCast`、`ensureProject`、`normalizeContent`、`scanProjects`、`parseSubtitle`、`copyAudioIntoProject` |
 | `materials.ts` | 87 | **项目素材库（图片 / 视频）**：目录表、素材 id、扩展名判类型、拷入项目、清单规范化、白名单文案 | `MATERIAL_DIR`、`materialSeq`、`newMaterialId`、`materialKindOf`、`copyMaterialIntoProject`、`normalizeMaterials`、`materialExtsText` |
-| `prompts.ts` | **354** | **纯字符串拼装（只读项目数据）**：内容脚本 / 全局视觉风格 / 素材 / 画布 / 成片时长 / 无限循环等提示块，以及规划、逐章、**画角色 / 改画法 / 动作脚本**五份 prompt（**15 个导出函数**）；**不调模型、不写盘**；新增 **`buildCastActionPrompt()`**（见 §1.3）；**本轮 +1 行**：`buildCastEditPrompt` 的**【关节】**整段重写（3 行拼接 → 6 行拼接，见 §1.3） | `buildAgentPrompt`、`buildContentBlock`、`buildStyleBlock`、`resolveMaterials`、`buildMaterialBlock`、`buildCanvasBlock`、`buildMaterialPrompt`、`validSceneList`、`projectCanvas`、`buildPlanPrompt`、`subtitleWindowText`、`buildChapterPrompt`、`buildCastPrompt`、`buildCastEditPrompt`、**`buildCastActionPrompt`** |
+| `prompts.ts` | **369** | **纯字符串拼装（只读项目数据）**：内容脚本 / 全局视觉风格 / 素材 / 画布 / 成片时长 / 无限循环等提示块，以及规划、逐章、**画角色 / 修改（重画）/ 动作脚本**五份 prompt（**15 个导出函数**）；**不调模型、不写盘**；新增 **`buildCastActionPrompt()`**（见 §1.3）；**本版 +7 行**：`buildCastEditPrompt` 新增**【朝向】**段、`buildChapterPrompt` 的【项目角色】块加 `o.face` 与「转身走路」一段（见 §1.3） | `buildAgentPrompt`、`buildContentBlock`、`buildStyleBlock`、`resolveMaterials`、`buildMaterialBlock`、`buildCanvasBlock`、`buildMaterialPrompt`、`validSceneList`、`projectCanvas`、`buildPlanPrompt`、`subtitleWindowText`、`buildChapterPrompt`、`buildCastPrompt`、`buildCastEditPrompt`、**`buildCastActionPrompt`** |
 | `bgm.ts` | 65 | **背景音轨确定性注入**：按 `project.audioFile` 重写 `index.html` 里的 `<audio id="myv-bgm">`（先摘后插，幂等） | `BGM_TAG_ID`、`insertHtmlSnippet`、`escapeRegExp`、`stripInjectedBgm`、`stripAudioOfFile`、`applyBgmToHtml` |
 | `previewScript.ts` | 159 | **预览副本控制脚本**：纯字符串常量，响应父页 `postMessage`、300ms 上报、载入后冻结在第 0 帧 | `HG_PREVIEW_CTRL` |
 | `progress.ts` | 45 | **进度文案与推送**：Agent 阶段 → 中文文案（带「第 k/N 章」前缀），并按 `taskId` 推回发起方 | `progressText`、`progressSender`、`pushStatus` |
 | `htmlWrite.ts` | 127 | **Agent 产出落盘**：单文件 `index.html`、章节骨架、**角色副本同步**与角色勾选变化后的页面刷新；含随包库本地化兜底、`core.js` 版本同步、HyperFrames 合规检查 | `syncCoreLib`、`writeSingleHtml`、`syncProjectCast`、`applyCastToHtml`、`refreshCastInPage`、`writeChapterSkeleton` |
 | `chaptersFlow.ts` | 192 | **章节化两条流程**：逐章生成（N 次调用、**全部成功才落盘**）与两段式改稿（先路由、再定向编辑；**角色不在这条链路上**） | `generateByChapters`、`applyChapterEdit` |
 | `ipc/project.ts` | 121 | **项目生命周期频道**（9 个 handle）：列表、新建、载入、存字幕、存内容脚本、导出 SRT、打开项目目录、打开指定路径所在目录、删除 | `registerProjectIpc(ctx)` |
-| `ipc/html.ts` | **247** | **HTML 类频道**（6 个 handle）：生成、按需求修改、下载、读取、预览副本、手写保存 | `registerHtmlIpc(ctx)` |
+| `ipc/html.ts` | **249** | **HTML 类频道**（6 个 handle）：生成、按需求修改、下载、读取、预览副本、手写保存；单文件生成时拼的【项目角色】块本版补了 `o.face` 与「转身走路」 | `registerHtmlIpc(ctx)` |
 | `ipc/media.ts` | 218 | **素材 / 音频 / 视频类频道**（10 个 handle）：成品回写、渲染档位、画布、选音频 / 设音频 / 清音频、选素材 / 加素材 / 回写素材、从视频提取音轨 | `FFMPEG_PACKS`、`registerMediaIpc(ctx)` |
-| `ipc/cast.ts` | 223 | **角色本身**（**7 个 handle**）：全局角色库 6 条（`cast:*`）+ 本片勾选 1 条（`project:save-cast`） | `registerCastIpc(ctx)` |
-| **`ipc/castActions.ts`** | **154** | **动作与动作示范**（**5 个 handle**，全部 `cast:*`）：列 / 存 / 删 / **AI 生成**（唯一调模型的动作路径）/ **会动的示范页** | `registerCastActionIpc(ctx)` |
+| `ipc/cast.ts` | 224 | **角色本身**（**7 个 handle**）：全局角色库 6 条（`cast:*`）+ 本片勾选 1 条（`project:save-cast`） | `registerCastIpc(ctx)` |
+| **`ipc/castActions.ts`** | **162** | **动作与动作示范**（**5 个 handle**，全部 `cast:*`）：列 / 存 / 删 / **AI 生成**（唯一调模型的动作路径）/ **会动的示范页** | `registerCastActionIpc(ctx)` |
 | `register.ts` | **19** | **只做装配**：把 `ctx.getWindow` 包一层（缺省返回 `null`），再按固定顺序调五个域的注册函数（角色那组拆成两支：角色本身 + 动作示范） | `register(ctx?)` |
 
 ### 1.1 项目目录里有什么（`index.ts` 顶部说明）
@@ -82,10 +82,10 @@ chaptersFlow.ts / htmlWrite.ts ──→ ipc/*.ts ──→ register.ts ──�
 | --- | --- | --- |
 | `buildAgentPrompt(parts)` | 「HTML生成」页 ·「生成 HTML」（单文件） | 把拼好的各块用空行连起来 |
 | `buildPlanPrompt(requirement, proj, sub)` | 同上，结构规划 | 【需求】+【内容脚本】+【画布】+【字幕窗口】等；输出只有 `mode` + `chapters` |
-| `buildChapterPrompt(opts)` | 同上，逐章生成 | 本章契约 +【项目角色】+ 上一章衔接 + 本章字幕窗口 |
+| `buildChapterPrompt(opts)` | 同上，逐章生成 | 本章契约 +【项目角色】+ 上一章衔接 + 本章字幕窗口；**本版【项目角色】块把 `o.face` 加进参数清单**（0 正面、1 侧面），并补了一段「转身走路」：`o.face` 在 0.12~0.18 秒内从 0 推到 1（0.5 处从正面切侧面），切换那几帧 `o.sq` 给 0.4~0.6 压窄遮硬切，转完 `sq` 回 0 再给 `walk` / `dx`，往左走加 `o.flip: true`；角色没读 `o.face` 就一直正面，不是报错 |
 | `buildCastPrompt(opts)` | 「角色」页 ·「新建角色」 | 【角色任务】+【角色文件】+【角色设定】+【身高】+【画风】+【全片角色表】+【本角色随包库】+【往哪画】 |
-| `buildCastEditPrompt(opts)` | 「角色」页 · 卡片「…」·「改画法…」 | 上面那份的「改」版本：+【本次改动】+**【关节】**（放在【本角色随包库】之后、【当前角色源码】之前）+【当前角色源码】(`<<<CURRENT cast/<id>.js>>>…<<<END CURRENT>>>`)，要求交回整份新文件、id 与身高不变。**【关节】原文**（6 行字符串拼接，成文为）：「【关节】手臂的枢轴 = **手臂宽度中心 · 从手臂顶部往下半个手臂宽**（即：手臂横跨 x=±1..±2，枢轴取中线 x=±1.5、y = 肩线 -6 往下 0.5u = -5.5；盒子局部 x 取 -0.5..0.5、y 取 -0.5..2.5）。抬手到 90° 时手臂的**中线压在肩线上**、上沿只比肩线高约 0.03u（几乎贴齐），臂根也不悬空、**手臂画在躯干之前（身体优先），抬手时手臂不会盖住身体**；静止时与"手臂紧贴身体外侧"的画法逐像素相同。**别把枢轴放在肩线上**（那就是头底/下巴那条线，抬到 86°~100° 时臂根会翘到下巴上，实测踩过），也**别放到肩线下一整个手臂宽**（抬起来手臂会糊到上胸、显得太低），更**不要**用补角 / 长条形肩垫 / 给身体加肩宽来补缝。腿仍按髋部中心转（腿也画在躯干之前，顶部越界会被躯干盖住）。」——它服务的是「用户拿着一个已有角色说『手抬起来会跟身体分开 / 像从头上长出来』」这条最常见的改画法诉求 |
-| **`buildCastActionPrompt(opts)`** | **「角色」页 · 动作示范弹窗 ·「AI 生成…」** | 用户需求 +【动作任务】+【时长】（`t` 的范围 `0 ≤ t < duration`）+【角色设定】+【角色源码】（`<<<CURRENT cast/<id>.js>>>…<<<END CURRENT>>>`，让它先读懂这个角色真的读哪些 `o` 参数）+【输出格式】（`<<<ACTION>>> function (t) { return { … }; } <<<END ACTION>>>`） |
+| `buildCastEditPrompt(opts)` | 「角色」页 · 卡片「…」·「修改角色…」·「按这个要求重画」 | 上面那份的「改」版本：+**【朝向】**（放在【画风】之后、【本次改动】之前）+【本次改动】+**【关节】**（放在【本角色随包库】之后、【当前角色源码】之前）+【当前角色源码】(`<<<CURRENT cast/<id>.js>>>…<<<END CURRENT>>>`)，要求交回整份新文件、id 与身高不变。**【关节】原文**（6 行字符串拼接，成文为）：「【关节】手臂的枢轴 = **手臂宽度中心 · 从手臂顶部往下半个手臂宽**（即：手臂横跨 x=±1..±2，枢轴取中线 x=±1.5、y = 肩线 -6 往下 0.5u = -5.5；盒子局部 x 取 -0.5..0.5、y 取 -0.5..2.5）。抬手到 90° 时手臂的**中线压在肩线上**、上沿只比肩线高约 0.03u（几乎贴齐），臂根也不悬空、**手臂画在躯干之前（身体优先），抬手时手臂不会盖住身体**；静止时与"手臂紧贴身体外侧"的画法逐像素相同。**别把枢轴放在肩线上**（那就是头底/下巴那条线，抬到 86°~100° 时臂根会翘到下巴上，实测踩过），也**别放到肩线下一整个手臂宽**（抬起来手臂会糊到上胸、显得太低），更**不要**用补角 / 长条形肩垫 / 给身体加肩宽来补缝。腿仍按髋部中心转（腿也画在躯干之前，顶部越界会被躯干盖住）。」——它服务的是「用户拿着一个已有角色说『手抬起来会跟身体分开 / 像从头上长出来』」这条最常见「让它按这个要求重画」的诉求。**【朝向】段（本版新增）**：要求角色契约要有 `o.face`（0 = 正面、1 = 侧面；≥0.5 画侧面，侧面固定朝局部 +x、朝左交给 `o.flip`），并写死三条——本次改动涉及「转身 / 侧面 / 朝向」时**必须补出侧面视图、正面画法保持逐像素不变**（侧面 = 正面绕竖直轴转 90° 的投影：头 2u 深、躯干 / 腿 / 臂各 1u 深，配色与部件跟正面逐项一致）；现有代码已支持 `o.face` 且本次不涉及朝向时**原样保留、不要重画** |
+| **`buildCastActionPrompt(opts)`** | **「角色」页 · 动作示范弹窗 ·「AI 生成…」（新建一条）/ 专属 AI 动作那一行的「改」（改一条）** | 用户需求 +【动作任务】+【时长】（`t` 的范围 `0 ≤ t < duration`）+【角色设定】+【角色源码】（`<<<CURRENT cast/<id>.js>>>…<<<END CURRENT>>>`，让它先读懂这个角色真的读哪些 `o` 参数）+【输出格式】（`<<<ACTION>>> function (t) { return { … }; } <<<END ACTION>>>`）。**`previous?` 有值时（改一条已有 AI 动作，`cast:action-generate` 带 `actionId`）多一段【当前动作脚本】`<<<ACTION>>>…<<<END ACTION>>>`**，要求「在下面这份上改（保留原本对的部分，只改用户要求的那几处），交回**整条**脚本」；用户需求那行的引导语也随之变成「在这个动作上改」（无 `previous` 时是「这条动作要做成什么样」） |
 
 - **动作脚本为什么也要发角色源码**：每个角色自己实现的 `o` 参数不止通用那几项（猫的尾巴、四只脚、手持道具），只有看过源码才知道它认哪些键、方向与量级怎么给——这正是「AI 生成专属动作」比通用关键帧强的地方。
 - 这五份都是**纯字符串**：不调模型、不写盘；模型调用分别在 `ipc/html.ts` / `ipc/cast.ts` / `ipc/castActions.ts`。
@@ -135,9 +135,10 @@ chaptersFlow.ts / htmlWrite.ts ──→ ipc/*.ts ──→ register.ts ──�
 | `cast:action-list` | `{ castId }` | `{ ok, shared, own }` | `cast.listActionsFor(castLibraryRoot(), castId)`：`shared` = 内置 14 条 + 用户自建公共动作，`own` = 这个角色的专属动作 |
 | `cast:action-save` | `{ castId, scope: 'shared' \| 'own', action }` | `{ ok, action }` | `scope` 缺省按 `shared`；`action.id` 为空 = **新建**，由主进程 `cast.nextActionId(takenIds(scope, castId))` 起 id（渲染层不用自己编 id）；落盘走 `cast.upsertAction`（同 id 就地替换，超 40 条拒绝） |
 | `cast:action-remove` | `{ castId, scope, actionId }` | `{ ok }` / `{ ok: false, message }` | `cast.removeAction`；专属动作要带 `castId` |
-| `cast:action-generate` | `{ castId, taskId, request, duration?, loop?, name? }` | `{ ok, action }` | **唯一会调模型的动作路径**：校验 `taskId` / 角色 id / `request` → `readLibrary` 找角色 + `readMemberCode` 读源码（缺了直接回人话错误）→ `buildCastActionPrompt({ member, code, request, duration })` → `chatWithCastAction`（进度按 `taskId` 推送，日志 `html-agent/cast-action.jsonl`）→ `parseCastActionReply` → `validateActionCode` → 组一条 `{ id: nextActionId(...), name, duration, loop, code, from: 'ai' }` → `upsertAction(root, 'own', id, …)`（**只存专属**，因为它可能用了角色自己的参数） |
+| `cast:action-generate` | `{ castId, taskId, actionId?, request, duration?, loop?, name? }` | `{ ok, action }` | **唯一会调模型的动作路径**：校验 `taskId` / 角色 id / `request` → `readLibrary` 找角色 + `readMemberCode` 读源码（缺了直接回人话错误）→ **给了 `actionId` 就先 `cast.listActionsFor(root, id).own.find(...)` 校验这条在不在**这个角色的专属列表里（防拿公共动作 / 别人的动作 id 来覆盖，找不到就回「要改的动作不在了」）→ `buildCastActionPrompt({ member, code, request, duration, previous })`（`previous` = 那条现有脚本的 `code`）→ `chatWithCastAction`（进度按 `taskId` 推送，日志 `html-agent/cast-action.jsonl`）→ `parseCastActionReply` → `validateActionCode` → 组一条 `{ id: prev ? prev.id : nextActionId(...), name: prev ? prev.name : name, duration, loop, code, from: 'ai' }` → `upsertAction(root, 'own', id, …)`（**只存专属**，因为它可能用了角色自己的参数） |
 | `cast:demo` | `{ id, units?, title?, uses? }` | `{ ok, rel }` | 读库里的角色代码 + 内置 `core.js`（`hfEnv.coreSource()`，与项目无关）+ `listActionsFor` 的全部动作（`[...shared, ...own]`）→ `cast.buildCastDemoHtml` → 写 `<userData>/cast-preview/<id>.demo.html` → 回 `rel`（形如 `cast-preview/hero.demo.html`）。`uses` 里含 `p5` 时给水彩提示 |
 
+- **`actionId` 是「改 / 新建」的开关**：给了就覆盖这条专属动作（id / 名字 / 来源 `from: 'ai'` 沿用，时长与循环按**本次入参**），不给就是新建一条；缺 `request` 时的提示文案也分两种（「请写一句「要改成什么样」」/「请写一句「要什么动作」」），`pushStatus` 同理（「正在改「X」的动作…」/「正在给「X」编动作…」）。
 - **时长口径**：`durationOf()` 把 `duration` 夹到 `CAST_ACTION_DURATION.min`–`max`（0.3–30 秒、两位小数），非法值落回 **2 秒**；`name` 取不到就用 `request`，截到 `CAST_ACTION_NAME_MAX`（12）。
 - **示范页一次落盘、演所有动作**：动作表整份内联进页面，换动作只改 URL 的 `#hash`（渲染层 `CastDemoShot.vue` 负责），所以 `cast:demo` 只在打开弹窗 / 角色重画 / 动作增删时调。
 - **不碰项目**：动作存 `<userData>/cast-library/actions.json`，示范页存 `<userData>/cast-preview/`，两者都属用户资产，与当前项目无关。
@@ -166,6 +167,7 @@ chaptersFlow.ts / htmlWrite.ts ──→ ipc/*.ts ──→ register.ts ──�
 - **规划失败不拦路**：`parsePlanReply` 解析不出就按单文件继续，只多一句 `pushStatus('章节规划未能解析…改用单文件模式生成…')`。
 - **规划回复里没有角色**：只取 `cast.selectedMembers(proj.cast)`（本片勾选）交给骨架 / 单文件提示词。
 - **章节模式「全部成功才落盘」**：任何一章失败立即返回错误，不写 `pages/`、不写骨架。
+- **单文件模式的角色块也补了朝向**：`ipc/html.ts` 拼的 `singlePrompt` 里【项目角色】那段本版也写进了 `o.face`（0 正面、1 侧面）与「转身走路」（`face` 0.12~0.18 秒 0→1、切换那几帧 `sq` 0.4~0.6、转完 `sq` 回 0 再 `walk` + `dx`、往左用 `flip`、角色没读 `face` 就一直正面），与章节模式同一套口径。
 
 ### 3.2 按需求修改：单文件一条路、章节两条路（`ipc/html.ts` + `chaptersFlow.ts`）
 
@@ -175,7 +177,7 @@ chaptersFlow.ts / htmlWrite.ts ──→ ipc/*.ts ──→ register.ts ──�
 | 单文件模式 | `ipc/html.ts` 直接读 `index.html` 全文 → 拼 `cast.buildCastTableBlock(allCast)`（只读角色表）→ `chatWithHtmlEdit`（system 是 `agent/htmlEdit.ts` 的 `HTML_AGENT_EDIT_SYSTEM`） | `cast.stripCastFileBlocks` 剥掉万一冒出来的角色块 → **回复里没有 HTML 就报错** → 有 HTML 才 `writeSingleHtml` |
 
 - 章节模式的骨架 `index.html` **模型永远不写**——由 `writeChapterSkeleton()` 按当前章节清单确定性生成。
-- **两条路都改不了角色**：角色只有全局一份，新建 / 改画法在「角色」页（`cast:create` / `cast:recreate`）。
+- **两条路都改不了角色**：角色只有全局一份，新建 / 修改（含「按这个要求重画」）在「角色」页（`cast:create` / `cast:save-meta` / `cast:recreate`）。
 
 ### 3.3 Agent 产出落盘（`htmlWrite.ts`）
 
@@ -200,9 +202,10 @@ chaptersFlow.ts / htmlWrite.ts ──→ ipc/*.ts ──→ register.ts ──�
 
 - **入口**：「角色」页 · 卡片双击 /「…」菜单 ·「动作示范…」→ `CastActionModal.vue`（见 [CastPage.md](../renderer/src/pages/CastPage.md)）。
 - **列表**：打开弹窗调 `cast:action-list`，拿到 `shared`（内置 + 自建公共）与 `own`（专属）。
-- **关键帧编辑器**：弹窗「新建动作…」/ 自建动作的「改」→ `CastActionEditor.vue` → 保存走 `cast:action-save` → `upsertAction`；**不调模型**。
-- **AI 生成**：弹窗「AI 生成…」面板 → `cast:action-generate`（§2.3）——这是**唯一**会调模型的动作路径，进度按 `taskId` 订阅 `project:html-progress`，日志 `html-agent/cast-action.jsonl`。
+- **关键帧编辑器**：弹窗「新建动作…」/ 自建公共动作或关键帧专属动作那一行的「改」→ `CastActionEditor.vue` → 保存走 `cast:action-save` → `upsertAction`；**不调模型**。
+- **AI 生成 / 改一条 AI 动作**：弹窗「AI 生成…」面板 → `cast:action-generate`（§2.3）——这是**唯一**会调模型的动作路径，进度按 `taskId` 订阅 `project:html-progress`，日志 `html-agent/cast-action.jsonl`；专属动作里 `from: 'ai'` 的那条也能「改」——同一个面板换成编辑态，载荷多带 `actionId`（覆盖同一条，不新增）。
 - **示范页**：弹窗左侧那张会动的图 → `cast:demo`（§2.3）→ `CastDemoShot.vue` 把 `userFileUrl(rel) + '&e=<epoch>' + '#' + actionId` 设成 iframe 的 `src`；**换动作只改 hash**，`epoch` 变了（角色重画 / 动作增删）才重设整段地址。
+- **`face` 不用改示范页代码**：`o.face` 是数字参数，`cast/demo.ts` 的 `paramsAt` 本来就会对数字参数在前后关键帧之间插值，示范页把参数对象原样透传给角色——所以关键帧表多出「朝向 face」这一列后，示范页立刻能演，`demo.ts` / `actions.ts` 一行都没改。
 - **不进正片**：动作这一版只做示范；生成 HTML 时角色动画仍由章节按 `t` 自己算。
 
 ### 3.6 背景音轨 / 预览副本 / 导出
