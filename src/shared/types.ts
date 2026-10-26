@@ -350,6 +350,12 @@ export interface GeneratedAudioItem {
   group: string
   size: number
   mtime: number
+  /** 来源：user=userData 白名单产物（可经 hgpreview://...?user=1 试听）；project=某项目 audio/（经 hgpreview://p/<项目>/<rel> 试听）；custom=自定义保存目录（无试听通道） */
+  src: 'user' | 'project' | 'custom'
+  /** src=project 时的项目名（渲染层拼 hgpreview://p/<项目名>/<rel> 用） */
+  projectName?: string
+  /** src=project 时相对项目根的路径（如 audio/xxx.wav） */
+  rel?: string
 }
 
 // voice:list-models / voice:get-config 回带的「厂家目录」：渲染层据此把模型与音色按厂家分组展示
@@ -803,7 +809,7 @@ export interface CastPreviewResult {
 // ===== 角色动作示范（cast:action-* / cast:demo）=====
 // 角色本身是**纯绘制函数**（`window.__cast[id](x, y, u, o)`），不含动画：动画由调用方按时间算出
 // 一组参数塞进 `o`（walk 摆腿相位 / aL、aR 摆臂角度 / eyes、mouth 表情 / blink 眨眼 / dy、dx 位移 /
-// rot 旋转 / sq 挤压，见 main/agent/html.ts 的 HTML_CAST_SYSTEM 第 4 条）。所以一条「动作」=
+// rot 旋转 / sq 挤压 / face 朝向（0 正面、1 侧面），见 main/agent/html.ts 的 HTML_CAST_SYSTEM 第 4 条）。所以一条「动作」=
 // 「时间 → 这组参数」的曲线，两种写法：
 //   · keys —— 关键帧表（时间点 + 参数值），所有角色通用，不调模型（「新建动作」写的就是它）；
 //   · code —— 一段纯函数 `function (t) { return { … } }`，由 AI 读这个角色的源码后生成，
@@ -857,7 +863,10 @@ export interface CastActionGeneratePayload {
   castId: string
   // 本次模型调用的任务 id（渲染层生成，见 utils/taskId.ts）
   taskId: string
-  // 要什么动作，一句话，如「四脚交替跑起来，尾巴左右甩」
+  // 改一条**已有**专属动作时给它的 id：带上那条现有脚本、按 request 改完**覆盖同一条**；
+  // 不给就是新建一条（名字 / 时长 / 循环都按本次入参）
+  actionId?: string
+  // 要什么动作（新建），或「要改成什么样」（给了 actionId 时），一句话
   request: string
   // 动作时长（秒）：t 的取值范围就是 [0, duration)
   duration?: number
@@ -1307,7 +1316,8 @@ export interface PreloadApi {
     // 保存一条关键帧动作（同 id 覆盖；id 为空 = 新建，主进程起 id）
     saveAction(payload: CastActionSavePayload): Promise<IpcResult<CastActionResult>>
     removeAction(payload: CastActionRemovePayload): Promise<IpcResult>
-    // 让 AI 读这个角色的源码后生成一条专属动作（要一次模型调用，进度按 taskId 路由）
+    // 让 AI 读这个角色的源码后生成一条专属动作；带 actionId = 在已有那条的脚本上改、覆盖同一条
+    // （要一次模型调用，进度按 taskId 路由）
     generateAction(payload: CastActionGeneratePayload): Promise<IpcResult<CastActionResult>>
     // 会动的示范页：返回相对路径，渲染层自行拼 URL（换动作只换 #hash，不重新加载）
     demo(id: string, options?: Omit<CastDemoPayload, 'id'>): Promise<IpcResult<CastDemoResult>>

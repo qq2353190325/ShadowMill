@@ -78,6 +78,12 @@
           <span class="ch-sub" style="margin-left:0">mouth 选「自动」= 不传这个参数，让角色按表情自己定嘴型</span>
         </div>
 
+        <!-- 转身怎么排：face 是"哪一套视图"，不是平滑旋转；硬切那几帧靠 sq 压窄遮住 -->
+        <div class="hgen-tip" style="margin:6px 0 0">
+          转身：把 face 从 0 推到 1（0.5 处从正面切到侧面），切换那几帧把 sq 压到 0.4~0.6 遮住硬切；
+          转完 sq 回 0、用 walk 摆腿；往左走靠 flip（侧面固定朝右）。角色代码没读 face 的话它就一直正面。
+        </div>
+
         <div v-if="errorText" class="hf-status hf-error">{{ errorText }}</div>
       </div>
 

@@ -241,21 +241,24 @@ export function buildChapterPrompt(opts: {
         + '\n调用方式：window.__cast["' + castList[0].id + '"](x, y, u, { ctx: ctx2d, … })；(x, y) 是脚底中点，u 是 1 个单位的像素数，'
         + '**ctx 必须传**（本章 canvas 的 2D 上下文，角色就是往它上面画）。'
         + '角色高 ' + castList[0].units + 'u ⇒ 希望它占画面高度 H 的三分之一，就把 u 设成 H/3/' + castList[0].units + '。'
-        + '\n**光传 ctx，角色就是一张不会动的立绘**：它读的是 o 里的动画参数（o.walk 摆腿相位 / o.aL、o.aR 摆臂角度 /'
-        + ' o.eyes、o.mouth 表情 / o.blink 眨眼 / o.dy、o.dx 位移 / o.rot 旋转 / o.sq 挤压）。出镜期间请按本章的 t 算出细微动态'
-        + '（呼吸 + 眨眼就够），有表演时再叠摆臂、走路与表情；**参数必须由 t 直接算**（draw(t) 是纯函数，seek 后要能重现），'
-        + '不要 tween 一个外部对象再读它的值。确实要静止的镜头（定格、时间冻结、纯背景人物）只传 ctx 也行——'
-        + '那是**有意的静止**，不是默认写法。'
+        + '\n**演动作优先用角色自带的 act(style, t)**（动作写在角色文件里，同一个角色全片只有一套动作）：\n'
+        + '  var fn = window.__cast["' + castList[0].id + '"];\n'
+        + '  var a = (fn.act && fn.act("bounce", t)) || {};   // style：idle/bounce/hop/walk/run/wave/stomp/sway/shimmy\n'
+        + '  fn(x, y, u, Object.assign({ ctx: lctx }, a));   // 踩拍、表情、摆臂都由角色自己的 act 决定\n'
+        + '**角色没有 act 时**（老角色）才回到手写参数：o.walk 摆腿相位 / o.aL、o.aR 摆臂角度 / o.eyes、o.mouth 表情 /'
+        + ' o.blink 眨眼 / o.dy、o.dx 位移 / o.rot 旋转 / o.sq 挤压（正 = 拉长变窄）/ o.face 朝向（0 正面、1 侧面）。'
+        + '**参数必须由 t 直接算**（draw(t) 是纯函数，seek 后要能重现），不要 tween 一个外部对象再读它的值。'
+        + '**光传 ctx 就是一张立绘**：整章一个动作参数都没有，成片里就是一群贴纸在平移——只在该静止的镜头这么写。'
+        + '\n**转身走路**：要角色"转过去走"就让 o.face 在 0.12~0.18 秒内从 0 推到 1（0.5 处从正面切到侧面），'
+        + '切换那几帧给 o.sq 0.4~0.6 压窄遮住硬切，转完 sq 回 0，再用 o.walk 摆腿、o.dx 位移让它走；'
+        + '往左走加 o.flip: true（侧面固定朝右，镜像交给 flip）。角色没读 o.face 的话它就一直正面，不是报错。'
         + '\n可以照抄的入口模版（参数按本章节奏改，lctx / u 换成你自己的）：\n'
         + '  function put(name, x, y, u, alpha) {\n'
         + '    var fn = window.__cast && window.__cast[name]; if (!fn) return;\n'
         + '    lctx.save();\n'
         + '    lctx.globalAlpha = alpha == null ? 1 : alpha;\n'
-        + '    fn(x, y, u, { ctx: lctx,                 // 站着：呼吸 + 眨眼 + 轻微摆臂\n'
-        + '                  dy: Math.sin(t * 1.7) * 0.02,\n'
-        + '                  blink: (t % 3.6) > 3.4 ? 1 : 0,\n'
-        + '                  aL: Math.sin(t * 2.0) * 0.22, aR: -Math.sin(t * 2.0) * 0.22 });\n'
-        + '    // 走起来再加 walk（相位 0..1 循环）、有情绪时给 eyes: "happy" / "sad" / "angry"\n'
+        + '    var a = (fn.act && fn.act("idle", t)) || { dy: Math.sin(t * 1.7) * 0.02, blink: (t % 3.6) > 3.4 ? 1 : 0 };\n'
+        + '    fn(x, y, u, Object.assign({ ctx: lctx }, a));   // 有 act 就用它，没有就退回最简的呼吸 + 眨眼\n'
         + '    lctx.restore();\n'
         + '  }'
         + '\n本章用不到的角色不要调用（没出场的角色不必出现）。'
@@ -318,6 +321,10 @@ export function buildCastEditPrompt(opts: {
     '\n【角色文件】' + cast.castRelPath(m.id) + '（文件块里的路径必须与这一行完全一致）',
     '\n【角色设定】' + (m.desc || '（未写描述）'),
     '\n【画风】' + (String(m.style || '').trim() || '（没指定：沿用现有代码里的配色与笔触，不要整体换风格）'),
+    '\n【朝向】角色契约要有 o.face（0 = 正面、1 = 侧面；≥0.5 画侧面，侧面固定朝局部 +x，朝左交给 o.flip）：'
+      + '本次改动要求涉及"转身 / 侧面 / 朝向"时，必须在这份代码里补出侧面视图，正面画法保持逐像素不变；'
+      + '侧面 = 正面绕竖直轴转 90° 的投影（头 2u 深、躯干 / 腿 / 臂各 1u 深），配色与部件跟正面逐项一致；'
+      + '现有代码已支持 o.face 且本次不涉及朝向时，原样保留、不要重画。',
     '\n【本次改动】' + request,
     '\n【全片角色表】（只改上面那个角色，别动别人的比例与设定）\n' + cast.castOutlineText(list),
     '\n【本角色随包库】' + (m.uses && m.uses.length ? m.uses.join(' + ') + '（页面已引入，可直接用）' : '只有 gsap（只能用传进来的 o.ctx 画）'),
@@ -335,20 +342,28 @@ export function buildCastEditPrompt(opts: {
 // 动作脚本的提示（「角色」页 · 动作示范 · AI 生成专属动作）：**只产出一个纯函数**，
 // 输入 t、返回这一刻的动画参数对象。为什么要发角色源码：每个角色自己实现的 o 参数不止通用那几项
 // （猫的尾巴、四只脚、手持道具），只有看过源码才知道它到底认哪些键——这是「专属动作」比关键帧表强的地方。
+// previous 给了就是**改一条已有动作**（动作示范里那条专属动作的「改」）：把现有脚本一起发过去，
+// 让它在这份上改、交回整条新脚本（主进程用同一条 id 覆盖），而不是从零再写一条。
 export function buildCastActionPrompt(opts: {
   member: ProjectCastMember;
   code: string;
   request: string;
   duration: number;
+  previous?: string;
 }): string {
   const { member: m, code, request, duration } = opts;
+  const previous = String(opts.previous || '').trim();
   return [
-    '用户需求（这条动作要做成什么样）：' + request,
+    '用户需求（' + (previous ? '在这个动作上改' : '这条动作要做成什么样') + '）：' + request,
     '\n【动作任务】给角色「' + m.name + '」（id ' + m.id + '）写**一条**动作脚本。',
     '\n【时长】' + duration + ' 秒：t 的取值范围是 0 ≤ t < ' + duration + '。',
     '\n【角色设定】' + (m.desc || '（未写描述）'),
     '\n【角色源码】它真正读哪些 o 参数（方向、量级怎么写）全在这份代码里，先读懂再写：',
     '<<<CURRENT ' + cast.castRelPath(m.id) + '>>>\n' + String(code || '').trim() + '\n<<<END CURRENT>>>',
+    previous
+      ? '\n【当前动作脚本】在下面这份上改（保留原本对的部分，只改用户要求的那几处），交回**整条**脚本：\n'
+        + '<<<ACTION>>>\n' + previous + '\n<<<END ACTION>>>'
+      : '',
     '\n【输出格式】\n<<<ACTION>>>\nfunction (t) {\n  return { … };\n}\n<<<END ACTION>>>'
   ].filter(Boolean).join('\n');
 }

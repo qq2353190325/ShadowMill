@@ -94,6 +94,11 @@ export function estimateSubtitleDur(text: string): number {
 // 方向与量纲都按角色端实际实现写（不是随手给的宽松区间）：
 //   dy 正 = 下移（负才是跳起来）/ dx 正 = 右移 / aL、aR 正 = 向外抬起 / sq 正 = 拉长变窄 /
 //   rot 弧度、正 = 顺时针（绕脚底）/ walk 相位 1 = 一个完整步。
+//   face 0 = 正面、1 = 侧面（角色按 ≥0.5 切到侧面；侧面固定朝角色局部 +x，朝左交给 flip）。
+//   中间值不是"平滑旋转"——角色没有 3D，通常按阈值硬切，转身那一瞬由 sq 压窄遮挡（见演示/章节提示词）。
+//   hip 髋角（弧度，正 = 大腿向前抬，只在侧面视图生效）：下蹲 = hip 与膝盖同角（大腿前 45°）+ dy 下沉。
+//   tuck 抱团 0..1：角色在 ≥0.5 时把身体抱起来（大腿抬到胸口、小腿折回、双臂环膝、头低下，不是画成球）；
+//   调用方按 rot 绕身体中心转、用 dx/dy 补偿，就能做出翻滚（见动作脚本）。
 // mouth 多一个 'auto'：**不传这个参数**，让角色自己按 eyes 定嘴型（多数角色是 mouth 跟随 eyes，
 // 显式给 'normal' 会把笑眼配成平嘴）。
 export interface CastActionParam {
@@ -117,6 +122,9 @@ export const CAST_ACTION_PARAMS: CastActionParam[] = [
   { key: 'rot', label: '旋转 rot', type: 'number', min: -0.8, max: 0.8, step: 0.02, def: 0 },
   { key: 'sq', label: '挤压 sq', type: 'number', min: -1, max: 1, step: 0.05, def: 0 },
   { key: 'walk', label: '摆腿 walk', type: 'number', min: 0, max: 4, step: 0.05, def: 0 },
+  { key: 'face', label: '朝向 face', type: 'number', min: 0, max: 1, step: 0.1, def: 0 },
+  { key: 'hip', label: '髋角 hip', type: 'number', min: -2, max: 2, step: 0.05, def: 0 },
+  { key: 'tuck', label: '抱团 tuck', type: 'number', min: 0, max: 1, step: 0.1, def: 0 },
   { key: 'blink', label: '眨眼 blink', type: 'number', min: 0, max: 1, step: 0.05, def: 0 },
   { key: 'eyes', label: '表情 eyes', type: 'enum', options: ['normal', 'happy', 'sad', 'angry', 'surprise'] },
   { key: 'mouth', label: '嘴型 mouth', type: 'enum', options: ['auto', 'normal', 'happy', 'sad', 'angry', 'surprise'] }
