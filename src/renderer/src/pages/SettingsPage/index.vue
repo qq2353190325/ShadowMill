@@ -29,9 +29,12 @@
 </template>
 
 <script setup lang="ts">
-// pages/SettingsPage/index.vue —— 设置页外壳（原 JS 版 settings 模块 {template,index}.js 移植）
+// pages/SettingsPage/index.vue —— 设置内容本体（原 JS 版 settings 模块 {template,index}.js 移植）
 // 5 类平级导航（模型配置 / 语音服务 / 渲染档位 / 语音识别模型 / 应用更新）+ 分类记忆 + 跨页导航意图；
 // 各分类的正文都在 ./components/ 下的 Section 组件里，本文件只负责「显示哪一类」。
+// ⚠ 本组件**不再是页面**：设置已改为模态弹窗，唯一挂载点是 components/SettingsDialog.vue
+//   （pages/index.ts 的注册表里已没有 settings 条目）。分类意图的消费时机随之变成「弹窗每次打开」：
+//   弹窗用 v-if 挂载，打开即重挂载本组件，setup 里的 applySectionIntent() 照旧先生效。
 import { watch } from 'vue'
 import {
   activeSection,

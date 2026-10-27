@@ -13,7 +13,7 @@ export const SETTINGS_SECTIONS: SettingsSectionKey[] = ['model', 'voice', 'rende
 
 const settingsSectionRequest = ref<SettingsSectionKey | null>(null)
 
-/** 请求「进入设置页并停在某个分类」（调用后自行 goPage('settings')） */
+/** 请求「打开设置弹窗并停在某个分类」（调用后自行 goPage('settings')，它会打开弹窗） */
 export function requestSettingsSection(section: SettingsSectionKey): void {
   settingsSectionRequest.value = section
 }

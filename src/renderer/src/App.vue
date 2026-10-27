@@ -45,11 +45,13 @@
     <!-- 左侧菜单（文字菜单） -->
     <aside class="sidebar">
       <nav class="menu" id="menu">
+        <!-- 「设置」不再是页面：点它只打开设置弹窗（goPage 里拦下），
+             所以它的高亮跟随弹窗开关，而不是跟随 activeMenu（弹窗关掉就灭，页面仍是原页） -->
         <div
           v-for="item in menuItems"
           :key="item.key"
           class="menu-item"
-          :class="{ active: activeMenu === item.key }"
+          :class="{ active: item.key === 'settings' ? settingsOpen : activeMenu === item.key }"
           :data-page="item.key"
           :title="item.title"
           @click="goPage(item.key)"
@@ -65,6 +67,9 @@
 
   <!-- 历史数据目录（品牌/目录改名留下的老数据）：有就由这个应用内弹窗问「迁移 / 删除 / 稍后」 -->
   <LegacyDataDialog />
+
+  <!-- 设置弹窗（全局单例）：设置已从独立页面改为模态弹窗，侧栏「设置」与各处「去设置」都开它 -->
+  <SettingsDialog />
 
   <!-- 运行环境缺包时的统一确认框（任何功能触发 → 下载 → 继续），全局只此一处 -->
   <div v-if="gate.visible.value" class="hf-modal-mask" @click.self="gate.close()">
@@ -153,7 +158,9 @@ import { initRuntime, useRuntime } from './composables/useRuntime'
 import { initEnvGate, useEnvGate } from './composables/useEnvGate'
 import { useConfigPrompt } from './composables/useConfigPrompt'
 import { initLegacyData } from './composables/useLegacyData'
+import { useSettingsDialog } from './composables/useSettingsDialog'
 import LegacyDataDialog from './components/LegacyDataDialog.vue'
+import SettingsDialog from './components/SettingsDialog.vue'
 
 const toasts = useToasts();
 const contentEl = ref<HTMLElement | null>(null);
@@ -168,6 +175,8 @@ const runtimeVisible = computed(() => runtimeBusy.value || runtimeFailed.value |
 const gate = useEnvGate();
 // 配置类错误的统一弹窗（各功能页拿到主进程 res.needConfig 后经 configPrompt.open 触发）
 const configPrompt = useConfigPrompt();
+// 设置弹窗开关（菜单「设置」的高亮跟随它：设置是模态弹窗，不再是页面）
+const { visible: settingsOpen } = useSettingsDialog();
 function retryRuntime(): void { void prepareRuntime(); }
 function downloadRuntime(): void { void prepareRuntime(); }
 const menuItems: { key: PageKey; label: string; title: string }[] = [

@@ -1580,6 +1580,19 @@ body {
   min-width: 0;
 }
 
+/* ===== 设置弹窗（设置从独立页改成模态框后的外层，见 components/SettingsDialog.vue）=====
+   比通用弹窗（640px）宽：左侧分类导航固定 150px + 右侧配置卡片（表单两列）挤在 640 里会换行。
+   高度刻意定成视口比例、不跟内容走：5 类分类的内容高度差很大，若由内容撑开，每次切分类
+   弹窗就跳一次高度；超出部分交给 .hf-modal-body 内部滚动（它的 min-height:0 已保证可收缩）。 */
+.hf-modal.settings-modal {
+  width: min(960px, 94vw);
+  height: min(780px, 88vh);
+  max-height: 88vh;
+}
+.settings-modal-body {
+  padding: 16px 18px 20px;
+}
+
 .hf-modal-mask {
   position: fixed;
   inset: 0;

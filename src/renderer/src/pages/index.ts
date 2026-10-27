@@ -4,6 +4,7 @@
 import { ref, shallowRef, type Component } from 'vue'
 import { activeMenu, refreshProject, type PageKey } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
+import { closeSettings, openSettings } from '@renderer/composables/useSettingsDialog'
 import HomePage from './HomePage/index.vue'
 import AboutPage from './AboutPage/index.vue'
 import ContentPage from './ContentPage/index.vue'
@@ -12,11 +13,14 @@ import SubtitlePage from './SubtitlePage/index.vue'
 import HtmlGenPage from './HtmlGenPage/index.vue'
 import CastPage from './CastPage/index.vue'
 import VideoPreviewPage from './VideoPreviewPage/index.vue'
-import SettingsPage from './SettingsPage/index.vue'
 
 // 音色管理不再是独立页：已并入 TextTtsPage 的第三个 Tab（原 SoundCopyPage 下线）
 // 角色（cast）是全局角色库的管理页：角色只有全局一份，与项目无关（见 main/cast/library.ts）
-export const pages: Record<PageKey, Component> = {
+// 设置（settings）也不再是页面：已改为模态弹窗（components/SettingsDialog.vue），
+// 所以这里刻意**没有** settings 条目——类型上用 Exclude 把它排除，漏删会直接编译不过。
+export type PageComponentKey = Exclude<PageKey, 'settings'>;
+
+export const pages: Record<PageComponentKey, Component> = {
   home: HomePage,
   about: AboutPage,
   content: ContentPage,
@@ -24,8 +28,7 @@ export const pages: Record<PageKey, Component> = {
   subtitle: SubtitlePage,
   'html-gen': HtmlGenPage,
   cast: CastPage,
-  'video-preview': VideoPreviewPage,
-  settings: SettingsPage
+  'video-preview': VideoPreviewPage
 };
 
 export const currentPage = shallowRef<Component>(pages.home);
@@ -36,6 +39,17 @@ export const currentPage = shallowRef<Component>(pages.home);
 export const pageNavKey = ref(0);
 
 export async function goPage(key: PageKey): Promise<void> {
+  // 设置已改为模态弹窗：走到这里只把弹窗打开就返回——**不切页、不动 activeMenu、不刷新项目**
+  // （弹窗是叠加层，关掉后用户还要回到原来那一页；而设置里没有任何东西依赖当前项目）。
+  // 之所以在 goPage 这个唯一入口拦，是为了让「去设置」的历史调用点（配置类错误弹窗、
+  // 配音页 / 字幕页的「去设置」）一行都不用改：requestSettingsSection 照旧先置分类意图，
+  // 弹窗内的 SettingsPage 挂载时消费（见 SettingsPage/helpers.ts applySectionIntent）。
+  if (key === 'settings') {
+    openSettings();
+    return;
+  }
+  // 真正切页时顺手收起设置弹窗：否则点完别的菜单，弹窗还压在页面上挡着
+  closeSettings();
   activeMenu.value = key;
   // 刷新项目上下文失败**不能连导航一起拖住**：旧写法是「先 await refreshProject() 再切页」，
   // 一旦它抛错（IPC 拒绝 / 某处 TypeError）就永远停在「侧栏菜单亮了、页面没换」的半截状态，

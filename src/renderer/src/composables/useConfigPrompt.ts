@@ -57,7 +57,8 @@ export function useConfigPrompt() {
     if (autoJump) go()
   }
 
-  // 主按钮：跳到设置页的对应分类（本功能只修配置，不涉及外链 / 充值）
+  // 主按钮：打开设置弹窗并落到对应分类（本功能只修配置，不涉及外链 / 充值）。
+  // 设置已改为模态弹窗：goPage('settings') 现在只开弹窗、不切页，用户关掉弹窗仍停在原页
   function go(): void {
     requestSettingsSection(SECTION_OF[target.value] || 'model')
     close()
