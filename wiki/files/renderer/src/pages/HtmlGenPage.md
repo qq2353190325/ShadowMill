@@ -12,7 +12,7 @@
 - **覆盖文件**（AGENTS.md 第五节 6：页面自己的子组件与助手并入同一篇；**角色预览组件 `CastShot.vue` 例外——它已搬到公共组件目录、归 [components.md](../components.md) 一篇**）：
   | 文件 | 行数 | 角色 |
   |------|------|------|
-  | `HtmlGenPage/index.vue` | 477 | 页面入口：状态条（3 个纯数据格 + 标题右侧「用法」`?`，两者都由 `useProjectMeta()` 派生）/ **字幕 + 画布（同一行）** / **全局视觉风格输入框** / `<MaterialsSection />` → **`<CastSection />`** → `<ChapterSection />` / 需求描述 / 统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；生成与渲染两套动作链（生成侧用自己的 `taskId` 订阅进度） |
+  | `HtmlGenPage/index.vue` | **480** | 页面入口：状态条（3 个纯数据格 + 标题右侧「用法」`?`，两者都由 `useProjectMeta()` 派生）/ **字幕 + 画布（同一行）** / **全局视觉风格输入框** / `<MaterialsSection />` → **`<CastSection />`** → `<ChapterSection />` / 需求描述 / 统一的生成前提提示 / 四个动作按钮 / 转视频弹窗；生成与渲染两套动作链（生成侧用自己的 `taskId` 订阅进度） |
   | `HtmlGenPage/MaterialsSection.vue` | 167 | 「项目素材」区块：**图片组** / **视频组**的卡片墙（勾选、移除、添加） |
   | **`HtmlGenPage/CastSection.vue`** | **184** | **「项目素材 · 角色」**（常显，0 个角色也显示）：**与「项目素材」同一套卡片墙**（人物在上面、名字在下面）——每张卡 = 左上角**勾选框**（`.mat-check`）+ 右上角**「…」按钮**（`.hf-btn.cast-more`）+ **13:15 竖版预览位（130×150）**（`.cast-thumb` 包 `CastShot`；卡片墙容器是 `.mat-grid.cast-mat-grid`——列宽定死 130px，素材那张 `.mat-grid` 仍是 `minmax(158px, 1fr)`；**130 是下限、别再收回 100**）+ `.mat-meta`（名字 + `{{units}}u · {{desc}}`）+ 条件渲染的**动作菜单**（`.cast-menu`：存为全局 / 改这个角色 / 移除）；标题右侧两个动作（**从全局库添加** / **新建角色**）；两个 `.hf-modal` 弹窗已拆成独立文件；空态提示带全局库条目数；`epoch` ref + `watch(() => appState.project)` 让缩略图在角色代码变化后重载。**props 只剩 `{ prompt?: string }`**（`status` 已删，进度由弹窗自己按 `taskId` 订阅） |
   | **`HtmlGenPage/CastLibraryModal.vue`** | **116** | **「从全局角色库添加」**：**方格网格**（`repeat(auto-fill, minmax(132px, 1fr))`），每格一张 `CastShot`（`from="lib"`）+ 名字 + 身高；点格子切换选中（`picked: string[]`），选中态 = 主色描边 + 勾角标；库里索引有但文件缺失（`missing`）的格子压暗、不可点、角上「文件缺失」；底部「导入 N 个」→ `projectTools.importCast` → `refreshProject()` → toast → 发 `imported` 与 `close`；每次打开都重新 `listCastLibrary()` |
@@ -21,7 +21,7 @@
   | `HtmlGenPage/PreviewSection.vue` | 470 | 「预览」卡片：**背景音频行（一个占满整行的下拉：当前音频 = 「已生成音频」里的选中项 + 清空/本地两项动作）**、状态行、AI 思考过程（标题行可折叠：生成 / 修改进行中自动展开、一轮结束自动收起）、**「视角比例」行**（**不显示画布值**）、iframe 预览副本（**视口 = 页面声明的画布**；**容器高度上限 800px、宽度按比例、水平居中**，页面按 contain 缩放 + 居中）、播放控制条（**一个三态键** + 进度条 + 时间）、**控制条下方的「总时长无法确定」提示行（`v-if="prevDurUnknown"`，只在页面里有无限循环动画时出现）** |
 - **所在目录**：`src/renderer/src/pages/HtmlGenPage/`（一页一目录，入口 `index.vue`）
 - **类型**：页面组件（SFC，`<script setup lang="ts">`）
-- **规模**：7 个文件合计 1654 行（`index.vue` 477 + `CastCreateModal.vue` 169 + `CastLibraryModal.vue` 116 + `CastSection.vue` 184 + `MaterialsSection.vue` 167 + `ChapterSection.vue` 71 + `PreviewSection.vue` 470）；**`CastShot.vue`（77 行）已不在本目录**——它搬到了公共组件目录 `src/renderer/src/components/CastShot.vue`（见 [components.md](../components.md)），本页三处（`CastSection.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue`）都通过别名 `@renderer/components/CastShot.vue` 引入
+- **规模**：7 个文件合计 1657 行（`index.vue` **480** + `CastCreateModal.vue` 169 + `CastLibraryModal.vue` 116 + `CastSection.vue` 184 + `MaterialsSection.vue` 167 + `ChapterSection.vue` 71 + `PreviewSection.vue` 470）；**`CastShot.vue`（77 行）已不在本目录**——它搬到了公共组件目录 `src/renderer/src/components/CastShot.vue`（见 [components.md](../components.md)），本页三处（`CastSection.vue` / `CastLibraryModal.vue` / `CastCreateModal.vue`）都通过别名 `@renderer/components/CastShot.vue` 引入
 - **对外导出**：`index.vue` 默认导出组件（无 props，模板内渲染 `StepBar` / `MaterialsSection` / `CastSection` / `ChapterSection` / `PreviewSection`）；子组件的契约分别是——`MaterialsSection`「无 props / 无 emits」、`PreviewSection`「5 个 props + `reload()`」、`ChapterSection`「`v-model:prompt` 只写不读」、**`CastSection`「只有 `prompt?` 一个 prop（`v-model:prompt` 的接收端，只写不读）；不再接父页的 `status` / `thinkText`」**、**`CastShot`（`@renderer/components/CastShot.vue`，公共组件）「8 个 props、无 emits」**、**`CastLibraryModal`「`open` / `project` / `epoch?` props + `close` / `imported` emits」**、**`CastCreateModal`「`open` / `project` 两个 props + `close` / `created` emits（不再收 `status`）」**
 
 ## 1. 作用与职责
@@ -444,7 +444,7 @@ iframe → 父页：副本每 300ms 以及「冻住后 / seek 后」立刻上报
 ### 6.7 转视频主流程（`onRenderVideo(skipEnvGuard = false)`）
 
 1. 进行中守卫（`rendering`）→ **Agent 忙守卫**（`agentRunning.value` → toast）→ `htmlPath` / `htmlExists` 校验。
-2. `options = { quality: quality.value, fps: fps.value, canvas: canvas.value }`（质量 / 帧率是渲染档位，`canvas` 是项目属性，一起随载荷下发）；`skipEnvGuard` 为假时先过 `envGate.guard(['ffmpeg', 'hyperframes'], '转成视频', () => { void onRenderVideo(true); })`，`!g.ok` 直接返回（见第 8 节）。
+2. `options = { quality: quality.value, fps: fps.value, canvas: canvas.value }`（质量 / 帧率是渲染档位，`canvas` 是项目属性，一起随载荷下发）；`skipEnvGuard` 为假时先过缺包守卫，`!g.ok` 直接返回（见第 9 节）。**本版修复**：守卫不再写死 `['ffmpeg','hyperframes']`，而是按全局 `renderBackend` 选包——`const packs: RuntimePackName[] = renderBackend.value === 'vidrender' ? ['ffmpeg', 'vidrender'] : ['ffmpeg', 'hyperframes']`，再 `envGate.guard(packs, '转成视频', () => { void onRenderVideo(true); })`；与主进程 `video.ts` 的 `renderPacks` 同一口径（CHANGELOG #125）。
 3. `status = '已提交渲染（' + renderOptionsText(options) + ' · ' + canvasLabel(options.canvas) + '，约 30 秒）...'`、`statusClass = ''`、`rendering = true`。
 4. `await window.hfTools.renderVideo(htmlPath, options)`（`video:render`；主进程按白名单拼 `--quality` / `--fps`）。
 5. 返回后先 `resetRenderProgress()`：用本地完成/失败文案覆盖全局 trace 残留（渲染期间状态区优先显示 trace，见 5.4 的 `statusDisplay`）。
@@ -525,14 +525,14 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 | `@renderer/composables/useEnvGate`：`useEnvGate` | 转视频的运行环境缺包守卫 |
 | `@renderer/composables/useConfigPrompt`：`useConfigPrompt` | 配置类错误弹窗 |
 | `@renderer/utils/render`：`FALLBACK_RENDER, RENDER_FPS_OPTIONS, RENDER_QUALITY_OPTIONS, isRenderOverridden, renderOptionsText` + `RENDER_CANVAS_OPTIONS, canvasLabel, normalizeCanvas` | 档位选项表、默认档位、覆盖判定与档位摘要文案 + 画布下拉选项、**画布标签（`canvasNote` 气泡前半句与渲染状态文案用）**与画布规范化（`syncCanvas()` / `canvas` 初值） |
-| `@renderer/composables/useRenderOptions`：`effectiveRenderOptions, renderDefaults, saveProjectRenderOverride` | 生效档位、全局默认、写入 / 清除项目覆盖 |
+| `@renderer/composables/useRenderOptions`：`effectiveRenderOptions, renderDefaults, renderBackend, saveProjectRenderOverride` | 生效档位、全局默认、**全局渲染后端（供缺包守卫选包）**、写入 / 清除项目覆盖 |
 | `@renderer/components/StepBar.vue` | 顶部流水线步骤条 + 工作项目切换 |
 | `@renderer/components/HfSelect.vue`：`HfSelect`（默认）、`type HfSelectGroup` | 全局自绘下拉组件（**全局视觉风格用的是原生 `input`**） |
 | `./MaterialsSection.vue` / `./PreviewSection.vue` / `./ChapterSection.vue` / **`./CastSection.vue`** | 同目录子组件，**相对路径导入**（AGENTS.md 第五节 7）；`index.vue` 对它们各只加一行 import + 一处挂载。**挂载顺序 = 素材 → 角色 → 章节**（`<MaterialsSection />` → `<CastSection v-model:prompt="prompt" />` → `<ChapterSection v-model:prompt="prompt" />`）——角色与图片 / 视频同属「项目素材」，章节列表才是产物结构。**`CastSection` 内部再相对导入 `./CastLibraryModal.vue` / `./CastCreateModal.vue` 两个同目录组件，并跨目录用别名 `import CastShot from '@renderer/components/CastShot.vue'`**（`CastShot` 已不在本页目录） |
 | **`@renderer/composables/useProjectMeta`：`useProjectMeta`** | 项目状态条（`meta`）与标题右侧「用法」气泡（`usageHint`）的派生逻辑（见 2.1）；页面只保留 `const { meta, usageHint } = useProjectMeta()` 一行 |
 | **`@renderer/utils/taskId`：`newTaskId`** | 生成 / 修改的任务 id（`newTaskId('html')`）；进度按它订阅（见 6.2），画角色那一路在弹窗里用 `newTaskId('cast')` |
 
-> **`index.vue` 不再往角色区传任何状态投影**：模板里就是 `<CastSection v-model:prompt="prompt" />`（上一版的 `:status` / `:think-text` 已删）。生成侧因此瘦到 **477 行**（上一版 496 行）：`meta` / `usageHint` 交给 `useProjectMeta()`，进度订阅从 `onMounted` 挪进 `runAgent`。`NONE_AUDIO` 仍是本文件内的普通常量，`audioBaseName` 是模块内普通函数、`currentAudioIndex` 是 `computed`（合成的 `CURRENT_AUDIO` 已删除）。
+> **`index.vue` 不再往角色区传任何状态投影**：模板里就是 `<CastSection v-model:prompt="prompt" />`（上一版的 `:status` / `:think-text` 已删）。生成侧因此瘦到 **480 行**（上一版 477 行；本版按后端选包 +3 行）：`meta` / `usageHint` 交给 `useProjectMeta()`，进度订阅从 `onMounted` 挪进 `runAgent`。`NONE_AUDIO` 仍是本文件内的普通常量，`audioBaseName` 是模块内普通函数、`currentAudioIndex` 是 `computed`（合成的 `CURRENT_AUDIO` 已删除）。
 
 > **两个弹窗为什么不直接在 `index.vue` 里挂**：它们只服务「角色」这一块，且都要用 `appState.currentName` 当项目名；放在 `CastSection` 内部，父页不必知道「角色区有几个弹窗」。**上一版为此付出的代价已经消失**：当时 `status` / `thinkText` 要作为 props 从 `index.vue` → `CastSection` → `CastCreateModal` 转一趟，原因是 `onHtmlProgress` 是单订阅、弹窗自己再订会把父页那条顶掉。现在一条频道 + 按 `taskId` 分发，弹窗用自己的 `newTaskId('cast')` 订阅自己的进度，`CastSection` 也就不必再中转任何状态。
 
@@ -636,12 +636,14 @@ const res = await window.projectTools.saveContent(appState.currentName, { style:
 
 ## 9. 运行环境缺包守卫（`useEnvGate`）
 
-`转成视频` 需要**不随安装包**的运行环境：`video:render` 需要 `ffmpeg` + `hyperframes`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）；`project:extract-video-audio` 需要 `ffmpeg`（42.6 MB）——但该入口当前已下线（见 3.5），所以本目录现在**只有 `onRenderVideo(skipEnvGuard)` 一个守卫调用点**（分包方案见 `docs/runtime-pack-split.md`、主进程实现见 [main/video.ts.md](../../../main/video.ts.md) / [main/projects.md](../../../main/projects.md)）。
+`转成视频` 需要**不随安装包**的运行环境，且**按全局渲染后端选包**（默认 hyperframes → `ffmpeg` + `hyperframes`；用户在设置页切到 vidrender → `ffmpeg` + `vidrender`）：两包实测 42.6 MB + 103.1 MB = 145.7 MB（2026-10-14）；`project:extract-video-audio` 需要 `ffmpeg`（42.6 MB）——但该入口当前已下线（见 3.5），所以本目录现在**只有 `onRenderVideo(skipEnvGuard)` 一个守卫调用点**（分包方案见 `docs/runtime-pack-split.md`、主进程实现见 [main/video.ts.md](../../../main/video.ts.md) / [main/vidrender.ts.md](../../../main/vidrender.ts.md)）。
 
-- 动手前先 `const g = await envGate.guard(['ffmpeg','hyperframes'], '转成视频', () => { void onRenderVideo(true) })`；`!g.ok`（缺包已弹框或用户取消）就 `return`，**不发后续 IPC、不产生任何下载**；
+- 动手前先按后端选包再守卫：`const packs: RuntimePackName[] = renderBackend.value === 'vidrender' ? ['ffmpeg','vidrender'] : ['ffmpeg','hyperframes']`（`renderBackend` 由 `useRenderOptions` 模块级 ref 从 `settings.json` 同步），`const g = await envGate.guard(packs, '转成视频', () => { void onRenderVideo(true) })`；`!g.ok`（缺包已弹框或用户取消）就 `return`，**不发后续 IPC、不产生任何下载**；
 - 主进程返回 `res.needPacks`（并发 / 探测窗口造成的二次缺包）时再 `envGate.guard(res.needPacks, '转成视频', …)` 一次；
 - 用户在确认框里点「继续」时，`onContinue` 以 `skipEnvGuard = true` 重发同一次操作（**不自动续做**，见 [common.md](../common.md)）；
 - 确认框本身由 `App.vue` 内联渲染（`useEnvGate` 是模块级单例），本页只调 `guard()`；**取消下载 = 取消这次转视频**，界面上横幅与设置页仍保留「需要下载」状态与重试入口。
+
+- **缺包守卫必须跟随渲染后端（CHANGELOG #125 修复点）**：此前这里写死 `['ffmpeg','hyperframes']`，用户切到小内核后仍被要求下载 103MB 的 hyperframes 包；现在与 `video.ts` 一样读 `renderBackend` 选包。若只改主进程不改这里，界面守卫仍会拦错包。**默认仍是 hyperframes；未新增 IPC 频道。**
 
 ## 10. 章节列表（`ChapterSection.vue`）
 

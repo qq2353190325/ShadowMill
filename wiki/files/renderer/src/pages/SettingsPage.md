@@ -12,7 +12,7 @@
 | `src/renderer/src/pages/SettingsPage/helpers.ts` | 56 | 分类状态：`activeSection`（模块级 ref）+ `persistActiveSection` / `applySection` / `applySectionIntent` / `watchSectionIntent` + `updateStage`（模块级 ref，供导航红点） |
 | `src/renderer/src/pages/SettingsPage/components/ModelSection.vue` | 188 | 「模型配置」区块：自定义模型（Base URL / 模型 ID 预设联动、API Key、**思考强度**、启用、保存、测试连接） |
 | `src/renderer/src/pages/SettingsPage/components/VoiceSection.vue` | 85 | 「语音服务」区块（按厂家：厂家下拉 + API Key） |
-| `src/renderer/src/pages/SettingsPage/components/RenderSection.vue` | 74 | 「渲染档位」区块：视频渲染默认档位（质量 / 帧率） |
+| `src/renderer/src/pages/SettingsPage/components/RenderSection.vue` | **85** | 「渲染档位」区块：视频渲染默认档位（质量 / 帧率 / **渲染引擎**三行） |
 | `src/renderer/src/pages/SettingsPage/components/WhisperSection.vue` | 274 | 「语音识别模型」区块（whisper.cpp：模型网格、下载 / 删除 / 设为当前、自定义模型登记、状态与进度条；**卡片外壳 / 标题 / 长说明由外壳 `index.vue` 提供**） |
 | `src/renderer/src/pages/SettingsPage/components/UpdateSection.vue` | 397 | 「应用更新」区块（版本 / 检查 / 下载 / 安装 / 更新源弹窗（整块 `Teleport` 到 `<body>`）/ 查看更新日志）+ 运行环境一行三态 + 本地导入 |
 | `src/renderer/src/pages/SettingsPage/components/ChangelogDialog.vue` | 145 | 「更新日志」弹窗（`UpdateSection` 的子组件，蒙层 `Teleport` 到 `<body>`）：取一次随包 `CHANGELOG.md` 原文，**只显示最新一版**（版本 / 时间一行 + 每条一行「`[标签]` 标题」，最多先 10 条），旧版进「历史版本（N）」折叠区 |
@@ -29,11 +29,11 @@
 |---|---|---|---|---|
 | `model` | 模型配置 | `components/ModelSection.vue` | 188 | 自定义模型：Base URL（预设下拉 / 手填二选一）/ 模型 ID（同）/ API Key / **思考强度（下拉，默认「高（默认）」）** / 启用 + 保存配置 / 测试连接 |
 | `voice` | 语音服务 | `components/VoiceSection.vue` | 85 | 语音服务（按厂家配置）：厂家下拉 + API Key（placeholder 来自厂家）+ 「保存该厂家配置」。**只有 API Key**：模型与音色由厂家目录固定，没有「厂家默认模型」这类全局设置（见 §5.4） |
-| `render` | 渲染档位 | `components/RenderSection.vue` | 74 | 视频渲染默认档位：质量 / 帧率下拉 + 保存渲染默认档位 + 状态条 + 当前质量说明 |
+| `render` | 渲染档位 | `components/RenderSection.vue` | **85** | 视频渲染默认档位：**质量 / 帧率 / 渲染引擎（HyperFrames 稳定默认 / Rust 小内核实验）三行下拉** + 保存渲染默认档位 + 状态条（带后端名） + 当前质量说明与小内核 A/B 验证提示 |
 | `whisper` | 语音识别模型 | `components/WhisperSection.vue`（挂载点在 `index.vue` 的 `.card.hgen-panel` 分支里） | 274 | 语音识别模型（whisper.cpp 字幕转录）：模型网格、下载 / 删除 / 设为当前、自定义模型登记、状态与进度条（**卡片外壳 / 标题 / 长说明由外壳 `index.vue` 提供**，见 §4.4、§5.28） |
 | `update` | 应用更新 | `components/UpdateSection.vue` | 397 | 应用更新（**卡片内渲染顺序见 §4.5**）：当前版本 + 更新动作按钮排（检查更新 / 自定义更新源（弹窗）/ **查看更新日志（弹窗 §4.6）** / 下载更新 / 取消下载 / 立即重启安装）+ 状态条 + **详情按钮排（查看详情 · 收起详情 / 仅更新出错时才出现的「打开日志目录」，`updateLogVisible`）** + 详情折叠块 + **跳过版本 / 恢复提示版本（独立成行，排在运行环境之前）** + 运行环境一行（三态 + 本地导入）+ 保存 / 重置反馈行 |
 
-各分类的用途：`model` 开启后「HTML 生成 / 修改」页改用该模型；`voice` 的配置供「音色管理」「文字生音频」使用；`render` 是「HTML生成」页「转视频」的全局默认档位（项目级覆盖优先于它）；`update` 是应用自更新的唯一入口（检查 / 下载 / 重启安装，全部状态由 `update:progress` 通道驱动；**文案由主进程单点产出，区块只渲染 `message`、把 `detail` 收进可折叠的详情块**）；`whisper` 供字幕页「从音频生成字幕」本机离线识别（不消耗 API 额度）。
+各分类的用途：`model` 开启后「HTML 生成 / 修改」页改用该模型；`voice` 的配置供「音色管理」「文字生音频」使用；`render` 是「HTML生成」页「转视频」的全局默认档位（项目级覆盖优先于它），「渲染引擎」二选一则是**全局后端设置**（默认 hyperframes，不进项目级覆盖）；`update` 是应用自更新的唯一入口（检查 / 下载 / 重启安装，全部状态由 `update:progress` 通道驱动；**文案由主进程单点产出，区块只渲染 `message`、把 `detail` 收进可折叠的详情块**）；`whisper` 供字幕页「从音频生成字幕」本机离线识别（不消耗 API 额度）。
 
 **挂载语义**：切换分类 = 卸载旧区块、挂载新区块（外壳注释原文：「右侧只渲染当前分类（未选中的不挂载）」——`whisper` 走的是模板里那层 `.card.hgen-panel` 分支），因此需要读配置的区块都把自己的读取放在 `onMounted` 里——**未选中的分类不跑 IPC**（`whisper` 也一样：进度订阅与状态拉取都在自己的 `onMounted`）。`UpdateSection` 的进度订阅（`updateTools.onProgress`）与键盘监听（ESC 关弹窗）成对注册 / 卸载（`onMounted` / `onBeforeUnmount`），离开设置页或切到别的分类即随之解绑（见 §4.5）。
 
@@ -197,9 +197,9 @@
 
 **保存语义**：无前置校验，空 API Key 也会提交，合法性由主进程判断并回传 `message`（见 §5.5）。**逐个音色换模型不在这里**——那是配音页「音色映射管理」的事。
 
-### 4.3 `RenderSection.vue`（74 行）——「渲染档位」
+### 4.3 `RenderSection.vue`（85 行）——「渲染档位」
 
-**模板**（`.card.hgen-panel`）：`.panel-title`「视频渲染默认档位」+ `.hgen-tip` 原文（「「HTML生成」页点「转视频」时的默认档位，普通使用只需在这两项中选择。单个项目可在「HTML生成」页的「渲染档位」单独覆盖（项目覆盖优先于这里的默认）。质量 draft 编码最快但文字边缘可能有压缩痕迹，仅用于快速确认内容；降低帧率不会缩短成片时长，只是采样更稀、渲染更快。」）+ 质量行 / 帧率行（两个 `HfSelect`：`v-model="rQuality"` / `v-model="rFps"`、`:groups="qualityGroups"` / `"fpsGroups"`）+ `.hgen-actions`「保存渲染默认档位」（→ `onSaveRender`）+ `.hf-status`（`:class="rStatusClass"`、`{{ rStatus }}`）+ 下方 `.hgen-tip`（`{{ qualityHint }}`，当前所选质量的说明）。
+**模板**（`.card.hgen-panel`）：`.panel-title`「视频渲染默认档位」+ `.hgen-tip`（「「HTML生成」页点「转视频」时的默认档位。单个项目可在「HTML生成」页的「渲染档位」单独覆盖质量 / 帧率（项目覆盖优先于这里的默认）。质量 draft 编码最快但文字边缘可能有压缩痕迹，仅用于快速确认内容；降低帧率不会缩短成片时长，只是采样更稀、渲染更快。**渲染引擎默认 HyperFrames（稳定）；Rust 小内核是新路径，适合 A/B 对比，复杂合成与长片仍在验证中。**」）+ **三行** `HfSelect`：质量行（`v-model="rQuality"`、`:groups="qualityGroups"`）/ 帧率行（`v-model="rFps"`、`:groups="fpsGroups"`）/ **渲染引擎行**（`<label class="sel-label">渲染引擎</label>` + `<HfSelect v-model="rBackend" :groups="backendGroups" />`，选项为「HyperFrames（稳定，默认）」与「Rust 小内核（实验）」）+ `.hgen-actions`「保存渲染默认档位」（→ `onSaveRender`）+ `.hf-status`（`:class="rStatusClass"`、`{{ rStatus }}`，**成功文案带后端名**）+ 下方 `.hgen-tip`（`{{ qualityHint }}`，当前所选质量的说明）。
 
 **状态与函数**：
 
@@ -207,12 +207,16 @@
 |------|------|------|
 | `qualityOptions` / `fpsOptions` | 常量 | 直接引用 `RENDER_QUALITY_OPTIONS`（质量 draft / standard / high）/ `RENDER_FPS_OPTIONS`（帧率 24 / 30） |
 | `qualityGroups` / `fpsGroups` | `computed<HfSelectGroup[]>` | 单组选项（原为 `<option v-for>`）；`value` / `label` 取自选项表 |
+| **`backendGroups`** | **`computed<HfSelectGroup[]>`** | **渲染引擎下拉选项表**：单组两项——`{ value: 'hyperframes', label: 'HyperFrames（稳定，默认）' }` 与 `{ value: 'vidrender', label: 'Rust 小内核（实验）' }` |
 | `rQuality` / `rFps` | `ref<RenderQuality>` / `ref<RenderFps>` | 全局默认档位，初值取 `FALLBACK_RENDER`（`standard` / `30`） |
+| **`rBackend`** | **`ref<RenderBackend>('hyperframes')`** | **渲染引擎选择**，初值 hyperframes；`onMounted` 时若 `s.renderBackend === 'vidrender'` 才改成 vidrender。类型是共享层新加的 `RenderBackend` |
 | `rStatus` / `rStatusClass` | `ref('')` | 区块状态文案与样式类 |
 | `qualityHint` | `computed<string>` | 当前所选质量档位的 `hint`（找不到时为空串） |
 | `setRStatus(text, kind)` | | 写 `rStatus` / `rStatusClass`，`text \|\| ''` |
-| `onSaveRender()` | | `await saveRenderDefaults({ quality: rQuality.value, fps: rFps.value })`（`@renderer/composables/useRenderOptions`，内部走 `settingsTools.saveRender` → `settings:save-render`）；成功提示「渲染默认档位已保存：质量标签 · N fps」`hf-ok`，失败 `res.message \|\| '保存失败'` `hf-error` |
-| `onMounted(async)` | | `settingsTools.get()` → `const r = (s && s.render) \|\| FALLBACK_RENDER`，仅当值在 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` 白名单内才写入 `rQuality` / `rFps`（异常静默忽略，读取失败沿用内置默认 `standard` / `30`） |
+| `onSaveRender()` | | `await saveRenderDefaults({ quality: rQuality.value, fps: rFps.value }, rBackend.value)`（`@renderer/composables/useRenderOptions`，**第二参是可选的后端**，内部提交 `{ render: next, backend }` → `settingsTools.saveRender` → `settings:save-render`，**整对象透传**）；成功提示「渲染默认档位已保存：质量标签 · N fps · Rust 小内核 / HyperFrames」`hf-ok`（**文案带后端名**），失败 `res.message \|\| '保存失败'` `hf-error` |
+| `onMounted(async)` | | `settingsTools.get()` → `const r = (s && s.render) \|\| FALLBACK_RENDER`，仅当值在 `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` 白名单内才写入 `rQuality` / `rFps`（异常静默忽略，读取失败沿用内置默认 `standard` / `30`）；**再读一次 `s.renderBackend === 'vidrender'` 决定 `rBackend`**（缺省 / hyperframes 保持默认） |
+
+**渲染引擎与档位一起保存**：第三行下拉与质量 / 帧率共用同一个「保存渲染默认档位」按钮，经 `saveRenderDefaults(next, backend?)` 把 `{ render: next, backend }` 一起提交；后端是**全局**设置（`AppSettings.renderBackend`，默认 hyperframes，不进项目级 `RenderOverride`），主进程由 `settings:save-render` 的 `backend?` 持久化。**未新增 IPC 频道**；产品侧分流见 [main/video.ts.md](../../../../main/video.ts.md) 与 [main/vidrender.ts.md](../../../../main/vidrender.ts.md)。
 
 **保存后无需刷新**：`saveRenderDefaults()` 成功后就地刷新模块级单例 `renderDefaults`，「HTML生成」页的 `optionNote`（「跟随设置页默认：…」）立刻反映新值（见 §5.15、§5.16）。
 
@@ -429,6 +433,8 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 28. **whisper 的卡片外壳、标题与长说明由 `index.vue` 提供，`components/WhisperSection.vue` 只画网格与表单**：因此它**不能**像其余四个区块那样自带 `.card.hgen-panel`——`SECTION_COMPONENTS` 里没有 `whisper` 键，模板里它是独立的 `<div v-if="activeSection === 'whisper'" class="card hgen-panel">` 分支（内部依次 `.panel-title` / `.hgen-tip` / `<WhisperSection />`），其余分类才走 `<component :is>`。改这一类的卡片外观（标题文案、说明、要不要卡片）要动 `index.vue`；改模型网格与表单才动 `components/WhisperSection.vue`。
 29. **导航项由 `v-for` 渲染、导航项样式写 `white-space: nowrap`**：导航项文案与顺序的唯一来源是 `constants.ts` 的 `SETTINGS_NAV_ITEMS`；红点 span 的显隐条件是 `item.key === 'update' && updateStage === 'available'`（读的是 `helpers.ts` 的模块级 `updateStage`）。`assets/main.css` 的 `.settings-nav-item` 里 `white-space: nowrap` 的源码注释写明原因：「导航项是 v-for 渲染的单行按钮：标签一律不换行，免得 4 字与 6 字的项在 150px 栏宽下高度不一致」。
 
+30. **渲染引擎是第三行、与档位一起保存**：`RenderSection` 的「渲染引擎」下拉默认 HyperFrames（稳定），可切到 Rust 小内核实验；它和「质量 / 帧率」共用一个保存按钮，`saveRenderDefaults(next, backend?)` 提交 `{ render: next, backend }`，后端是全局设置（`AppSettings.renderBackend`），默认不变、**未新增 IPC 频道**。状态行成功文案带后端名，提示行明确「小内核仍在 A/B 验证、复杂合成与长片尚未验证」。
+
 ## 6. 运行环境（分包）一行（`useRuntime`）
 
 运行环境改成「`ffmpeg` / `hyperframes` 各成一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）、首次用到时由用户确认后下载并解到 `<userData>/runtime/<包名>/`，`whisper` 随安装包」之后，`UpdateSection` 的这一行是**三态**（分包方案见 `docs/runtime-pack-split.md`）：
@@ -466,10 +472,10 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 | `VoiceSection.vue` | `../types` | `type VoiceProviderView` | 厂家目录条目 |
 | `VoiceSection.vue` | `@renderer/components/HfSelect.vue` | `HfSelect`、`type HfSelectGroup` | 厂家下拉 |
 | `RenderSection.vue` | `vue` | `computed`、`onMounted`、`ref` | 同上 |
-| `RenderSection.vue` | `@shared/types` | `type RenderFps`、`type RenderQuality` | 两个档位的类型标注 |
+| `RenderSection.vue` | `@shared/types` | `type RenderFps`、`type RenderQuality`、**`type RenderBackend`（本版新增，第三行下拉）** | 三个下拉的类型标注 |
 | `RenderSection.vue` | `@renderer/utils/render` | `FALLBACK_RENDER`、`RENDER_FPS_OPTIONS`、`RENDER_QUALITY_OPTIONS`、`renderQualityLabel` | 档位选项表、内置默认与保存成功文案里的质量标签 |
 | `RenderSection.vue` | `@renderer/composables/useRenderOptions` | `saveRenderDefaults` | 保存全局默认档位（内部刷新 `renderDefaults` 单例） |
-| `RenderSection.vue` | `@renderer/components/HfSelect.vue` | `HfSelect`、`type HfSelectGroup` | 质量 / 帧率两处下拉 |
+| `RenderSection.vue` | `@renderer/components/HfSelect.vue` | `HfSelect`、`type HfSelectGroup` | 质量 / 帧率 / **渲染引擎**三处下拉 |
 | `WhisperSection.vue` | `vue` | `computed`、`onMounted`、`ref` | 派生文案、进度订阅与状态 |
 | `WhisperSection.vue` | `@renderer/utils/escape` | `escTxt` | 模型文本（名称、文件名、说明、URL、`localFile`）的 HTML 转义 |
 | `UpdateSection.vue` | `vue` | `computed`、`onBeforeUnmount`、`onMounted`、`ref` | 更新与运行环境状态；`onBeforeUnmount` 用于注销 ESC 监听 |
@@ -487,10 +493,10 @@ computed：`models`（`wmState.models || []`）、`storeTip`（「存储位置�
 
 | preload 调用 | IPC 频道 | 归属文件 | 说明 |
 |--------------|----------|----------|------|
-| `window.settingsTools.get()` | `settings:get` | Model / Voice / Render / Update 四个区块的 `onMounted` | 读取 `AppSettings`（各区块只取自己那一段：`customModel` / `voice` / `render` / `updater`；未挂载的分类不调用） |
+| `window.settingsTools.get()` | `settings:get` | Model / Voice / Render / Update 四个区块的 `onMounted` | 读取 `AppSettings`（各区块只取自己那一段：`customModel` / `voice` / `render`（含 **`renderBackend`**）/ `updater`；未挂载的分类不调用） |
 | `window.settingsTools.save(customModel)` | `settings:save` | ModelSection | preload 包装为 `{ customModel }` |
 | `window.settingsTools.test(customModel)` | `settings:test` | ModelSection | preload 包装为 `{ customModel }`，用当前表单内容测试 |
-| `window.settingsTools.saveRender(render)` | `settings:save-render` | RenderSection（经 `saveRenderDefaults`） | preload 包装为 `{ render }`；只更新 `render` 段 |
+| `window.settingsTools.saveRender(payload)` | `settings:save-render` | RenderSection（经 `saveRenderDefaults`） | **本版改为整对象透传**（`{ render: next, backend }`）；只更新 `render` 与 `renderBackend`；**频道未变** |
 | `window.settingsTools.saveUpdater(updater)` | `settings:save-updater` | UpdateSection | preload 包装为 `{ updater }`；只更新 `updater` 段（`feedUrl` / `autoCheck` / `skippedVersion`） |
 | `window.settingsTools.pickRuntimePack()` | `settings:pick-runtime-pack` | UpdateSection | 选一个本地 `ffmpeg.7z` / `hyperframes.7z` 导入（离线兜底），成功后接着 `prepareRuntime()` |
 | `window.updateTools.version()` | `update:version` | UpdateSection | **同步**返回当前版本号字符串（`sendSync`），`onMounted` 首屏显示用（全应用唯一的同步 IPC，调用点见 §4.5.3 的 `onMounted` 行与 [04-目录架构-src-renderer.md](../../../../04-目录架构-src-renderer.md) §7 第 6 条） |

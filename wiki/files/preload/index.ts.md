@@ -4,7 +4,7 @@
 
 - **所在目录**：`src/preload/`
 - **类型**：预加载脚本（sandboxed preload，编译为 CJS）
-- **规模**：**305 行**（实测 `[IO.File]::ReadAllLines`）
+- **规模**：**316 行**（实测 `[IO.File]::ReadAllLines`；上一版 305 行，本版 +11 行：新增账号 / 设置等接口与 `saveRender` 改为载荷原样透传；**没有新增 IPC 频道**）
 - **对外导出**：本文件不产生模块导出；其作用是把 **13** 个命名空间注入渲染层 `window`，命名空间为 `electronAPI`、`appTools`、`windowControls`、`hfTools`、`settingsTools`、`voiceTools`、`whisperTools`、`projectTools`、**`castTools`**、`scriptTools`、`updateTools`、`runtimeTools`、`legacyTools`
 - **类型契约**：13 个对象全部以 `PreloadApi['<命名空间>']` 标注（`PreloadApi` 定义在 `src/shared/types.ts` ⑨ 节），因此实现被契约校验；渲染层看到的签名由 `src/preload/index.d.ts` 挂载同一份契约
 
@@ -73,7 +73,7 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 | `hfTools` | `onProgress` | `video:progress` | 渲染进度订阅，数据形如 `{ text }` |
 | `settingsTools` | `get` | `settings:get` | 读取 `AppSettings` |
 | `settingsTools` | `save` | `settings:save` | 传 `{ customModel }` |
-| `settingsTools` | `saveRender` | `settings:save-render` | 传 `{ render }`（`RenderOverride`） |
+| `settingsTools` | `saveRender` | `settings:save-render` | **本版改为载荷原样透传**：`invoke(IPC.Settings.SaveRender, payload)`，payload = `SettingsSaveRenderPayload`（`{ render?, backend? }`）；以前包装成 `{ render }`（见 §2.4） |
 | `settingsTools` | `saveUpdater` | `settings:save-updater` | 传 `{ updater }`（`feedUrl` / `autoCheck` / `skippedVersion`） |
 | `settingsTools` | `test` | `settings:test` | 传 `{ customModel }` 测试连通性 |
 | `settingsTools` | `pickRuntimePack` | `settings:pick-runtime-pack` | 运行环境「从本地文件安装…」（取消时 `{ ok:false, canceled:true }`） |
@@ -133,7 +133,18 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 - **`demo` 的 `options` 类型**是 `Omit<CastDemoPayload, 'id'>`（= `Omit<CastPreviewPayload, 'id'>`：`units?` / `title?` / `uses?`），由 `CastDemoShot.vue` 就地拼成普通对象（不是 reactive `Proxy`），能过结构化克隆。
 - **方法数 7 → 12**，与 `shared/ipc.ts` 的 `Cast` 组 6 → 11、`projects/ipc/castActions.ts` 的 5 个 `ipcMain.handle` 一一对应（**三处齐改**）。
 
-### 2.4 `projectTools` 侧的变化
+### 2.4 本版 `settingsTools.saveRender` 的签名变化（无新频道）
+
+```ts
+// src/preload/index.ts（源码逐字）
+saveRender: (payload) => ipcRenderer.invoke(IPC.Settings.SaveRender, payload),
+```
+
+- **以前**：`saveRender: (render) => ipcRenderer.invoke(IPC.Settings.SaveRender, { render })`——把档位包成 `{ render }`。**现在**：整个 `SettingsSaveRenderPayload`（`{ render: RenderOptions, backend?: RenderBackend }`）原样透传给主进程；新增的 `backend?` 让设置页能一起保存「渲染引擎」。
+- 实现仍由 `PreloadApi['settingsTools']` 标注，签名真源在 `src/shared/types.ts` ⑨ 节；提交方是渲染层 `composables/useRenderOptions.ts` 的 `saveRenderDefaults(next, backend?)`，它提交 `{ render: next, backend }`。
+- **频道 `settings:save-render` 不变，没有新增 IPC 频道**；主进程对应 handler 在 `src/main/settings.ts`，它从 `payload.backend` 读后端并持久化。`RenderBackend` 不进项目级 `RenderOverride`，默认 hyperframes。
+
+### 2.5 `projectTools` 侧的变化
 
 - **下线 6 个角色方法**：`listCastLibrary` / `promoteCast` / `importCast` / `removeCastFromLibrary` / `newCast` / `castPreview`（页面里已没有 `projectTools.castPreview`，改成 `castTools.preview`）。`projectTools` 从 **33 → 27** 个方法。
 - **保留 `saveCast(name, cast)`**，载荷是 `[{ id, selected }]`（`ProjectCastSelection[]`），不再是完整成员快照。
@@ -208,9 +219,10 @@ contextBridge.exposeInMainWorld('hfTools', hfTools);
 ## 5. 注意事项与实现要点
 
 - **频道名不得硬编码**：所有频道都通过 `IPC.Xxx.Yyy` 取用，禁止改成字符串字面量。
+- **本版唯一改签名的方法是 `settingsTools.saveRender`**：从「收档位、包成 `{ render }`」改成「收整个 `SettingsSaveRenderPayload` 原样透传」，以便把 `backend?` 带上；频道和其余方法签名都没动，**未新增 IPC 频道**。
 - **方法名与参数顺序是对外契约**：唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi`；本文件的 **13** 个对象都以 `PreloadApi['<命名空间>']` 标注，渲染层经 `index.d.ts` 的 `interface Window extends PreloadApi {}` 拿到同一份签名。
 - **`send` 与 `invoke` 不可混用**：窗口三操作与 `voiceTools.cancelAlign` 是 `send`，`updateTools.version` 是 `sendSync`，其余基本是 `invoke`（含全部 `cast:*`）。
-- **payload 透传**：`whisperTools.addModel/updateModel/removeModel/transcribe`、`voiceTools.synthAligned`、**`castTools.saveAction/removeAction/generateAction`** 原样透传对象载荷；`voiceTools.synth` / `create`、`castTools.preview` / `demo`、`projectTools.generateHtml` 则把位置参数组装 / 展开成载荷对象。
+- **payload 透传**：`whisperTools.addModel/updateModel/removeModel/transcribe`、`voiceTools.synthAligned`、**`settingsTools.saveRender`（本版改为整对象透传，见 §2.4）**、**`castTools.saveAction/removeAction/generateAction`** 原样透传对象载荷；`voiceTools.synth` / `create`、`castTools.preview` / `demo`、`projectTools.generateHtml` 则把位置参数组装 / 展开成载荷对象。
 - **对象展开的坑**：`{ name, prompt, ...(materials || {}) }`、`{ id, ...(options || {}) }` 这类写法是同层平铺，`options` / `materials` 里不要出现与外层同名的键。
 - **载荷必须是普通对象 / 数组**：`invoke` 要过**结构化克隆**，Vue 响应式 `Proxy` 会抛 `DataCloneError`。素材三件套、`saveCast`、`castPreview` / **`castTools.demo`** 的 `options` 都是就地拼的普通对象 / 数组。
 - **订阅方式的差异**：`onTaskProgress` **有退订函数**，调用方必须在 `finally` 里 `off()`；其余 `onProgress` 无法注销，页面卸载后旧回调仍被引用，回调里访问已销毁的组件状态需自行容错。

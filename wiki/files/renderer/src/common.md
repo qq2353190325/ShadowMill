@@ -15,11 +15,11 @@
 | `src/renderer/src/composables/useAppStore.ts` | 112 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写（键名取 `constants.ts`）；`ProjectState` 含项目级渲染档位覆盖与**成片画布 `canvas`**（本次新增） |
 | `src/renderer/src/composables/useToast.ts` | 22 | 全局轻提示队列（自增 id + 2800ms 自动移除） |
 | `src/renderer/src/composables/useRenderProgress.ts` | 92 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行并生成中文进度文案（只上屏用户看得懂的阶段） |
-| `src/renderer/src/composables/useRuntime.ts` | 91 | 运行环境（**分包** ffmpeg / hyperframes / **vidrender**，首次用到时下载；vidrender 仅 demo 显式下载）状态单例：`runtime:progress` 订阅 + `runtime:status` 首帧补齐，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()`；**交给 IPC 的包名数组必须走 `toRaw(list).slice()`**（Vue 响应式代理过不了结构化克隆，`invoke` 会抛 `DataCloneError` 且主进程 handler 不执行），`prepare()` 的非 ok 回执 / 抛错会写进 `runtime`（不再静默）；初始 `status` 加 `vidrender: 'unknown'`，`PACK_LABEL` 加「Rust 编码内核（vidrender-encode，联调 demo 用）」 |
-| `src/renderer/src/composables/useEnvGate.ts` | 162 | 全局唯一的「需要下载运行环境」确认框单例：`guard(need, actionName, cont?)` → `confirmDownload()` / `cancelDownload()` / `continueAction()` / `close()`，三态 `confirm \| downloading \| ready`（装好后按钮变「继续」、**不自动续做**）；进度**不自己订阅** `runtime:progress`，而是 `watch` 消费 `useRuntime` 的状态（全渲染层只有 `useRuntime.ts` 一处 onProgress 注册）；`LABEL` 同三包文案，`HINT_MB = { ffmpeg: 43, hyperframes: 103, vidrender: 1 }`（vidrender 约 1 MB，注释写明「只有显式指定时才下载，产品默认不提示」） |
+| `src/renderer/src/composables/useRuntime.ts` | 91 | 运行环境（**分包** ffmpeg / hyperframes / **vidrender**，首次用到时下载；vidrender 供用户显式切换的小内核后端使用，缺包守卫按 `renderBackend` 选包）状态单例：`runtime:progress` 订阅 + `runtime:status` 首帧补齐，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()`；**交给 IPC 的包名数组必须走 `toRaw(list).slice()`**（Vue 响应式代理过不了结构化克隆，`invoke` 会抛 `DataCloneError` 且主进程 handler 不执行），`prepare()` 的非 ok 回执 / 抛错会写进 `runtime`（不再静默）；初始 `status` 加 `vidrender: 'unknown'`，`PACK_LABEL` 的 vidrender 文案为「Rust 编码内核（vidrender-encode）」 |
+| `src/renderer/src/composables/useEnvGate.ts` | 162 | 全局唯一的「需要下载运行环境」确认框单例：`guard(need, actionName, cont?)` → `confirmDownload()` / `cancelDownload()` / `continueAction()` / `close()`，三态 `confirm \| downloading \| ready`（装好后按钮变「继续」、**不自动续做**）；进度**不自己订阅** `runtime:progress`，而是 `watch` 消费 `useRuntime` 的状态（全渲染层只有 `useRuntime.ts` 一处 onProgress 注册）；`LABEL` 同三包文案，`HINT_MB = { ffmpeg: 43, hyperframes: 103, vidrender: 1 }`（vidrender 约 1 MB；源码注释仍写「只有显式指定时才下载，产品默认不提示」，但切到小内核后端后即按后端选包） |
 | `src/renderer/src/composables/useConfigPrompt.ts` | 86 | **配置类错误弹窗单例**（2026-10 新增）：`open(msg, target, jump?, title?)` / `fromResult(res, jump?)` / `go()` / `close()`，只有 `[去设置]` / `[取消]` 两个按钮；分类由主进程 `needConfig` 单点判定，渲染层不做正则猜测；**余额 / 欠费不弹窗**（走内嵌状态行） |
 | `src/renderer/src/composables/useLegacyData.ts` | 60 | 旧版本数据（品牌/目录改名留下）提示：挂载时问一次 `legacy:status`，有结果就弹应用内弹窗，并把用户选择经 `legacy:resolve` 回传 |
-| `src/renderer/src/composables/useRenderOptions.ts` | 41 | 视频渲染档位：全局默认载入（`settings.json` 的 `render`）+ 生效档位 + 项目级覆盖写入 |
+| `src/renderer/src/composables/useRenderOptions.ts` | **47** | 视频渲染档位：全局默认载入（`settings.json` 的 `render`）+ 生效档位 + 项目级覆盖写入；**本版新增模块级 `renderBackend` ref**，`loadRenderDefaults()` / `saveRenderDefaults()` 从 settings 同步它，供「转视频」缺包守卫按后端选包 |
 | `src/renderer/src/composables/useNavIntent.ts` | 30 | 跨页面「导航意图」信号（模块级 `ref` 单例）：`requestSettingsSection()` 置位、目标页 `consumeSettingsSection()` 读取并复位；设置页 5 个分类的**唯一枚举来源**（`SETTINGS_SECTIONS`） |
 | **`src/renderer/src/composables/useProjectMeta.ts`** | **48** | **「HTML生成」页项目状态条 + 标题右侧「用法」气泡的派生逻辑**：`useProjectMeta()` → `{ meta, usageHint }`，从 `appState.project` / `hasHtml` 算出 `hasH` / `sceneN` / `missVisual` / `subCount` / `matN` / `matText` 与两段操作引导文案；口径与主进程 `buildContentBlock` 一致（**画面分镜非空**才算一场） |
 | **`src/renderer/src/utils/taskId.ts`** | **13** | **渲染层发起 AI 任务时生成的任务 id（纯函数）**：`newTaskId(prefix)` → `前缀-时间戳36进制-序号-4位随机`，模块级 `seq` 自增取模 `1e6`；唯一性只要求「同一时刻同一页面上不重复」，这个串不进提示词、不进日志文件名 |
@@ -196,7 +196,7 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 ## 4. 运行环境：composables/useRuntime.ts 与 composables/useEnvGate.ts
 
-运行环境已**分包**：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）各自一个 7z、**首次用到时**由用户确认后下载并解到 `<userData>/runtime/<包名>/`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14；比旧单包 `runtime.7z` 147.4 MB 还小）；**第三包 `vidrender`（Rust 小内核，约 1 MB）由同一脚本单独成包、仅联调 demo 显式下载，主进程 `PRODUCT_PACKS` 把它排除在产品默认缺包提示与「下载全部」之外**；`whisper`（12.5 MB）随安装包，装完即可离线转录（主进程实现见 [main/runtime.ts.md](../../main/runtime.ts.md)，方案见 `docs/runtime-pack-split.md`）。渲染层因此拆成两个模块级单例：`useRuntime` 管**状态**，`useEnvGate` 管**「缺包 → 问用户 → 装好后继续」这条交互**。两者的分工里有一条硬约束：**凡是交给 `runtimeTools.prepare()` 的包名数组，都必须是 `toRaw(list).slice()` 出来的普通数组**——`ipcRenderer.invoke` 的参数要过**结构化克隆**（structured clone），而 `missing.value`（`runtime` 是 `ref`，深层响应式 ⇒ 其中的数组是 Proxy）与确认框里的 `packs`（`ref([])`）都是 **Vue 的响应式 Proxy**，**代理对象不可克隆**，`invoke` 会直接抛 `DataCloneError: [object Array] could not be cloned.`，主进程的 handler 根本不会执行（所以 `runtime.log` 一个字都没有、`userData/runtime/` 也不创建），而这个异常以前被 `prepare()` 的 catch 吞掉 ⇒ 横幅 / 设置页 / 确认框三个「下载运行环境」按钮点了都毫无反应；现在 `prepare()` 把「没能启动」的原因写进 `runtime`（`phase='error'` + `message` / `detail`），失败不再静默。
+运行环境已**分包**：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）各自一个 7z、**首次用到时**由用户确认后下载并解到 `<userData>/runtime/<包名>/`（**两包实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14；比旧单包 `runtime.7z` 147.4 MB 还小）；**第三包 `vidrender`（Rust 小内核，约 1 MB）由同一脚本单独成包，供用户显式切换的小内核后端使用；主进程 `PRODUCT_PACKS` 仍把它排除在默认缺包提示与「下载全部」之外，产品侧由 `video.ts` 与「HTML生成」页按 `renderBackend` 显式选包**；`whisper`（12.5 MB）随安装包，装完即可离线转录（主进程实现见 [main/runtime.ts.md](../../main/runtime.ts.md)，方案见 `docs/runtime-pack-split.md`）。渲染层因此拆成两个模块级单例：`useRuntime` 管**状态**，`useEnvGate` 管**「缺包 → 问用户 → 装好后继续」这条交互**。两者的分工里有一条硬约束：**凡是交给 `runtimeTools.prepare()` 的包名数组，都必须是 `toRaw(list).slice()` 出来的普通数组**——`ipcRenderer.invoke` 的参数要过**结构化克隆**（structured clone），而 `missing.value`（`runtime` 是 `ref`，深层响应式 ⇒ 其中的数组是 Proxy）与确认框里的 `packs`（`ref([])`）都是 **Vue 的响应式 Proxy**，**代理对象不可克隆**，`invoke` 会直接抛 `DataCloneError: [object Array] could not be cloned.`，主进程的 handler 根本不会执行（所以 `runtime.log` 一个字都没有、`userData/runtime/` 也不创建），而这个异常以前被 `prepare()` 的 catch 吞掉 ⇒ 横幅 / 设置页 / 确认框三个「下载运行环境」按钮点了都毫无反应；现在 `prepare()` 把「没能启动」的原因写进 `runtime`（`phase='error'` + `message` / `detail`），失败不再静默。
 
 ### 4.1 `useRuntime.ts`（91 行）—— 运行环境状态单例
 
@@ -217,7 +217,7 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 | `missing` / `hasMissing` | `computed<RuntimePackName[]>` / `computed<boolean>` | 当前仍缺的包 / 是否缺包（**缺包是首次安装的常态**，此时不自动下载，等用户在某处确认） |
 | `ready` | `computed<boolean>` | 不忙、不失败、也不缺包；已就绪时界面保持干净（不常驻「已就绪」） |
 | `cancelable` | `computed<boolean>` | `payload.cancellable`（**checking / downloading / extracting** 期间为真；`cancelPrepare()` 本来就支持取消取清单阶段，界面以前只在下载 / 解包时才给「取消」按钮） |
-| `missingText` | `computed<string>` | 把缺的包按 `PACK_LABEL`（`ffmpeg` → 「音视频处理（ffmpeg）」、`hyperframes` → 「视频渲染引擎（HyperFrames）」、`vidrender` → 「Rust 编码内核（vidrender-encode，联调 demo 用）」）用「、」拼成一句话 |
+| `missingText` | `computed<string>` | 把缺的包按 `PACK_LABEL`（`ffmpeg` → 「音视频处理（ffmpeg）」、`hyperframes` → 「视频渲染引擎（HyperFrames）」、`vidrender` → 「Rust 编码内核（vidrender-encode）」）用「、」拼成一句话 |
 | `prepare(packs?)` | `async (packs?: RuntimePackName[]) => Promise<boolean>` | 先 `const want = plainPacks(packs && packs.length ? packs : missing.value)` 再 `window.runtimeTools.prepare(want)`；拿到**非 ok 回执**（如忙碌期的「正在准备另一个运行环境包，请稍候再试」）或 `invoke` 抛异常时调 `reportNotStarted(...)` 把失败写进状态并返回 `false`（以前这里是一个空的 `catch { return false }`，什么都不显示），成功返回 `true`；只负责触发，进度由 `runtime:progress` 回填 |
 | `cancel()` | `async () => Promise<void>` | 调 `window.runtimeTools.cancel()`（取消 = 不下载，且不留半截状态；成败同样由进度回填） |
 
@@ -233,7 +233,7 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
   └─ 下载 ⇒ 框内原地显示进度与「取消」；装好后按钮变 [继续]，点它才用原参数重发原来的操作
 ```
 
-**模块级单例**（全局只有一个框）：`visible` / `packs` / `title` / `phase: 'confirm' | 'downloading' | 'ready'` / `percent` / `readyNow` / `message` / `detail` / `onContinue`；常量 `LABEL`（同 `PACK_LABEL`，现含第三项 `vidrender: 'Rust 编码内核（vidrender-encode，联调 demo 用）'`）与 `HINT_MB = { ffmpeg: 43, hyperframes: 103, vidrender: 1 }`（**体积提示**：前两者都已按 2026-10-14 实测值取整到 MiB（43 / 103），合计 146.0 MB（实测合计 145.7 MiB）；**`vidrender` 约 1 MB，源码注释写明「只有显式指定时才下载，产品默认不提示」**；真实值以主进程清单为准）。
+**模块级单例**（全局只有一个框）：`visible` / `packs` / `title` / `phase: 'confirm' | 'downloading' | 'ready'` / `percent` / `readyNow` / `message` / `detail` / `onContinue`；常量 `LABEL`（同 `PACK_LABEL`，现含第三项 `vidrender: 'Rust 编码内核（vidrender-encode）'`）与 `HINT_MB = { ffmpeg: 43, hyperframes: 103, vidrender: 1 }`（**体积提示**：前两者都已按 2026-10-14 实测值取整到 MiB（43 / 103），合计 146.0 MB（实测合计 145.7 MiB）；**`vidrender` 约 1 MB，源码注释写明「只有显式指定时才下载，产品默认不提示」**；真实值以主进程清单为准）。
 
 | 导出 | 说明 |
 | --- | --- |
@@ -246,7 +246,7 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 | `close()` | 隐藏并清空 `onContinue` / `readyNow` / `detail` / `message` |
 | `labelText(list)` / `sizeText` | 把包名渲染成「<label>（约 N MB）」；`sizeText` 是 `packs` 的 `computed` |
 
-**使用方**：`App.vue`（`initEnvGate()` + 模板里内联渲染确认框）、`pages/HtmlGenPage/index.vue`（`转成视频` 要 `['ffmpeg','hyperframes']`、`提取视频原声` 要 `['ffmpeg']`）、`pages/SubtitlePage/TranscribeSection.vue`（`文字转字幕`，只在要转码时缺 ffmpeg）、`pages/TextTtsPage/AlignSection.vue`（`逐句对齐配音`）。页面用法固定为：
+**使用方**：`App.vue`（`initEnvGate()` + 模板里内联渲染确认框）、`pages/HtmlGenPage/index.vue`（**本版修复**：`转成视频` 按 `renderBackend.value === 'vidrender' ? ['ffmpeg','vidrender'] : ['ffmpeg','hyperframes']` 选包，与主进程 `video.ts` 一致；`提取视频原声` 要 `['ffmpeg']`）、`pages/SubtitlePage/TranscribeSection.vue`（`文字转字幕`，只在要转码时缺 ffmpeg）、`pages/TextTtsPage/AlignSection.vue`（`逐句对齐配音`）。页面用法固定为：
 
 ```ts
 const g = await envGate.guard(need, '动作名', () => { void doIt(true) })
@@ -254,7 +254,7 @@ if (!g.ok) return                     // 缺包（框已弹出）或用户取消
 // 主进程返回 needPacks 时再 guard 一次，用 skipEnvGuard = true 重发
 ```
 
-**注意事项**：① 续做所需的动作只活在 `onContinue` 闭包与框的组件作用域内，关框即丢弃，**主进程不记「待续做」**，所以不存在成环问题；② **进度来源只有一个订阅者**：preload 的 `runtime:progress` 是单订阅语义（重复注册只替换回调），因此 `useEnvGate` **刻意不再自己调 `window.runtimeTools.onProgress(...)`**，改为 `watch` 消费 `useRuntime()` 的 `runtime` ref（见 4.2 的 `initEnvGate`）——这样外壳横幅 / 设置页 / 确认框读的是同一份状态，且后注册者不会顶掉 `useRuntime` 的订阅（旧写法会导致 `useRuntime` 的 `runtime` 停在首帧 `status()` 快照上，已修正）；③ 体积提示（2026-10-14 实测）：`ffmpeg` 42.6 MB、`hyperframes` 103.1 MB，**两包合计 145.7 MB**；主进程 `packSizeText()` 才是取清单后的口径；④ `vidrender`（约 1 MB）只是第三包文案——`useRuntime.status` 初值 / `PACK_LABEL` 与 `useEnvGate.LABEL` / `HINT_MB` 都补齐了它，但**默认 `guard` 兜底仍是 `['ffmpeg','hyperframes']`**，它只有显式 `prepare(['vidrender'])` 才会下载，产品渲染链路未改。
+**注意事项**：① 续做所需的动作只活在 `onContinue` 闭包与框的组件作用域内，关框即丢弃，**主进程不记「待续做」**，所以不存在成环问题；② **进度来源只有一个订阅者**：preload 的 `runtime:progress` 是单订阅语义（重复注册只替换回调），因此 `useEnvGate` **刻意不再自己调 `window.runtimeTools.onProgress(...)`**，改为 `watch` 消费 `useRuntime()` 的 `runtime` ref（见 4.2 的 `initEnvGate`）——这样外壳横幅 / 设置页 / 确认框读的是同一份状态，且后注册者不会顶掉 `useRuntime` 的订阅（旧写法会导致 `useRuntime` 的 `runtime` 停在首帧 `status()` 快照上，已修正）；③ 体积提示（2026-10-14 实测）：`ffmpeg` 42.6 MB、`hyperframes` 103.1 MB，**两包合计 145.7 MB**；主进程 `packSizeText()` 才是取清单后的口径；④ `vidrender`（约 1 MB）现在既是第三包文案、也是可显式切换的产品后端——`useRuntime.status` 初值 / `PACK_LABEL` 与 `useEnvGate.LABEL` / `HINT_MB` 都补齐了它（文案已去掉「联调 demo 用」）；`guard` 的空 need 兜底仍是 `['ffmpeg','hyperframes']`，但**「转成视频」已按 `renderBackend` 选包**（CHANGELOG #125），切到小内核后不再被要求下载 hyperframes 包。
 
 ## 5. 历史数据：composables/useLegacyData.ts
 
@@ -542,15 +542,18 @@ export async function goPage(key: PageKey): Promise<void> {
 
 取值与尺寸**全部来自** `@shared/constants`（`RENDER_CANVASES` / `CANVAS_SIZES` / `CANVAS_LABELS` / `DEFAULT_CANVAS`，唯一真源，与 HyperFrames CLI 的画布预设对齐）——因此渲染层的下拉文案、主进程的生成提示词与渲染入口注入说的是同一套数。
 
-### 9.2 `composables/useRenderOptions.ts`（41 行）—— 全局默认与项目覆盖
+### 9.2 `composables/useRenderOptions.ts`（47 行）—— 全局默认与项目覆盖
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `renderDefaults` | `reactive<RenderOptions>` | **模块级单例**的全局默认档位，初值 `FALLBACK_RENDER` 的浅拷贝；`App.vue` 启动时经 `loadRenderDefaults()` 写入 |
-| `loadRenderDefaults()` | `async () => Promise<void>` | 读 `window.settingsTools.get()`，把 `s.render` 经 `resolveRenderOptions()` 规范化后 `Object.assign` 进 `renderDefaults`；读取失败静默沿用内置默认，不打断启动 |
+| **`renderBackend`（本版新增）** | **`Ref<RenderBackend>`** | **模块级 `ref`，初值 `'hyperframes'`**：从 `settings.json` 的 `renderBackend` 同步而来，供「HTML生成」页「转视频」的缺包守卫按后端选包；后端是**全局**设置，不进项目级 `RenderOverride` |
+| `loadRenderDefaults()` | `async () => Promise<void>` | 读 `window.settingsTools.get()`，把 `s.render` 经 `resolveRenderOptions()` 规范化后 `Object.assign` 进 `renderDefaults`，**并同步 `renderBackend.value = s && s.renderBackend === 'vidrender' ? 'vidrender' : 'hyperframes'`**；读取失败静默沿用内置默认，不打断启动 |
 | `effectiveRenderOptions()` | `() => RenderOptions` | 当前生效档位：`resolveRenderOptions(renderDefaults, appState.project && appState.project.render)`（无项目时 `override` 为 `undefined`，直接取全局默认） |
-| `saveRenderDefaults(next)` | `async (RenderOptions) => Promise<{ ok; message? }>` | 设置页保存全局默认：调 `window.settingsTools.saveRender(next)`（`settings:save-render`），成功后再用返回的 `res.settings.render` 回写 `renderDefaults` |
+| `saveRenderDefaults(next, backend?)` | `async (RenderOptions, RenderBackend?) => Promise<{ ok; message? }>` | 设置页保存全局默认与后端：调 `window.settingsTools.saveRender({ render: next, backend })`（`settings:save-render`，**载荷整对象透传**），成功后用 `res.settings.render` 回写 `renderDefaults`、**用 `res.settings.renderBackend` 回写 `renderBackend`**；第二参可选，不传则主进程保持原后端 |
 | `saveProjectRenderOverride(render)` | `async (RenderOverride \| null) => Promise<{ ok; message? }>` | 写项目级覆盖：`currentName` 为空时**直接返回 `{ ok: true }` 不发 IPC**（无当前项目，选择只在本次会话生效）；否则调 `window.projectTools.setRender(currentName, render)`（`project:set-render`），成功后把 `res.project.render` 经 `pickRenderOverride` 规范化写回 `appState.project.render`；`render` 传 `null` 表示清除覆盖、回到跟随全局默认 |
+
+**后端同步（本版新增）**：`renderBackend` 是全局渲染后端（`hyperframes` 默认 / `vidrender` 实验），与「质量 / 帧率」那套三层优先级**无关**；它由 `loadRenderDefaults()` / `saveRenderDefaults()` 与 `settings.json` 双向同步，「HTML生成」页据此决定「转视频」缺包守卫要哪两包（见 [HtmlGenPage.md](./pages/HtmlGenPage.md)）。**未新增 IPC 频道**。
 
 **优先级与使用约定**：① `App.vue` 的 `initApp()` 里 `Promise.all([refreshProject(), loadRenderDefaults()])`——项目列表与渲染默认档位**并行载入**（档位读取失败落回内置默认，不影响启动）；② 读生效档位的页面调 `effectiveRenderOptions()`（「HTML生成」页挂载时 `syncFromEffective()`）；③ 判断是否需要显示「恢复默认」用 `renderDefaults` + `isRenderOverridden()`；④ 写覆盖只走 `saveProjectRenderOverride()`，页面不直接调 `projectTools.setRender`。
 
@@ -618,7 +621,7 @@ export function newTaskId(prefix: string): string {
 | `window.projectTools.create(name)` | 频道 `project:create`，新建项目 | `components/NewProjectDialog.vue` |
 | `window.hfTools.onProgress(callback)` | 频道 `video:progress`，渲染进度订阅，回调参数形如 `{ text: string }`（日志 chunk） | `renderProgress.initRenderProgress()` |
 | `window.settingsTools.get()` | 频道 `settings:get`，读 `settings.json`（含 `render` 段） | `useRenderOptions.loadRenderDefaults()`；设置页另有四个区块各自在自己的 `onMounted` 里调用一次以回填表单（`pages/SettingsPage/components/` 的 `ModelSection.vue` / `VoiceSection.vue` / `RenderSection.vue` / `UpdateSection.vue`，只在实际挂载的分类里发生） |
-| `window.settingsTools.saveRender(render)` | 频道 `settings:save-render`，只更新渲染默认档位 | `useRenderOptions.saveRenderDefaults()` |
+| `window.settingsTools.saveRender(payload)` | 频道 `settings:save-render`，更新渲染默认档位与后端（载荷 `{ render, backend? }` 原样透传；**频道未变**） | `useRenderOptions.saveRenderDefaults()` |
 | `window.projectTools.setRender(name, render \| null)` | 频道 `project:set-render`，写 / 清除项目级档位覆盖 | `useRenderOptions.saveProjectRenderOverride()` |
 | `window.runtimeTools.onProgress(callback)` | 频道 `runtime:progress`，运行环境进度推送（单订阅），回调参数为 `RuntimeProgressPayload`（`phase` / `pack` / `missing` / …） | **只有** `useRuntime.initRuntime()` 注册（全渲染层唯一订阅者）；`useEnvGate` 经 `watch(useRuntime().runtime)` 消费同一份状态，不再注册第二个回调 |
 | `window.runtimeTools.status()` | 频道 `runtime:status`，查一次当前状态（补齐首帧，此后由推送驱动） | `useRuntime.initRuntime()` |
@@ -636,7 +639,7 @@ export function newTaskId(prefix: string): string {
 - `switchProject`：`components/StepBar.vue`、`pages/HomePage/index.vue`。
 - `toast` / `useToasts`：见 §2「使用方」。
 - `renderProgress` / `initRenderProgress` / `resetRenderProgress`：`App.vue`（`onMounted` 中调用 `initRenderProgress()`，全局只订阅一次）、`pages/HtmlGenPage/index.vue`（**发起渲染**：`onMounted` 与 `onRenderVideo` 结束时 `resetRenderProgress()`）、**`pages/HtmlGenPage/PreviewSection.vue`（展示侧：`statusDisplay` 在 `props.rendering` 为真且 trace 非空时接管状态行）**、`pages/VideoPreviewPage/index.vue`（预览侧：`statusText = renderProgress.text || localStatus`，`onMounted` 里 `resetRenderProgress()`）。
-- `renderDefaults` / `loadRenderDefaults`：`App.vue`（`initApp()` 中与 `refreshProject()` 并行调用）、`pages/HtmlGenPage/index.vue`（`isRenderOverridden(renderDefaults, ...)` 判断是否显示「恢复默认档位」）。
+- `renderDefaults` / `loadRenderDefaults` / **`renderBackend`（本版新增）**：`App.vue`（`initApp()` 中与 `refreshProject()` 并行调用）、`pages/HtmlGenPage/index.vue`（`isRenderOverridden(renderDefaults, ...)` 判断是否显示「恢复默认档位」；**`renderBackend` 供「转视频」缺包守卫按后端选包**）。
 - `effectiveRenderOptions` / `saveProjectRenderOverride`：`pages/HtmlGenPage/index.vue`（`syncFromEffective()` 读、`onOptionChange()` / `onResetOptions()` 写）。**「视频预览」页不消费渲染档位**，只读 `renderProgress.text` 展示进度。
 - `saveRenderDefaults`：`pages/SettingsPage/components/RenderSection.vue`（「保存渲染默认档位」按钮）。
 - `RENDER_QUALITY_OPTIONS` / `RENDER_FPS_OPTIONS` / `FALLBACK_RENDER` / `renderOptionsText` / `renderQualityLabel`：`pages/SettingsPage/components/RenderSection.vue`（全局默认档位下拉与保存文案）、`pages/HtmlGenPage/index.vue`（档位下拉、`optionNote`、渲染状态文案）。
@@ -663,6 +666,7 @@ export function newTaskId(prefix: string): string {
 - **持久化键集中在 `constants.ts`，且 `'myapp.'` 前缀不可漂移**：`STORAGE_KEY_PROJECT_CTX` / `STORAGE_KEY_SETTINGS_SECTION` 都由 `STORAGE_PREFIX = 'myapp.'` 派生（**故意不跟随品牌名**：生产环境 `file://` 同源，键名就是用户数据的地址，改名会让「上次项目 / 设置页分类」读不到，要改必须补「读旧键 → 写新键」迁移）。消费处一律 `import` 常量，不再出现裸字面量；品牌文案则是另一层的 `@shared/constants`，两者不要混。
 - **存在性判定必须走列表项**：`htmlExists` / `videoExists` 来自 `projectTools.list()` 的 `hasHtml` / `hasVideo`（主进程文件系统检查），`projectTools.load()` 不返回这两项。
 - **`composables` 与 `utils` 的分界（与 `AGENTS.md` 规则 8 一致，当前成立）**：`composables/` 放依赖 Vue 响应式 API 或有状态、带副作用（IPC 订阅、`localStorage`）的复用逻辑，文件名以 `use` 开头（`useAppStore.ts` / `useToast.ts` / `useRenderProgress.ts` / `useRuntime.ts` / `useEnvGate.ts` / `useConfigPrompt.ts` / `useLegacyData.ts` / `useRenderOptions.ts` / `useNavIntent.ts`，这九者都有模块级单例状态；`useProjectMeta.ts` 没有模块级状态，但**依赖 `computed`**、只导出组合式函数，所以仍归 `composables/`）；`utils/` 放无状态纯函数（`escape.ts` / `time.ts` / `rate.ts` / `render.ts` / `url.ts` / `changelog.ts` / `taskId.ts`，其中 `rate.ts` 只读写传入的 DOM 元素、`render.ts` 只有常量表与纯函数、`url.ts` 只有两个纯字符串函数、`changelog.ts` 只有解析与排版纯函数、`taskId.ts` 只有一个模块级自增计数 + 一个纯函数（不持有业务状态），均无副作用）。跨目录引用这些模块一律走 `@renderer/*` 别名。
+- **渲染后端不进档位层级**：`RenderBackend`（默认 hyperframes，切到 vidrender 走小内核）是**全局**设置，与 `RenderOverride` 的「项目覆盖 > 全局默认 > 内置默认」无关；`renderBackend` ref 由 `loadRenderDefaults()` / `saveRenderDefaults()` 与 settings 同步，供「转成视频」缺包守卫选包，**未新增 IPC 频道**（CHANGELOG #124 / #125）。
 - **渲染档位三层优先级只有一处实现**：`项目覆盖 > 全局默认 > 内置默认`，缺省字段逐级继承；渲染层用 `utils/render.ts` 的 `resolveRenderOptions()` / `pickRenderOverride()`，主进程用 `settings.ts` 里同名的白名单实现，两边取值必须同步修改（`draft/standard/high` 与 `24/30`）。
 - **成片画布刻意不走那套层级（本次新增）**：`RenderCanvas` 是**项目属性**（`ProjectState.canvas` 必填、缺省落 `DEFAULT_CANVAS`），没有「全局默认 → 项目覆盖」可继承——所有消费点都从 `shared/constants.ts` 取同一组取值与尺寸。**不要把它并进 `pickRenderOverride` / `resolveRenderOptions`**：一个是「这个项目长什么样」（画布、成片尺寸），一个是「怎么编码」（质量、帧率）。
 - **渲染动作的唯一入口是「HTML生成」页**：`hfTools.renderVideo()` 只在 `pages/HtmlGenPage/index.vue` 的 `onRenderVideo()` 里发起，因此「渲染进度由谁展示」「产物谁回写项目」都以此为准——产物回写只在该页调 `projectTools.saveVideo()`；「视频预览」页只读结果、不发起渲染。

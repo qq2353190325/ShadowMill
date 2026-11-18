@@ -140,7 +140,7 @@
 // 本页只留「生成/修改 + 渲染」这条主动作链：素材库在 MaterialsSection.vue、预览与背景音频在 PreviewSection.vue。
 // 拆分的理由是按「一个文件一件事」切：素材的增删勾选与本页的生成流程互不依赖，预览那套 iframe/seek/音频试听也自成一块。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { RenderCanvas, RenderFps, RenderQuality } from '@shared/types'
+import type { RenderCanvas, RenderFps, RenderQuality, RuntimePackName } from '@shared/types'
 import { appState, hasHtml, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { resetRenderProgress } from '@renderer/composables/useRenderProgress'
@@ -156,7 +156,7 @@ import {
   normalizeCanvas,
   renderOptionsText
 } from '@renderer/utils/render'
-import { effectiveRenderOptions, renderDefaults, saveProjectRenderOverride } from '@renderer/composables/useRenderOptions'
+import { effectiveRenderOptions, renderBackend, renderDefaults, saveProjectRenderOverride } from '@renderer/composables/useRenderOptions'
 import { useProjectMeta } from '@renderer/composables/useProjectMeta'
 import { newTaskId } from '@renderer/utils/taskId'
 import StepBar from '@renderer/components/StepBar.vue'
@@ -409,10 +409,13 @@ async function onRenderVideo(skipEnvGuard = false): Promise<void> {
   const htmlPath = appState.project && appState.project.htmlPath;
   if (!htmlPath || !(appState.project && appState.project.htmlExists)) { toast('还没有 HTML，请先「生成 HTML」'); return; }
   const options = { quality: quality.value, fps: fps.value, canvas: canvas.value };
-  // 渲染要 ffmpeg + hyperframes 两个运行环境包（不随安装包）：缺则在确认框里问用户，
+  // 缺包守卫要跟主进程选的后端一致：小内核路径不需要 103MB 的 hyperframes 包。
   // 用户在框里点「继续」时回到这里（skipEnvGuard=true），不再重复弹框
   if (!skipEnvGuard) {
-    const g = await envGate.guard(['ffmpeg', 'hyperframes'], '转成视频', () => { void onRenderVideo(true); });
+    const packs: RuntimePackName[] = renderBackend.value === 'vidrender'
+      ? ['ffmpeg', 'vidrender']
+      : ['ffmpeg', 'hyperframes'];
+    const g = await envGate.guard(packs, '转成视频', () => { void onRenderVideo(true); });
     if (!g.ok) return;
   }
   status.value = '已提交渲染（' + renderOptionsText(options) + ' · ' + canvasLabel(options.canvas) + '，约 30 秒）...';

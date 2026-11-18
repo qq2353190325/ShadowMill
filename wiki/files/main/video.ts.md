@@ -1,10 +1,10 @@
 # src/main/video.ts
 
-> HyperFrames 转视频：注册 3 个 IPC 频道（含 1 路进度推送），**就地渲染**到 `<项目目录>/video/output.mp4`——先裁定成片时长（模型声明 / 实测时间轴 / 最长媒体三档）并裁掉超长媒体副本，再在项目内临时子目录写渲染入口。**画布和时长都是「写两处、只有一处生效」**：画布 = 舞台元素的 `data-width` / `data-height`（**成片宽高的真正来源**，`applyCanvasSize`）+ 入口 `<html>` 的 `data-resolution`（**页面自描述**，`applyCanvasDeclaration`）；时长 = 舞台元素的 `data-duration`（**CLI 编译阶段唯一读的地方**，`applyStageDuration`）+ `<html data-composition-duration>`（**页面自描述**，预览 / `info` / 下次生成读它）。`<html>` 上那两样渲染链路都**不读**。全程把 CLI 子进程日志流式回推渲染层。**动手渲染之前还有一道无限循环静态守卫**：`index.html` 或章节脚本 `pages/cNN.js` 里出现 GSAP 的 `repeat: -1`（或 `repeat: Infinity`）就当场拒绝、不进 CLI（GSAP 把这种 tween 当成 1e10 秒，不拦的话成片时长没法确定、CLI 会按 1e10 秒排帧、永远渲不完）。量时间轴的探针副本落在项目根、用未抬级原文（否则章节脚本 `./pages/cNN.js` 会 404、时间轴量回 0）。
+> 转视频（默认 HyperFrames，用户显式切到 `vidrender` 才走小内核；本模块按 `settings.getRenderBackend()` 分流）：注册 3 个 IPC 频道（**未新增频道**）（含 1 路进度推送），**就地渲染**到 `<项目目录>/video/output.mp4`——先裁定成片时长（模型声明 / 实测时间轴 / 最长媒体三档）并裁掉超长媒体副本，再在项目内临时子目录写渲染入口。**画布和时长都是「写两处、只有一处生效」**：画布 = 舞台元素的 `data-width` / `data-height`（**成片宽高的真正来源**，`applyCanvasSize`）+ 入口 `<html>` 的 `data-resolution`（**页面自描述**，`applyCanvasDeclaration`）；时长 = 舞台元素的 `data-duration`（**CLI 编译阶段唯一读的地方**，`applyStageDuration`）+ `<html data-composition-duration>`（**页面自描述**，预览 / `info` / 下次生成读它）。`<html>` 上那两样渲染链路都**不读**。全程把 CLI 子进程日志流式回推渲染层。**动手渲染之前还有一道无限循环静态守卫**：`index.html` 或章节脚本 `pages/cNN.js` 里出现 GSAP 的 `repeat: -1`（或 `repeat: Infinity`）就当场拒绝、不进 CLI（GSAP 把这种 tween 当成 1e10 秒，不拦的话成片时长没法确定、CLI 会按 1e10 秒排帧、永远渲不完）。量时间轴的探针副本落在项目根、用未抬级原文（否则章节脚本 `./pages/cNN.js` 会 404、时间轴量回 0）。
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（IPC 注册 + 子进程编排）
-- **规模**：485 行（实测 `[IO.File]::ReadAllLines`；上一版 474 行，本轮 **+11 行**：渲染前按版本同步共享绘制助手 `./core.js`，见 §3.3 第 7.5 步）
+- **规模**：514 行（实测 `[IO.File]::ReadAllLines`；上一版 485 行，本版 **+29 行**：按渲染后端分流选包、删除 `RENDER_PACKS` 常量、新增小内核分支，hyperframes 原路径完全保留）
 - **对外导出**：`register`（唯一导出）
 
 ## 1. 作用与职责
@@ -14,8 +14,8 @@
 | 能力 | 说明 |
 |------|------|
 | 选 HTML 文件 | 弹系统文件选择框挑 HTML（`dialog:open-html`，**保留但渲染层当前无调用方**） |
-| 转视频（准备阶段） | 校验 HyperFrames 合规性 → **无限循环静态守卫（页面里有 GSAP 的 `repeat: -1` / `repeat: Infinity` 直接拒绝，见 §1.3）** → 定位 hyperframes CLI 与 Node（`{ cmd, env }` 一对）→ **就地确定渲染根（HTML 所在的项目目录）** → 随包前端库本地化（幂等；GSAP / p5 / p5.brush）→ 注入环境变量 → **取画布（白名单校验，缺省落 `DEFAULT_CANVAS`）** → **把画布写两处（舞台 `data-width`/`data-height` + `<html data-resolution>`）、裁定成片时长、把裁定出的时长写进舞台 `data-duration`（`applyStageDuration`——**CLI 编译阶段唯一读的地方**；`<html data-composition-duration>` 只为页面自描述）、裁掉超长媒体的副本、写渲染入口** |
-| 转视频（渲染阶段） | 按载荷里的渲染档位拼 `--quality` / `--fps`（**不拼 `--resolution`**：画布已经写进入口的舞台 `data-width` / `data-height` 了），`spawn` 子进程在项目内渲染出 `video/output.mp4`，全程把 stdout/stderr 回推渲染进程，收尾删除临时入口目录 |
+| 转视频（准备阶段） | **先按 `settings.getRenderBackend()` 选包**（hyperframes → `['ffmpeg','hyperframes']`，vidrender → `['ffmpeg','vidrender']`；CLI/Node 校验只在 hyperframes 分支）→ 两后端共用的合规校验与入口准备 → 校验 HyperFrames 合规性 → **无限循环静态守卫（页面里有 GSAP 的 `repeat: -1` / `repeat: Infinity` 直接拒绝，见 §1.3）** → 定位 hyperframes CLI 与 Node（`{ cmd, env }` 一对）→ **就地确定渲染根（HTML 所在的项目目录）** → 随包前端库本地化（幂等；GSAP / p5 / p5.brush）→ 注入环境变量 → **取画布（白名单校验，缺省落 `DEFAULT_CANVAS`）** → **把画布写两处（舞台 `data-width`/`data-height` + `<html data-resolution>`）、裁定成片时长、把裁定出的时长写进舞台 `data-duration`（`applyStageDuration`——**CLI 编译阶段唯一读的地方**；`<html data-composition-duration>` 只为页面自描述）、裁掉超长媒体的副本、写渲染入口** |
+| 转视频（渲染阶段） | 按载荷里的渲染档位拼 `--quality` / `--fps`（**不拼 `--resolution`**：画布已经写进入口的舞台 `data-width` / `data-height` 了），`spawn` 子进程在项目内渲染出 `video/output.mp4`，全程把 stdout/stderr 回推渲染进程，收尾删除临时入口目录；**小内核分支**在入口写好后 `await renderWithVidrender(...)`，成功 / 失败都清 `.render-tmp/`，进度经 `video:progress` 回推 |
 
 **最大的形态变化是「就地渲染」**（取代旧的临时工作目录方案）：
 
@@ -165,6 +165,13 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 
 > 这是**判据放在渲染入口**、而不放在预览侧的第二个落点：预览侧的同类闸门在 `projects.ts` 的 `HG_PREVIEW_CTRL` 里（超长时长降级成 `--:--`，见 [projects.md](./projects.md) §5），两者各自独立、互不依赖。
 
+### 1.4 渲染后端二选一（本版新增）
+
+- **谁决定**：`const backend = settings.getRenderBackend()`（全局设置 `AppSettings.renderBackend`，默认 `hyperframes`；设置页第三行「渲染引擎」显式切换才变）。**没有新增 / 删除 IPC 频道**，`video:render` 的载荷与结果都不变。
+- **选包**：`const renderPacks: RuntimePackName[] = backend === 'vidrender' ? ['ffmpeg','vidrender'] : ['ffmpeg','hyperframes']`——原来的固定 `RENDER_PACKS` 常量已删除；`runtime.missingPacks(renderPacks)` 缺包即回 `needPacks`。
+- **hyperframes 分支（原路径完全保留）**：`findHyperframesCli()` / `findNode()` 校验与「未找到 hyperframes CLI / Node >= 22」文案只在 `backend === 'hyperframes'` 时执行；`env` 只在有 Node 运行时才合并 `nodeRt.env`；下面的 `new Promise` 渲染段、`hfCli!` / `nodeRt!` 仅用于这一支。
+- **vidrender 分支**：入口 `.render-tmp/entry.html` 写好后 `await renderWithVidrender({ entryHtml, output: outMp4, canvas, fps: renderOpts.fps || 30, quality: renderOpts.quality || 'standard', onProgress })`；`onProgress` 把文本经 `event.sender.send(IPC.Video.Progress, { text })` 回推。**成功与失败都清理 `.render-tmp/`**：成功且成片存在回 `{ ok:true, outputVideo, projectDir }`，成片缺失回「小内核渲染完成但未找到成片」，异常回「小内核渲染失败：…」。实现见 [vidrender.ts.md](./vidrender.ts.md)。
+
 ## 2. 导出与关键实现
 
 ### 2.1 对外导出
@@ -186,7 +193,7 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 
 | 名称 | 类型 | 取值 / 说明 |
 |------|------|-------------|
-| `RENDER_PACKS` | `RuntimePackName[]` | `['ffmpeg', 'hyperframes']`——渲染要哪几包：HyperFrames CLI 与浏览器壳在 `hyperframes` 包，编码与素材探测在 `ffmpeg` 包；分包后两者都在安装包之外，**缺哪个就提示下载哪个** |
+| （本版删除 `RENDER_PACKS` 常量） | `RuntimePackName[]` | 原来固定 `['ffmpeg', 'hyperframes']`；现改为在 handler 内按后端现场决定 `renderPacks`（见 §1.4）：hyperframes → `['ffmpeg','hyperframes']`，vidrender → `['ffmpeg','vidrender']`；两包都不随安装包，**缺哪个就提示下载哪个** |
 
 > 画布相关常量不在这里自己声明：`RENDER_CANVASES` / `CANVAS_SIZES` / `DEFAULT_CANVAS` 一律从 `../shared/constants` 取（三端同源），本文件只用它们做白名单校验、写舞台宽高（`applyCanvasSize`）与日志留痕。
 
@@ -225,12 +232,12 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 
 #### 准备阶段（`await` 代码）
 
-1. **缺包校验（最先做）**：`const lack = runtime.missingPacks(RENDER_PACKS)`——非空立刻返回 `{ ok: false, needPacks: lack, message: '转视频需要先下载运行环境（' + runtime.packSizeText(lack) + '）' }`：**不下载、不阻塞**，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），用户点「继续」才用原参数重发本操作（见 `docs/runtime-pack-split.md`）。
+1. **选包 + 缺包校验（最先做）**：`const backend = settings.getRenderBackend()` → `renderPacks = backend === 'vidrender' ? ['ffmpeg','vidrender'] : ['ffmpeg','hyperframes']`（原固定 `RENDER_PACKS` 已删）→ `const lack = runtime.missingPacks(renderPacks)`——非空立刻返回 `{ ok: false, needPacks: lack, message: '转视频需要先下载运行环境（' + runtime.packSizeText(lack) + '）' }`：**不下载、不阻塞**，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），用户点「继续」才用原参数重发本操作（见 `docs/runtime-pack-split.md`）。
 2. **入口校验**：`payload.htmlPath` 缺失或文件不存在 → `{ ok: false, message: 'HTML 文件不存在' }`；读取原文。
 3. **合规校验**：`hfEnv.isHyperframesComposition(raw)`（要求同时含 `data-composition-id`、`__timelines`、`gsap`）；不合规则返回 `{ ok: false, compatible: false, message: … }`，提示先用 HyperFrames 引导生成合规模板。
 4. **无限循环静态守卫**（本轮新增，§1.3）：`if (/repeat\s*:\s*(?:-1|Infinity)\b/i.test(raw))` 命中就返回 `{ ok: false, message: '页面里有无限循环动画（GSAP 的 repeat: -1）…' }`——**此时还没建 `.render-tmp`、没定位 CLI / Node、也没写 `video-duration.log`**。章节模式下同一正则连 `pages/cNN.js` 一起扫（章节模式没有新增频道，守卫仍在这一个 handler 里）。
-5. **定位 CLI**：`hfEnv.findHyperframesCli()`（内置 `hyperframes.mjs` 优先，回退环境变量 `HYPERFRAMES_CLI`）；找不到返回「未找到 hyperframes CLI（hyperframes.mjs）。可设置环境变量 HYPERFRAMES_CLI 指向其路径。」
-6. **定位 Node**：`hfEnv.findNode()` —— 返回 `{ cmd, env }`（**两级优先**：① Electron 内嵌 Node，即 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`；② 系统 Node，要求主版本 >= 22）；`null` 时给出「未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 系统两种途径均不可用）」。`env` **必须**合进下面 `spawn` 的环境，否则 `electron.exe` 会把自己当应用来启动。
+5. **定位 CLI（仅 hyperframes 分支）**：`hfEnv.findHyperframesCli()`（内置 `hyperframes.mjs` 优先，回退环境变量 `HYPERFRAMES_CLI`）；找不到返回「未找到 hyperframes CLI（hyperframes.mjs）。可设置环境变量 HYPERFRAMES_CLI 指向其路径。」
+6. **定位 Node（仅 hyperframes 分支）**：`hfEnv.findNode()` —— 返回 `{ cmd, env }`（**两级优先**：① Electron 内嵌 Node，即 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`；② 系统 Node，要求主版本 >= 22）；`null` 时给出「未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 系统两种途径均不可用）」。`env` **必须**合进下面 `spawn` 的环境，否则 `electron.exe` 会把自己当应用来启动。
 7. **就地确定渲染根与路径**（取代「建临时工作目录 + 复制素材」）：
 
    | 变量 | 取值 |
@@ -262,7 +269,7 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
 
 8. **随包前端库本地化（幂等）**：`const localized = hfEnv.localizeVendorHtml(raw)` + `hfEnv.ensureVendorFiles(projDir, localized)`——把 CDN / `node_modules` 引用改写为 `./gsap.min.js` / `./p5.min.js` / `./p5.brush.js`，并把页面引用到的随包文件复制进**项目目录**（入口在子目录里，所以下面 `prepareEntry()` 用 `hfEnv.hoistVendorRefs(localized, '../')` 把它们抬一级）。本文件**没有** `try/catch` 包裹、也**不判断** `ensureVendorFiles` 的返回值（在线时仍可由 CDN 加载；与 `projects.ts` 作者态三处的兜底策略不同）。
 9. **构造环境变量**：
-   - `env = { ...process.env, ...nodeRt.env }` —— 把 `findNode()` 给的附加环境合并进来；
+   - `env = { ...process.env, ...(nodeRt ? nodeRt.env : {}) }` —— **只有 hyperframes 分支有 Node 运行时**才合并 `findNode()` 给的附加环境（vidrender 分支没有 Node，`env` 不带 `ELECTRON_RUN_AS_NODE`）；
    - `hfEnv.findFfmpegBin()` 命中时把该 bin 目录前置到 `env.PATH`（`ffBin + path.delimiter + env.PATH`）；
    - `hfEnv.BUILTIN_RESOURCES.ffmpeg` 存在 → `env.HYPERFRAMES_FFMPEG_PATH`；
    - `hfEnv.BUILTIN_RESOURCES.ffprobe` 存在 → `env.HYPERFRAMES_FFPROBE_PATH`；
@@ -288,7 +295,7 @@ HyperFrames 自己的模板是把 `data-composition-id` 写在 `<html>` 上的�
     }
     ```
 
-#### 渲染阶段（`new Promise` 执行器内，同步代码）
+#### 渲染阶段（`new Promise` 执行器内，同步代码；**仅 hyperframes 分支**）
 
 1. **拼参数**：`const renderArgs = [hfCli, 'render', '-c', '.render-tmp/entry.html', '-o', outMp4]`——`-c` 用**相对项目根的路径**（CLI 硬要求入口落在项目根之内）。再 `const renderOpts = pickRenderOverride(payload)`；`renderOpts.quality` 为真时 `renderArgs.push('--quality', renderOpts.quality)`，`renderOpts.fps` 为真时 `renderArgs.push('--fps', String(renderOpts.fps))`（缺省 / 非法一律不传，交给 CLI 自己的默认 `standard` / `30`）。
 2. **启动子进程**：`spawn(nodeRt.cmd, renderArgs, { cwd: projDir, env })`——**`cwd` 就是项目目录**，CLI 的素材解析据此把 `video/x.mp4` 这类相对引用还原成项目内的真实文件。
@@ -372,11 +379,13 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 | `node:child_process` | `spawn` | 启动 hyperframes CLI 渲染子进程；也被 `runCapture()` 用于量时间轴 / ffprobe / ffmpeg |
 | `./hfEnv` | `* as hfEnv` | `BUILTIN_RESOURCES`（`ffmpeg` / `ffprobe` / `chromeShell`）、`findHyperframesCli`、`findNode`（返回 `{ cmd, env }`）、`findFfmpegBin`、`isHyperframesComposition`、**`coreSource`（本轮新增：`./core.js` 的真源路径）**，以及随包前端库本地化的 `localizeVendorHtml` / `ensureVendorFiles` / `hoistVendorRefs` |
 | `./coreLib` | `* as coreLib` | **本轮新增**：`syncCoreTo(projDir, coreSrc)` —— 渲染前把共享绘制助手按 `CORE_VERSION` 同步进项目（只同步、不写 `core-lib.log`） |
-| `./runtime` | `* as runtime` | `missingPacks(RENDER_PACKS)` / `packSizeText(lack)` 做缺包纯校验 |
+| `./runtime` | `* as runtime` | `missingPacks(renderPacks)` / `packSizeText(lack)` 做缺包纯校验 |
 | `./settings` | `pickRenderOverride` | 渲染档位（质量 / 帧率）白名单校验，与 `projects.ts` 复用同一实现 |
 | `../shared/constants` | `CANVAS_SIZES`、`DEFAULT_CANVAS`、`RENDER_CANVASES` | 成片画布：`RENDER_CANVASES` 做白名单校验、`DEFAULT_CANVAS` 做缺省、`CANVAS_SIZES` 里的宽高写进舞台 `data-width` / `data-height` 并进日志留痕 |
 | `../shared/ipc` | `IPC` | 频道常量 |
-| `../shared/types` | `type RegisterCtx`、**`type RenderCanvas`**、`type RuntimePackName`、`type VideoRenderPayload`、`type VideoRenderResult` | `register` 的上下文类型、**画布入参 / 局部变量的类型**、`RENDER_PACKS` 的元素类型、渲染 handler 的载荷/结果类型 |
+| `./settings` | `getRenderBackend` | **本版新增**：读全局渲染后端，决定 `renderPacks` 与 CLI / Node 校验是否执行（原来的 `pickRenderOverride` 仍从同一模块导入） |
+| `./vidrender` | `{ renderWithVidrender }` | **本版新增**：小内核分支调用它渲染（不注册 IPC） |
+| `../shared/types` | `type RegisterCtx`、**`type RenderCanvas`**、`type RuntimePackName`、`type VideoRenderPayload`、`type VideoRenderResult` | `register` 的上下文类型、**画布入参 / 局部变量的类型**、`renderPacks` 的元素类型、渲染 handler 的载荷/结果类型 |
 
 > 本文件**不 import `node:url`**（量时间轴的 `file:///` URL 是手工拼的）；`app` 的使用点只剩 `writeTrimLog()` 里的 `app.getPath('userData')`。
 
@@ -384,7 +393,7 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 
 | 使用方 | 用法 |
 |--------|------|
-| `src/main/index.ts` | `video.register(ctx)` 完成注册（依赖图注释：`hfEnv ← projects, voice, whisper, video, runtime`） |
+| `src/main/index.ts` | `video.register(ctx)` 完成注册（依赖图注释：`hfEnv ← projects, voice, whisper, video, vidrender, runtime`） |
 | `src/preload/index.ts` | 暴露 `openHtml` / `renderVideo` / `showInFolder` / `onProgress`，分别转发上述频道 |
 | `src/renderer/src/pages/HtmlGenPage/index.vue` | **发起渲染**（「转视频」按钮，带质量 / 帧率档位）、成功后回写产物并刷新项目；被无限循环守卫拒绝时，就把返回的 `message` 直接写进「预览」卡的状态行（见 [HtmlGenPage.md](../renderer/src/pages/HtmlGenPage.md) §6.7） |
 | `src/renderer/src/pages/VideoPreviewPage/index.vue` | **可选项目的**纯预览：下拉选择要看的项目（默认当前工作项目，只列 `hasVideo` 的项目）、展示 / 定位成品视频；**切换不改工作项目、也不发起渲染** |
@@ -410,10 +419,10 @@ writeTrimLog(projDir, '成片画布 = ' + canvas + '（' + size.width + 'x' + si
 - **本文件不做随包库本地化的兜底判断、也不做 BGM 注入**：本地化那一步只改文本（`localizeVendorHtml`）、按需复制到项目目录（`ensureVendorFiles`），**不判断 `ensureVendorFiles()` 的返回值**（与 `projects.ts` 作者态三处「文件未就位即退回 CDN」不同）；`<audio id="myv-bgm">` 完全由 `projects.ts` 的 `applyBgmToHtml()` 在生成 / 修改 / 保存 / 设置音频时写进 `index.html`，渲染时随项目内的 HTML 一起被 CLI 读到，**音轨提取与混入 MP4 全部发生在 HyperFrames CLI 内部**（trace 阶段 `audio_process`）。因此「页面有音轨但成片没声音」应查注入标签是否存在，而不是查本模块。
 - **`dialog:open-html` 是保留能力、当前无调用方**：`hfTools.openHtml()` 仍暴露在 preload 上，但渲染层已不再调用；不要据此以为存在「手动选 HTML 渲染」的界面入口。
 - **合规校验是硬门槛**：`data-composition-id`、`__timelines`、`gsap` 三者缺一不可，失败时额外回传 `compatible: false` 供界面区分「环境错误」与「HTML 不合规」。**无限循环守卫排在它之后**（先把「不是 composition」这种更根本的问题报出去，再看循环写法）。
-- **Node 的解析与「怎么跑」都交给 `hfEnv.findNode()`**：模块自身不拼 node 路径、不假定可执行文件叫什么名字。`cmd` 在复用 Electron 内嵌 Node 时就是 `process.execPath`（绝对路径，天然规避 nvm shim / WindowsApps alias 下 `spawn('node')` 的 ENOENT），`env` 里带 `ELECTRON_RUN_AS_NODE=1` 并**必须**用 `{ ...process.env, ...nodeRt.env }` 合并；系统 Node 途径 `env` 为空对象。`child.on('error')` 文案里也会带上 `nodeRt.cmd` 便于排查。
+- **Node 的解析与「怎么跑」都交给 `hfEnv.findNode()`（仅 hyperframes 分支；小内核直接 spawn `vidrender-encode.exe`）**：模块自身不拼 node 路径、不假定可执行文件叫什么名字。`cmd` 在复用 Electron 内嵌 Node 时就是 `process.execPath`（绝对路径，天然规避 nvm shim / WindowsApps alias 下 `spawn('node')` 的 ENOENT），`env` 里带 `ELECTRON_RUN_AS_NODE=1` 并**必须**用 `{ ...process.env, ...nodeRt.env }` 合并；系统 Node 途径 `env` 为空对象。`child.on('error')` 文案里也会带上 `nodeRt.cmd` 便于排查。
 - **环境变量注入而非依赖系统 PATH**：`HYPERFRAMES_FFMPEG_PATH` / `HYPERFRAMES_FFPROBE_PATH` / `PRODUCER_HEADLESS_SHELL_PATH` 均为显式注入，`HYPERFRAMES_CLI` 是 CLI 缺失时的可选回退。这些变量名与 `hfEnv.ts` 的读取逻辑一一对应。**量时间轴（ffprobe / ffmpeg / chrome）用的就是同一份 `env`**，所以缺包时整段准备阶段根本不会开始（第 1 步就回了 `needPacks`）。
 - **`done` 幂等**：`finished` 标志位防止 `error` 与 `close` 双触发导致 Promise 重复 settle。
 - **进度不解析、只透传**：主进程原样转发子进程 stdout/stderr 文本，`[Render:trace]` 一类的语义解析在渲染层完成。
 - **不生成预览外壳**：模块只注册三个 handler 与一路推送，项目内只临时产出 `.render-tmp/**` 与成品 `video/output.mp4`，不写任何 HTML 外壳文件，也不生成 `index.preview.html`（那是 `projects.ts` 的 `project:preview-html`）。
-- **本模块需要的两个包都不随安装包**：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）各是一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14），首次用到时下载并解到 `<userData>/runtime/<包名>/`（`src/main/runtime.ts`）。因此 `BUILTIN_RESOURCES.ffmpeg` / `ffprobe` / `chromeShell` 在这些包未就绪时分别是空串 / `null`，上面的环境变量注入会整段跳过；缺包时第 1 步就把 `needPacks` 交回界面，**不会**走到「CLI / Node 定位失败」那种报错。
+- **本模块需要的包都不随安装包（按后端各两个）**：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）各是一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14），首次用到时下载并解到 `<userData>/runtime/<包名>/`（`src/main/runtime.ts`）。因此 `BUILTIN_RESOURCES.ffmpeg` / `ffprobe` / `chromeShell` 在这些包未就绪时分别是空串 / `null`，上面的环境变量注入会整段跳过；缺包时第 1 步就把 `needPacks` 交回界面，**不会**走到「CLI / Node 定位失败」那种报错。
 - **实测数据（本项目的真实项目，2026-10）**：动画内容 36.65 秒结束、GSAP 时间轴 45 秒（被一条 45 秒的进度条动画撑长）、旁白 / 字幕到 60 秒、素材视频与 BGM 都是 225.4 秒。声明有效性对照：**无声明 → 成片 225.4 秒；声明 5 → 仍 225.4 秒（被最长媒体顶掉）；声明 120 → 精确 120.000 秒**。裁剪效果：213.5 MB 素材 → 44.6 MB / 45.1 秒，`-c copy` 约 0.1 秒完成。就地渲染验证：`◇ projects\任意文件女生\video\output.mp4 1.1 MB · 5.0s · rendered in 17.4s`（子目录入口 + `../` 素材引用 + 输出直写项目 + 无事务残渣）。**反面对照**：同一个项目的页面被写进 13 处 `repeat: -1` 后，预览总时长显示 `166666668:12`（= 1e10+92 秒按 `mm:ss` 口径格式化），转视频会永远渲不完——这就是 §1.3 那道守卫要拦的情形。

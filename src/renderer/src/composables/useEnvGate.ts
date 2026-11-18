@@ -39,7 +39,7 @@ let onContinue: (() => void) | null = null
 const LABEL: Record<RuntimePackName, string> = {
   ffmpeg: '音视频处理（ffmpeg）',
   hyperframes: '视频渲染引擎（HyperFrames）',
-  vidrender: 'Rust 编码内核（vidrender-encode，联调 demo 用）'
+  vidrender: 'Rust 编码内核（vidrender-encode）'
 }
 
 // 体积按经验值提示（真实值以主进程清单为准，准备过程中会回推）。

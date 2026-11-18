@@ -134,6 +134,7 @@ const BUILTIN_RESOURCES: {
   readonly hfCli: string
   readonly hivePlayer: string
   readonly chromeShell: string | null
+  readonly vidrenderEncode: string
 } = {
   // root 只是「旧布局 / dev 的资源根」兜底（不再是所有资源的父目录）；ffmpeg / hyperframes 各自解析
   get root() { return resolveRoot(); },
@@ -142,7 +143,17 @@ const BUILTIN_RESOURCES: {
   get ffprobe() { const r = resolvePackRoot('ffmpeg'); return r ? path.join(r, 'ffmpeg', 'bin', 'ffprobe.exe') : ''; },
   get hfCli() { const r = resolvePackRoot('hyperframes'); return r ? path.join(r, 'hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs') : ''; },
   get hivePlayer() { const r = resolvePackRoot('hyperframes'); return r ? path.join(r, 'hyperframes', 'node_modules', 'hyperframes', 'dist', 'hyperframes-player.global.js') : ''; },
-  get chromeShell() { const r = resolvePackRoot('hyperframes'); return r ? findChromeShell(r) : null; }
+  get chromeShell() { const r = resolvePackRoot('hyperframes'); return r ? findChromeShell(r) : null; },
+  // Rust 小内核：运行环境包 > 安装包 extraResources > dev 仓库 resources/bin。
+  // 与 hfCli 不同，找不到时返回空串（由调用方给「缺包」提示，不误报成 hyperframes CLI 缺失）。
+  get vidrenderEncode() {
+    const packed = resolvePackRoot('vidrender');
+    const candidates = [
+      packed ? path.join(packed, 'bin', 'vidrender-encode.exe') : '',
+      app.isPackaged ? path.join(process.resourcesPath || '', 'bin', 'vidrender-encode.exe') : path.join(devResourceRoot(), 'bin', 'vidrender-encode.exe')
+    ];
+    return candidates.find((p) => p && fs.existsSync(p)) || '';
+  }
 };
 
 // 某包是否已就绪（纯查询，不触发下载）：供消费点在动手前校验

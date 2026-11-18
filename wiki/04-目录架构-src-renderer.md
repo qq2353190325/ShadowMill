@@ -2,6 +2,9 @@
 
 > Vue 3 + TypeScript 的界面层，共 **75** 个文件（`index.html` 1 + 设计规范 `agents.md` 1 + `src/` 下 **73**：外壳 `App.vue` 1 + 入口 `main.ts` / `env.d.ts` 2 + 渲染层常量 1 + 样式 1 + 通用组件 **8**（`StepBar.vue` / `NewProjectDialog.vue` / `HfSelect.vue` / `CastShot.vue` / `LegacyDataDialog.vue` / **`SettingsDialog.vue`** / **`UserArea.vue`** / **`AuthDialog.vue`**） + composables **13** + utils **8** + 页面 **39**（一页一目录，入口统一 `index.vue`，含注册表 `pages/index.ts`；设置已从页面改为**全局模态弹窗**，由 `SettingsDialog.vue` 承载 `SettingsPage`）。刻意**不引入** vue-router 与 pinia：导航是一个注册表 + `goPage()` 函数，全局状态是模块级 `reactive` 单例。所有系统能力都经 `window.*`（preload 桥）访问。
 
+> **缺包守卫跟随后端（CHANGELOG #125）**：`useRenderOptions` 的 `renderBackend` ref 与 `settings.json` 双向同步，「HTML生成」页「转视频」与 `video.ts` 都按它选 `['ffmpeg','hyperframes']` 或 `['ffmpeg','vidrender']`，默认仍是 hyperframes、**未新增 IPC 频道**。`useRuntime` / `useEnvGate` 的 vidrender 文案也同步改成「Rust 编码内核（vidrender-encode）」。
+>
+> **本版新增（双后端可切换）**：设置页「渲染档位」区块第三行「渲染引擎」（HyperFrames 稳定默认 / Rust 小内核实验），与质量 / 帧率一起经 `saveRenderDefaults(next, backend?)` 保存；后端是全局设置（`AppSettings.renderBackend`，不进项目级覆盖），默认仍是 hyperframes，**未新增 IPC 频道**。
 > **本次同步范围**：账号（可选登录）在渲染层新增 5 个文件（`composables/useAuth.ts`、`composables/useAuthDialog.ts`、`utils/localAccount.ts`、`components/AuthDialog.vue`、`components/UserArea.vue`），并把先前未收录的两个设置弹窗文件（`SettingsDialog.vue` / `useSettingsDialog.ts`）补进清单；全表行数按当前源码实测（`[IO.File]::ReadAllLines`）。**页面级描述（§5 的 HtmlGenPage / CastPage 细节、`main.css` 的样式节历史）仍是更早快照**，与当前源码的出入见各节提示，留给下一次全量同步。
 
 ---
@@ -32,13 +35,13 @@ src/renderer/
    │  ├─ useAppStore.ts          # 123 行   全局项目状态单例（appState / has* / refreshProject；`ProjectState.materials` / `canvas`）；上下文键取 @renderer/constants
    │  ├─ useToast.ts             #  22 行   轻提示
    │  ├─ useRenderProgress.ts    # 159 行   HyperFrames 渲染进度解析（长阶段中文名 + 内部微阶段不上屏）
-   │  ├─ useRuntime.ts           #  91 行   运行环境（分包 **ffmpeg / hyperframes / vidrender**）状态单例（runtime:progress 订阅 + runtime:status 首帧补齐；busy / failed / missing / prepare / cancel）；初始 status 多一个 `vidrender: 'unknown'`，`PACK_LABEL` 加「Rust 编码内核（vidrender-encode，联调 demo 用）」
-   │  ├─ useEnvGate.ts           # 162 行   「需要下载运行环境」确认框单例（guard → confirmDownload / cancelDownload / continueAction；三态）；`LABEL` 同三包文案，`HINT_MB` 加 `vidrender: 1`（仅显式指定时才下载，产品默认不提示）
+   │  ├─ useRuntime.ts           #  91 行   运行环境（分包 **ffmpeg / hyperframes / vidrender**）状态单例（runtime:progress 订阅 + runtime:status 首帧补齐；busy / failed / missing / prepare / cancel）；初始 status 多一个 `vidrender: 'unknown'`，`PACK_LABEL` 的 vidrender 文案为「Rust 编码内核（vidrender-encode）」（已去掉「联调 demo 用」）
+   │  ├─ useEnvGate.ts           # 162 行   「需要下载运行环境」确认框单例（guard → confirmDownload / cancelDownload / continueAction；三态）；`LABEL` 同三包文案，`HINT_MB` 加 `vidrender: 1`（默认后端仍是 hyperframes；切到小内核后按后端选包）
    │  ├─ useConfigPrompt.ts      #  87 行   配置类错误弹窗单例（`open` / `fromResult` / `go` / `close`；只有 [去设置] / [取消]）
    │  ├─ useLegacyData.ts        #  60 行   旧数据提示单例（legacy:status 问一次 → 弹窗；resolve(action) 回传）
    │  ├─ useNavIntent.ts         #  31 行   跨页「导航意图」信号单例（requestSettingsSection / consumeSettingsSection；SETTINGS_SECTIONS）
    │  ├─ useProjectMeta.ts       #  48 行   「HTML生成」页项目状态条 + 标题右侧「用法」气泡的派生（只读 appState，不碰 IPC）
-   │  ├─ useRenderOptions.ts     #  41 行   渲染档位：全局默认载入 / 生效档位 / 项目级覆盖写入
+   │  ├─ useRenderOptions.ts     #  47 行   渲染档位：全局默认载入 / 生效档位 / 项目级覆盖写入；**新增模块级 `renderBackend` ref**，`loadRenderDefaults()` / `saveRenderDefaults()` 从 settings 同步它（供「转视频」缺包守卫按后端选包）；`saveRenderDefaults(next, backend?)` 提交 { render: next, backend }
    │  ├─ **useAuth.ts**          # 125 行   **登录态的渲染层镜像**：模块级 `reactive` 单例 `authState`（`loggedIn` / `userName` / `email` / `expiresAt`），**只存展示字段、不存令牌**；`signIn(session)`（后端昵称，空则邮箱 @ 前部分）、`restore()`（启动问 `accountTools.me()`，**只在 `UNAUTHORIZED` 清态，网络错误保留**）、`logout()`（**异步**：先 `accountTools.logout()` 再清本地）
    │  ├─ **useAuthDialog.ts**    #  27 行   **登录 / 注册弹窗的单例开关**（模块级 `visible` / `mode` + `openAuth` / `closeAuth`；与 `useSettingsDialog` 同一套写法，只管弹窗开没开）
    │  └─ useSettingsDialog.ts    #  27 行   设置弹窗的单例开关（设置已从页面改为全局模态弹窗；`goPage('settings')` 直接转到 `openSettings()`）
@@ -74,7 +77,7 @@ src/renderer/
       │  ├─ TranscribeSection.vue# 365 行   转录弹窗
       │  └─ helpers.ts           # 165 行   字幕助手（估时、条目类型等）
       ├─ HtmlGenPage/            # **5 个文件**（角色库的两个弹窗已删除，角色区只做勾选）
-      │  ├─ index.vue            # 477 行   页面入口：项目状态卡 + 字幕 / 画布下拉 + 全局视觉风格 + `<MaterialsSection />` → `<CastSection />` → `<ChapterSection />` + 需求描述 + 四个动作按钮 + `<PreviewSection />` + 转视频弹窗
+      │  ├─ index.vue            # 480 行   页面入口：项目状态卡 + 字幕 / 画布下拉 + 全局视觉风格 + `<MaterialsSection />` → `<CastSection />` → `<ChapterSection />` + 需求描述 + 四个动作按钮 + `<PreviewSection />` + 转视频弹窗
       │  ├─ MaterialsSection.vue # 167 行   「项目素材」区块（图片 / 视频卡片墙；无 props / 无 emits）
       │  ├─ CastSection.vue      # 118 行   **「角色」区块（常显）**：卡片墙只做**勾选**（`projectTools.saveCast`）+「管理角色」跳转 `goPage('cast')`；缩略图走 `CastShot`；`castTools.list()` 只用来补展示信息
       │  ├─ ChapterSection.vue   #  71 行   只读章节列表（点「改这一章」把范围写进需求描述）
@@ -94,7 +97,7 @@ src/renderer/
          └─ components/
             ├─ ModelSection.vue  # 188 行   「模型配置」区块
             ├─ VoiceSection.vue  #  85 行   「语音服务」区块
-            ├─ RenderSection.vue #  74 行   「渲染档位」区块
+            ├─ RenderSection.vue #  85 行   「渲染档位」区块（质量 / 帧率 / **渲染引擎**三行；引擎下拉默认 HyperFrames、可切 Rust 小内核实验）
             ├─ WhisperSection.vue# 274 行   「语音识别模型」区块
             ├─ UpdateSection.vue # 397 行   「应用更新」区块
             └─ ChangelogDialog.vue # 145 行 「更新日志」弹窗
@@ -195,9 +198,9 @@ export async function goPage(key: PageKey) {
 | 提示反馈 | `toast(msg)`（2800ms 自动消失，`App.vue` 用 `TransitionGroup` 渲染） | 全局 |
 | 文本输出 | 需拼接 HTML 的场景一律用 `escTxt()` 转义 | `utils/escape.ts` |
 | 路径 → URL | 渲染层一律不拼 `file://`：项目内资源经 `previewUrl()`、项目外产物经 `userPathUrl()` / `userFileUrl()`（`hgpreview://user/…?user=1`；认不出白名单目录返回空串 ⇒ 不给试听入口） | `utils/url.ts` |
-| 渲染档位 | 项目覆盖 > 全局默认 > 内置默认（`standard` / `30`） | `composables/useRenderOptions.ts` + `utils/render.ts` |
+| 渲染档位 / 渲染引擎 | 档位：项目覆盖 > 全局默认 > 内置默认（`standard` / `30`）；**后端是全局设置**（`AppSettings.renderBackend`，默认 hyperframes，不进项目级覆盖），设置页第三行下拉经 `saveRenderDefaults(next, backend?)` 保存 | `composables/useRenderOptions.ts` + `utils/render.ts` + `pages/SettingsPage/components/RenderSection.vue` |
 | 成片画布 | **项目属性，不是渲染档位**：三档 `landscape` / `portrait` / `square`，只在「HTML生成」页选一次，落 `project.json` 的 `canvas` | `pages/HtmlGenPage/index.vue` + `utils/render.ts` / `useAppStore.ts` |
-| 运行环境状态 / 确认框 | 模块级单例；`initRuntime()` 先订阅再查一次；`useEnvGate` 只在缺包时弹框并记下续做闭包。**三包文案一致**：`vidrender` 标签「Rust 编码内核（vidrender-encode，联调 demo 用）」、体积提示 1 MB；产品默认缺包口径仍是 ffmpeg + hyperframes（`PRODUCT_PACKS`），vidrender 只有显式指定才会下载 | `composables/useRuntime.ts` / `useEnvGate.ts` |
+| 运行环境状态 / 确认框 | 模块级单例；`initRuntime()` 先订阅再查一次；`useEnvGate` 只在缺包时弹框并记下续做闭包。**三包文案一致**：`vidrender` 标签「Rust 编码内核（vidrender-encode）」（已删「联调 demo 用」）、体积提示 1 MB；产品默认缺包口径由 `video.ts` 按后端决定（hyperframes → ffmpeg + hyperframes；vidrender → ffmpeg + vidrender），`PRODUCT_PACKS` 语义未变 | `composables/useRuntime.ts` / `useEnvGate.ts` |
 | 配置类错误弹窗 | 模块级单例：主按钮固定「去设置」、**不显示「查看详情」**、余额 / 欠费不弹窗 | `composables/useConfigPrompt.ts` + `App.vue` 宿主 |
 | 旧数据提示 | 模块级单例：`initLegacyData()` 问一次 `legacy:status`；`resolve(action)` 回传 | `composables/useLegacyData.ts` + `components/LegacyDataDialog.vue` |
 | 跨页导航意图 | 模块级 `ref` 单例：源页置位 → 目标页读取并复位（设置弹窗的分类落点也走它） | `composables/useNavIntent.ts` |
@@ -234,7 +237,7 @@ export async function goPage(key: PageKey) {
 | CastPage（5 个文件） | 全局角色库：列库 / 新建 / 修改（保存元数据 / 按这个要求重画）/ 删除 / 静态预览 / 动作示范（列 / 存 / 删 / AI 生成 / 示范页） | `castTools`（`list` / `create` / `recreate` / `saveMeta` / `remove` / `preview` / `listActions` / `saveAction` / `removeAction` / `generateAction` / `demo` / `onTaskProgress`）、`projectTools`（`onTaskProgress` 共用的任务进度） |
 | VideoPreviewPage | 可选项目成品预览、在文件夹中显示；不发起渲染、不切工作项目 | `projectTools`（经 `refreshProject` 与 `load`）、`hfTools`（`showInFolder`） |
 | **全局 · 用户区 / 登录弹窗（本次新增）** | 左下角 `UserArea`：登录态展示（姓名 / 邮箱 / 首字头像）+ 浮窗第二项（未登录「登录」→ `AuthDialog`；已登录「退出登录」→ `logout()`）；`AuthDialog`：登录 / 注册（邮箱验证码 + 倒计时 + 开发模式回显）、注册成功即登录 | **`accountTools`**（`sendCode` / `register` / `login` / `me` / `logout`）；**只回展示字段，令牌不出主进程** |
-| **全局 · 设置弹窗** | 5 类配置（模型 / 语音 / 渲染 / 语音识别 / 应用更新）；`ModelSection` 的「测试连接」刻意不弹配置类弹窗 | `settingsTools`（含 `pickRuntimePack`）、`voiceTools`、`updateTools`、`runtimeTools`、`whisperTools` |
+| **全局 · 设置弹窗** | 5 类配置（模型 / 语音 / 渲染（含**渲染引擎**二选一）/ 语音识别 / 应用更新）；`ModelSection` 的「测试连接」刻意不弹配置类弹窗 | `settingsTools`（含 `pickRuntimePack`）、`voiceTools`、`updateTools`、`runtimeTools`、`whisperTools` |
 
 > 具体方法名与参数见 [files/renderer/](./files/renderer/) 下的文档（`HtmlGenPage.md` / `CastPage.md` 等仍是更早快照，见 §0/文末附录）；频道 ↔ 命名空间总表见 [01-架构总览 §3.3](./01-架构总览.md)。
 
@@ -264,7 +267,7 @@ export async function goPage(key: PageKey) {
 11. **素材列表要过结构化克隆**：`appState.project.materials` 的元素是 Vue `Proxy`，直接 `invoke` 会抛 `DataCloneError`；写素材的代码必须先铺平成普通对象（`plainList()`）。
 12. **渲染层不再拼 `file://`**：路径 → URL 只有 `utils/url.ts` 的三个出口（`previewUrl()` / `userPathUrl()` / `userFileUrl()`），都**逐段 `encodeURIComponent`**；`userPathUrl()` 认不出白名单目录时返回**空串**。
 13. **预览的「时长不可信」是一条只读回执**：主进程注入脚本把超长时长降级为 `{ dur: 0, unknown: true }`，`PreviewSection.vue` 只映射成 `prevDurUnknown`（`--:--` + 一行说明），**不新增 IPC 频道**。
-14. **vidrender 只是第三包文案，不是新的产品交互**：`useRuntime` 的初始 `status` 与 `PACK_LABEL`、`useEnvGate` 的 `LABEL` / `HINT_MB` 都补了 `vidrender`（1 MB，标注「联调 demo 用 / 只有显式指定时才下载」）；主进程的 `PRODUCT_PACKS` 已把它排除出默认缺包提示，因此界面不会主动提示下载它，`video.ts` 链路也未改。
+14. **vidrender 现在既是第三包文案，也是可显式切换的产品后端**：`useRuntime` 的初始 `status` 与 `PACK_LABEL`、`useEnvGate` 的 `LABEL` / `HINT_MB` 仍补着 `vidrender`（1 MB；文案已改为「Rust 编码内核（vidrender-encode）」；「转视频」缺包守卫也已按 `renderBackend` 选包（CHANGELOG #125））。设置页「渲染档位」第三行「渲染引擎」切到 `vidrender` 后，`saveRenderDefaults(next, backend?)` 提交 `{ render: next, backend }`，后端是**全局**设置（`AppSettings.renderBackend`，不进项目级 `RenderOverride`），默认仍是 hyperframes，**未新增 IPC 频道**。主进程分流见 [main/video.ts.md](./files/main/video.ts.md) 与 [main/vidrender.ts.md](./files/main/vidrender.ts.md)。
 
 ---
 
@@ -281,7 +284,7 @@ export async function goPage(key: PageKey) {
 - **页面 8 个组件页 + 1 个设置弹窗**：注册表 `pages/index.ts`（68 行）里 `pages` = `home / about / content / text-tts / subtitle / html-gen / cast / video-preview`，`PageComponentKey = Exclude<PageKey, 'settings'>`；`cast: CastPage` 插在 `'html-gen'` 与 `'video-preview'` 之间；设置由 `components/SettingsDialog.vue`（43 行）承载，`goPage('settings')` 直接 `openSettings()` 并返回。`App.vue`（350 行）的菜单数组 9 项（含 `{ key: 'cast', label: '角色' }` 与 `{ key: 'settings', label: '设置' }`）。
 - **页面目录** `src/renderer/src/pages/CastPage/`（**5 个文件 / 合计 1221 行**）：`index.vue` 180 / `CastEditModal.vue` 319 / `CastActionModal.vue` 375 / `CastActionEditor.vue` 262 / `CastDemoShot.vue` 85。`CastMetaModal.vue`（旧「改信息」弹窗）已删除，职责并入 `CastEditModal.vue`。
 - **账号（本次新增）**：`composables/useAuth.ts`（125 行，登录态镜像 + `restore()` + 异步 `logout()`）、`composables/useAuthDialog.ts`（27 行，弹窗单例）、`utils/localAccount.ts`（111 行，纯校验 + `accountApi` 转发）、`components/AuthDialog.vue`（364 行，登录 / 注册 + 验证码行 + 倒计时 + 开发模式 `devCode` 回显）、`components/UserArea.vue`（115 行，用户区 · 登录 / 退出）。`constants.ts`（62 行）删掉 `STORAGE_KEY_ACCOUNTS`、新增 `STORAGE_KEY_AUTH`（**只存展示字段、不含令牌**）；`App.vue` 的 `onMounted` 新增 `void restore()` 并挂 `<AuthDialog />`；`assets/main.css`（2701 行）新增 `.auth-code` / `.auth-code-send` / `.auth-devcode` 等验证码行样式。**未登录时全部本机功能照常可用**。
-- **`pages/HtmlGenPage/`**：现为 **5 个文件**（`index.vue` 477 / `CastSection.vue` 118 / `ChapterSection.vue` 71 / `MaterialsSection.vue` 167 / `PreviewSection.vue` 470）；**`CastCreateModal.vue` 与 `CastLibraryModal.vue` 已删除**，`CastSection.vue` 只剩勾选 + 「管理角色」跳转（正文 §5 里提到的 `listCastLibrary` / `importCast` / `newCast` / `promoteCast` 均已不存在，现行方法名见 §1 与 01 的频道总表）。
+- **`pages/HtmlGenPage/`**：现为 **5 个文件**（`index.vue` **480** / `CastSection.vue` 118 / `ChapterSection.vue` 71 / `MaterialsSection.vue` 167 / `PreviewSection.vue` 470）；**`CastCreateModal.vue` 与 `CastLibraryModal.vue` 已删除**，`CastSection.vue` 只剩勾选 + 「管理角色」跳转（正文 §5 里提到的 `listCastLibrary` / `importCast` / `newCast` / `promoteCast` 均已不存在，现行方法名见 §1 与 01 的频道总表）。
 - **`components/CastShot.vue`（77 行）**：props `id / units / title? / uses? / epoch? / big?`，内部调 `window.castTools.preview(id, { units, title, uses })` → `userFileUrl(res.rel) + '&e=' + epoch`；`uses` 必须是普通数组。`CastDemoShot.vue`（85 行）同理。
 - **`utils/url.ts`（65 行）**：`previewUrl` / `userPathUrl` / `userFileUrl`；白名单常量 `USER_DIRS = ['tts-output','voice','cast-preview']`。
 - **`assets/main.css`（2701 行）**：角色 / 素材 / 章节 / 账号各节的现状见 [assets.md](./files/renderer/src/assets.md)（该篇也是更早快照，行数已变）。

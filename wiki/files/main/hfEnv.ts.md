@@ -1,29 +1,29 @@
 # src/main/hfEnv.ts
 
-> **按包解析**的内在依赖定位与环境探测：ffmpeg（ffmpeg 运行环境包）/ chrome-headless-shell、HyperFrames CLI（hyperframes 运行环境包）/ Node（Electron 内嵌或系统）；另有**随包前端库本地化**（GSAP / p5 / p5.brush，离线可用）、**共享绘制助手 core.js 的真源定位**、导出外部化与渲染入口抬级辅助
+> **按包解析**的内在依赖定位与环境探测：ffmpeg（ffmpeg 运行环境包）/ chrome-headless-shell、HyperFrames CLI（hyperframes 运行环境包）/ Node（Electron 内嵌或系统）、**Rust 小内核编码二进制 `vidrenderEncode`（本版新增）**；另有**随包前端库本地化**（GSAP / p5 / p5.brush，离线可用）、**共享绘制助手 core.js 的真源定位**、导出外部化与渲染入口抬级辅助
 
 - **所在目录**：src/main/
 - **类型**：环境探测 + 随包前端库本地化辅助模块（无 IPC 注册、无业务依赖）
-- **规模**：398 行（实测 `[IO.File]::ReadAllLines`；上一版 384 行，本轮 **+14 行**：新增 `coreSource()` 及其注释；本轮 vidrender 改动只替换 `RuntimePackDirName` / `PACK_DIRS` 两行的取值，行数不变）
+- **规模**：409 行（实测 `[IO.File]::ReadAllLines`；上一版 398 行，本版 **+11 行**：新增 `BUILTIN_RESOURCES.vidrenderEncode` getter 及其注释；更早一轮 +14 行为 `coreSource()`）
 - **对外导出**：常量 `BUILTIN_RESOURCES`，函数 `refreshBuiltinResources`（兼容保留）、**`refreshPack`**（本轮参数类型 `'ffmpeg' | 'hyperframes'` → `RuntimePackDirName`，三值）、**`packReady`**（同）、`findHyperframesCli`、`resolveNodePath`、`findNode`（返回 `{ cmd, env }` 而非纯路径）、`findFfmpegBin`、`isHyperframesComposition`、**`localizeVendorHtml`**、**`externalizeVendorHtml`**、**`referencedVendorFiles`**、**`ensureVendorFiles`**、**`hoistVendorRefs`**、**`coreSource`**（共 15 个）
 
 ## 1. 作用与职责
 
 - **资源根解析**：区分开发版与打包版两种资源根，并一次性算出内置依赖的全部绝对路径。
-- **可执行文件探测**：为 HyperFrames 渲染链寻找 Chrome headless-shell、Node（要求 >= 22；**两级优先：Electron 内嵌 Node → 系统 Node**）、FFmpeg（WinGet 安装目录）。
+- **可执行文件探测**：为 HyperFrames 渲染链寻找 Chrome headless-shell、Node（要求 >= 22；**两级优先：Electron 内嵌 Node → 系统 Node**）、FFmpeg（WinGet 安装目录）；**为本版小内核渲染链定位 `vidrender-encode.exe`**（`BUILTIN_RESOURCES.vidrenderEncode`）。
 - **CLI 入口探测**：定位 `hyperframes.mjs`，内置优先、环境变量兜底。
 - **合规校验**：判断一段 HTML 是否为 HyperFrames 规范的 composition。
 - **随包前端库本地化（离线可用）**：把 HTML 里的第三方前端库引用（GSAP / p5 / p5.brush）改写成项目内相对引用 `./gsap.min.js` / `./p5.min.js` / `./p5.brush.js`，并按需把随包文件复制进调用方指定的项目目录——让生成的 composition 在离线或 CDN 抖动时也能预览与渲染。**能识别两种来源**：CDN 地址（jsDelivr / unpkg / cdnjs）与本地 `node_modules/p5/lib/…` 这类相对引用（PDoom 风格写法）。`ensureVendorFiles` 返回 `false`（有库缺失 / 复制失败）时，作者态三处（生成 / 修改 / 保存）会把引用换回 CDN；预览与渲染副本不判断返回值（见 3.7 的调用点表）。
 - **共享绘制助手真源定位（本轮新增）**：`coreSource()` 给出应用内置 `vendor/shadowmill/core.js` 的绝对路径，供 `coreLib.syncCoreTo()` 在「写骨架 / 预览 / 导出 / 渲染前」把这份助手**按版本复制进项目**。它与 `vendor/` 的库共用同一套定位规则，但**刻意不进 `VENDOR_LIBS`**（见 2.2 与 5 的最后几条）。
 - **导出外部化（反向）**：导出/下载的是**单个 HTML 文件**，同目录没有这些库文件，故 `externalizeVendorHtml()` 把 `./gsap.min.js` / `./p5.min.js` / `./p5.brush.js` 换回 `VENDOR_LIBS` 里登记的固定版本 CDN 地址，让导出物脱离项目目录也能独立打开（联网即可）。
 - **渲染入口抬级**：渲染入口写在项目的 `.render-tmp/` 子目录里，`hoistVendorRefs(html, '../')` 把 `./<库文件>` 改写成 `../<库文件>`（引用要比项目根多退一级）。
-- 本模块不注册任何 IPC，也不读写业务数据（`project.json`、字幕等一概不碰）；唯一的写盘行为是本地化的 `ensureVendorFiles()`，它只把随包文件复制到调用方指定的目录。`BUILTIN_RESOURCES` 的字段是 **getter + 按包缓存**（`cachedPackRoots`，另有 `cachedChrome`；Node 探测另有 `cachedNode`），路径在首次访问时求值，之后复用缓存值，直到 `refreshPack(name, root?)` 按包清缓存（或 `refreshBuiltinResources()` 清全部）（详见 3.4 / 5）。**`cachedChrome` 是个例外：它只缓存「找到的」结果**（`if (cachedChrome) return cachedChrome;`），找不到时返回 `null` 但不写缓存——详见 3.1。
+- 本模块不注册任何 IPC，也不读写业务数据（`project.json`、字幕等一概不碰）；唯一的写盘行为是本地化的 `ensureVendorFiles()`，它只把随包文件复制到调用方指定的目录。`BUILTIN_RESOURCES` 的字段是 **getter + 按包缓存**（`cachedPackRoots`，另有 `cachedChrome`；Node 探测另有 `cachedNode`），路径在首次访问时求值，之后复用缓存值，直到 `refreshPack(name, root?)` 按包清缓存（或 `refreshBuiltinResources()` 清全部）（详见 3.4 / 5）；**本版新增的 `vidrenderEncode` getter 也在这里**（见 2.1）。**`cachedChrome` 是个例外：它只缓存「找到的」结果**（`if (cachedChrome) return cachedChrome;`），找不到时返回 `null` 但不写缓存——详见 3.1。
 
 ## 2. 导出与关键实现
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `BUILTIN_RESOURCES` | 常量对象（字段为 getter） | 字段：`root`、`ffmpegBin`、`ffmpeg`、`ffprobe`、`hfCli`、`hivePlayer`、`chromeShell`（**已无 `node` 字段**：`resources/node` 整体删除；`root` 只作旧布局 / dev 的兜底，不再是一切资源的父目录） |
+| `BUILTIN_RESOURCES` | 常量对象（字段为 getter） | 字段：`root`、`ffmpegBin`、`ffmpeg`、`ffprobe`、`hfCli`、`hivePlayer`、`chromeShell`、**`vidrenderEncode`（本版新增）**（**已无 `node` 字段**：`resources/node` 整体删除；`root` 只作旧布局 / dev 的兜底，不再是一切资源的父目录） |
 | `refreshPack(name, root?)` | `(name: RuntimePackDirName, root?: string) => void`（`RuntimePackDirName = 'ffmpeg' \| 'hyperframes' \| 'vidrender'`，**本轮扩为三值**） | **按包失效路径缓存**：传 `root` 则把该包钉到该目录，不传（或空串）则删掉该包缓存、下次按盘上标记重新解析；同时清 `cachedChrome`，`name === 'hyperframes'` 时另清 `cachedNode`。由 `runtime.ts` 在「探测到某包就绪」与「解包完成」时调用 |
 | `packReady(name)` | `(name: RuntimePackDirName) => boolean`（三值，本轮扩展） | 纯查询：该包根是否解析得到（不触发下载、不写盘），供消费点校验 |
 | `refreshBuiltinResources(root?)` | `(root?: string) => string` | **兼容保留**的旧接口：把传入的根同时钉给两个包（不传则清两个包缓存），再清 `cachedChrome` / `cachedNode`，返回 hyperframes 包根；分包后 `runtime.ts` 主要走 `refreshPack()` |
@@ -39,7 +39,7 @@
 | `hoistVendorRefs(html, prefix)` | `(html: string, prefix: string) => string` | 渲染入口在 `.render-tmp/` 子目录里，把本级 `./<库文件>` 改写成 `prefix + <库文件>`（`prefix` 传 `'../'`）；已是 `../` 的引用不再二次加前缀 |
 | **`coreSource()`** | `() => string \| null` | **共享绘制助手 `vendor/shadowmill/core.js` 的绝对路径**（与 `vendorSource` 同一套定位规则：`app.getAppPath()/vendor` → `process.resourcesPath/vendor`；都不存在回 `null`）。**只给路径、不复制**——复制与版本比对在 `coreLib.ts` 的 `syncCoreTo()` |
 
-> **包目录名类型（本轮扩展）**：源码 `export type RuntimePackDirName = 'ffmpeg' | 'hyperframes' | 'vidrender';` 与 `const PACK_DIRS: RuntimePackDirName[] = ['ffmpeg', 'hyperframes', 'vidrender'];`；`resolvePackRoot` / `packRootFromDisk` / `refreshPack` / `packReady` / `cachedPackRoots` 都改用这个类型。**没有新增 `BUILTIN_RESOURCES` getter 或字段**（vidrender 的二进制由 `runtime.ts` 包注册表与 demo 脚本定位，不经过这里）。
+> **包目录名类型（本轮扩展）**：源码 `export type RuntimePackDirName = 'ffmpeg' | 'hyperframes' | 'vidrender';` 与 `const PACK_DIRS: RuntimePackDirName[] = ['ffmpeg', 'hyperframes', 'vidrender'];`；`resolvePackRoot` / `packRootFromDisk` / `refreshPack` / `packReady` / `cachedPackRoots` 都改用这个类型。**本版已新增 `BUILTIN_RESOURCES.vidrenderEncode` getter**（见 2.1）——上一版只扩了三包类型，这一版把小内核二进制的定位也收进了本模块；`runtime.ts` 包注册表仍负责解包。
 >
 ### 2.1 `BUILTIN_RESOURCES` 字段与路径构成
 
@@ -51,6 +51,7 @@
 | `ffprobe` | `string` | 同上 + `/ffmpeg/bin/ffprobe.exe` |
 | `hfCli` | `string` | `resolvePackRoot('hyperframes')` + `/hyperframes/node_modules/hyperframes/bin/hyperframes.mjs` |
 | `hivePlayer` | `string` | hyperframes 包根 + `/hyperframes/node_modules/hyperframes/dist/hyperframes-player.global.js` |
+| **`vidrenderEncode`** | **`string`（本版新增）** | `vidrender-encode.exe` 绝对路径，解析顺序 = ① 运行环境包 `vidrender` 根（`resolvePackRoot('vidrender')` + `bin/vidrender-encode.exe`）→ ② 安装包 extraResources `process.resourcesPath/bin/vidrender-encode.exe` → ③ dev 仓库 `resources/bin/vidrender-encode.exe`；**三者都找不到返回空串**，由 `vidrender.ts` 转成「请在设置里下载 Rust 编码内核运行环境包」的提示，不误报成 hyperframes CLI 缺失 |
 | `chromeShell` | `string \| null` | `findChromeShell(<hyperframes 包根>)` 的返回值：在包根 + `/chrome/chrome-headless-shell` 子树中递归找出的 `chrome-headless-shell.exe` 绝对路径（该包未就绪时 `null`）；getter 每次访问都会重新求值，但**只有找到的结果**会被缓存（见 3.1） |
 
 `resolvePackRoot(name)` 是分包后的核心（候选顺序）：① `<userData>/runtime/<包名>/`——目录内有 `ok.json` 才算完整（与 `runtime.ts` 先写 `ok.json` 再写记录的顺序一致）；② 旧版整体包目录（`current.json` + `ok.json` 的 `<id>` 目录，实现于 `legacyRoots()`）；③ `process.resourcesPath`（打包态）或项目根 `resources`（开发态，走 `devResourceRoot()`）。候选目录下必须存在与包名同名的子目录（`<候选>/ffmpeg` 或 `<候选>/hyperframes`）才算命中。命中结果按包写入 `cachedPackRoots`；解包完成或包切换时由 `runtime.ts` 调 `refreshPack(name, root?)` 失效。**这解释了为什么 `root` 不能再直接用 `process.resourcesPath`**：打包后 ffmpeg / hyperframes 各在 `userData/runtime/<包名>/` 下，安装目录里根本没有它们。
@@ -201,6 +202,7 @@
 | `src/main/voice/ttsAlign.ts` | `BUILTIN_RESOURCES`（取 `ffmpeg` / `ffprobe`） |
 | `src/main/voice/cloneAudio.ts` | `import { BUILTIN_RESOURCES } from './hfEnv'`：`voice:create` 创建克隆音色时取 `BUILTIN_RESOURCES.ffmpeg` / `BUILTIN_RESOURCES.ffprobe`，把本地参考音频裁成前 15 秒 / 24 kHz / 单声道 `pcm_s16le` wav（见 [voice.md](./voice.md) §4.1.1） |
 | `src/main/whisper.ts` | `BUILTIN_RESOURCES`（取 `ffmpeg`；并把它当作 `resolveCliPath()` 的第二候选根——whisper 现在**随安装包**，首选 `<resources>/whisper`，`root` 只是旧布局兜底） |
+| **`src/main/vidrender.ts`（本版新增）** | 用 `hfEnv.BUILTIN_RESOURCES.vidrenderEncode` 定位 `vidrender-encode.exe`（找不到直接抛「未找到 vidrender-encode」），并用 `hfEnv.BUILTIN_RESOURCES.ffmpegBin` 前置进子进程 `PATH`；**不注册 IPC**，由 `video.ts` 调用 |
 | `src/main/runtime.ts` | 以 `import * as hfEnv from './hfEnv'` 整体引入，**主要用 `refreshPack(name, root)`**（探测到某包就绪、以及解包完成时，把该包目录交给 `hfEnv` 重算该包缓存）；`refreshBuiltinResources(...)` 与 `packReady(...)` 也已导出但当前调用点在 `runtime.ts` 内以 `refreshPack` 为主 |
 
 `vendorSource` 仅在本模块内部被 `localizeVendorHtml` / `ensureVendorFiles` 使用；`referencesLocalFile` 由 `referencedVendorFiles` 调用；`referencedVendorFiles` 也已导出，但当前只在模块内部被 `ensureVendorFiles` 调用（全库无外部调用点）。`coreSource` 是**唯一一个专门为模块外调用而存在的路径函数**：本文件内没有它的调用点，唯一消费方是 `projects.ts` 的 `syncCoreLib`（`video.ts` 直接 `import * as hfEnv` 后自己调用，不经 `projects.ts`）。
@@ -213,7 +215,7 @@
 
 ## 5. 注意事项与实现要点
 
-- **第三包只扩了类型、没扩资源定位面**：`RuntimePackDirName` / `PACK_DIRS` 变为三值，但 `BUILTIN_RESOURCES` 的 getter 仍是 `ffmpegBin` / `ffmpeg` / `ffprobe` / `hfCli` / `hivePlayer` / `chromeShell` 这一组，没有为 vidrender 新增 getter；`refreshPack('vidrender', root)` 只让包根缓存能记下它的目录，不参与 ffmpeg / hyperframes 的路径解析。
+- **第三包从「只扩类型」升级为「有专门 getter」（本版新增）**：上一版 `RuntimePackDirName` / `PACK_DIRS` 变为三值、但 `BUILTIN_RESOURCES` 没有对应 getter；本版补上 `vidrenderEncode`（解析顺序见 2.1，找不到返回空串），供 `vidrender.ts` 使用。`refreshPack('vidrender', root)` 同时让 `resolvePackRoot('vidrender')` 的包根缓存能被主动失效；ffmpeg / hyperframes 的路径解析不受影响。
 - **路径解析是「按包缓存 + 可失效」而非一次性快照**：`BUILTIN_RESOURCES` 的字段都是 getter，`ffmpeg` 一族与 `hfCli` 一族各自经 `resolvePackRoot(name)` 解析并按包写入 `cachedPackRoots`；候选依次是「该包已解到 `<userData>/runtime/<包名>/`（需 `ok.json`）」→「旧版整体包目录（`current.json` + `ok.json`）」→「`process.resourcesPath` / 开发态项目根 `resources`」。`root` 只作后两者的兜底。运行环境包解包完成或切换目录时由调用方 `refreshPack(name, root?)` 失效该包缓存（并清 `cachedChrome`，hyperframes 时另清 `cachedNode`），`refreshBuiltinResources(root?)` 则一次清两个包 + 两个探测缓存（兼容保留）。
 - **平台假设为 Windows**：路径与文件名硬编码 `node.exe`、`ffmpeg.exe`、`ffprobe.exe`、`chrome-headless-shell.exe`、`where.exe`、`C:\Program Files\nodejs`，非 Windows 平台这些分支会全部落空。
 - **只做“存在 + 能跑”的轻量验证**：所有探测都是 `existsSync` 加 `spawnSync(..., ['-v'])` 的 `status === 0` 判定，不解析版本（`resolveNodePath`、`findHyperframesCli`、`findFfmpegBin` 均不校验版本）；**唯一例外是 `findNode`**——① 与 ② 分支都解析主版本并要求 >= 22。

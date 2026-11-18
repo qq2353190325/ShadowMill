@@ -146,6 +146,9 @@ export interface RenderOptions {
 }
 // 项目级覆盖：字段可缺省，缺省项跟随全局默认（settings.json 的 render）
 export type RenderOverride = Partial<RenderOptions>
+// 渲染后端：默认 hyperframes（老行为），用户可在设置页切到 Rust 小内核做 A/B。
+// 这是**全局**设置，不进项目级 RenderOverride——后端是「用什么渲」，不是「渲成什么档位」。
+export type RenderBackend = 'hyperframes' | 'vidrender'
 
 // ===== 成片画布方向（**项目属性，不是渲染档位**）=====
 // 取值与尺寸见 shared/constants.ts（RENDER_CANVASES / CANVAS_SIZES / DEFAULT_CANVAS），
@@ -169,6 +172,8 @@ export interface AppSettings {
   whisper: WhisperSettings
   // 视频渲染全局默认档位（项目未覆盖时生效）
   render: RenderOptions
+  // 渲染后端（全局）：缺省按 hyperframes 兼容老用户；vidrender 为小内核实验路径
+  renderBackend: RenderBackend
   // 应用自更新：更新源覆盖 / 启动静默检查 / 已跳过版本
   updater: UpdaterSettings
 }
@@ -186,6 +191,7 @@ export interface SettingsSaveResult {
 // settings:save-render 载荷：只更新渲染默认档位，不动 customModel
 export interface SettingsSaveRenderPayload {
   render?: RenderOverride
+  backend?: RenderBackend
 }
 // settings:save-updater 载荷：只更新更新源 / 自动检查开关
 export interface SettingsSaveUpdaterPayload {
@@ -1257,8 +1263,8 @@ export interface PreloadApi {
   settingsTools: {
     get(): Promise<AppSettings>
     save(customModel: CustomModelConfig): Promise<IpcResult<SettingsSaveResult>>
-    // 渲染默认档位（settings.json 的 render 段）
-    saveRender(render: RenderOverride): Promise<IpcResult<SettingsSaveResult>>
+    // 渲染默认档位与后端（settings.json 的 render 段 + renderBackend）
+    saveRender(payload: SettingsSaveRenderPayload): Promise<IpcResult<SettingsSaveResult>>
     // 更新源与自动检查开关（settings.json 的 updater 段）
     saveUpdater(updater: Partial<UpdaterSettings>): Promise<IpcResult<SettingsSaveResult>>
     test(customModel: CustomModelConfig): Promise<IpcResult>

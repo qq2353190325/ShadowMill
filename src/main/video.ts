@@ -10,7 +10,9 @@ import { spawn } from 'node:child_process'
 import * as hfEnv from './hfEnv'
 import * as coreLib from './coreLib'
 import * as runtime from './runtime'
+import * as settings from './settings'
 import { pickRenderOverride } from './settings'
+import { renderWithVidrender } from './vidrender'
 import { CANVAS_SIZES, DEFAULT_CANVAS, RENDER_CANVASES } from '../shared/constants'
 import { IPC } from '../shared/ipc'
 import type {
@@ -25,9 +27,9 @@ import type {
 // RenderPayload / PreviewShellPayload / RenderResult（见 VideoRenderPayload / VideoPreviewShellPayload / VideoRenderResult）
 // 渲染档位（质量 / 帧率）也在 VideoRenderPayload 内：只接受白名单内的显式值，缺省不传参数、走 CLI 默认（standard / 30）
 
-// 渲染要哪几包：HyperFrames CLI 与浏览器壳在 hyperframes 包，编码与素材探测在 ffmpeg 包；
-// 分包后两者都在安装包之外，缺哪个就提示下载哪个（见 docs/runtime-pack-split.md）
-const RENDER_PACKS: RuntimePackName[] = ['ffmpeg', 'hyperframes']
+// 渲染要哪些运行环境包按后端决定：hyperframes 路径要 CLI + 浏览器壳（103MB 包），
+// vidrender 路径只要 ffmpeg + 小内核（<1MB 包）；缺哪个就提示下载哪个（见 docs/runtime-pack-split.md）。
+// 默认 hyperframes，只有用户在设置页显式切换才走小内核。
 
 // ===== 成片时长：谁说了算 =====
 // HyperFrames 的规则（cli.js 实测）：**成片时长 = max(根节点声明的时长, 页面里最长媒体的时长)**。
@@ -303,10 +305,14 @@ function register(ctx?: RegisterCtx): void {
   });
 
   ipcMain.handle(IPC.Video.Render, async (event, payload?: VideoRenderPayload) => {
-    // 分包之后运行环境**不再随安装包**：渲染要 ffmpeg + hyperframes 两包。
+    // 分包之后运行环境**不再随安装包**：按所选后端要不同的包。
     // 这里只做纯校验（不下载、不阻塞）——缺包就把 needPacks 回给界面，由它问用户是否下载（可取消）；
     // 否则会以「未找到 hyperframes CLI」误导用户，或者让这次请求无声地卡在下载上。
-    const lack = runtime.missingPacks(RENDER_PACKS);
+    const backend = settings.getRenderBackend();
+    const renderPacks: RuntimePackName[] = backend === 'vidrender'
+      ? ['ffmpeg', 'vidrender']
+      : ['ffmpeg', 'hyperframes'];
+    const lack = runtime.missingPacks(renderPacks);
     if (lack.length) {
       return {
         ok: false,
@@ -359,14 +365,15 @@ function register(ctx?: RegisterCtx): void {
       } as VideoRenderResult;
     }
 
-    const hfCli = hfEnv.findHyperframesCli();
-    if (!hfCli) {
+    // CLI 与 Node 只有 hyperframes 后端要；小内核由 vidrender.ts 直接 spawn 编码二进制。
+    const hfCli = backend === 'hyperframes' ? hfEnv.findHyperframesCli() : null;
+    if (backend === 'hyperframes' && !hfCli) {
       return { ok: false, message: '未找到 hyperframes CLI（hyperframes.mjs）。可设置环境变量 HYPERFRAMES_CLI 指向其路径。' } as VideoRenderResult;
     }
     // 返回 { cmd, env }：优先复用 Electron 内嵌 Node，此时 env 里带 ELECTRON_RUN_AS_NODE=1。
     // 这个 env **必须**合进下面 spawn 的环境，否则 electron.exe 会把自己当应用来启动（详见 hfEnv.findNode()）。
-    const nodeRt = hfEnv.findNode();
-    if (!nodeRt) {
+    const nodeRt = backend === 'hyperframes' ? hfEnv.findNode() : null;
+    if (backend === 'hyperframes' && !nodeRt) {
       return { ok: false, message: '未找到可用的 Node.js（HyperFrames 要求 >= 22；Electron 内嵌 / 系统两种途径均不可用）' } as VideoRenderResult;
     }
 
@@ -405,7 +412,8 @@ function register(ctx?: RegisterCtx): void {
     const localized = hfEnv.localizeVendorHtml(raw)
     hfEnv.ensureVendorFiles(projDir, localized)
 
-    const env: Record<string, string | undefined> = { ...process.env, ...nodeRt.env };
+    // 小内核后端没有 Node 运行时：env 只是给量测/裁剪的子进程用，不带 ELECTRON_RUN_AS_NODE。
+    const env: Record<string, string | undefined> = { ...process.env, ...(nodeRt ? nodeRt.env : {}) };
     const ffBin = hfEnv.findFfmpegBin();
     if (ffBin) env.PATH = ffBin + path.delimiter + (env.PATH || '');
     // 内置 ffmpeg/ffprobe 路径显式注入，避免依赖系统 PATH（HYPERFRAMES_* 为可选）
@@ -436,16 +444,37 @@ function register(ctx?: RegisterCtx): void {
       return { ok: false, message: '准备渲染入口失败：' + ((e as Error).message || String(e)) } as VideoRenderResult;
     }
 
+    // ===== 小内核后端：与 hyperframes 共用前面的入口准备，渲染这一段换掉 =====
+    if (backend === 'vidrender') {
+      try {
+        const renderOpts = pickRenderOverride(payload);
+        await renderWithVidrender({
+          entryHtml,
+          output: outMp4,
+          canvas,
+          fps: renderOpts.fps || 30,
+          quality: renderOpts.quality || 'standard',
+          onProgress: (text) => event.sender.send(IPC.Video.Progress, { text })
+        });
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (e) { /* 被占用则下次渲染前再清 */ }
+        if (fs.existsSync(outMp4)) return { ok: true, outputVideo: outMp4, projectDir: projDir };
+        return { ok: false, message: '小内核渲染完成但未找到成片' };
+      } catch (e) {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (e2) { /* ignore */ }
+        return { ok: false, message: '小内核渲染失败：' + ((e as Error).message || String(e)) };
+      }
+    }
+
     return new Promise<VideoRenderResult>((resolve) => {
 
       // 渲染档位：只把载荷里显式给出的合法值拼进 CLI 参数（缺省交给 CLI 自己的默认 standard / 30）。
       // -c 用「相对项目根的路径」（CLI 的硬要求：入口必须落在项目根之内，它也接受绝对路径但相对更稳）。
-      const renderArgs = [hfCli, 'render', '-c', '.render-tmp/entry.html', '-o', outMp4];
+      const renderArgs = [hfCli!, 'render', '-c', '.render-tmp/entry.html', '-o', outMp4];
       const renderOpts = pickRenderOverride(payload);
       if (renderOpts.quality) renderArgs.push('--quality', renderOpts.quality);
       if (renderOpts.fps) renderArgs.push('--fps', String(renderOpts.fps));
 
-      const child = spawn(nodeRt.cmd, renderArgs, {
+      const child = spawn(nodeRt!.cmd, renderArgs, {
         cwd: projDir,
         env
       });
@@ -465,7 +494,7 @@ function register(ctx?: RegisterCtx): void {
         const text = d.toString();
         event.sender.send(IPC.Video.Progress, { text });
       });
-      child.on('error', (err) => done({ ok: false, message: '启动渲染失败：' + err.message + '（node: ' + (nodeRt.cmd || 'null') + '）' }));
+      child.on('error', (err) => done({ ok: false, message: '启动渲染失败：' + err.message + '（node: ' + (nodeRt!.cmd || 'null') + '）' }));
       child.on('close', (code) => {
         // 渲染入口是临时物（几十 KB）：无论成败都清掉，不把中间产物留在项目里。
         // 成品的清理不需要做——它就直接长在 video/output.mp4，不存在"从工作目录搬回来"这一步。

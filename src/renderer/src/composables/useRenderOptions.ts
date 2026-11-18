@@ -1,19 +1,22 @@
 // composables/useRenderOptions.ts —— 视频渲染档位：全局默认（settings.json）载入 + 项目级覆盖写入
 // 生效档位 = 全局默认 ⊕ 当前项目覆盖（项目覆盖优先，缺省项跟随全局默认）。
 // 全局默认在 App.vue 启动时经 loadRenderDefaults() 载入一次；页面读 renderDefaults / effectiveRenderOptions()。
-import { reactive } from 'vue'
-import type { RenderOptions, RenderOverride } from '@shared/types'
+import { reactive, ref } from 'vue'
+import type { RenderBackend, RenderOptions, RenderOverride } from '@shared/types'
 import { FALLBACK_RENDER, pickRenderOverride, resolveRenderOptions } from '@renderer/utils/render'
 import { appState } from '@renderer/composables/useAppStore'
 
 // 全局默认档位（模块级 reactive 单例，与 appState 同一模式）
 export const renderDefaults = reactive<RenderOptions>(Object.assign({}, FALLBACK_RENDER));
+// 渲染后端（全局，来自 settings.json）：设置页切换后同步到这里，供缺包守卫使用
+export const renderBackend = ref<RenderBackend>('hyperframes');
 
 // 读取 settings.json 的 render 段（失败/缺省则沿用内置默认 standard / 30）
 export async function loadRenderDefaults(): Promise<void> {
   try {
     const s = await window.settingsTools.get();
     Object.assign(renderDefaults, resolveRenderOptions(s && s.render));
+    renderBackend.value = s && s.renderBackend === 'vidrender' ? 'vidrender' : 'hyperframes';
   } catch (e) { /* 读取失败：沿用内置默认，不打断启动 */ }
 }
 
@@ -24,9 +27,12 @@ export function effectiveRenderOptions(): RenderOptions {
 }
 
 // 保存全局默认（设置页）
-export async function saveRenderDefaults(next: RenderOptions): Promise<{ ok: boolean; message?: string }> {
-  const res = await window.settingsTools.saveRender(next);
-  if (res && res.ok) Object.assign(renderDefaults, resolveRenderOptions(res.settings.render));
+export async function saveRenderDefaults(next: RenderOptions, backend?: RenderBackend): Promise<{ ok: boolean; message?: string }> {
+  const res = await window.settingsTools.saveRender({ render: next, backend });
+  if (res && res.ok) {
+    Object.assign(renderDefaults, resolveRenderOptions(res.settings.render));
+    renderBackend.value = res.settings.renderBackend;
+  }
   return { ok: !!(res && res.ok), message: (res as { message?: string })?.message };
 }
 

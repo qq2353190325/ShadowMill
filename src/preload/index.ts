@@ -77,7 +77,7 @@ const settingsTools: PreloadApi['settingsTools'] = {
   get: () => ipcRenderer.invoke(IPC.Settings.Get),
   save: (customModel) => ipcRenderer.invoke(IPC.Settings.Save, { customModel }),
   // 渲染默认档位（质量 / 帧率）：只更新 settings.json 的 render 段
-  saveRender: (render) => ipcRenderer.invoke(IPC.Settings.SaveRender, { render }),
+  saveRender: (payload) => ipcRenderer.invoke(IPC.Settings.SaveRender, payload),
   // 更新源与自动检查开关：只更新 settings.json 的 updater 段
   saveUpdater: (updater) => ipcRenderer.invoke(IPC.Settings.SaveUpdater, { updater }),
   test: (customModel) => ipcRenderer.invoke(IPC.Settings.Test, { customModel }),
