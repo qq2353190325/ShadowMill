@@ -32,8 +32,8 @@ src/renderer/
    │  ├─ useAppStore.ts          # 123 行   全局项目状态单例（appState / has* / refreshProject；`ProjectState.materials` / `canvas`）；上下文键取 @renderer/constants
    │  ├─ useToast.ts             #  22 行   轻提示
    │  ├─ useRenderProgress.ts    # 159 行   HyperFrames 渲染进度解析（长阶段中文名 + 内部微阶段不上屏）
-   │  ├─ useRuntime.ts           #  90 行   运行环境（分包）状态单例（runtime:progress 订阅 + runtime:status 首帧补齐；busy / failed / missing / prepare / cancel）
-   │  ├─ useEnvGate.ts           # 160 行   「需要下载运行环境」确认框单例（guard → confirmDownload / cancelDownload / continueAction；三态）
+   │  ├─ useRuntime.ts           #  91 行   运行环境（分包 **ffmpeg / hyperframes / vidrender**）状态单例（runtime:progress 订阅 + runtime:status 首帧补齐；busy / failed / missing / prepare / cancel）；初始 status 多一个 `vidrender: 'unknown'`，`PACK_LABEL` 加「Rust 编码内核（vidrender-encode，联调 demo 用）」
+   │  ├─ useEnvGate.ts           # 162 行   「需要下载运行环境」确认框单例（guard → confirmDownload / cancelDownload / continueAction；三态）；`LABEL` 同三包文案，`HINT_MB` 加 `vidrender: 1`（仅显式指定时才下载，产品默认不提示）
    │  ├─ useConfigPrompt.ts      #  87 行   配置类错误弹窗单例（`open` / `fromResult` / `go` / `close`；只有 [去设置] / [取消]）
    │  ├─ useLegacyData.ts        #  60 行   旧数据提示单例（legacy:status 问一次 → 弹窗；resolve(action) 回传）
    │  ├─ useNavIntent.ts         #  31 行   跨页「导航意图」信号单例（requestSettingsSection / consumeSettingsSection；SETTINGS_SECTIONS）
@@ -197,7 +197,7 @@ export async function goPage(key: PageKey) {
 | 路径 → URL | 渲染层一律不拼 `file://`：项目内资源经 `previewUrl()`、项目外产物经 `userPathUrl()` / `userFileUrl()`（`hgpreview://user/…?user=1`；认不出白名单目录返回空串 ⇒ 不给试听入口） | `utils/url.ts` |
 | 渲染档位 | 项目覆盖 > 全局默认 > 内置默认（`standard` / `30`） | `composables/useRenderOptions.ts` + `utils/render.ts` |
 | 成片画布 | **项目属性，不是渲染档位**：三档 `landscape` / `portrait` / `square`，只在「HTML生成」页选一次，落 `project.json` 的 `canvas` | `pages/HtmlGenPage/index.vue` + `utils/render.ts` / `useAppStore.ts` |
-| 运行环境状态 / 确认框 | 模块级单例；`initRuntime()` 先订阅再查一次；`useEnvGate` 只在缺包时弹框并记下续做闭包 | `composables/useRuntime.ts` / `useEnvGate.ts` |
+| 运行环境状态 / 确认框 | 模块级单例；`initRuntime()` 先订阅再查一次；`useEnvGate` 只在缺包时弹框并记下续做闭包。**三包文案一致**：`vidrender` 标签「Rust 编码内核（vidrender-encode，联调 demo 用）」、体积提示 1 MB；产品默认缺包口径仍是 ffmpeg + hyperframes（`PRODUCT_PACKS`），vidrender 只有显式指定才会下载 | `composables/useRuntime.ts` / `useEnvGate.ts` |
 | 配置类错误弹窗 | 模块级单例：主按钮固定「去设置」、**不显示「查看详情」**、余额 / 欠费不弹窗 | `composables/useConfigPrompt.ts` + `App.vue` 宿主 |
 | 旧数据提示 | 模块级单例：`initLegacyData()` 问一次 `legacy:status`；`resolve(action)` 回传 | `composables/useLegacyData.ts` + `components/LegacyDataDialog.vue` |
 | 跨页导航意图 | 模块级 `ref` 单例：源页置位 → 目标页读取并复位（设置弹窗的分类落点也走它） | `composables/useNavIntent.ts` |
@@ -264,6 +264,7 @@ export async function goPage(key: PageKey) {
 11. **素材列表要过结构化克隆**：`appState.project.materials` 的元素是 Vue `Proxy`，直接 `invoke` 会抛 `DataCloneError`；写素材的代码必须先铺平成普通对象（`plainList()`）。
 12. **渲染层不再拼 `file://`**：路径 → URL 只有 `utils/url.ts` 的三个出口（`previewUrl()` / `userPathUrl()` / `userFileUrl()`），都**逐段 `encodeURIComponent`**；`userPathUrl()` 认不出白名单目录时返回**空串**。
 13. **预览的「时长不可信」是一条只读回执**：主进程注入脚本把超长时长降级为 `{ dur: 0, unknown: true }`，`PreviewSection.vue` 只映射成 `prevDurUnknown`（`--:--` + 一行说明），**不新增 IPC 频道**。
+14. **vidrender 只是第三包文案，不是新的产品交互**：`useRuntime` 的初始 `status` 与 `PACK_LABEL`、`useEnvGate` 的 `LABEL` / `HINT_MB` 都补了 `vidrender`（1 MB，标注「联调 demo 用 / 只有显式指定时才下载」）；主进程的 `PRODUCT_PACKS` 已把它排除出默认缺包提示，因此界面不会主动提示下载它，`video.ts` 链路也未改。
 
 ---
 

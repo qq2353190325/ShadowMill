@@ -1,13 +1,13 @@
 # src/main/runtime.ts
 
-> 运行环境（**分包**）：把 `ffmpeg`（179.9 MB / 9 文件）与 `hyperframes`（439.9 MB / 4892 文件）从「随安装包展开」改成「各自一个 7z、**首次用到时**从更新源下载并解到 `<userData>/runtime/<包名>/`」；`whisper`（12.5 MB / 15 文件）改为**随安装包**（见 `package.json` 的 `extraResources`），装完即可离线转录。注册 3 个 `runtime:*` handle + 1 路 `runtime:progress` 推送。分包实测：`ffmpeg` 42.6 MB + `hyperframes` **103.1 MB = 两包合计 145.7 MB**（比旧单包 `runtime.7z` 的 147.4 MB 还小 1.7 MB）。方案与验收清单见 `docs/runtime-pack-split.md`。
+> 运行环境（**分包**）：把 `ffmpeg`（179.9 MB / 9 文件）与 `hyperframes`（439.9 MB / 4892 文件）从「随安装包展开」改成「各自一个 7z、**首次用到时**从更新源下载并解到 `<userData>/runtime/<包名>/`」；**本轮新增第三包 `vidrender`（Rust 小内核，约 1 MB / 关键文件 `bin/vidrender-encode.exe`），由同一脚本单独成包、与 hyperframes 并存不替换，仅联调 demo 显式下载**；`whisper`（12.5 MB / 15 文件）改为**随安装包**（见 `package.json` 的 `extraResources`），装完即可离线转录。注册 3 个 `runtime:*` handle + 1 路 `runtime:progress` 推送。分包实测：`ffmpeg` 42.6 MB + `hyperframes` **103.1 MB = 两包合计 145.7 MB**（比旧单包 `runtime.7z` 的 147.4 MB 还小 1.7 MB）。方案与验收清单见 `docs/runtime-pack-split.md`。
 >
 > **取清单有 20 秒硬超时**（`MANIFEST_TIMEOUT_MS`）：超时按失败上报（`MANIFEST_TIMEOUT` → 「连接更新源超时，没能取到运行环境清单」），**不再回落成 `null`**（回落会被误报成「更新源上没有清单 / 404」）；超时**不是**用户取消，`.part` 残片保留待续传。
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（IPC 注册 + 网络下载 + 子进程解包）
-- **规模**：825 行
-- **对外导出**：`register`、`ensurePacks`、`prepareInBackground`、`cancelPrepare`、`packsStatus`、`missingPacks`、`packSizeText`、`packRoots`、`runtimeStatus`、`runtimeDir`（另有 `export type PackManifest`、`export type PackStatus`）
+- **规模**：963 行（实测 `[IO.File]::ReadAllLines`）
+- **对外导出**：`register`、`ensurePacks`、`prepareInBackground`、`cancelPrepare`、`packsStatus`、`missingPacks`、`packSizeText`、`packRoots`、`runtimeStatus`、`runtimeDir`（另有 `export type PackManifest`、`export type PackStatus`）；本轮新增 `PRODUCT_PACKS` / `PACK_NAMES` 均为**模块内常量、不对外导出**
 
 ## 1. 作用与职责
 
@@ -20,7 +20,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | 能力 | 说明 |
 |------|------|
 | 纯探测 | `packsStatus()` / `missingPacks(needs?)` / `packSizeText(names)` 只查盘上标记与关键文件，**不下载、不阻塞**，供消费点在动手前校验 |
-| 下载 + 解包 | `ensurePacks(packs?)` 才真正取清单 / 下载 / 解包（幂等 + 并发安全），带进度与取消 |
+| 下载 + 解包 | `ensurePacks(packs?)` 才真正取清单 / 下载 / 解包（幂等 + 并发安全），带进度与取消；缺省走 `PRODUCT_PACKS`（ffmpeg + hyperframes），显式 `prepare(['vidrender'])` 会按 `PACK_NAMES` 过滤后下载 demo 小内核 |
 | 启动探测 | `prepareInBackground()` **只探测、不下载**：缺包时把 phase 置 `idle`、文案「运行环境需要下载（<体积>）」，让横幅与设置页首屏就有话说 |
 | 进度回推 | 检查 / 下载 / 解包每个阶段都经 `runtime:progress` 推给渲染层（唯一出口 `push()`） |
 | 取消 | `cancelPrepare()` 中断 HTTP 请求与 `7za` 子进程，并清掉半成品（**只有取消才删残片**；取清单 20 秒无响应的**超时不算取消**，残片保留）。`checking` 阶段同样可取消（`payload().cancellable` 含 `checking`） |
@@ -36,14 +36,14 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | 名称 | 类型 | 说明 |
 |------|------|------|
 | `register` | `(ctx: RegisterCtx) => void` | 存下 `ctx.getWindow`（缺失则为 `null`）→ 注册 `runtime:status` / `runtime:prepare` / `runtime:cancel` 三个 handler → 调 `prepareInBackground()`（**只探测，不下载**）。排在 `index.ts` 装配序列最后只保证 handler 先挂上 |
-| `ensurePacks` | `(packs?: RuntimePackName[]) => Promise<IpcResult>` | 包名先过滤成合法集（缺省 = 全部两包）；已有 `inFlight` ⇒ 返回 `{ ok:false, message:'正在准备另一个运行环境包，请稍候再试' }`；合法集为空 ⇒ `{ ok:true }`；否则 `inFlight = runOnce(want).catch(e => fail('运行环境准备失败', String(e), want)).then(r => { inFlight = null; return r })`，settle 后清锁 |
-| `prepareInBackground` | `() => void` | `syncStatus(packsStatus())` 取缺包：无缺 ⇒ `phase='ready'` / `percent=100` / 文案「运行环境已就绪」；有缺 ⇒ `phase='idle'` / `percent=0` / `source=''` / 文案「运行环境需要下载（<`packSizeText(miss)`>）」，然后 `push()` 一次。异常只写 `runtime.log('启动探测失败：…')`。**刻意不下载**：静默下载会把「用户的选择」变成「已经在跑了」 |
+| `ensurePacks` | `(packs?: RuntimePackName[]) => Promise<IpcResult>` | 包名先按 `PACK_NAMES` 过滤成合法集（三包都合法）；**缺省 = `PRODUCT_PACKS.slice()`（ffmpeg + hyperframes，不含 vidrender）**；已有 `inFlight` ⇒ 返回 `{ ok:false, message:'正在准备另一个运行环境包，请稍候再试' }`；合法集为空 ⇒ `{ ok:true }`；否则 `inFlight = runOnce(want).catch(e => fail('运行环境准备失败', String(e), want)).then(r => { inFlight = null; return r })`，settle 后清锁 |
+| `prepareInBackground` | `() => void` | `syncStatus(packsStatus())` 取缺包（`miss` 与 `state.packs` 都取 `PRODUCT_PACKS`，不含 vidrender）：无缺 ⇒ `phase='ready'` / `percent=100` / 文案「运行环境已就绪」；有缺 ⇒ `phase='idle'` / `percent=0` / `source=''` / 文案「运行环境需要下载（<`packSizeText(miss)`>）」，然后 `push()` 一次。异常只写 `runtime.log('启动探测失败：…')`。**刻意不下载**：静默下载会把「用户的选择」变成「已经在跑了」 |
 | `cancelPrepare` | `() => IpcResult` | 非忙（`phase` 不在 `downloading` / `extracting` / `checking`）⇒ `{ ok:true, message:'当前没有正在进行的下载' }`；否则置 `cancelRequested`、`activeReq.abort()`、`activeChild.kill()`、写日志，返回 `{ ok:true, message:'已取消下载' }` |
 | `packsStatus` | `() => PackStatus` | 纯探测：逐包判 `installedEntry()` → legacy 满足 → `missing`，返回每包的 `{ state, id, root, files, unpackedBytes, bytes, legacy }` |
-| `missingPacks` | `(needs?: RuntimePackName[]) => RuntimePackName[]` | `packsStatus()` + `syncStatus()` 后，返回 `needs`（缺省 = 全部包）里 `state !== 'ready'` 的包（按 `PACK_DEFS` 顺序） |
-| `packSizeText` | `(names: RuntimePackName[]) => string` | 按 `PACK_DEFS.hint`（ffmpeg **43 MiB**、hyperframes **103 MiB**——两者都已按 2026-10-14 实测值取整到 MiB：42.6 → 43、103.1 → 103，合计 146.0 MB 与实测 145.7 MiB 一致）求和后 `bytesText()` 成「约 xx MB」，用于确认框与失败文案 |
+| `missingPacks` | `(needs?: RuntimePackName[]) => RuntimePackName[]` | `packsStatus()` + `syncStatus()` 后，返回 `needs`（**缺省 = `PRODUCT_PACKS`**，即 ffmpeg + hyperframes，不含 vidrender）里 `state !== 'ready'` 的包（按 `PACK_DEFS` 顺序） |
+| `packSizeText` | `(names: RuntimePackName[]) => string` | 按 `PACK_DEFS.hint`（ffmpeg **43 MiB**、hyperframes **103 MiB**、**vidrender 1 MiB**——前两者都已按 2026-10-14 实测值取整到 MiB：42.6 → 43、103.1 → 103，合计 146.0 MB 与实测 145.7 MiB 一致）求和后 `bytesText()` 成「约 xx MB」，用于确认框与失败文案 |
 | `packRoots` | `() => Partial<Record<RuntimePackName, string>>` | 各包解出来的根目录（未就绪的不出现），供主进程其它模块定位资源 |
-| `runtimeStatus` | `() => RuntimeProgressPayload` | 同步探测后整理状态：`phase` 不在 `checking` / `downloading` / `extracting` 时按缺包重置成 `idle`（文案「运行环境需要下载（<体积>）」/ `percent=0`）或 `ready`（「运行环境已就绪」/ `percent=100`），返回 `payload()` |
+| `runtimeStatus` | `() => RuntimeProgressPayload` | 同步探测后整理状态（缺包口径为 `PRODUCT_PACKS`）：`phase` 不在 `checking` / `downloading` / `extracting` 时按缺包重置成 `idle`（文案「运行环境需要下载（<体积>）」/ `percent=0`）或 `ready`（「运行环境已就绪」/ `percent=100`），返回 `payload()` |
 | `runtimeDir` | `() => string` | `<userData>/runtime` |
 
 ### 2.2 注册的 IPC 频道
@@ -51,7 +51,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | 频道常量 | 频道路由名 | 方向 | 载荷 → 返回 |
 |----------|-----------|------|-------------|
 | `IPC.Runtime.Status` | `runtime:status` | `ipcMain.handle` | 无参 → `RuntimeProgressPayload`（`runtimeStatus()` 快照；渲染层挂载时用它补齐首帧） |
-| `IPC.Runtime.Prepare` | `runtime:prepare` | `ipcMain.handle` | `packs?: RuntimePackName[]`（**省略 = 全部**；**必须是可结构化克隆的普通数组**——传 Vue 的响应式 `Proxy` 会在 `invoke` 阶段直接抛 `DataCloneError`，handler 根本不会执行）→ `Promise<IpcResult>`（`ensurePacks(packs)`；失败后重试入口，重复点击共享同一次执行） |
+| `IPC.Runtime.Prepare` | `runtime:prepare` | `ipcMain.handle` | `packs?: RuntimePackName[]`（**省略 = 全部产品包（`PRODUCT_PACKS` = ffmpeg + hyperframes，不含 vidrender）**；**必须是可结构化克隆的普通数组**——传 Vue 的响应式 `Proxy` 会在 `invoke` 阶段直接抛 `DataCloneError`，handler 根本不会执行）→ `Promise<IpcResult>`（`ensurePacks(packs)`；失败后重试入口，重复点击共享同一次执行） |
 | `IPC.Runtime.Cancel` | `runtime:cancel` | `ipcMain.handle` | 无参 → `IpcResult`（`cancelPrepare()`；取消 = 不下载，且发起该操作的动作一并作废） |
 | `IPC.Runtime.Progress` | `runtime:progress` | 主进程 → 渲染进程推送（`win.webContents.send`） | `RuntimeProgressPayload`（唯一推送出口 `push()`，发送前判 `win && !win.isDestroyed()`） |
 
@@ -59,11 +59,12 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 
 | 名称 | 类型 | 说明 |
 |------|------|------|
-| `PACK_DEFS` | 常量数组 | 包注册表，**必须与 `scripts/pack-runtime.mjs` 的 `PACKS` 对应**：`ffmpeg`（title「音视频处理（ffmpeg）」、hint **43 MiB（实测 42.6 MiB 取整）**、关键文件 `ffmpeg/bin/ffmpeg.exe` + `ffmpeg/bin/ffprobe.exe`）、`hyperframes`（title「视频渲染引擎（HyperFrames）」、hint **103 MiB（按实测 103.1 MiB 取整）**、关键文件 `hyperframes/node_modules/hyperframes/bin/hyperframes.mjs`）。`PACK_NAMES` 是它的 `name` 列表 |
+| `PACK_DEFS` | 常量数组 | 包注册表，**必须与 `scripts/pack-runtime.mjs` 的 `PACKS` 对应**：`ffmpeg`（title「音视频处理（ffmpeg）」、hint **43 MiB（实测 42.6 MiB 取整）**、关键文件 `ffmpeg/bin/ffmpeg.exe` + `ffmpeg/bin/ffprobe.exe`）、`hyperframes`（title「视频渲染引擎（HyperFrames）」、hint **103 MiB（按实测 103.1 MiB 取整）**、关键文件 `hyperframes/node_modules/hyperframes/bin/hyperframes.mjs`）、**`vidrender`（title「Rust 编码内核（vidrender-encode）」、hint **1 MiB**、关键文件 `bin/vidrender-encode.exe`；仅联调 demo 用）**。`PACK_NAMES` 是它的 `name` 列表（三包） |
+| **`PRODUCT_PACKS`（本轮新增）** | 常量数组（**模块内**） | `PACK_NAMES.filter((n) => n !== 'vidrender')`——**产品默认口径**：缺省 `missingPacks()` / `ensurePacks()`、`prepareInBackground()`、`runtimeStatus()` 与 `gc()` 的 `allReady` 都用它，所以 vidrender 不进默认缺包提示、不进「下载全部」、也不影响 legacy 清理判据；显式 `prepare(['vidrender'])` 仍按 `PACK_NAMES` 放行下载 |
 | `PackManifest` | `interface`（**已导出**） | 清单结构：`name?` / `id` / `file` / `sha512` / `bytes` / `files` / `unpackedBytes` + 可选 `sourceKey?` / `appVersion?` / `createdAt?`。**字段必须与 `scripts/pack-runtime.mjs` 一致** |
 | `PacksState` | `interface`（未导出） | `userData/runtime/packs.json` 的形状：`{ version, packs: { <包名>: { id, files, unpackedBytes, at } }, legacy?: { id, root, at } }` |
 | `PackStatusEntry` / `PackStatus` | `interface` / `type`（`PackStatus` 已导出） | 单包探测结果 `{ state, id, root, files, unpackedBytes, bytes, legacy }`；`PackStatus = Record<RuntimePackName, PackStatusEntry>` |
-| `state` | 模块级对象 | `phase` / `pack` / `percent` / `packs` / `missing` / `status` / `message` / `detail` / `source` / `bytes` / `unpackedBytes` / `files`；初值 `phase:'idle'`、`message:'尚未检查运行环境'`、两包 `status` 均为 `'unknown'`。`phase` **刻意放宽为 `string`**（与 `updater/base.ts` 的 `state.stage` 同因：跨回调写入后 TS 会把联合类型判成不可能分支），交出前由 `payload()` 断言成 `RuntimeProgressPayload['phase']` |
+| `state` | 模块级对象 | `phase` / `pack` / `percent` / `packs` / `missing` / `status` / `message` / `detail` / `source` / `bytes` / `unpackedBytes` / `files`；初值 `phase:'idle'`、`message:'尚未检查运行环境'`、三包（ffmpeg / hyperframes / vidrender）`status` 均为 `'unknown'`。`phase` **刻意放宽为 `string`**（与 `updater/base.ts` 的 `state.stage` 同因：跨回调写入后 TS 会把联合类型判成不可能分支），交出前由 `payload()` 断言成 `RuntimeProgressPayload['phase']` |
 | `inFlight` / `cancelRequested` / `activeReq` / `activeChild` | 模块级状态 | 并发锁（同时只跑一次准备）、取消标志、当前 HTTP 请求、当前 `7za` 子进程 |
 | `payload()` | 函数 | 把 `state` 转成 `RuntimeProgressPayload`：`percent` 先 clamp 到 `[0,100]` 再 `Math.round`；`packs` / `missing` / `status` 都是切片或浅拷贝；`cancellable = phase ∈ {checking, downloading, extracting}`（`cancelPrepare()` 本来就支持取消取清单阶段，界面以前只在下载 / 解包时才给「取消」按钮）——**所有回执与推送的唯一形状** |
 | `push()` / `setPhase(phase, message, detail?)` | 函数 | `push()` 取窗口并 `webContents.send(runtime:progress)`（窗口已销毁则忽略）；`setPhase` 写 `phase` / `message` / `detail` 后推一次 |
@@ -91,7 +92,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `cleanupHalfDone(name, file, dest)` | 函数 | 取消后清半成品：解包目录（recursive）、`<file>.part`、`<file>`——**只在取消时删**，网络失败 / 超时要留残片续传 |
 | `isCancelError(e)` | 函数 | 开头先排超时：信息含 `TIMEOUT_TEXT` ⇒ 返回 `false`（**超时不是用户取消**，`.part` 残片要留着续传，不能被 `cleanupHalfDone()` 当取消清掉）；其余为 `cancelRequested` 为真、或错误信息含 `已取消下载`、或匹配 `/aborted|ERR_ABORTED/i` |
 | `installOne(sevenZip, name)` | 函数 | 单包安装四段，见 §3.2 |
-| `gc()` | 函数 | 两包都就位后删 legacy 目录与 `current.json` 并从 `packs.json` 删除 `legacy` 字段；`downloads/` 只保留当前各包 `<包名>-<id>.7z`。任何失败只忽略（占用中下次再清） |
+| `gc()` | 函数 | **产品两包**（`PRODUCT_PACKS` = ffmpeg + hyperframes）都就位后删 legacy 目录与 `current.json` 并从 `packs.json` 删除 `legacy` 字段（demo 用的 vidrender 不参与该判据）；`downloads/` 只保留当前各包 `<包名>-<id>.7z`。任何失败只忽略（占用中下次再清） |
 | `runOnce(packs)` | 函数 | 一轮准备主流程，见 §3.1 |
 
 ## 3. 关键流程
@@ -189,6 +190,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 - **`percent` 语义**：`downloading` / `extracting` 阶段有效（下载按已下 / 总量，解包取 `7za -bsp1` 的百分比），`checking` 阶段没有百分比，`ready` 为 100；`payload()` 里统一 clamp 并 `Math.round`，渲染层拿到的一定是合法整数；`cancellable` 在 `checking` / `downloading` / `extracting` 三态为真。
 - **失败不阻断应用**：任何一步失败都走 `fail()`——只更新 `state`（`phase='error'` + 人话 `message` + 排障 `detail`）、推一次进度、写一行 `runtime.log`，并返回 `{ ok:false, … }`。安装包自带 whisper，因此**离线首启时项目、音色、配音、转录、字幕、HTML 生成全部可用**，只有渲染 / 转码会缺包。
 - **启动不再静默下载**：`prepareInBackground()` 只探测并推一次「运行环境需要下载（<体积>）」，是否下载由用户在某处确认（两包合计 145.7 MB：ffmpeg 42.6 + hyperframes 103.1）；`ensurePacks()` 忙碌期重复调用只返回一句提示，不排队。
+- **`PRODUCT_PACKS` 是「产品口径」而非全部包**：第三包 `vidrender` 进 `PACK_DEFS` / `PACK_NAMES`，可显式 `prepare(['vidrender'])` 下载；但产品默认缺包提示、`runtimeStatus()` / `prepareInBackground()` 的 `missing`、`ensurePacks()` 缺省的「下载全部」、`gc()` 的 `allReady` 都只看 `PRODUCT_PACKS`。**产品渲染链路未改**：`video.ts` 仍 `runtime.missingPacks(['ffmpeg','hyperframes'])` 并 spawn hyperframes，没有新增 IPC 频道。
 - **旧包与下载目录会自清**：两包都就位后 `gc()` 删 legacy 目录（632 MB）与 `current.json`，并只保留当前各包 id 的下载缓存；被占用的下次再清。
 - **`userData/runtime.log`**：与 `updater.log` / `startup.log` 同一套排障口子（超过 64KB 自动清一次），记录「启动探测失败」「取消」「远端清单不可用（含超时的真实原因）」「下载完成 + 续传起点 + 用时」「解包完成 + 用时 + 来源」「识别到旧版整体目录」等关键节点。
 - **`register` 只注册三个 `handle` + 一路 `send`**：查询 / 准备 / 取消都是「问一次答一次」，没有主 → 渲染的独立命令通道；进度完全由 `runtime:progress` 单路推送。

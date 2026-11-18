@@ -20,8 +20,8 @@ import { app } from 'electron'
 // 实现上刻意用 getter 而不是快照：userData 目录迁移（my-app → shadowmill）与本模块的 import 顺序不确定，
 // 解包又是运行时才完成，快照会把路径永久钉在旧值上；getter 每次按当前状态算，结果按包缓存，
 // 解包完成后由 refreshPack() 失效。
-export type RuntimePackDirName = 'ffmpeg' | 'hyperframes';
-const PACK_DIRS: RuntimePackDirName[] = ['ffmpeg', 'hyperframes'];
+export type RuntimePackDirName = 'ffmpeg' | 'hyperframes' | 'vidrender';
+const PACK_DIRS: RuntimePackDirName[] = ['ffmpeg', 'hyperframes', 'vidrender'];
 // 包根缓存：undefined=还没查过；''=查过但没有；非空=已就绪的目录
 const cachedPackRoots: Partial<Record<RuntimePackDirName, string>> = {};
 let cachedChrome: string | null | undefined;

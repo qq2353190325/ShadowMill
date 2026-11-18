@@ -4,8 +4,8 @@
 
 - **所在目录**：src/main/
 - **类型**：环境探测 + 随包前端库本地化辅助模块（无 IPC 注册、无业务依赖）
-- **规模**：398 行（实测 `[IO.File]::ReadAllLines`；上一版 384 行，本轮 **+14 行**：新增 `coreSource()` 及其注释）
-- **对外导出**：常量 `BUILTIN_RESOURCES`，函数 `refreshBuiltinResources`（兼容保留）、**`refreshPack`**、**`packReady`**、`findHyperframesCli`、`resolveNodePath`、`findNode`（返回 `{ cmd, env }` 而非纯路径）、`findFfmpegBin`、`isHyperframesComposition`、**`localizeVendorHtml`**、**`externalizeVendorHtml`**、**`referencedVendorFiles`**、**`ensureVendorFiles`**、**`hoistVendorRefs`**、**`coreSource`**（共 15 个）
+- **规模**：398 行（实测 `[IO.File]::ReadAllLines`；上一版 384 行，本轮 **+14 行**：新增 `coreSource()` 及其注释；本轮 vidrender 改动只替换 `RuntimePackDirName` / `PACK_DIRS` 两行的取值，行数不变）
+- **对外导出**：常量 `BUILTIN_RESOURCES`，函数 `refreshBuiltinResources`（兼容保留）、**`refreshPack`**（本轮参数类型 `'ffmpeg' | 'hyperframes'` → `RuntimePackDirName`，三值）、**`packReady`**（同）、`findHyperframesCli`、`resolveNodePath`、`findNode`（返回 `{ cmd, env }` 而非纯路径）、`findFfmpegBin`、`isHyperframesComposition`、**`localizeVendorHtml`**、**`externalizeVendorHtml`**、**`referencedVendorFiles`**、**`ensureVendorFiles`**、**`hoistVendorRefs`**、**`coreSource`**（共 15 个）
 
 ## 1. 作用与职责
 
@@ -24,8 +24,8 @@
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `BUILTIN_RESOURCES` | 常量对象（字段为 getter） | 字段：`root`、`ffmpegBin`、`ffmpeg`、`ffprobe`、`hfCli`、`hivePlayer`、`chromeShell`（**已无 `node` 字段**：`resources/node` 整体删除；`root` 只作旧布局 / dev 的兜底，不再是一切资源的父目录） |
-| `refreshPack(name, root?)` | `(name: 'ffmpeg' \| 'hyperframes', root?: string) => void` | **按包失效路径缓存**：传 `root` 则把该包钉到该目录，不传（或空串）则删掉该包缓存、下次按盘上标记重新解析；同时清 `cachedChrome`，`name === 'hyperframes'` 时另清 `cachedNode`。由 `runtime.ts` 在「探测到某包就绪」与「解包完成」时调用 |
-| `packReady(name)` | `(name: 'ffmpeg' \| 'hyperframes') => boolean` | 纯查询：该包根是否解析得到（不触发下载、不写盘），供消费点校验 |
+| `refreshPack(name, root?)` | `(name: RuntimePackDirName, root?: string) => void`（`RuntimePackDirName = 'ffmpeg' \| 'hyperframes' \| 'vidrender'`，**本轮扩为三值**） | **按包失效路径缓存**：传 `root` 则把该包钉到该目录，不传（或空串）则删掉该包缓存、下次按盘上标记重新解析；同时清 `cachedChrome`，`name === 'hyperframes'` 时另清 `cachedNode`。由 `runtime.ts` 在「探测到某包就绪」与「解包完成」时调用 |
+| `packReady(name)` | `(name: RuntimePackDirName) => boolean`（三值，本轮扩展） | 纯查询：该包根是否解析得到（不触发下载、不写盘），供消费点校验 |
 | `refreshBuiltinResources(root?)` | `(root?: string) => string` | **兼容保留**的旧接口：把传入的根同时钉给两个包（不传则清两个包缓存），再清 `cachedChrome` / `cachedNode`，返回 hyperframes 包根；分包后 `runtime.ts` 主要走 `refreshPack()` |
 | `findHyperframesCli()` | `() => string \| null` | 返回 `hyperframes.mjs` 绝对路径或 `null` |
 | `resolveNodePath()` | `() => string \| null` | 返回 Node 可执行文件真实绝对路径或 `null` |
@@ -39,6 +39,8 @@
 | `hoistVendorRefs(html, prefix)` | `(html: string, prefix: string) => string` | 渲染入口在 `.render-tmp/` 子目录里，把本级 `./<库文件>` 改写成 `prefix + <库文件>`（`prefix` 传 `'../'`）；已是 `../` 的引用不再二次加前缀 |
 | **`coreSource()`** | `() => string \| null` | **共享绘制助手 `vendor/shadowmill/core.js` 的绝对路径**（与 `vendorSource` 同一套定位规则：`app.getAppPath()/vendor` → `process.resourcesPath/vendor`；都不存在回 `null`）。**只给路径、不复制**——复制与版本比对在 `coreLib.ts` 的 `syncCoreTo()` |
 
+> **包目录名类型（本轮扩展）**：源码 `export type RuntimePackDirName = 'ffmpeg' | 'hyperframes' | 'vidrender';` 与 `const PACK_DIRS: RuntimePackDirName[] = ['ffmpeg', 'hyperframes', 'vidrender'];`；`resolvePackRoot` / `packRootFromDisk` / `refreshPack` / `packReady` / `cachedPackRoots` 都改用这个类型。**没有新增 `BUILTIN_RESOURCES` getter 或字段**（vidrender 的二进制由 `runtime.ts` 包注册表与 demo 脚本定位，不经过这里）。
+>
 ### 2.1 `BUILTIN_RESOURCES` 字段与路径构成
 
 | 字段 | 类型 | 取值 |
@@ -211,6 +213,7 @@
 
 ## 5. 注意事项与实现要点
 
+- **第三包只扩了类型、没扩资源定位面**：`RuntimePackDirName` / `PACK_DIRS` 变为三值，但 `BUILTIN_RESOURCES` 的 getter 仍是 `ffmpegBin` / `ffmpeg` / `ffprobe` / `hfCli` / `hivePlayer` / `chromeShell` 这一组，没有为 vidrender 新增 getter；`refreshPack('vidrender', root)` 只让包根缓存能记下它的目录，不参与 ffmpeg / hyperframes 的路径解析。
 - **路径解析是「按包缓存 + 可失效」而非一次性快照**：`BUILTIN_RESOURCES` 的字段都是 getter，`ffmpeg` 一族与 `hfCli` 一族各自经 `resolvePackRoot(name)` 解析并按包写入 `cachedPackRoots`；候选依次是「该包已解到 `<userData>/runtime/<包名>/`（需 `ok.json`）」→「旧版整体包目录（`current.json` + `ok.json`）」→「`process.resourcesPath` / 开发态项目根 `resources`」。`root` 只作后两者的兜底。运行环境包解包完成或切换目录时由调用方 `refreshPack(name, root?)` 失效该包缓存（并清 `cachedChrome`，hyperframes 时另清 `cachedNode`），`refreshBuiltinResources(root?)` 则一次清两个包 + 两个探测缓存（兼容保留）。
 - **平台假设为 Windows**：路径与文件名硬编码 `node.exe`、`ffmpeg.exe`、`ffprobe.exe`、`chrome-headless-shell.exe`、`where.exe`、`C:\Program Files\nodejs`，非 Windows 平台这些分支会全部落空。
 - **只做“存在 + 能跑”的轻量验证**：所有探测都是 `existsSync` 加 `spawnSync(..., ['-v'])` 的 `status === 0` 判定，不解析版本（`resolveNodePath`、`findHyperframesCli`、`findFfmpegBin` 均不校验版本）；**唯一例外是 `findNode`**——① 与 ② 分支都解析主版本并要求 >= 22。

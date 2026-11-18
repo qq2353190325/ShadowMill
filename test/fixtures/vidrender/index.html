@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- 小内核联调用的最小 composition：一个 <video> 图层 + 一个由 __timelines.time(t) 驱动的色块。 -->
+<html data-composition-id="main" data-start="0" data-duration="2" data-width="640" data-height="360">
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { margin: 0; width: 640px; height: 360px; overflow: hidden; background: #0b1020; }
+    #stage { position: relative; width: 640px; height: 360px; }
+    #clip { position: absolute; left: 0; top: 0; width: 640px; height: 360px; object-fit: cover; }
+    #box { position: absolute; left: 40px; top: 40px; width: 90px; height: 90px; background: #ff5252; }
+    #label { position: absolute; left: 40px; top: 150px; color: #fff; font: 28px sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <video id="clip" src="./clip.mp4" muted playsinline preload="auto"></video>
+    <div id="box"></div>
+    <div id="label">vidrender demo</div>
+  </div>
+  <script>
+    var video = document.getElementById('clip')
+    var box = document.getElementById('box')
+    var label = document.getElementById('label')
+
+    // 宿主按 t 调 time(t)：DOM 必须立即变成第 t 秒的完整状态（HyperFrames 的 seek 契约）。
+    window.__timelines = {
+      main: {
+        time: function (t) {
+          box.style.transform = 'translate(' + (t * 160).toFixed(2) + 'px,' + (Math.sin(t * 3) * 40).toFixed(2) + 'px)'
+          label.textContent = 't=' + t.toFixed(2) + 's  currentTime=' + (video.currentTime || 0).toFixed(2)
+        }
+      }
+    }
+    window.__timelines.main.time(0)
+
+    // 等视频元数据就绪再开抓帧；失败也放行，让脚本自己报超时。
+    window.__videoReady = new Promise(function (resolve) {
+      if (video.readyState >= 2) { resolve(true); return }
+      var done = function () { resolve(true) }
+      video.addEventListener('loadeddata', done, { once: true })
+      video.addEventListener('error', done, { once: true })
+      setTimeout(done, 5000)
+    })
+  </script>
+</body>
+</html>

@@ -44,9 +44,13 @@ import { getUpdaterSettings } from './settings'
 // files：判定「解包完整」的关键文件（相对包目录），缺一即视为未就绪并触发重下。
 const PACK_DEFS: { name: RuntimePackName; title: string; hint: number; files: string[] }[] = [
   { name: 'ffmpeg', title: '音视频处理（ffmpeg）', hint: 43 * 1024 * 1024, files: [path.join('ffmpeg', 'bin', 'ffmpeg.exe'), path.join('ffmpeg', 'bin', 'ffprobe.exe')] },
-  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 103 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] }
+  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 103 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] },
+  { name: 'vidrender', title: 'Rust 编码内核（vidrender-encode）', hint: 1 * 1024 * 1024, files: [path.join('bin', 'vidrender-encode.exe')] }
 ]
 const PACK_NAMES: RuntimePackName[] = PACK_DEFS.map((d) => d.name)
+// vidrender 是独立 demo 用的小内核包：允许显式下载，但不进产品的默认缺包提示与「下载全部」
+// （产品渲染仍走 hyperframes，别让它一装应用就提示下载一个暂时用不到的包）
+const PRODUCT_PACKS: RuntimePackName[] = PACK_NAMES.filter((n) => n !== 'vidrender')
 
 // ===== 清单（scripts/pack-runtime.mjs 产出，字段必须与脚本一致）=====
 interface PackManifest {
@@ -286,7 +290,7 @@ function syncStatus(status: PackStatus): PackStatus {
 
 // 缺哪些包（供消费点校验；缺的按 PACK_DEFS 顺序返回）
 function missingPacks(needs?: RuntimePackName[]): RuntimePackName[] {
-  const want = needs && needs.length ? needs : PACK_NAMES
+  const want = needs && needs.length ? needs : PRODUCT_PACKS
   const status = packsStatus()
   syncStatus(status)
   return want.filter((n) => status[n].state !== 'ready')
@@ -761,7 +765,7 @@ function gc(): void {
   try {
     const s = readState()
     const legacy = s.legacy && s.legacy.root ? path.join(runtimeDir(), s.legacy.root) : ''
-    const allReady = PACK_NAMES.every((n) => installedEntry(n))
+    const allReady = PRODUCT_PACKS.every((n) => installedEntry(n))
     if (legacy && allReady) {
       try { fs.rmSync(legacy, { recursive: true, force: true }) } catch (e) { /* 占用中则下次再清 */ }
       try { if (fs.existsSync(legacyPointer())) fs.rmSync(legacyPointer(), { force: true }) } catch (e) { /* ignore */ }
@@ -873,7 +877,7 @@ async function runOnce(packs: RuntimePackName[]): Promise<IpcResult> {
 
 // 幂等 + 并发安全：同一时刻只允许一次准备；忙碌期内的重复调用返回提示（界面按进度渲染）
 function ensurePacks(packs?: RuntimePackName[]): Promise<IpcResult> {
-  const want = packs && packs.length ? packs.filter((n) => PACK_NAMES.indexOf(n) >= 0) : PACK_NAMES.slice()
+  const want = packs && packs.length ? packs.filter((n) => PACK_NAMES.indexOf(n) >= 0) : PRODUCT_PACKS.slice()
   if (inFlight) {
     return Promise.resolve({ ok: false, message: '正在准备另一个运行环境包，请稍候再试' })
   }
@@ -894,8 +898,8 @@ function ensurePacks(packs?: RuntimePackName[]): Promise<IpcResult> {
 function prepareInBackground(): void {
   try {
     const status = syncStatus(packsStatus())
-    const miss = PACK_NAMES.filter((n) => status[n].state !== 'ready')
-    state.packs = PACK_NAMES.slice()
+    const miss = PRODUCT_PACKS.filter((n) => status[n].state !== 'ready')
+    state.packs = PRODUCT_PACKS.slice()
     state.missing = miss
     if (!miss.length) {
       state.phase = 'ready'
@@ -926,7 +930,7 @@ function packRoots(): Partial<Record<RuntimePackName, string>> {
 
 const runtimeStatus = (): RuntimeProgressPayload => {
   const status = syncStatus(packsStatus())
-  state.missing = PACK_NAMES.filter((n) => status[n].state !== 'ready')
+  state.missing = PRODUCT_PACKS.filter((n) => status[n].state !== 'ready')
   if (state.phase !== 'downloading' && state.phase !== 'extracting' && state.phase !== 'checking') {
     state.phase = state.missing.length ? 'idle' : 'ready'
     state.message = state.missing.length ? '运行环境需要下载（' + packSizeText(state.missing) + '）' : '运行环境已就绪'

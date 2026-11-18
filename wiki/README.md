@@ -10,7 +10,7 @@
 
 | # | 文档 | 内容 | 适合谁 |
 |---|---|---|---|
-| 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构、`src/` 完整目录树、构建与打包、运行时数据目录、全局约定 | 第一次接触项目的人 |
+| 0 | [00-项目结构](./00-项目结构.md) | 技术栈与版本、仓库顶层结构（含 `scripts/demo-vidrender.cjs`、`resources/bin/`、`test/fixtures/vidrender/`）、`src/` 完整目录树、构建与打包、运行时数据目录（**ffmpeg / hyperframes / vidrender 三包 + whisper 随包**）、全局约定 | 第一次接触项目的人 |
 | 1 | [01-架构总览](./01-架构总览.md) | 进程模型、启动时序、**IPC 契约全貌（111 个频道总表 + 账号 / 可选登录）**、以「项目」为中心的数据流、关键业务链路（含内容脚本 Agent、对话记录与账号）、主进程依赖图、安全边界 | 想理解整体设计的人 |
 | 2 | [02-目录架构-src-main](./02-目录架构-src-main.md) | 主进程（**59** 个 `.ts` 源文件 = 根目录 9 个单文件 + `account/` 目录 **3** 个文件 + `cast/` 目录 **9** 个文件 + `voice/` 目录 10 个文件 + `projects/` 目录 **16** 个文件 + `agent/` 目录 **8** 个文件 + `updater/` 目录 4 个文件）的职责、装配模式 `register(ctx)`、模块依赖图、各域要点 | 改主进程 / 加 IPC |
 | 3 | [03-目录架构-src-preload](./03-目录架构-src-preload.md) | 桥接层：**14** 个命名空间、7 路进度通道的转发（`project:html-progress` **一条频道 + 按任务 id 分发**，`projectTools.onTaskProgress` 与 `castTools.onTaskProgress` **共用同一张订阅表**；其余 5 路单槽，`video:progress` 无包装）、类型来源与 CJS 约束 | 改接口 / 排查跨进程调用 |
@@ -49,7 +49,7 @@
 | `src/main/video.ts` | [main/video.ts.md](./files/main/video.ts.md) |
 | `src/main/whisper.ts` | [main/whisper.ts.md](./files/main/whisper.ts.md) |
 | `src/main/updater/`（`index.ts` / `base.ts` / `actions.ts` / `install.ts` 四个文件，目录级一篇） | [main/updater.md](./files/main/updater.md) |
-| `src/main/runtime.ts` | [main/runtime.ts.md](./files/main/runtime.ts.md) |
+| `src/main/runtime.ts`（运行环境三包：`ffmpeg` / `hyperframes` / `vidrender`，后者仅 demo 显式下载、不进产品默认缺包提示） | [main/runtime.ts.md](./files/main/runtime.ts.md) |
 
 ### 3.2 `src/preload/` 与 `src/shared/`（6 篇）
 
@@ -104,6 +104,8 @@
 | `tsconfig.json` / `tsconfig.node.json` / `tsconfig.web.json` / `tsconfig.agent.json` | [root/tsconfig.md](./files/root/tsconfig.md) |
 | `.gitignore` | [root/gitignore.md](./files/root/gitignore.md) |
 
+> **工程脚本与测试素材的归属**：本知识库没有 `files/scripts/`、`files/test/` 目录；根目录 `scripts/`（`pack-runtime.mjs` 运行环境打包 / `release.mjs` 发版 / **`demo-vidrender.cjs` 小内核联调**）与 `test/fixtures/vidrender/`（`index.html` + `clip.mp4`，只服务 demo）不在逐文件说明范围内。打包脚本与 `extraResources` 见 [00-项目结构 §5 / §6](./00-项目结构.md) 与 [root/package.json.md](./files/root/package.json.md)，三包语义见 [main/runtime.ts.md](./files/main/runtime.ts.md)，demo / fixture 的来龙去脉记在根目录 [`../CHANGELOG.md`](../CHANGELOG.md) 的 **#119 / #120**。
+>
 > `CHANGELOG.md` 是**唯一**的变更记录（更新日志 = 修改日志 = 版本记录，同一份文件），写入规则见根目录 [`agents.md`](../agents.md) 第三节与关键约定的第 3、4 条；`README.md`、`REFACTOR_PLAN.md` 属于项目级说明文档，其内容不再二次转述，直接阅读原文件即可；项目入口（项目简介 + wiki 地址）与设计规范指针见根目录 [`agents.md`](../agents.md)，界面设计规范正文在 [`src/renderer/agents.md`](../src/renderer/agents.md)。
 
 ---
@@ -144,7 +146,8 @@
 | 明白「进度怎么按 `taskId` 分给谁」 | [03-目录架构-src-preload §4](./03-目录架构-src-preload.md)（`onTaskProgress` + `Map` 分发）+ [files/preload/index.ts.md](./files/preload/index.ts.md) §3.2 + [renderer/src/common.md](./files/renderer/src/common.md) §10.1.2（`newTaskId`） |
 | 明白「AI 创作」怎么改内容脚本 / 对话记录存在哪 | [01-架构总览 §5.5](./01-架构总览.md) + [main/agent.md](./files/main/agent.md)（`script.ts` + `chatLog.ts`）+ [renderer/src/pages/ContentPage.md](./files/renderer/src/pages/ContentPage.md) |
 | 查 whisper 模型档位与转录流程 | [main/whisper.ts.md](./files/main/whisper.ts.md) |
-| 搞清 ffmpeg / hyperframes 分包怎么按需下载与解包 | [main/runtime.ts.md](./files/main/runtime.ts.md) + [01-架构总览 §3.3](./01-架构总览.md)（`runtime:*`） |
+| 搞清 ffmpeg / hyperframes / vidrender 三包怎么按需下载与解包（vidrender 仅 demo 显式下载，不进产品默认缺包提示） | [main/runtime.ts.md](./files/main/runtime.ts.md) + [01-架构总览 §3.3](./01-架构总览.md)（`runtime:*`） |
+| 跑 / 改小内核联调 demo 与它的测试合成 | [00-项目结构 §5](./00-项目结构.md)（`demo:vidrender`）与根目录 [`../CHANGELOG.md`](../CHANGELOG.md) #119；脚本本体 `scripts/demo-vidrender.cjs`、素材 `test/fixtures/vidrender/`、二进制 `resources/bin/vidrender-encode.exe`（均不建独立 wiki 篇） |
 | 搞清「缺运行环境」时界面怎么问用户 / 怎么续做 | [renderer/src/common.md](./files/renderer/src/common.md) §4（`useRuntime` / `useEnvGate`） |
 | 查旧数据弹窗 / `legacy:*` 契约 | [main/index.ts.md](./files/main/index.ts.md) §3.1 + [renderer/src/components.md](./files/renderer/src/components.md) §6 |
 | 改界面 / 加页面 | [04-目录架构-src-renderer](./04-目录架构-src-renderer.md) → 对应页面文档（§3.3） |

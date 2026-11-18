@@ -6,11 +6,12 @@
 
 ## 0. 本次同步范围与已知漂移
 
-本页这一次只同步**账号（可选登录）**带来的变化：新增 `src/main/account/`（3 个文件、393 行）、第 13 个频道分组 `Account`（5 条）、注册顺序与依赖图里多一条 `account ← index.ts`，并新增 §4.15。
+本页这一次除**账号（可选登录）**（`src/main/account/`、第 13 组 `Account`、`account ← index.ts`、§4.15）外，同步**新增的 vidrender 小内核运行环境包**对两个逐文件条目的影响：`runtime.ts` / `hfEnv.ts` 的包名扩为 **ffmpeg / hyperframes / vidrender** 三包，`runtime.ts` 新增 `PRODUCT_PACKS` 语义，`hfEnv.ts` 新增 `RuntimePackDirName` / `PACK_DIRS` 第三个值；**没有新增 `BUILTIN_RESOURCES` getter、没有新增 IPC 频道、`video.ts` 产品渲染链路未改**。
 
 > **⚠ 其余条目仍可能落后于当前源码**（本页只对「总数口径依赖到的」几处做了实测修正）：
 > - `agent/` 已按实测改成 **8 个文件**（另有 `constants.ts` 368 行，提示词常量从 `html.ts` 拆出）：`chat.ts` 265 / `chatLog.ts` 155 / `html.ts` **229** / `constants.ts` 368 / `htmlEdit.ts` 52 / `script.ts` **342** / `castAction.ts` **44** / `index.ts` 21——§1、§4.4 与附录用的是这一组新数字。
 > - `src/main/index.ts` 实测 **551** 行（含账号注册段），§1 表已按实测值写。
+> - `src/main/runtime.ts` 实测 **963** 行、`src/main/hfEnv.ts` **398** 行（`[IO.File]::ReadAllLines`）；§1 表与 §4.2 / §4.10 已按当前源码写。
 > - `projects/`（16 文件）、`cast/`（9 文件）、`voice/`（10 文件）与 `hfEnv.ts` / `settings.ts` / `video.ts` / `whisper.ts` / `runtime.ts` 的逐文件行数**未逐一复核**（总数与文件数已实测），需要时以 `[IO.File]::ReadAllLines($f).Count` 现测为准。
 > - 计数口径不受影响：`src/main` 下 `.ts` 文件实测 **59 个** = 根目录 9 + `account/` 3 + `cast/` 9 + `voice/` 10 + `projects/` 16 + `agent/` 8 + `updater/` 4（旧记 55 = 少了 account 3 + `agent/constants.ts` 1）。
 
@@ -21,7 +22,7 @@
 | 文件 | 行数 | 角色 | 注册的 IPC 域 |
 |---|---|---|---|
 | [index.ts](./files/main/index.ts.md) | 551 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议（**两条路由**：`p/<项目名>/…` 项目内文件、`user/<相对路径>?user=1` 项目外语音产物且只读白名单 `USER_PREVIEW_DIRS = ['tts-output','voice','cast-preview']`；路径解析抽成 `resolveHgPreviewPath(rawUrl)`；`rangeResponse()` 支持 `Range` 字节范围取 → `206` / `416`，响应体走文件流）、窗口控制与剪贴板 IPC、各域 `register()` 顺序（**含 `agent.registerScript(projects.projectDir)`**——把项目目录解析函数注入给 agent；**含 `account.register(ctx)`**——5 条账号频道，排在 `settings` 之后、`projects` 之前）、启动时序打点 `startup.log` | `window:*`、`app:copy-text`、`legacy:*` |
-| [hfEnv.ts](./files/main/hfEnv.ts.md) | 398 | 环境探测与**按包解析**的内置资源定位（`resolvePackRoot()` / `refreshPack()` / `packReady()`，`root` 只作旧布局与 dev 的兜底）+ 随包前端库本地化（GSAP / p5 / p5.brush，`VENDOR_LIBS` 一张表驱动）/ 导出外部化 / 渲染入口抬级（不注册 IPC）；`findChromeShell()` **只缓存「找到的」结果**（找不到返回 `null` 但不写缓存，避免「解包完成前被问过一次」把 `chrome=无` 永久钉住）；`coreSource()`：`vendor/shadowmill/core.js` 的真源定位（与 `vendorSource()` 同一套两级路径），**不进 `VENDOR_LIBS`**（自家文件、没有 CDN 形态，导出时内联） | — |
+| [hfEnv.ts](./files/main/hfEnv.ts.md) | 398 | 环境探测与**按包解析**的内置资源定位（`resolvePackRoot()` / `refreshPack()` / `packReady()`，`root` 只作旧布局与 dev 的兜底；包目录名类型 `RuntimePackDirName` 与 `PACK_DIRS` 已扩为 **ffmpeg / hyperframes / vidrender** 三值，但**没有新增 `BUILTIN_RESOURCES` getter**）+ 随包前端库本地化（GSAP / p5 / p5.brush，`VENDOR_LIBS` 一张表驱动）/ 导出外部化 / 渲染入口抬级（不注册 IPC）；`findChromeShell()` **只缓存「找到的」结果**（找不到返回 `null` 但不写缓存，避免「解包完成前被问过一次」把 `chrome=无` 永久钉住）；`coreSource()`：`vendor/shadowmill/core.js` 的真源定位（与 `vendorSource()` 同一套两级路径），**不进 `VENDOR_LIBS`**（自家文件、没有 CDN 形态，导出时内联） | — |
 | [settings.ts](./files/main/settings.ts.md) | 469 | 设置存储（`userData/settings.json`，含 `customModel`（**含 `reasoningEffort` 思考强度，默认 `high`，`settings:save` 与 `readSettings` 共用 `normalizeCustomModel` 白名单**）、`voice` 按厂家配置（**只有 apiKey**）与视频渲染默认档位）+ OpenAI SDK 懒加载入口 `loadOpenAI` + 「出厂状态」判定 `isPristineSettings`（供 index.ts 的 `migrateFrom()` 迁移老数据时决定能否覆盖 settings.json）+ 运行环境「从本地文件安装…」`settings:pick-runtime-pack`（选 `ffmpeg.7z` / `hyperframes.7z` 导入 `userData/runtime/local-import/`） | `settings:*`（6） |
 | [**account/**](./files/main/account.md)（**目录级一篇，3 个文件**：`api.ts` **221** / `store.ts` **96** / `index.ts` **76**，**合计 393 行 / 最长 221 行**） | 221 / 96 / 76 | **账号（可选登录）**（同名目录 + `index.ts` 出口，依赖单向 `index → api / store`）：`api.ts` 账号后端 HTTP 客户端（`apiBaseUrl()` 读 `SHADOWMILL_API_BASE`、缺省 `http://127.0.0.1:8080`；`fail()`；`sendCode()` / `register()` / `login()` / `me()` / `logout()`；内部 `FALLBACK_MESSAGE` 14 条错误码文案、`SERVER_CODE_MAP` 7 条业务码直通、`request()` = `fetch` + `AbortSignal.timeout(10_000)` + `X-Device-Name` 头）；`store.ts` 令牌持久化（`safeStorage.encryptString` 写 `userData/account.bin`；safeStorage 不可用时**只存内存、不降级明文**；`load()` / `save()` / `clear()`）；`index.ts` 装配 5 条 `account:*` 频道 + `currentToken()` + `devCode` 仅未打包时透出 + `remember()` 落盘 + `currentSession()`（401 才清令牌）+ `logout()`（先撤销服务端再清本地）。**不 gate 任何本机功能；令牌不出主进程** | `account:*`（**5 handle**：`account:send-code` / `register` / `login` / `me` / `logout`） |
 | [agent/](./files/main/agent.md)（**目录级一篇，8 个文件**：`chat.ts` 265 / `chatLog.ts` 155 / `html.ts` **229** / **`constants.ts` 368** / `htmlEdit.ts` 52 / `script.ts` **342** / `castAction.ts` **44** / `index.ts` 21；逐文件行数见 §0） | 265 / 155 / 229 / 368 / 52 / 342 / 44 / 21 | **Agent 层**（同名目录 + `index.ts` 统一出口，依赖单向 `chat ← html / htmlEdit / castAction / script`、`html ← htmlEdit / castAction`、`script → chatLog`）：`chat.ts` 是**通用对话层**——多轮 `messages` + 流式（`openai` SDK / `fetch` 手写 SSE 两条等价路径，**两条都带 `reasoning_effort: m.reasoningEffort`**）+ `max_tokens` 升档重试（`MAX_TOKEN_TRIES = [131072, 262144]`）+ 全过程记录追加 `userData/<logFile>` 的 jsonl + 人话错误 + 300ms 节流进度，**不认识任何业务、不读写项目文件**；`chatLog.ts` 是**对话记录的磁盘读写**（`MAX_CHAT_ROUNDS = 100` / `chat/index.json` + `versions/<id>.json` / `readChatIndex` / `writeChatIndex`（写后清理不再被引用的副本）/ `writeVersion` / `readVersion` / `clearChat`，只依赖 `node:fs` / `node:path` / 类型，**不由 `index.ts` 再导出**）；`html.ts` 是 HTML 薄封装（`HTML_AGENT_SYSTEM` + `extractHtmlFromReply` + `chatWithCustomModel` + 章节 / 角色 / 路由五份提示词与五个包装；**提示词常量本体已拆到 `constants.ts`**，见 §0）；`script.ts` 是内容脚本 Agent（`SCRIPT_AGENT_SYSTEM` + `buildScriptPrompt` + `parseScriptReply` + **`registerScript(getProjectDir)`**，不 import `node:fs` / `node:path`、不反向 import projects）；`index.ts` **只做再导出、不写逻辑**；`htmlEdit.ts` 是**单文件模式「按需求修改」的薄封装**（`HTML_AGENT_EDIT_SYSTEM` + `isCompleteHtmlEdit` + `chatWithHtmlEdit`）；**`constants.ts` 是 Agent 提示词常量表**（从 `html.ts` 拆出，避免单文件越过硬上限）。`projects/` 的 `ipc/html.ts` / `ipc/cast.ts` / `chaptersFlow.ts` / `htmlWrite.ts` / `progress.ts` 各自从 `./agent` 取所需的包装与类型 | `script:*`（**7**：6 handle + 1 推送） |
@@ -37,7 +38,7 @@
 | [updater/base.ts](./files/main/updater.md)（同篇） | 285 | 底座（依赖最上游，不 import 同目录任何模块）：`updater` / `flags` / `state` 运行态单例、日志与小工具、**随包 `CHANGELOG.md` 的定位与读取**、`humanError()` 文案分层、进度 `payload()` / `send()`、6 个事件绑定 `bindEvents()`、懒加载 `ensureUpdater()` | — |
 | [updater/actions.ts](./files/main/updater.md)（同篇） | 139 | 对外动作：检查 / 下载 / 取消、更新源覆盖 `applyFeedUrl()`、两条「无事件不许报成功」的守卫 | — |
 | [updater/install.ts](./files/main/updater.md)（同篇） | 145 | 退出并安装（`quitAndInstall`）、下载缓存清理、忙碌态判定（`bindBusyTracking()`：`project:html-progress` 按活动 `taskId` 集合判忙） | — |
-| [runtime.ts](./files/main/runtime.ts.md) | 959 | 运行环境（**分包**）：`PACK_DEFS` 包注册表（`ffmpeg` / `hyperframes` 各成一个 7z，whisper 不进包）→ 取清单 + 包 → sha512 校验（`Range` 断点续传）→ `7za` 解到 `userData/runtime/<包名>/`，就绪后按包调 `hfEnv.refreshPack()`；`packsStatus()` 纯探测、`ensurePacks()` 才下载解包（可取消）；取远端清单有 **20 秒硬超时** | `runtime:*`（3 handle + 1 推送） |
+| [runtime.ts](./files/main/runtime.ts.md) | 963 | 运行环境（**分包**）：`PACK_DEFS` 包注册表（`ffmpeg` / `hyperframes` / **`vidrender`** 各成一个 7z，whisper 不进包；`vidrender` 是第三项 `{ name: 'vidrender', title: 'Rust 编码内核（vidrender-encode）', hint: 1MB, files: ['bin/vidrender-encode.exe'] }`）→ 取清单 + 包 → sha512 校验（`Range` 断点续传）→ `7za` 解到 `userData/runtime/<包名>/`，就绪后按包调 `hfEnv.refreshPack()`；`packsStatus()` 纯探测、`ensurePacks()` 才下载解包（可取消）；**`PRODUCT_PACKS = PACK_NAMES.filter(n => n !== 'vidrender')` 用于缺省 `missingPacks()`、`gc()` 的 allReady、`ensurePacks()` 缺省、`prepareInBackground()`、`runtimeStatus()`——vidrender 不进产品默认缺包提示与「下载全部」，仍可 `prepare(['vidrender'])` 显式下载**；取远端清单有 **20 秒硬超时** | `runtime:*`（3 handle + 1 推送） |
 
 > 行数取自工作区源码实测（`[IO.File]::ReadAllLines` 与编辑器行号一致）。目录下共 **59** 个 `.ts` 文件 = **9 个根目录单文件 + `account/` 目录 3 个文件 + `cast/` 目录 9 个文件 + `voice/` 目录 10 个文件 + `projects/` 目录 16 个文件 + `agent/` 目录 8 个文件 + `updater/` 目录 4 个文件**（`Get-ChildItem src\main -Recurse -File -Filter *.ts` 实测；旧记 55，差在 account 3 与 `agent/constants.ts` 1）；上表**已全部收录**（`account/` / `cast/` / `voice/` / `projects/` / `agent/` / `updater/` 各合成**目录级一篇**：[files/main/account.md](./files/main/account.md)、[files/main/cast.md](./files/main/cast.md)、[files/main/voice.md](./files/main/voice.md)、[files/main/projects.md](./files/main/projects.md)、[files/main/agent.md](./files/main/agent.md)、[files/main/updater.md](./files/main/updater.md)，旧名 [files/main/updater.ts.md](./files/main/updater.ts.md) 只留过渡指针）。
 >
@@ -177,7 +178,8 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 
 ### 4.2 `hfEnv.ts` —— 环境探测与资源定位
 
-- `BUILTIN_RESOURCES` 各字段都是 **getter**，按包缓存；`resolvePackRoot('ffmpeg'|'hyperframes')` 候选依次是：`<userData>/runtime/<包名>/`（有 `ok.json`）→ 旧版整体包目录 → `process.resourcesPath` / 开发态 `resources`。`refreshPack()` / `packReady()` 一并保留。
+- **包目录名三值（本轮扩展）**：`export type RuntimePackDirName = 'ffmpeg' | 'hyperframes' | 'vidrender'`、`const PACK_DIRS = ['ffmpeg','hyperframes','vidrender']`（`resolvePackRoot` / `refreshPack` / `packReady` 都用它）；其余逻辑未变，**没有为 vidrender 新增 `BUILTIN_RESOURCES` getter 或字段**。
+- `BUILTIN_RESOURCES` 各字段都是 **getter**，按包缓存；`resolvePackRoot('ffmpeg'|'hyperframes'|'vidrender')` 候选依次是：`<userData>/runtime/<包名>/`（有 `ok.json`）→ 旧版整体包目录 → `process.resourcesPath` / 开发态 `resources`。`refreshPack()` / `packReady()` 一并保留。
 - `findChromeShell()` **只缓存找到的结果**（找不到返回 `null` 但不写缓存），避免「解包完成前被问过一次」把 `chrome=无` 钉住。
 - 定位函数均为**多候选回退**：`findNode()`（Electron 内嵌 Node ≥22 → 系统 Node）、FFmpeg（WinGet 的 `Gyan.FFmpeg*`）、HyperFrames CLI（内置优先，其次 `HYPERFRAMES_CLI`）。
 - `isHyperframesComposition(raw)`：转视频前的合规校验。
@@ -258,7 +260,8 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 
 ### 4.10 `runtime.ts` —— 运行环境包
 
-- **动机**：安装包只带代码 + whisper；ffmpeg / hyperframes 各成一个 7z，首次用到时由用户确认后下载（提示体积、可取消）。
+- **动机**：安装包只带代码 + whisper（另投 `resources/bin` 小内核二进制）；ffmpeg / hyperframes / vidrender 各成一个 7z，首次用到时由用户确认后下载（提示体积、可取消）。
+- **三包与 `PRODUCT_PACKS`（本轮新增）**：`PACK_DEFS` 第三项是 vidrender（title「Rust 编码内核（vidrender-encode）」、hint 1 MiB、关键文件 `bin/vidrender-encode.exe`）；`PACK_NAMES` 是三项的 name 列表，`PRODUCT_PACKS = PACK_NAMES.filter(n => n !== 'vidrender')` 才是**产品口径**——缺省 `missingPacks()` / `ensurePacks()`、`prepareInBackground()`、`runtimeStatus()` 与 `gc()` 的 allReady 都用它，所以 vidrender 不进默认缺包提示、不进「下载全部」；`ensurePacks` 的显式入参仍按 `PACK_NAMES` 过滤，`prepare(['vidrender'])` 可下载。
 - **频道**：`runtime:status` / `runtime:prepare` / `runtime:cancel` / 推送 `runtime:progress`。
 - **三个 API 的分工**：`packsStatus()` / `missingPacks()` / `packSizeText()` 纯探测，`ensurePacks()` 才下载 + 解包，`prepareInBackground()` 启动只探测。
 - **主流程**：探测缺包 → 定位 `7za` → 逐包安装（清单本地优先，否则远端 + `Range` 续传 + sha512 复核）→ 解包 → 先写 `ok.json` 再写 `packs.json` → `hfEnv.refreshPack()`。
@@ -311,7 +314,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 ## 5. 目录内的通用实现约定
 
 1. **spawn 样板统一**：`child_process.spawn` + `windowsHide: true` + Promise 包装，参数以数组传递、不经 shell。
-2. **外部依赖只从「安装包资源 + 运行环境包」取**：`whisper-cli.exe` 与 `7za.exe` 来自安装包，ffmpeg / hyperframes 来自运行环境包解出的 `<userData>/runtime/<包名>/`。
+2. **外部依赖只从「安装包资源 + 运行环境包」取**：`whisper-cli.exe` 与 `7za.exe` 来自安装包，`resources/bin/vidrender-encode.exe`（小内核）经 extraResources 随包（仅 demo 用），ffmpeg / hyperframes / vidrender 来自运行环境包解出的 `<userData>/runtime/<包名>/`。
 3. **返回约定**：业务接口统一 `{ ok: true, ... }` / `{ ok: false, message, canceled? }`；查询类可返回数组或 `null`（`project:pick-media` 返回裸字符串数组，取消时为空数组）。**账号域用 `{ ok, code, message }`**（见 §4.15），不套 `IpcFail`。
 4. **进度回推节流**：下载与转录的高频进度按时间/百分比节流后再 `webContents.send`。
 5. **路径安全**：所有项目内路径由 `projectDir()` 派生并做前缀校验；素材的 `file` 另由 `normalizeMaterials()` 校验必须落在本项目素材目录下且不含 `..`；`hgpreview` 的项目外路由顶层目录必须落在 `USER_PREVIEW_DIRS` 白名单内，否则 403。

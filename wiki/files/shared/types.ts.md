@@ -4,7 +4,8 @@
 
 - **所在目录**：`src/shared/`
 - **类型**：共享类型（纯 `interface` / `type` 别名，无运行时代码）
-- **规模**：**1337 行**（实测 `[IO.File]::ReadAllLines`；本版 **+4 行** = `CastActionGeneratePayload` 新增可选 **`actionId?`**——带它就是「改一条已有专属动作、覆盖同一条」，不带是新建；再上一版 1244 → 1333 是 **+89 行**：⑥ 节新增十个动作相关类型、⑨ 节 `castTools` 补 5 个方法签名。更早一轮 +15 行是：⑥ 节新增 **`ScriptCastRef`**（含 3 行注释，说明它**不是** `ProjectCastMember`：不落盘、不导入项目、不参与 HTML 生成的角色注入，只用于写稿）与 **`ScriptGeneratePayload.cast?: ScriptCastRef[]`**（空 / 缺省 = 提示词里没有【角色】块）。**而本轮动作示范改了 `src/shared/ipc.ts`**：`Cast` 组 6 → 11 条（新增动作 5 条），全库频道 101 → 106，分组数不变）
+- **规模**：**1429 行**（实测 `[IO.File]::ReadAllLines`；本版 **+4 行** = `CastActionGeneratePayload` 新增可选 **`actionId?`**——带它就是「改一条已有专属动作、覆盖同一条」，不带是新建；再上一版 1244 → 1333 是 **+89 行**：⑥ 节新增十个动作相关类型、⑨ 节 `castTools` 补 5 个方法签名。更早一轮 +15 行是：⑥ 节新增 **`ScriptCastRef`**（含 3 行注释，说明它**不是** `ProjectCastMember`：不落盘、不导入项目、不参与 HTML 生成的角色注入，只用于写稿）与 **`ScriptGeneratePayload.cast?: ScriptCastRef[]`**（空 / 缺省 = 提示词里没有【角色】块）。**而本轮动作示范改了 `src/shared/ipc.ts`**：`Cast` 组 6 → 11 条（新增动作 5 条），全库频道 101 → 106，分组数不变）
+- **本轮（vidrender）改动**：`RuntimePackName` 从 `'ffmpeg' | 'hyperframes'` 扩为 **`'ffmpeg' | 'hyperframes' | 'vidrender'`**（定义仍在文件最前），③.6 运行环境段与 ⑨ 节 `runtimeTools` 段的两行注释改为三包；**没有新增任何 IPC 频道 / 载荷类型**，账号契约不在本轮范围。
 - **对外导出**：按 12 个小节组织（源码编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）—— ① 通用 IPC 结果 3 个（`IpcFail`、`IpcResult`、**`ConfigTarget`**）② 主进程装配上下文 1 个（`RegisterCtx`）③ 设置（含**思考强度 `ReasoningEffort`**、`UpdaterSettings`、`SettingsSaveUpdaterPayload`、渲染档位 `RenderQuality` / `RenderFps` / `RenderOptions` / `RenderOverride` 与**成片画布 `RenderCanvas`**）③.5 应用自更新 4 个（`UpdateCheckState`、`UpdateCheckResult`、`UpdateStage`、`UpdateProgressPayload`）③.6 运行环境（**分包**）4 个（`RuntimePackName`、`RuntimePackState`、`RuntimePhase`、`RuntimeProgressPayload`）⑧b 历史数据目录 3 个（`LegacyDataInfo`、`LegacyResolveAction`、`LegacyResolveResult`）④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕（含素材库 `ProjectMaterial*` 一族、**章节 `ProjectChapter` 与角色 `ProjectCastMember`（含 `selected?`）**、**全局角色库 `CastLibraryMember` / `CastLibraryResult` / `ProjectCastResult`**、**项目角色的三件套 `ProjectNewCastPayload` / `ProjectNewCastResult` / `ProjectSaveCastPayload`**、**角色预览 `ProjectCastPreviewPayload` / `ProjectCastPreviewResult`**、**`ScriptCastRef`（内容脚本写稿用的角色引用——不是项目角色）**、`ScriptGeneratePayload` / `ScriptGenerateReply` 与**对话记录的 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`**）⑦ 预览 / 转视频 2 个（`VideoRenderPayload`——含 `canvas?`、`VideoRenderResult`）⑧ 进度推送（**通用：`AgentStage` / `AgentProgressPayload` + 旧名别名 `HtmlAgentStage` / `HtmlAgentProgress` + `HtmlProgressPayload`（**本轮加必填 `taskId`**）/ `ScriptProgressPayload` 两个 `extends` 变体**）⑨ `PreloadApi` 1 个（**12 个命名空间**）；另有 ① 节 `IpcFail.needPacks`（缺哪个运行环境包）与 `IpcFail.needConfig` / `title`（配置类错误）、⑨ 节 `settingsTools.pickRuntimePack`、**`projectTools` 的 4 个角色库成员**与 **`scriptTools` 的 7 个成员**、**动作示范的十个类型**（`CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload` / `CastDemoResult`）与 **`castTools` 的 5 个动作方法**（`listActions` / `saveAction` / `removeAction` / `generateAction` / `demo`）等
 
 ## 1. 作用与职责
@@ -53,7 +54,7 @@
 | `message` | 可选 `string` | 失败说明（人话）。**可选**的原因：`voice:pick-dir` 的「用户取消」分支只回 `{ ok: false, canceled: true }`，没有 `message` |
 | `detail` | 可选 `string` | **可选的技术详情**（原始报错 / HTTP 状态 / 请求 URL）：供 UI 的「查看详情」折叠展示，与面向用户的 `message` 分离——`message` 说人话，`detail` 给排障。见 `UpdateCheckResult.detail` |
 | `canceled` | 可选 `boolean` | 区分「用户取消」与「真实失败」，渲染层通常静默忽略取消 |
-| `needPacks` | 可选 `RuntimePackName[]` | **运行环境缺包**时回给界面的包名数组（`'ffmpeg'` / `'hyperframes'`）：消费点（`video:render` / `project:extract-video-audio` / `voice:synth-aligned` / 转码时的 `whisper:transcribe`）先纯校验，缺包就带上它返回，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），用户点「继续」才用原参数重发。`VideoRenderResult` 的失败分支另有同名字段 |
+| `needPacks` | 可选 `RuntimePackName[]` | **运行环境缺包**时回给界面的包名数组（`'ffmpeg'` / `'hyperframes'` / `'vidrender'`；产品代码只回前两者，vidrender 仅在 demo 显式通路出现）：消费点（`video:render` / `project:extract-video-audio` / `voice:synth-aligned` / 转码时的 `whisper:transcribe`）先纯校验，缺包就带上它返回，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），用户点「继续」才用原参数重发。`VideoRenderResult` 的失败分支另有同名字段 |
 | `needConfig` | 可选 `ConfigTarget` | **本次失败属于「配置类」**（缺 Key / Key 无效 / 配置不完整 / Base URL 填错 / 未启用）：界面据此弹「去设置 / 取消」弹窗而不是只显示一行红字。源码注释强调：**它不驱动流程**（不像 `needPacks` 要续做），只是一个分类标记；**不显示原始报文**（排障详情仍落日志）；**余额 / 欠费不属于此处**。写入方是主进程（`agent/html.ts` / `settings.ts` / `voice/api.ts`、`voice/ipc/*` 直接产出，`projects.ts` 用 `configTargetOf()` 补分类） |
 | `title` | 可选 `string` | 配置类弹窗的**标题**（主进程用 `errors.configTitle()` 单点产出：`需要设置自定义模型` / `需要设置语音服务`，兜底 `需要先完成设置`）；界面只显示、不判断 |
 
@@ -140,11 +141,11 @@
 
 ### 2.3.2 ③.6 运行环境（分包）（`src/main/runtime.ts`）
 
-> 分包模型：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）不随安装包，各自一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）、首次用到时下载并解到 `<userData>/runtime/<包名>/`；`whisper`（12.5 MB）随安装包（`extraResources`），装完即可离线转录。方案见 `docs/runtime-pack-split.md`。
+> 分包模型：`ffmpeg`（解包 179.9 MB）与 `hyperframes`（解包 439.9 MB）不随安装包，各自一个 7z（**实测 42.6 MB + 103.1 MB = 145.7 MB**，2026-10-14）、首次用到时下载并解到 `<userData>/runtime/<包名>/`；**第三包 `vidrender`（Rust 小内核，约 1 MB，关键文件 `bin/vidrender-encode.exe`）由同一脚本单独成包，仅联调 demo 显式下载，`runtime.ts` 用 `PRODUCT_PACKS` 把它排除在产品默认缺包提示与「下载全部」之外**；`whisper`（12.5 MB）随安装包（`extraResources`），装完即可离线转录。方案见 `docs/runtime-pack-split.md`。
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
-| `RuntimePackName` | `type` | `'ffmpeg' \| 'hyperframes'`。**定义在本文件最前**（`IpcFail.needPacks` 与 ⑧ 节的进度载荷都要用），详细说明在本节；① 节的 `ConfigTarget` 紧随它之后定义 |
+| `RuntimePackName` | `type` | **`'ffmpeg' \| 'hyperframes' \| 'vidrender'`（本轮新增第三个值）**——前两者是产品运行环境包，`vidrender` 是 Rust 编码小内核（目前仅独立 demo 显式下载、不进产品默认缺包提示）。**定义在本文件最前**（`IpcFail.needPacks` 与 ⑧ 节的进度载荷都要用），详细说明在本节；① 节的 `ConfigTarget` 紧随它之后定义 |
 | `RuntimePackState` | `type` | 单个包在本机的状态：`'ready'`（已就绪）/ `'missing'`（本机没有，需要下载）/ `'unknown'`（还没探测过） |
 | `RuntimePhase` | `type` | `'idle'`（未开始）/ `'checking'`（探测 / 取清单）/ `'downloading'`（下载中）/ `'extracting'`（解包中）/ `'ready'`（需要的包都就绪）/ `'cancelled'`（用户取消，**不是失败**）/ `'error'`（失败，有 `detail` 可排障） |
 | `RuntimeProgressPayload` | `interface` | `runtime:progress` 推送与 `runtime:status` 返回共用的载荷；字段见下。**旧的 `stage` / `id` 字段已删除**（阶段改叫 `phase`，包名改叫 `pack`，就绪与否看 `status` / `missing`） |

@@ -13,7 +13,7 @@ const runtime = ref<RuntimeProgressPayload>({
   percent: 0,
   packs: [],
   missing: [],
-  status: { ffmpeg: 'unknown', hyperframes: 'unknown' },
+  status: { ffmpeg: 'unknown', hyperframes: 'unknown', vidrender: 'unknown' },
   message: '',
   source: '',
   bytes: 0,
@@ -35,7 +35,8 @@ export function initRuntime(): void {
 
 const PACK_LABEL: Record<RuntimePackName, string> = {
   ffmpeg: '音视频处理（ffmpeg）',
-  hyperframes: '视频渲染引擎（HyperFrames）'
+  hyperframes: '视频渲染引擎（HyperFrames）',
+  vidrender: 'Rust 编码内核（vidrender-encode，联调 demo 用）'
 }
 
 export function useRuntime() {
