@@ -67,9 +67,16 @@ function seekScript(t) {
 
 function writeAll(stream, buf) {
   return new Promise((resolve, reject) => {
-    if (stream.write(buf)) return resolve()
-    stream.once('drain', resolve)
-    stream.once('error', reject)
+    // 每次背压都挂 once 监听却不摘，60 帧累积后会触发 MaxListenersExceededWarning。
+    const cleanup = () => {
+      stream.off('drain', onDrain)
+      stream.off('error', onError)
+    }
+    const onDrain = () => { cleanup(); resolve() }
+    const onError = (e) => { cleanup(); reject(e) }
+    if (stream.write(buf)) { cleanup(); resolve(); return }
+    stream.once('drain', onDrain)
+    stream.once('error', onError)
   })
 }
 
@@ -144,7 +151,8 @@ async function main() {
     if (f % 15 === 0) console.log('  seek ' + f + '/' + FRAMES)
   }
   child.stdin.end()
-  const [code] = await exited
+  // close 事件回传的是单个退出码（不是数组），不能解构
+  const code = await exited
   if (spawnError) throw spawnError
   if (code !== 0) throw new Error('vidrender-encode 退出码 ' + code + '；stderr 尾部：\n' + stderrTail)
 
