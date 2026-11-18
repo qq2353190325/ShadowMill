@@ -98,7 +98,9 @@ async function main() {
   let latest = null
   let waiter = null
   win.webContents.beginFrameSubscription(false, (image) => {
-    const buf = image.toBitmap() // 原始字节；格式按 PIX_FMT 交给小内核解释
+    // Windows 离屏窗口的订阅帧是「外框」尺寸（请求 640x360 实得 643x363）：多出的 3px
+    // 是不可见边框，不属于 composition。先裁到内容视口再取原始像素，否则每帧字节数对不上。
+    const buf = image.crop({ x: 0, y: 0, width: WIDTH, height: HEIGHT }).toBitmap()
     if (waiter) { const fn = waiter; waiter = null; fn(buf) } else latest = buf
   })
   const nextFrame = () => new Promise((resolve, reject) => {
