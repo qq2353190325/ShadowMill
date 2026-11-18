@@ -2,7 +2,7 @@
 //
 // 跑法：npm run demo:vidrender   （需等待，交给用户执行）
 // 链路：Electron 隐藏 offscreen 窗口 → 逐帧 seek（含 <video>.currentTime）→
-//       beginFrameSubscription 拿原始 BGRA → vidrender-encode 的 stdin → MP4。
+//       capturePage() 抓帧 → 裁到内容视口取原始像素 → vidrender-encode 的 stdin → MP4。
 // 只验证协议与画面能否成片；「HTML生成」页的「转成视频」按钮仍走 hyperframes，未改动。
 const { app, BrowserWindow } = require('electron')
 const { spawn } = require('node:child_process')
@@ -102,19 +102,11 @@ async function main() {
   await win.loadFile(FIXTURE)
   await win.webContents.executeJavaScript('window.__videoReady')
 
-  let latest = null
-  let waiter = null
-  win.webContents.beginFrameSubscription(false, (image) => {
-    // Windows 离屏窗口的订阅帧是「外框」尺寸（请求 640x360 实得 643x363）：多出的 3px
-    // 是不可见边框，不属于 composition。先裁到内容视口再取原始像素，否则每帧字节数对不上。
-    const buf = image.crop({ x: 0, y: 0, width: WIDTH, height: HEIGHT }).toBitmap()
-    if (waiter) { const fn = waiter; waiter = null; fn(buf) } else latest = buf
-  })
-  const nextFrame = () => new Promise((resolve, reject) => {
-    if (latest) { const b = latest; latest = null; resolve(b); return }
-    const timer = setTimeout(() => { waiter = null; reject(new Error('等待合成帧超时')) }, 3000)
-    waiter = (buf) => { clearTimeout(timer); resolve(buf) }
-  })
+  // 用 capturePage 而不是 beginFrameSubscription：后者只在 presentation 事件时回调，
+  // 隐藏的离屏窗口会合并/跳过呈现，实测会偶发长时间无帧；capturePage 按需抓，单路径稳定。
+  // 抓到的图比 composition 略大（窗口边框），裁到 640x360 后每帧正好 WIDTH*HEIGHT*4 字节。
+  const cropBitmap = (image) => image.crop({ x: 0, y: 0, width: WIDTH, height: HEIGHT }).toBitmap()
+  const nextFrame = async () => cropBitmap(await win.webContents.capturePage())
 
   const child = spawn(exe, [
     '--width', String(WIDTH), '--height', String(HEIGHT), '--fps', String(FPS),
