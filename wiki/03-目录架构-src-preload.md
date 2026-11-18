@@ -1,6 +1,6 @@
 # 03 · 目录架构：`src/preload/`（桥接层）
 
-> 预加载脚本是渲染层通往系统的**唯一门面**：它把 **106** 个 IPC 频道收敛成 **13** 个命名空间的方法，并转发 **7 路**主→渲染进度推送（其中 6 路有模块级「只绑一次」标志）。渲染层永远不直接接触 `ipcRenderer`。
+> 预加载脚本是渲染层通往系统的**唯一门面**：它把 **111** 个 IPC 频道收敛成 **14** 个命名空间的方法，并转发 **7 路**主→渲染进度推送（其中 6 路有模块级「只绑一次」标志）。渲染层永远不直接接触 `ipcRenderer`。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 文件 | 行数 | 角色 | 是否进运行时 |
 |---|---|---|---|
-| [index.ts](./files/preload/index.ts.md) | **305** | `contextBridge` 暴露 **13** 个命名空间 + 7 路进度通道的订阅转发（6 路有「只绑一次」标志）；每个对象用 `PreloadApi['<命名空间>']` 标注。**进度订阅是 `onTaskProgress(taskId, cb)`：一条频道 + 按任务 id 分发**（`projectTools` 与 `castTools` 共用） | 是（构建为 `out/preload/index.js`，CJS） |
+| [index.ts](./files/preload/index.ts.md) | **316** | `contextBridge` 暴露 **14** 个命名空间 + 7 路进度通道的订阅转发（6 路有「只绑一次」标志）；每个对象用 `PreloadApi['<命名空间>']` 标注。**进度订阅是 `onTaskProgress(taskId, cb)`：一条频道 + 按任务 id 分发**（`projectTools` 与 `castTools` 共用） | 是（构建为 `out/preload/index.js`，CJS） |
 | [index.d.ts](./files/preload/index.d.ts.md) | 11 | 只做 `interface Window extends PreloadApi {}`，把共享层契约挂到全局 `Window` | 否（仅类型，被 `tsconfig.web.json` include，为渲染层提供智能提示） |
 
 ---
@@ -21,12 +21,13 @@
 
 ---
 
-## 3. 暴露的 13 个命名空间
+## 3. 暴露的 14 个命名空间
 
 | 命名空间 | 方法数 | 底层域 | 说明 |
 |---|---|---|---|
 | `electronAPI` | — | 无（纯数据） | `platform`、`versions{node,chrome,electron}` |
 | `appTools` | 1 | `app:copy-text` | 剪贴板写入（sandbox 下渲染层无 `clipboard` 模块） |
+| **`accountTools`** | **5** | **`account:*`** | **账号（可选登录）**：`sendCode(email)`（`account:send-code`）/ `register(payload)`（`account:register`，载荷 `{ email, password, code, nickname? }`）/ `login(payload)`（`account:login`）/ `me()`（`account:me`，用主进程里保存的令牌取当前用户）/ `logout()`（`account:logout`，撤销服务端会话 + 清本地令牌，回 `void`）。**原样 `invoke` 转发，令牌与 HTTP 都在主进程**（见 [main/account.md](./files/main/account.md)）；回执是 `AccountResult` / `AccountSendCodeResult`（**不是 `IpcResult`**），渲染层按 `code` 分流 |
 | `windowControls` | 4 | `window:*` | 最小化 / 最大化切换 / 关闭 / 最大化状态订阅 |
 | `hfTools` | 4 | `dialog:open-html`、`video:*` | HTML 选择（`openHtml`，**当前无渲染层调用方**）、转视频（`renderVideo(htmlPath, options?)`，`options` = 渲染档位 `quality?` / `fps?` + **项目属性 `canvas?`**）、在文件夹中显示、渲染进度订阅 |
 | `settingsTools` | 6 | `settings:*` | 读取 / 保存自定义模型 / 保存渲染档位 / 保存更新设置 / 连接测试 / **运行环境「从本地文件安装…」（`pickRuntimePack`）** |
@@ -39,7 +40,9 @@
 | `runtimeTools` | 4 | `runtime:*` | 运行环境（分包 ffmpeg / hyperframes）：状态查询 / 主动准备（`prepare(packs?)`）/ **取消（`cancel`）** / 进度订阅 |
 | `legacyTools` | 2 | `legacy:*` | 旧版本数据：状态查询 / 回传选择（`migrate` \| `delete` \| `later`）；**无进度订阅**——旧数据是否存在由渲染层主动问一次，主进程不推送、不弹界面 |
 
-> 渲染层对主进程的全部依赖面就是这 13 个命名空间，因此它们被定义为**不可漂移的契约**：方法签名唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi`，频道名一一对应 `src/shared/ipc.ts`（12 个分组 / 106 个频道）。
+> 渲染层对主进程的全部依赖面就是这 14 个命名空间，因此它们被定义为**不可漂移的契约**：方法签名唯一真源是 `src/shared/types.ts` ⑨ 节的 `PreloadApi`，频道名一一对应 `src/shared/ipc.ts`（**13 个分组 / 111 个频道**）。
+>
+> **`accountTools` 是第 14 个命名空间**（排在 `appTools` 之后，与 `src/main/index.ts` 的注册顺序 `settings → account → projects → …` 呼应）：5 个方法一一对应 `IPC.Account` 的 5 条频道，**没有进度订阅**（登录 / 注册是一次请求-响应，没有阶段推送）。
 
 ---
 
@@ -57,7 +60,7 @@
 | `update:progress` | `updateTools.onProgress(cb)` | `_updateProgressCb` + `_updateProgressBound`（单槽） |
 | `runtime:progress` | `runtimeTools.onProgress(cb)` | `_runtimeProgressCb` + `_runtimeProgressBound`（单槽） |
 
-> **「6 个进度推送通道」该怎么读**：源文件头注释写的是「13 个命名空间 / 6 个进度推送通道」，那个 **6 指的是有模块级「只绑一次」标志的通道数**（html / script / whisper / align / update / runtime）；加上 `video:progress`（`hfTools.onProgress` 直接 `ipcRenderer.on`，没有模块级标志），**整层实际暴露 7 路进度订阅**。写文档 / 加通道时按「7 路」核，别把 video 那路漏掉。**注意 html 这一路的「标志」只保证监听器绑一次，回调不再是一个单槽**——它是 `taskId → 回调` 的 Map。
+> **「6 个进度推送通道」该怎么读**：源文件头注释写的是「**14 个命名空间** / 6 个进度推送通道」，那个 **6 指的是有模块级「只绑一次」标志的通道数**（html / script / whisper / align / update / runtime）；加上 `video:progress`（`hfTools.onProgress` 直接 `ipcRenderer.on`，没有模块级标志），**整层实际暴露 7 路进度订阅**。写文档 / 加通道时按「7 路」核，别把 video 那路漏掉。**注意 html 这一路的「标志」只保证监听器绑一次，回调不再是一个单槽**——它是 `taskId → 回调` 的 Map。
 
 做法分两类：
 
@@ -69,8 +72,8 @@
 
 ## 5. 类型来源：`shared/types.ts` 的 `PreloadApi`
 
-- **唯一真源在共享层**：13 个命名空间的方法签名、参数顺序与返回类型统一定义在 `src/shared/types.ts` ⑨ 节的 `PreloadApi`；`index.d.ts` 只剩一句 `interface Window extends PreloadApi {}`（外加 `import type` 与 `export {}`）。
-- **实现侧也被同一份契约约束**：`index.ts` 的每个对象都写成 `const hfTools: PreloadApi['hfTools'] = { ... }` 形式（`electronAPI` / `appTools` / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / **`castTools`** / `scriptTools` / `updateTools` / `runtimeTools` / `legacyTools` 共 **13** 处），因此方法名、参数个数、返回类型写错会直接在 `tsconfig.node.json` 阶段编译失败。
+- **唯一真源在共享层**：14 个命名空间的方法签名、参数顺序与返回类型统一定义在 `src/shared/types.ts` ⑨ 节的 `PreloadApi`；`index.d.ts` 只剩一句 `interface Window extends PreloadApi {}`（外加 `import type` 与 `export {}`）。
+- **实现侧也被同一份契约约束**：`index.ts` 的每个对象都写成 `const hfTools: PreloadApi['hfTools'] = { ... }` 形式（`electronAPI` / `appTools` / **`accountTools`** / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / **`castTools`** / `scriptTools` / `updateTools` / `runtimeTools` / `legacyTools` 共 **14** 处），因此方法名、参数个数、返回类型写错会直接在 `tsconfig.node.json` 阶段编译失败。
 - **结果类型约定（① 节）**：
 
 ```ts
@@ -81,6 +84,7 @@ type IpcResult<T = unknown> = ({ ok: true; message?: string } & T) | IpcFail
   `message` 为**可选**，因为 `voice:pick-dir` 的用户取消分支只回 `{ ok: false, canceled: true }`；成功分支的业务字段是**平铺**的（没有 `data` 包装，也没有旧版 `OkResult` 的 `[key: string]: any` 索引签名），成功分支的 `message` 同样可选（取消、幂等复用等场景给一句话回执）。`detail` 同为可选，是给排障用的技术详情（原始报错 / HTTP 状态 / 请求地址），由 UI 折叠展示——目前主要用在 `update:*` 一族与 `updateTools.openLog()` 的失败分支上。`needPacks` 是运行环境分包带进来的可选字段：缺包时主进程回 `{ ok:false, needPacks: ['ffmpeg', …] }`，渲染层据此弹「下载运行环境」确认框（`useEnvGate`），`VideoRenderResult` 的失败分支另有同名字段。`needConfig` / `title` 是**配置类**字段：主进程 `friendlyError()` 判出「去设置页改配置就能解决」时回 `needConfig: 'model' | 'voice'`（余额 / 欠费**不在其中**，走内嵌状态行），渲染层据此弹只有 `[去设置]` / `[取消]` 的弹窗（`useConfigPrompt`，见 [04-目录架构-src-renderer](./04-目录架构-src-renderer.md)）。**preload 只是 `ipcRenderer.invoke` 原样转发，这两个字段不需要 preload 任何改动**。
 - 该文件被 `tsconfig.web.json` 的 `include` 显式引入（`src/preload/index.d.ts`），这是渲染层获得 IPC 类型的唯一途径；`tsconfig.node.json` 则包含 `src/preload/index.ts` 本体，两侧共同保证契约不漂移。
 - 少数接口不遵循 `IpcResult`：`projectTools.list()` 返回数组、`projectTools.load()` 返回项目对象或 `null`、`pickAudio()` 返回 `string | null`、`pickMedia(kind)` 返回 `string[]`（项目素材库选文件，取消时为空数组）、`settingsTools.get()` 直接返回 `AppSettings`、`hfTools.renderVideo()` 返回 `VideoRenderResult`（载荷 = `{ htmlPath, quality?, fps?, canvas? }`，`htmlPath` 由第一参数给，故 `PreloadApi` 里写成 `Omit<VideoRenderPayload, 'htmlPath'>`）、**`scriptTools.generate(payload)` 返回 `ScriptGenerateReply`（成功 `{ ok:true, scenes, totalChars, message? }` / 失败 `{ ok:false, message, raw?, needConfig?, title? }`）**—— 这些是历史契约，改动会同时影响渲染层多处调用。`scriptTools` 的 5 个 chat 方法则**走标准 `IpcResult`**（`loadChat` → `IpcResult<ScriptChatIndex>`、`appendRound` → `IpcResult<{ versionId }>`、`readVersion` → `IpcResult<ScriptVersionResult>`、`setActiveVersion` / `clearChat` → `IpcResult`）。
+- **`accountTools` 也自成一套结果类型**（`src/shared/types.ts` 的「账号」一节）：`sendCode` → `AccountSendCodeResult`（成功 `{ ok:true, expiresInSeconds, resendAfterSeconds, devCode? }`）、`register` / `login` / `me` → `AccountResult`（成功 `{ ok:true, session:{ user, expiresAt } }` / 失败 `{ ok:false, code, message }`）、`logout` → `void`。**没有 `detail` / `needPacks` / `needConfig`**——登录失败靠 `code` 分流，`message` 已由主进程翻成人话；`devCode` 只在未打包时由主进程透出（打包版没有这个字段）。
 - **`castTools` 里有两类方法**：① 角色本身 6 个（`list` / `create` / `recreate` / `saveMeta` / `remove` / `preview`），都走标准 `IpcResult`；`preview(id, options?)` 的 `options` 是 `Omit<CastPreviewPayload, 'id'>`，成功回 `IpcResult<CastPreviewResult>`（`{ rel }` = `cast-preview/<id>.html`，相对 **userData**），实现里原样展开：`ipcRenderer.invoke(IPC.Cast.Preview, { id, ...(options || {}) })`。② 动作示范 5 个（`listActions` / `saveAction` / `removeAction` / `generateAction` / `demo`）：`listActions(castId)` 组装 `{ castId }`，其余三个**整对象透传**（`payload || {}`），`demo(id, options?)` 把 `options` 展开成 `{ id, ...(options || {}) }`；`generateAction` 是**唯一会调模型的动作方法**（进度按 `taskId` 路由），`demo` 只回示范页的 `rel`（`cast-preview/<id>.demo.html`）。
 - 另有 **1 个同步方法**：`updateTools.version()` 走 `ipcRenderer.sendSync('update:version')`，同步返回版本号字符串（设置页首屏要立刻显示，不愿等一轮异步渲染）。这是全层唯一的同步 IPC，除它之外一律异步。
 
@@ -89,11 +93,11 @@ type IpcResult<T = unknown> = ({ ok: true; message?: string } & T) | IpcFail
 ## 6. 与本层相关的注意事项
 
 1. **频道名必须引用 `IPC.*` 常量**，不得写字符串字面量：常量集中在 `src/shared/ipc.ts`，是主进程、preload 两侧唯一的对齐依据（例外：`dialog:open-html` 属于 `IPC.Video.OpenHtml`，命名上不属于 `video:` 前缀，属历史遗留，不可「顺手统一」）。
-2. **不要让 `ipcRenderer` 泄漏到渲染层**：不暴露通用的 `invoke(channel, …)` 逃生舱，所有能力都必须显式列在命名空间里，保证攻击面可枚举。
+2. **不要让 `ipcRenderer` 泄漏到渲染层**：不暴露通用的 `invoke(channel, …)` 逃生舱，所有能力都必须显式列在命名空间里，保证攻击面可枚举。**账号这 5 条尤其不要做「任意 URL 转发」**——它固定打 `account:*`，HTTP 与令牌都在主进程。
 3. **`send` 与 `invoke` 的区分**：窗口控制与 `voice:align-cancel` 是单向 `send`（无返回值），`update:version` 是唯一的 `sendSync`（同步取版本号），其余为 `invoke`（含 `updateTools.openLog()` → `update:open-log`，它必须能独立工作：更新失败时 electron-updater 可能根本没加载起来，日志入口不能挂在那条懒加载链上）。**`castTools.preview` 与 `castTools.demo` 都是 `invoke`**：主进程写盘后要回 `rel`，渲染层靠它拼 iframe 地址（`cast:demo` 那页换动作只改 `#hash`）。
 4. **进度回调参数有具名类型**：`onTaskProgress`（回调 `(data: HtmlProgressPayload) => void`）/ **`scriptTools.onProgress`** / `whisperTools.onProgress` / `onAlignProgress` / `updateTools.onProgress` / `runtimeTools.onProgress` 的回调分别标注 `HtmlProgressPayload` / **`ScriptProgressPayload`** / `WhisperProgressPayload` / `AlignProgressPayload` / `UpdateProgressPayload` / `RuntimeProgressPayload`（模块级 `_progressCbs` 的 Map 值类型同 `HtmlProgressPayload` 回调），`hfTools.onProgress` 则仍是就地构造的 `{ text: string }`；改字段请改 `src/shared/types.ts` ⑧ 节。
 5. **新增一路进度通道的三处齐改**：`shared/ipc.ts` 加频道常量 → 主进程 `sender.send` → 本文件加 `onProgress`（记得同时加模块级 `_xxxProgressCb` / `_xxxProgressBound` 与 `import type` 的载荷类型）+ `shared/types.ts` ⑨ 节 `PreloadApi` 同步签名。`script:progress` 就是照这个流程加的；对话记录那 5 条（`load-chat` / `append-round` / `read-version` / `set-active-version` / `clear-chat`）是普通 `invoke`，只改 `ipc.ts` / `agent/script.ts` / 本文件与 `PreloadApi`，进度通道一路没动。**`project:html-progress` 是唯一改过分发方式的通道**：频道名与数量没变（`ipc.ts` 零改动），只是把单槽换成 `taskId → 回调` 的 Map，并让订阅函数返回退订函数。
-6. **新增普通 invoke（如 `castTools.demo`）是「三处齐改 + 一个方法」**：`shared/ipc.ts` 加频道常量 → 主进程对应 `register()` 里加 `ipcMain.handle` → 本文件对应命名空间加一行转发 → `shared/types.ts` 的 `PreloadApi.<命名空间>` 同步签名。**本轮动作示范的 5 条就是这么加的**（`Cast` 组 6 → 11、全库 101 → 106；`castTools` 7 → 12 个方法；`projectTools` 是 33 → **27**，那是上一轮角色频道搬家时下线 6 个方法的账）。
+6. **新增普通 invoke 是「三处齐改 + 一个方法」**：`shared/ipc.ts` 加频道常量 → 主进程对应 `register()` 里加 `ipcMain.handle` → 本文件对应命名空间加一行转发 → `shared/types.ts` 的 `PreloadApi.<命名空间>` 同步签名。**本轮账号 5 条就是这么加的**：`IPC.Account` 分组 5 条 → `src/main/account/index.ts` 的 `register()` 5 个 `ipcMain.handle` → 本文件新增第 14 个命名空间 `accountTools` → ⑨ 节 `PreloadApi.accountTools` + 「账号」一节的 9 个类型。计数：`ipc.ts` 分组 **12 → 13**、频道 **106 → 111**、命名空间 **13 → 14**。**上一轮动作示范的 5 条**同样走过这条流程（`Cast` 组 6 → 11、全库 101 → 106；`castTools` 7 → 12 个方法；`projectTools` 是 33 → **27**，那是更早角色频道搬家时下线 6 个方法的账）。
 
 ---
 
@@ -102,11 +106,12 @@ type IpcResult<T = unknown> = ({ ok: true; message?: string } & T) | IpcFail
 - 逐文件说明：[files/preload/](./files/preload/)
 - 频道常量与类型定义：[05-目录架构-src-shared.md](./05-目录架构-src-shared.md)
 - 频道总表：[01-架构总览.md](./01-架构总览.md) 第 3.3 节
+- 账号域：[main/account.md](./files/main/account.md)
 
 ## 附录 · 角色与动作示范的现状（与上文冲突时以本节为准）
 
-- **命名空间 13 个**：新增 **`castTools`**，成员 **12** 个——角色本身 6 个：`list`（`cast:list`）/ `create`（`cast:create`）/ `recreate`（`cast:recreate`）/ `saveMeta`（`cast:save-meta`）/ `remove`（`cast:remove`）/ `preview`（`cast:preview`）；**动作示范 5 个**：`listActions(castId)`（`cast:action-list`）/ `saveAction(payload)`（`cast:action-save`）/ `removeAction(payload)`（`cast:action-remove`）/ `generateAction(payload)`（`cast:action-generate`，**唯一会调模型**）/ `demo(id, options?)`（`cast:demo`，会动的示范页）；外加 `onTaskProgress`（与 `projectTools.onTaskProgress` 同一条频道、同一张订阅表）。
+- **命名空间 14 个**：`electronAPI` / `appTools` / **`accountTools`** / `windowControls` / `hfTools` / `settingsTools` / `voiceTools` / `whisperTools` / `projectTools` / **`castTools`** / `scriptTools` / `updateTools` / `runtimeTools` / `legacyTools`。其中新增的 **`castTools`** 成员 **12** 个——角色本身 6 个：`list`（`cast:list`）/ `create`（`cast:create`）/ `recreate`（`cast:recreate`）/ `saveMeta`（`cast:save-meta`）/ `remove`（`cast:remove`）/ `preview`（`cast:preview`）；**动作示范 5 个**：`listActions(castId)`（`cast:action-list`）/ `saveAction(payload)`（`cast:action-save`）/ `removeAction(payload)`（`cast:action-remove`）/ `generateAction(payload)`（`cast:action-generate`，**唯一会调模型**）/ `demo(id, options?)`（`cast:demo`，会动的示范页）；外加 `onTaskProgress`（与 `projectTools.onTaskProgress` 同一条频道、同一张订阅表）。
 - **`projectTools` 去掉 6 个角色方法**：`listCastLibrary` / `promoteCast` / `importCast` / `removeCastFromLibrary` / `newCast` / `castPreview`（**`projectTools.castPreview` 这个名字已不存在**，换成 `castTools.preview(id, { units, title, uses })`），方法数 33 → **27**。
 - **`projectTools.saveCast(name, cast)`**：`cast` 现在是 `ProjectCastSelection[]`（`[{ id, selected }]`），不再是完整成员快照。
 - **角色预览 / 动作示范都不是进度通道**：`cast:preview` 与 `cast:demo` 都是一次普通 `invoke`（请求 → 主进程拼页落 `<userData>/cast-preview/` 下的 `<id>.html` / `<id>.demo.html` → 回 `{ ok, rel }`），`CastShot.vue` / `CastDemoShot.vue` 各自调一次，`rel` 再经 `utils/url.ts` 的 `userFileUrl` 拼成 `hgpreview://user/…?user=1`。**`cast:action-generate` 调模型时的进度仍走既有的 `project:html-progress`**（按 `taskId` 分发，没有新增进度通道）。
-- **频道总数 106、分组 12**（`Project` 27 + **`Cast` 11** = 角色 6 + 动作 5，见 [shared/ipc.ts.md](./shared/ipc.ts.md)）。
+- **频道总数 111、分组 13**（Window 4 + App 1 + Update 9 + Settings 6 + **Account 5** + Voice 19 + Whisper 12 + **Project 27** + **Cast 11** + **Script 7** + Video 4 + Runtime 4 + **Legacy 2** = **111**，见 [shared/ipc.ts.md](./shared/ipc.ts.md)）。**注意**：更早的 wiki 记的是「106 条 / 12 组」——那在写下的当时就已经落后（`#86`–`#106` 的角色与动作批次把 94 加到了 106，wiki 没跟上）；本版按 `src/shared/ipc.ts` 实测重记为 **111 / 13**。

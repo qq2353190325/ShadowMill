@@ -206,6 +206,10 @@ body {
 .menu {
   padding: 12px 0;
   flex: 1;
+  /* 菜单区吃掉剩余高度，但允许收缩并按需滚动：否则菜单项多 / 窗口矮（minHeight 600）时，
+     flex 默认 min-height:auto 会把菜单撑到内容高度，把下面新加的用户区顶出视口。 */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .menu-item {
@@ -228,6 +232,127 @@ body {
   border-left: 3px solid var(--color-primary);
   background: linear-gradient(90deg, rgba(0, 212, 255, 0.25) 0%, rgba(0, 212, 255, 0) 100%);
   text-shadow: var(--glow-primary);
+}
+
+/* ===== 侧栏左下角用户区（头像 + 姓名 + 向上弹出的浮窗菜单） =====
+   位置：贴在侧栏底部（.menu 是 flex:1，本区 flex:none），所以菜单项再多也只是菜单区滚动/压缩，
+   用户区始终在左下角。浮窗用绝对定位朝上开（bottom:100%），不占文档流、也不撑高侧栏。 */
+.user-area {
+  flex: none;
+  position: relative;
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(0, 212, 255, 0.15);
+}
+
+.user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.user-trigger:hover,
+.user-trigger.open {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(0, 212, 255, 0.28);
+}
+
+.user-trigger.open {
+  box-shadow: var(--glow-primary);
+}
+
+/* 头像：有图用图；没有则是首字头像（渐变底 + 深色字，与主色系一致） */
+.user-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.user-avatar-text {
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  color: #0B1220;
+  background: linear-gradient(135deg, #00D4FF 0%, #8B5CF6 100%);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.35);
+  user-select: none;
+}
+
+/* 未登录态：首字头像转灰（去掉渐变与辉光），让「彩色头像 = 已登录」一眼可分 */
+.user-trigger.is-offline .user-avatar-text {
+  color: var(--text-secondary);
+  background: rgba(148, 163, 184, 0.24);
+  box-shadow: none;
+}
+
+.user-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+/* 浮窗菜单：锚在用户区上方（bottom:100%），宽度与用户区对齐。
+   z-index 刻意低于模态层（9000）：万一它还没收起而模态弹窗已打开，也不会压住弹窗 */
+.user-pop {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 2px);
+  z-index: 8900;
+  padding: 4px;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(0, 212, 255, 0.28);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), var(--glow-card);
+}
+
+.user-pop-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.user-pop-item:hover {
+  color: var(--text-primary);
+  background: rgba(0, 212, 255, 0.16);
+}
+
+.user-pop-enter-active,
+.user-pop-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.user-pop-enter-from,
+.user-pop-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 /* ===== 右侧内容区 ===== */
@@ -1656,6 +1781,218 @@ body {
   gap: var(--space-3);
   padding: 14px 18px;
   border-top: 1px solid rgba(0, 212, 255, 0.2);
+}
+
+/* ===== 登录 / 注册弹窗（components/AuthDialog.vue）=====
+   比通用弹窗窄：单列表单（邮箱 / 密码 / 确认密码）铺太宽反而难对齐，420px 刚好一行读得完。
+   字号沿用设置页刻度：标签与输入 13px、提示 12px；错误统一 var(--color-danger)，
+   不与主色青混用（青色在这里表示"可交互"，不表示"出错"）。 */
+.hf-modal.auth-modal {
+  width: min(420px, 92vw);
+}
+.auth-body {
+  padding: 16px 20px 18px;
+}
+/* 栏位切换：两个等宽页签，底边高亮当前栏（不用下划线滑块，少一层动画状态） */
+.auth-tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: 14px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.18);
+}
+.auth-tab {
+  flex: 1;
+  padding: 8px 0 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.auth-tab:hover {
+  color: var(--text-primary);
+}
+.auth-tab.active {
+  color: var(--color-primary);
+  font-weight: 600;
+  border-bottom-color: var(--color-primary);
+}
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auth-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+/* 输入框复用 .hgen-input 的底/边/圆角，这里只补宽度与聚焦态 */
+.auth-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.auth-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15);
+}
+.auth-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+/* 密码行：输入框右侧贴一个「显示/隐藏」文字按钮（绝对定位在 input 内，不额外占行） */
+.auth-pwd {
+  position: relative;
+  display: flex;
+}
+.auth-pwd .auth-input {
+  padding-right: 52px;
+}
+.auth-eye {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  padding: 2px 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.auth-eye:hover {
+  color: var(--color-primary);
+}
+
+/* 邮箱验证码：输入框 + 发送按钮同一行（按钮定宽，倒计时文案变化时输入框不会抖） */
+.auth-code {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.auth-code .auth-input {
+  flex: 1;
+  min-width: 0;
+  letter-spacing: 2px;
+}
+
+.auth-code-send {
+  flex: none;
+  min-width: 112px;
+  padding: 0 12px;
+  border-radius: var(--radius-btn);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  background: rgba(0, 212, 255, 0.08);
+  color: var(--color-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.auth-code-send:hover:not(:disabled) {
+  background: rgba(0, 212, 255, 0.16);
+}
+
+.auth-code-send:disabled {
+  color: var(--text-secondary);
+  border-color: rgba(138, 155, 181, 0.3);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+/* 开发模式验证码（仅未打包的应用会拿到）：小一号的警告色提示，不抢主信息 */
+.auth-devcode {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-warning);
+}
+/* 强度条：4 档宽度的细条 + 一句建议，弱/中/强三色区分 */
+.auth-strength {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.auth-strength-track {
+  display: block;
+  height: 3px;
+  background: rgba(230, 241, 255, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.auth-strength-track > b {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.15s ease;
+}
+.auth-strength-track > b.weak {
+  background: var(--color-danger);
+}
+.auth-strength-track > b.medium {
+  background: var(--color-warning);
+}
+.auth-strength-track > b.strong {
+  background: var(--color-success);
+}
+.auth-strength-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.auth-strength-text em {
+  font-style: normal;
+  color: rgba(138, 155, 181, 0.85);
+}
+.auth-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.auth-hint.is-error {
+  color: var(--color-danger);
+}
+/* 提交级错误：带底色的一行，和字段级提示区分开（它是接口返回的结果） */
+.auth-error {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--color-danger);
+  background: rgba(255, 77, 109, 0.1);
+  border: 1px solid rgba(255, 77, 109, 0.35);
+  border-radius: 8px;
+}
+.auth-submit {
+  margin-top: 2px;
+  padding: 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #04121c;
+  background: var(--color-primary);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.auth-submit:hover:not(:disabled) {
+  background: #33ddff;
+}
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+/* 实现边界说明：始终可见，不允许折叠（避免用户误以为这是真实账号体系） */
+.auth-note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(138, 155, 181, 0.85);
+}
+.auth-note b {
+  color: var(--color-warning);
+  font-weight: 600;
 }
 
 /* ===== 更新日志弹窗（设置 → 应用更新 →「查看更新日志」）=====

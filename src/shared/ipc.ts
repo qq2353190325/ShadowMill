@@ -1,5 +1,5 @@
 // src/shared/ipc.ts —— IPC 频道名常量（main / preload / 渲染层三端共享）
-// 频道名与现行实现逐一对应，禁止改动（preload 13 命名空间与渲染层调用依赖它们）。
+// 频道名与现行实现逐一对应，禁止改动（preload 14 命名空间与渲染层调用依赖它们）。
 
 export const IPC = {
   // 窗口控制（renderer → main，send）+ 最大化状态回推（main → renderer）
@@ -40,6 +40,15 @@ export const IPC = {
     Test: 'settings:test',
     // 运行环境「从本地文件安装」：选一个 <pack>.7z 导入（离线 / 内网机器的兜底入口）
     PickRuntimePack: 'settings:pick-runtime-pack'
+  },
+  // 账号 / 可选登录（main/account/）：令牌只存主进程，渲染层只拿展示字段。
+  // 未登录时本机全部功能照常可用；这 5 条只为「云端能力」服务（详见 docs/account-integration.md）。
+  Account: {
+    SendCode: 'account:send-code',
+    Register: 'account:register',
+    Login: 'account:login',
+    Me: 'account:me',
+    Logout: 'account:logout'
   },
   // 千问语音（voice.js / ttsAlign.js）
   Voice: {

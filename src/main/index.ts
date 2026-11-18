@@ -20,6 +20,7 @@ import { Readable } from 'node:stream'
 import { IPC } from '../shared/ipc'
 import type { LegacyDataInfo, LegacyResolveAction, LegacyResolveResult, RegisterCtx } from '../shared/types'
 import * as settings from './settings'
+import * as account from './account'
 import * as projects from './projects'
 import * as agent from './agent'
 import * as voice from './voice'
@@ -518,6 +519,8 @@ app.whenReady().then(() => {
   // 注册各业务域 IPC（窗口已就绪；ctx.getWindow 使各模块的对话框以主窗口为父）
   const ctx: RegisterCtx = { getWindow }
   settings.register(ctx)
+  // 账号（可选登录）：未登录不影响任何本机功能；令牌只存在主进程（见 account/index.ts 头注释）
+  account.register(ctx)
   projects.register(ctx)
   // 内容脚本 Agent（script:*）：生成只造文本（落盘由 project:save-content 负责）；
   // 对话记录要写项目目录，故把 projects.projectDir 注入进去（agent 不反向 import projects）

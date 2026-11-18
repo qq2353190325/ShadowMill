@@ -12,6 +12,9 @@ export const STORAGE_PREFIX = 'myapp.';
 export const STORAGE_KEY_PROJECT_CTX = STORAGE_PREFIX + 'projectCtx';
 // 设置页上次停留的分类（SettingsPage 读写）
 export const STORAGE_KEY_SETTINGS_SECTION = STORAGE_PREFIX + 'settingsSection';
+// 登录态（见 composables/useAuth.ts）：{ loggedIn, userName, email, expiresAt } 的 JSON。
+// **不含令牌**——令牌只存在主进程的 safeStorage 里（src/main/account/store.ts），渲染层拿不到。
+export const STORAGE_KEY_AUTH = STORAGE_PREFIX + 'auth';
 
 // ===== 自定义模型（HTML 生成 Agent）的 Base URL / 模型预设 =====
 // 「常见取值」的快捷方式，不是白名单：模型名会被服务商下线或改名，所以界面必须保留「自定义」手填。

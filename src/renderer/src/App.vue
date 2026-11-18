@@ -57,6 +57,10 @@
           @click="goPage(item.key)"
         >{{ item.label }}</div>
       </nav>
+
+      <!-- 左下角用户区（头像 + 姓名）：点击向上弹浮窗，「设置」项打开设置弹窗。
+           .menu 是 flex:1 撑满，用户区 flex:none 自然压在底部，菜单变多也不会把它挤走 -->
+      <UserArea />
     </aside>
 
     <!-- 右侧内容区 -->
@@ -70,6 +74,9 @@
 
   <!-- 设置弹窗（全局单例）：设置已从独立页面改为模态弹窗，侧栏「设置」与各处「去设置」都开它 -->
   <SettingsDialog />
+
+  <!-- 登录 / 注册弹窗（全局单例）：左下角用户浮窗的「登录」打开它 -->
+  <AuthDialog />
 
   <!-- 运行环境缺包时的统一确认框（任何功能触发 → 下载 → 继续），全局只此一处 -->
   <div v-if="gate.visible.value" class="hf-modal-mask" @click.self="gate.close()">
@@ -158,9 +165,12 @@ import { initRuntime, useRuntime } from './composables/useRuntime'
 import { initEnvGate, useEnvGate } from './composables/useEnvGate'
 import { useConfigPrompt } from './composables/useConfigPrompt'
 import { initLegacyData } from './composables/useLegacyData'
+import { restore } from './composables/useAuth'
 import { useSettingsDialog } from './composables/useSettingsDialog'
 import LegacyDataDialog from './components/LegacyDataDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
+import AuthDialog from './components/AuthDialog.vue'
+import UserArea from './components/UserArea.vue'
 
 const toasts = useToasts();
 const contentEl = ref<HTMLElement | null>(null);
@@ -222,6 +232,9 @@ onMounted(() => {
   initRuntime();
   initEnvGate();
   initLegacyData();
+  // 登录态校验：异步问一次账号服务（/me），不阻塞首屏；断网时保留上次的展示态（离线可用）。
+  // 未登录时它直接返回，不做任何请求。
+  void restore();
   void initApp();
 });
 </script>

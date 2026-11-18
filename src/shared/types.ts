@@ -1,7 +1,7 @@
 // src/shared/types.ts —— 跨进程共享的载荷类型（main / preload / 渲染层三端共用）
 // 约束一：载荷格式必须与现行实现逐字段一致，禁止改结构（本文件只「描述」载荷，不含任何运行时逻辑）。
 // 约束二：新增/修改 IPC 接口须三处齐改 —— 主进程 register() 回调、本文件类型、preload 桥接方法。
-// 组织：① 通用 IPC 结果 ② 主进程装配上下文 ③ 设置 ④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览/转视频 ⑧ 进度推送
+// 组织：① 通用 IPC 结果 ② 主进程装配上下文 ③ 设置 ④ 音色与配音 ⑤ 语音识别 ⑥ 项目与字幕 ⑦ 预览/转视频 ⑧ 进度推送 ⑨ 账号（可选登录）
 import type { BrowserWindow } from 'electron'
 
 // ============================================================
@@ -1140,12 +1140,86 @@ export interface VideoProgressPayload {
 }
 
 // ============================================================
+// 账号（可选登录，见 docs/account-integration.md）
+// ============================================================
+// 三条不变量：
+//  ① **未登录可用**：账号不 gate 任何本机流水线；断网或登录态失效只影响云端能力。
+//  ② **令牌不出主进程**：渲染层拿到的只有 AccountSession（展示字段 + 过期时间），拿不到 token。
+//  ③ 后端是**不透明会话令牌**（30 天滑动续期），所以这里没有 refresh、也没有任何 JWT 解析。
+export interface AccountUser {
+  id: number
+  email: string
+  nickname: string
+  /** 注册时间（ISO 本地时间字符串，后端原样给） */
+  createdAt: string
+}
+
+/** 登录态展示数据（不含令牌）。expiresAt 是毫秒时间戳，由主进程按后端 expiresInSeconds 换算 */
+export interface AccountSession {
+  user: AccountUser
+  expiresAt: number
+}
+
+/**
+ * 账号错误码：与后端业务码同名（见后端 BizCodes）。
+ * 前三个由渲染层本地校验产出；NETWORK / SERVER / STORAGE_FAILED 由主进程补。
+ */
+export type AccountErrorCode =
+  | 'INVALID_EMAIL'
+  | 'WEAK_PASSWORD'
+  | 'EMAIL_TAKEN'
+  | 'ACCOUNT_NOT_FOUND'
+  | 'WRONG_PASSWORD'
+  | 'CODE_INVALID'
+  | 'CODE_EXPIRED'
+  | 'CODE_TOO_MANY'
+  | 'CODE_COOLDOWN'
+  | 'BAD_REQUEST'
+  | 'UNAUTHORIZED'
+  | 'NETWORK'
+  | 'SERVER'
+  | 'STORAGE_FAILED'
+
+export interface AccountFail {
+  ok: false
+  code: AccountErrorCode
+  /** 可直接显示的文案（主进程已翻成人话；后端给了 message 就优先用它） */
+  message: string
+}
+
+export type AccountResult = { ok: true; session: AccountSession } | AccountFail
+
+/** 发送验证码结果：有效期与冷却以后端返回为准，前端不写死 */
+export interface AccountSendCodeOk {
+  ok: true
+  expiresInSeconds: number
+  resendAfterSeconds: number
+  /** 仅开发模式（未打包的应用）下由主进程透传，便于本地联调；打包版永远没有这个字段 */
+  devCode?: string
+}
+
+export type AccountSendCodeResult = AccountSendCodeOk | AccountFail
+
+export interface AccountRegisterPayload {
+  email: string
+  password: string
+  /** 邮箱验证码（后端要求 4~12 位数字） */
+  code: string
+  nickname?: string
+}
+
+export interface AccountLoginPayload {
+  email: string
+  password: string
+}
+
+// ============================================================
 // ⑨ window.* API 契约（preload 实现与渲染层消费的唯一真源）
 // ============================================================
 // 用法：preload/index.ts 用 PreloadApi['<命名空间>'] 标注各 contextBridge 对象（实现被契约校验），
 //      preload/index.d.ts 用 `interface Window extends PreloadApi` 暴露给渲染层（消费方拿到同一签名）。
 // 因此「preload 实现」与「渲染层看到的 window.*」不会再各自漂移：改这里两端同时生效。
-// 命名空间与 IPC 频道的对应关系见 src/shared/ipc.ts（12 个命名空间 ↔ 11 组频道常量）。
+// 命名空间与 IPC 频道的对应关系见 src/shared/ipc.ts（14 个命名空间 ↔ 13 组频道常量）。
 export interface PreloadApi {
   electronAPI: {
     platform: string
@@ -1153,6 +1227,17 @@ export interface PreloadApi {
   }
   appTools: {
     copyText(text: string): Promise<boolean>
+  }
+  // 账号（可选登录）：全部经主进程发 HTTP（渲染层直连会被 CSP 的 connect-src 'self' 拦掉，
+  // 打包后页面 Origin 是 file://，后端的 CORS 也不放行）。令牌只进主进程的 safeStorage。
+  accountTools: {
+    sendCode(email: string): Promise<AccountSendCodeResult>
+    register(payload: AccountRegisterPayload): Promise<AccountResult>
+    login(payload: AccountLoginPayload): Promise<AccountResult>
+    /** 用已保存的令牌取当前用户；未登录 / 已过期返回 UNAUTHORIZED（不抛错） */
+    me(): Promise<AccountResult>
+    /** 撤销服务端会话并清掉本地令牌；未登录时也安全（幂等） */
+    logout(): Promise<void>
   }
   windowControls: {
     minimize(): void

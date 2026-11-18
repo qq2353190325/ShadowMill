@@ -1,5 +1,5 @@
 // src/preload/index.ts —— 预加载脚本：通过 contextBridge 向渲染进程暴露安全 API
-// 13 个命名空间（electronAPI/appTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/castTools/scriptTools/updateTools/runtimeTools/legacyTools）
+// 14 个命名空间（electronAPI/appTools/accountTools/windowControls/hfTools/settingsTools/voiceTools/whisperTools/projectTools/castTools/scriptTools/updateTools/runtimeTools/legacyTools）
 // 与 6 个进度推送通道的单订阅语义（重复注册仅替换回调，避免页面切换叠加监听）。
 // 类型契约：每个对象都以 PreloadApi['<命名空间>'] 标注（见 src/shared/types.ts ⑨ 节），
 //           渲染层拿到的 window.* 签名由 preload/index.d.ts 挂载同一份契约 —— 两处不会漂移。
@@ -36,6 +36,17 @@ const appTools: PreloadApi['appTools'] = {
   copyText: (text: string): Promise<boolean> => ipcRenderer.invoke(IPC.App.CopyText, text)
 };
 contextBridge.exposeInMainWorld('appTools', appTools);
+
+// 账号（可选登录）：全部转主进程发 HTTP（渲染层不直连后端，见 src/main/account/api.ts 头注释）。
+// 令牌不出主进程，这里的方法只回展示字段（AccountSession）或错误码。
+const accountTools: PreloadApi['accountTools'] = {
+  sendCode: (email: string) => ipcRenderer.invoke(IPC.Account.SendCode, { email }),
+  register: (payload) => ipcRenderer.invoke(IPC.Account.Register, payload),
+  login: (payload) => ipcRenderer.invoke(IPC.Account.Login, payload),
+  me: () => ipcRenderer.invoke(IPC.Account.Me),
+  logout: () => ipcRenderer.invoke(IPC.Account.Logout)
+};
+contextBridge.exposeInMainWorld('accountTools', accountTools);
 
 // 自绘标题栏：窗口控制 API
 const windowControls: PreloadApi['windowControls'] = {

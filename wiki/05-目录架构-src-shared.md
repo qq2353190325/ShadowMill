@@ -1,6 +1,6 @@
 # 05 · 目录架构：`src/shared/`（三端共享层）
 
-> 全应用唯一的「契约层」：IPC 频道名、跨进程载荷类型、错误文案映射表，以及品牌文案 / 成片画布尺寸 / 项目素材白名单 / 估时语速（4 字/秒，一个语速三处用）/ **角色动作参数表**等应用级常量。它没有自己的运行时产物（构建时被内联进 main / preload / renderer 三端），但决定了三端能否对齐。
+> 全应用唯一的「契约层」：IPC 频道名、跨进程载荷类型、错误文案映射表，以及品牌文案 / 成片画布尺寸 / 项目素材白名单 / 估时语速（4 字/秒，一个语速三处用）/ **角色动作参数表** / **账号（可选登录）契约**等应用级常量。它没有自己的运行时产物（构建时被内联进 main / preload / renderer 三端），但决定了三端能否对齐。
 
 ---
 
@@ -8,8 +8,8 @@
 
 | 文件 | 行数 | 角色 |
 |---|---|---|
-| [ipc.ts](./files/shared/ipc.ts.md) | **184** | IPC 频道名常量（**12** 个分组、**106** 个频道）+ `IpcChannel` 类型 |
-| [types.ts](./files/shared/types.ts.md) | **1337** | 跨进程载荷类型（12 小节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情、`needConfig` / `title` 两个配置类字段）、`RegisterCtx`、设置（含**按厂家的 `VoiceSettings` / `VoiceProviderConfig`（只有 `apiKey`）**、渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境（**分包**：`RuntimePackName` / `RuntimePackState` / `RuntimePhase` / `RuntimeProgressPayload`；`IpcFail.needPacks` 与 `IpcResult` 成功分支的可选 `message`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音（含 `VoiceProviderView`；`VoiceCreatePayload.audioPath` 可为本地路径 / 公网 URL / `data:audio/...` URI）、语音识别、项目与字幕（**项目素材库 `ProjectMaterialKind` / `ProjectMaterial` 与素材三件套载荷 / `ProjectMaterialsResult`**、**内容脚本 Agent 的 `ScriptGeneratePayload` / `ScriptGenerateReply`**、**对话记录的 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`**、**角色：`ProjectCastMember`（含 `style?`）/ `ProjectCastSelection` / `ProjectSaveCastPayload` / `ProjectCastResult` 与全局库的 `CastLibraryMember` / `CastLibraryResult` / `CastCreatePayload` / `CastRecreatePayload` / `CastSaveMetaPayload` / `CastPreviewPayload` / `CastPreviewResult`**、**动作示范的十个类型 `CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload` / `CastDemoResult`**）、预览/转视频、进度推送（**通用 `AgentStage` / `AgentProgressPayload` + 旧名别名 + `HtmlProgressPayload` / `ScriptProgressPayload` 都 `extends` 它**），以及 `PreloadApi`（`window.*` 契约唯一真源，**13 个命名空间**）；`ProjectHtmlMaterials` 的 `videoPath` 已换成 `materialIds?: string[]` 并删掉 `audioPath`（背景音轨由主进程注入 HTML），`Project.videoMaterial` 退化为**历史字段**，`ProjectSetVideoResult` 已删除；`ConfigTarget = 'model' \| 'voice'` 定义在 `RuntimePackName` 之后（**没有 `'billing'`**：余额类不弹窗）。**历次改过的必填 `taskId: string`**：`ProjectAgentPayload` / `CastCreatePayload` / `CastRecreatePayload` / `CastActionGeneratePayload` / `HtmlProgressPayload`（进度按任务 id 分发）；`PreloadApi.projectTools` 的 `generateHtml` / `modifyHtml` 第三参是 `Omit<ProjectAgentPayload, 'name' \| 'prompt'>`（**必填**），`onTaskProgress(taskId, callback)` 返回退订函数 |
+| [ipc.ts](./files/shared/ipc.ts.md) | **193** | IPC 频道名常量（**13** 个分组、**111** 个频道）+ `IpcChannel` 类型 |
+| [types.ts](./files/shared/types.ts.md) | **1428** | 跨进程载荷类型（12 小节 + **账号**一节）：通用 IPC 结果 `IpcFail` / `IpcResult<T>`（失败分支含可选的 `detail` 排障详情、`needConfig` / `title` 两个配置类字段）、`RegisterCtx`、设置（含**按厂家的 `VoiceSettings` / `VoiceProviderConfig`（只有 `apiKey`）**、渲染档位与更新设置）、应用自更新（`UpdateCheckResult.message` 必填 + `detail` 可选）、运行环境（**分包**：`RuntimePackName` / `RuntimePackState` / `RuntimePhase` / `RuntimeProgressPayload`；`IpcFail.needPacks` 与 `IpcResult` 成功分支的可选 `message`）、历史数据目录（`LegacyDataInfo` / `LegacyResolveAction` / `LegacyResolveResult`）、音色与配音（含 `VoiceProviderView`；`VoiceCreatePayload.audioPath` 可为本地路径 / 公网 URL / `data:audio/...` URI）、语音识别、项目与字幕（**项目素材库 `ProjectMaterialKind` / `ProjectMaterial` 与素材三件套载荷 / `ProjectMaterialsResult`**、**内容脚本 Agent 的 `ScriptGeneratePayload` / `ScriptGenerateReply`**、**对话记录的 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`**、**角色：`ProjectCastMember`（含 `style?`）/ `ProjectCastSelection` / `ProjectSaveCastPayload` / `ProjectCastResult` 与全局库的 `CastLibraryMember` / `CastLibraryResult` / `CastCreatePayload` / `CastRecreatePayload` / `CastSaveMetaPayload` / `CastPreviewPayload` / `CastPreviewResult`**、**动作示范的十个类型 `CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload` / `CastDemoResult`**）、预览/转视频、进度推送（**通用 `AgentStage` / `AgentProgressPayload` + 旧名别名 + `HtmlProgressPayload` / `ScriptProgressPayload` 都 `extends` 它**）、**账号（`AccountUser` / `AccountSession` / `AccountErrorCode`（14 个码）/ `AccountFail` / `AccountResult` / `AccountSendCodeOk` / `AccountSendCodeResult` / `AccountRegisterPayload` / `AccountLoginPayload`）**，以及 `PreloadApi`（`window.*` 契约唯一真源，**14 个命名空间**）；`ProjectHtmlMaterials` 的 `videoPath` 已换成 `materialIds?: string[]` 并删掉 `audioPath`（背景音轨由主进程注入 HTML），`Project.videoMaterial` 退化为**历史字段**，`ProjectSetVideoResult` 已删除；`ConfigTarget = 'model' \| 'voice'` 定义在 `RuntimePackName` 之后（**没有 `'billing'`**：余额类不弹窗）。**历次改过的必填 `taskId: string`**：`ProjectAgentPayload` / `CastCreatePayload` / `CastRecreatePayload` / `CastActionGeneratePayload` / `HtmlProgressPayload`（进度按任务 id 分发）；`ProjectNewCastPayload` / `ProjectNewCastResult` / `ProjectCastPreviewPayload` / `ProjectCastPreviewResult` 已删除（角色频道搬进 `Cast` 组时一并下线） |
 | [errors.ts](./files/shared/errors.ts.md) | 225 | **全应用「原始报错 → 人话文案」唯一映射表**：`friendlyError(err, ctx)` / `configTargetOf(message)` / `configTitle(target)` + 类型 `FriendlyError` / `ErrorContext`；纯函数、无副作用、不 import electron；十档固定顺序判定，配置类带 `needConfig`（**余额 / 欠费不弹窗**，走内嵌状态行）（详见 `docs/error-mapping.md`） |
 | [constants.ts](./files/shared/constants.ts.md) | **136** | 应用级公共常量：品牌文案 `APP_NAME`（`'影坊'`）/ `APP_NAME_EN`（`'ShadowMill'`）/ `APP_SLOGAN` / `APP_SLOGAN_SHORT`、出网请求标识 `APP_USER_AGENT`、**项目素材三常量** `MAX_MATERIALS`（`20`）/ `IMAGE_MATERIAL_EXTS` / `VIDEO_MATERIAL_EXTS`、**成片画布四常量** `RENDER_CANVASES` / `CANVAS_SIZES` / `CANVAS_LABELS` / `DEFAULT_CANVAS`、**估时语速一常量 + 一纯函数** `EST_CHARS_PER_SEC`（`4`）/ `estimateSubtitleDur(text)`，以及**角色动作的参数表与上限**：接口 `CastActionParam`、`CAST_ACTION_PARAMS`（**13 项**：`dy` / `dx` / `aL` / `aR` / `rot` / `sq` / `walk` / **`face`** / **`hip`** / **`tuck`** / `blink` 数字 + `eyes` / `mouth` 枚举，含方向与范围；`face` 0 = 正面 / 1 = 侧面、`hip` 髋角正 = 大腿向前抬且只在侧面视图生效、`tuck` 抱团 ≥0.5 画成球，`mouth` 多一个 `'auto'` = 不传该参数）、`CAST_ACTION_NAME_MAX`（`12`）、`CAST_ACTION_DURATION`（`{ min: 0.3, max: 30 }`）、`CAST_ACTION_MAX_PER_SCOPE`（`40`） |
 
@@ -19,7 +19,7 @@
 
 ## 2. `ipc.ts` —— 频道常量
 
-以冻结对象字面量导出（`as const`），按业务域分 **12 组**：
+以冻结对象字面量导出（`as const`），按业务域分 **13 组**：
 
 | 分组 | 频道数 | 频道 |
 |---|---|---|
@@ -27,20 +27,23 @@
 | `App` | 1 | `app:copy-text`（曾有一条 `app:open-external`「去充值」外链频道，已按用户要求整条摘除，见 [shared/errors.ts.md](./files/shared/errors.ts.md) §6） |
 | `Update` | 9 | `update:check`、`update:download`、`update:cancel`、`update:install`、`update:version`、`update:status`、`update:open-log`、`update:changelog`、`update:progress` |
 | `Settings` | 6 | `settings:get`、`settings:save`、`settings:save-render`、`settings:save-updater`、`settings:test`、`settings:pick-runtime-pack` |
+| **`Account`** | **5** | **`account:send-code`、`account:register`、`account:login`、`account:me`、`account:logout`**（**本轮新增**，账号 / 可选登录；常量对象里的注释写明「5 条只为云端能力服务，未登录时本机功能照常可用」） |
 | `Voice` | 19 | `voice:get-config`、`voice:get-save-dir`、`voice:save-config`、`voice:pick-audio`、`voice:create`、`voice:list-system-voices`、`voice:list-models`、`voice:get-profiles`、`voice:save-profile`、`voice:delete-profile`、`voice:delete-cloud`、`voice:list`、`voice:list-all`、`voice:pick-dir`、`voice:list-generated`、`voice:synth`、`voice:synth-aligned`、`voice:align-cancel`、`voice:align-progress` |
 | `Whisper` | 12 | `whisper:status`、`whisper:download`、`whisper:delete`、`whisper:set-current`、`whisper:add-model`、`whisper:update-model`、`whisper:remove-model`、`whisper:open-dir`、`whisper:project-audio`、`whisper:pick-audio`、`whisper:transcribe`、`whisper:progress` |
-| `Project` | **27** | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:set-canvas`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-media`、`project:add-materials`、`project:save-materials`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、**`project:save-cast`（本片用哪几个全局角色，载荷 `[{ id, selected }]`）**、`project:html-progress`。**本轮下线 6 条角色频道**：`project:cast-library` / `project:promote-cast` / `project:import-cast` / `project:remove-cast-from-library` / `project:new-cast` / `project:cast-preview`（33 → 27） |
-| **`Cast`** | **11** | **角色 6 条（`projects/ipc/cast.ts`）**：`cast:list`（列库）/ `cast:create`（画一个新角色）/ `cast:recreate`（重画、覆盖库里那份）/ `cast:save-meta`（只改元数据，不调模型）/ `cast:remove`（从库里删，**连带清它的专属动作**）/ `cast:preview`（静态预览页 `<id>.html`）；**动作示范 5 条（`projects/ipc/castActions.ts`，本轮新增）**：`cast:action-list`（列动作，回 `{ ok, shared, own }`；`shared` = 内置 14 条 + 用户自建公共动作，`own` = 该角色专属）/ `cast:action-save`（存一条**关键帧**动作，同 id 覆盖、id 空由主进程起 `actN`）/ `cast:action-remove`（删一条动作，内置动作删不掉）/ `cast:action-generate`（**唯一会调模型的动作路径**：读角色源码 → 生成一条 `function (t) { … }` → 存成专属动作；进度按 `taskId` 走 `project:html-progress`）/ `cast:demo`（会动的示范页 `<id>.demo.html`）。角色与动作都存 `<userData>/cast-library/`（`index.json` / `<id>.js` / **`actions.json`**），与项目无关 |
+| `Project` | **27** | `project:list`、`project:create`、`project:load`、`project:save-subtitle`、`project:save-content`、`project:generate-html`、`project:modify-html`、`project:download-html`、`project:export-srt`、`project:open-folder`、`project:open-folder-of`、`project:delete`、`project:save-video`、`project:set-render`、`project:set-canvas`、`project:pick-audio`、`project:set-audio`、`project:clear-audio`、`project:pick-media`、`project:add-materials`、`project:save-materials`、`project:extract-video-audio`、`project:read-html`、`project:preview-html`、`project:save-html`、**`project:save-cast`（本片用哪几个全局角色，载荷 `[{ id, selected }]`）**、`project:html-progress`。**更早下线 6 条角色频道**：`project:cast-library` / `project:promote-cast` / `project:import-cast` / `project:remove-cast-from-library` / `project:new-cast` / `project:cast-preview`（33 → 27） |
+| **`Cast`** | **11** | **角色 6 条（`projects/ipc/cast.ts`）**：`cast:list`（列库）/ `cast:create`（画一个新角色）/ `cast:recreate`（重画、覆盖库里那份）/ `cast:save-meta`（只改元数据，不调模型）/ `cast:remove`（从库里删，**连带清它的专属动作**）/ `cast:preview`（静态预览页 `<id>.html`）；**动作示范 5 条（`projects/ipc/castActions.ts`）**：`cast:action-list`（列动作，回 `{ ok, shared, own }`；`shared` = 内置 14 条 + 用户自建公共动作，`own` = 该角色专属）/ `cast:action-save`（存一条**关键帧**动作，同 id 覆盖、id 空由主进程起 `actN`）/ `cast:action-remove`（删一条动作，内置动作删不掉）/ `cast:action-generate`（**唯一会调模型的动作路径**：读角色源码 → 生成一条 `function (t) { … }` → 存成专属动作；进度按 `taskId` 走 `project:html-progress`）/ `cast:demo`（会动的示范页 `<id>.demo.html`）。角色与动作都存 `<userData>/cast-library/`（`index.json` / `<id>.js` / **`actions.json`**），与项目无关 |
 | **`Script`** | **7** | **`script:generate`（生成）/ `script:load-chat`（读索引）/ `script:append-round`（写副本 + 更新索引）/ `script:read-version`（读某版副本）/ `script:set-active-version`（改 active）/ `script:clear-chat`（删整个 chat/）——内容脚本 Agent 的六条 `ipcMain.handle`；外加 `script:progress`（main → renderer 进度推送）**。注释明确：**生成只产出文本、不写文件——场景落盘走 `project:save-content`**；chat 系列管的是**对话记录** `projects/<项目名>/chat/`（`index.json` 索引 + `versions/<id>.json` 每版副本） |
 | `Video` | 4 | `dialog:open-html`、`video:show-in-folder`、`video:render`、`video:progress` |
 | `Runtime` | 4 | `runtime:status`、`runtime:prepare`（载荷 `packs?: RuntimePackName[]`，省略 = 全部）、`runtime:cancel`、`runtime:progress` |
 | `Legacy` | 2 | `legacy:status`、`legacy:resolve`（历史数据目录：问一次「有没有 / 是什么」+ 回传处置选择；**没有推送频道**，界面在渲染层） |
 
-合计 **106** 个频道（Window 4 + App 1 + Update 9 + Settings 6 + Voice 19 + Whisper 12 + **Project 27** + **Cast 11** + **Script 7** + Video 4 + Runtime 4 + Legacy 2 = **106**，共 **12** 个分组）。
+合计 **111** 个频道（Window 4 + App 1 + Update 9 + Settings 6 + **Account 5** + Voice 19 + Whisper 12 + **Project 27** + **Cast 11** + **Script 7** + Video 4 + Runtime 4 + Legacy 2 = **111**，共 **13** 个分组）。
 
-**`Cast` 组分两支**：角色本身 6 条（`ipc/cast.ts`，`cast:list` / `cast:create` / `cast:recreate` / `cast:save-meta` / `cast:remove` / `cast:preview`）+ **动作示范 5 条（`ipc/castActions.ts`，本轮新增：`cast:action-list` / `cast:action-save` / `cast:action-remove` / `cast:action-generate` / `cast:demo`）**——语义是「角色的唯一真源是 `<userData>/cast-library/`、动作存在同目录的 `actions.json`，两者都与项目无关」；`Project` 组只留 **`project:save-cast`**（本片用哪几个，载荷 `[{ id, selected }]`）。计数：`Cast` 组 **6 → 11**、全库 **101 → 106**、分组数 12 不变；preload 的 `castTools` 因此从 7 个方法变 **12** 个（角色 6 + 动作 5 + `onTaskProgress`）。更早的账：角色频道整体从 `Project` 组搬进新建的 `Cast` 组时，`Project` 组 33 → **27**、分组 11 → 12、频道总数仍是 101。
+> **为什么是 111 而不是本文旧版记的 106（以及更早的 94）**：按 `src/shared/ipc.ts` 实测，改账号之前的工作区已经是 **106** 条——`#86`–`#106` 的角色 / 动作示范批次把 94 加到了 106，但 wiki 只在部分文档里跟到了 106、另一些仍写 94；**本次账号 +5 ⇒ 106 + 5 = 111**，分组 12 → 13。本版统一按实测记 **111 / 13**（`Select-String` 逐行数频道行得到 111，`git show HEAD:src/shared/ipc.ts` 数到 106）。更早的账：94 是 `#72`–`#81` 时代的数字（对话记录扩到五条 chat handler 时 91 → 94）。
 
-**Script 组是「先加一组、再扩到七条」**：先新增 `Script` 分组（`Generate` / `Progress`），分组数 **10 → 11**、频道数 **87 → 89**；随后为对话记录补 `LoadChat` / `SaveChat`（组内 **2 → 4**、全库 **89 → 91**）；本轮对话记录改成「索引 + 每版副本」后，两条 `load-chat` / `save-chat` 扩成五条 chat handler（`LoadChat` / `AppendRound` / `ReadVersion` / `SetActiveVersion` / `ClearChat`），`Script` 组 **4 → 7**、全库 **91 → 94**（**分组数仍是 11**）。`Script` 的位置在 `Project` 之后、`Video` 之前，顺序与主进程的 `register()` 段（`projects.register(ctx)` → `agent.registerScript(projects.projectDir)` → `voice.register(ctx)`）呼应。历史净增记录保留：素材库「3 换 3」→ `update:changelog` → `project:set-canvas` → `script:*` 两条 → **对话记录扩到五条 chat handler** → **角色库 4 条（94 → 98）** → **项目角色 2 条（98 → 100）** → **角色预览 1 条（100 → 101）**。
+**`Cast` 组分两支**：角色本身 6 条（`ipc/cast.ts`）+ **动作示范 5 条（`ipc/castActions.ts`）**——语义是「角色的唯一真源是 `<userData>/cast-library/`、动作存在同目录的 `actions.json`，两者都与项目无关」；`Project` 组只留 **`project:save-cast`**（本片用哪几个，载荷 `[{ id, selected }]`）。计数：`Cast` 组 **6 → 11**、全库 **101 → 106**、分组数 12 不变；preload 的 `castTools` 因此从 7 个方法变 **12** 个（角色 6 + 动作 5 + `onTaskProgress`）。更早的账：角色频道整体从 `Project` 组搬进新建的 `Cast` 组时，`Project` 组 33 → **27**、分组 11 → 12、频道总数仍是 101。
+
+**`Account` 组是本轮新增的第 13 组**：5 条频道全部是 `invoke`（无推送、无 `send`），载荷与回执类型见 §3 的「账号」小节；实现落在 `src/main/account/`（3 个文件），preload 侧是第 14 个命名空间 `accountTools`（5 个方法）。**它不是 `IpcResult` 家族**：账号用更窄的 `AccountResult` / `AccountSendCodeResult`（`code` + `message`），因为登录失败要按错误码分流（如 `CODE_COOLDOWN` 提示稍后再试），不需要 `detail` / `needPacks` / `needConfig`。
 
 五个容易踩的点：
 
@@ -48,7 +51,7 @@
 2. **`IpcChannel` 类型是分组对象的并集**（`(typeof IPC)[keyof typeof IPC]`），即「`Window` 对象 | `App` 对象 | …」，而不是频道字符串的并集。它用于约束「必须传入 IPC 分组对象」，不要误当作字符串联合类型使用。
 3. **`Update.OpenLog`（`update:open-log`）排在 `Version` 与 `Progress` 之间**：它是「打开 `userData/updater.log` 所在位置」的排障出口，主进程侧**刻意不经过 `ensureUpdater()`**——更新失败时最常见的场景恰恰是 electron-updater 没加载起来，若挂在懒加载之后就打不开日志了。
 4. **「去充值」外链频道曾加过、又整条删掉**：`App.OpenExternal`（`app:open-external`）只服务配置类弹窗上的「去充值」按钮，而那个按钮**从未被用户同意过**，已按用户要求整条摘除。余额 / 欠费改为走内嵌状态行（文案说明去厂家控制台充值），因此 `ConfigTarget` 里也**没有 `'billing'`**——「弹窗」与「去设置能修好」严格等价。
-5. **文件头注释已同步**：`src/shared/ipc.ts` 第 2 行写的是「preload **13 命名空间**与渲染层调用依赖它们」，与实际情况一致（含 `scriptTools` / `castTools`）。核数字时仍以 `PreloadApi`（⑨ 节）与实际 `contextBridge` 调用为准；命名空间或分组再增减时，这行注释与本文都要一起改。
+5. **两条源码注释已落后于实现，不要照抄**：`src/shared/ipc.ts` 第 2 行仍写「preload **13 命名空间**」（accountTools 进来后实际是 **14**）；`src/shared/types.ts` ⑨ 节头部注释仍写「**12 个命名空间 ↔ 11 组频道常量**」（实际 **14 个命名空间 / 13 个分组**）。核数字时以 `PreloadApi`（⑨ 节）、`contextBridge` 调用与 `IPC` 对象为准；命名空间或分组再增减时，这两行注释与本文都要一起改。
 
 约束（源码注释明确写着）：频道名与现行实现逐一对应，**禁止改动**；preload 的命名空间与渲染层调用全部依赖这些字面量。
 
@@ -56,7 +59,7 @@
 
 ## 3. `types.ts` —— 跨进程载荷类型
 
-按 12 个小节组织（源码注释的编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节）：
+按 12 个小节组织（源码注释的编号 ①～⑨，其中穿插 ③.5 / ③.6 / ⑧b 三个补充小节），**账号契约另起一段、排在 ⑨ 之前**（`// 账号（可选登录，见 docs/account-integration.md）` 分隔块）：
 
 | 小节 | 内容 | 代表类型 |
 |---|---|---|
@@ -68,16 +71,19 @@
 | ⑧b 历史数据目录 | 旧数据扫描结论与处置契约 | `LegacyDataInfo`（`dir` / `entries` / `projects`）、`LegacyResolveAction`、`LegacyResolveResult` |
 | ④ 音色与配音 | 系统/克隆音色、映射、合成与逐句对齐 | `SystemVoice`、`SystemVoiceItem`、`VoiceModel`、`VoiceListItem`、`VoiceCreateResult`、`VoiceSynthResult`、`VoiceAlignPayload`、`VoiceAlignResult` |
 | ⑤ 语音识别 | whisper 模型状态与转录 | `WhisperModelItem`、`WhisperStatusResult`、`WhisperTranscribePayload`、`WhisperTranscribeResult` |
-| ⑥ 项目与字幕 | **`project.json` 索引（`ProjectIndex`）与完整视图 `Project`**、**项目素材库**、字幕行、HTML 生成载荷、**内容脚本 Agent 载荷**、**对话记录（索引元数据 / 索引 / 单版结果 / 追加载荷）**、**角色（`ProjectCastMember` / `ProjectCastSelection` / `CastLibrary*` / `Cast*Payload`）与动作示范** | `Scene`、`ContentScript`、`Project`、`ProjectIndex`、`ProjectMaterialKind` / `ProjectMaterial` / 素材三件套载荷 / `ProjectMaterialsResult`、`SubtitleLine`、`ProjectMeta`、`ProjectSetCanvasPayload`、`ProjectAgentPayload`、`ProjectHtmlMaterials`、`ProjectHtmlResult`、**`ScriptGeneratePayload`、`ScriptGenerateReply`（紧跟 `ProjectHtmlResult` 之后，带 `// ===== 内容脚本 Agent（script:generate）=====` 小标题）**、**`ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`（带 `// ===== 内容脚本对话记录（按项目持久化）=====` 小标题）**、**`CastLibraryMember` / `CastLibraryResult` / `ProjectCastSelection` / `ProjectSaveCastPayload` / `ProjectCastResult` / `CastCreatePayload` / `CastRecreatePayload` / `CastSaveMetaPayload` / `CastResult` / `CastPreviewPayload` / `CastPreviewResult`**、**`CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload` / `CastDemoResult`（带 `// ===== 角色动作示范（cast:action-* / cast:demo）=====` 小标题，紧接 `ScriptAppendRoundPayload` 之后）** |
+| ⑥ 项目与字幕 | **`project.json` 索引（`ProjectIndex`）与完整视图 `Project`**、**项目素材库**、字幕行、HTML 生成载荷、**内容脚本 Agent 载荷**、**对话记录（索引元数据 / 索引 / 单版结果 / 追加载荷）**、**角色（`ProjectCastMember` / `ProjectCastSelection` / `CastLibrary*` / `Cast*Payload`）与动作示范** | `Scene`、`ContentScript`、`Project`、`ProjectIndex`、`ProjectMaterialKind` / `ProjectMaterial` / 素材三件套载荷 / `ProjectMaterialsResult`、`SubtitleLine`、`ProjectMeta`、`ProjectSetCanvasPayload`、`ProjectAgentPayload`、`ProjectHtmlMaterials`、`ProjectHtmlResult`、**`ScriptGeneratePayload`、`ScriptGenerateReply`**、**`ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`**、**`CastLibraryMember` / `CastLibraryResult` / `ProjectCastSelection` / `ProjectSaveCastPayload` / `ProjectCastResult` / `CastCreatePayload` / `CastRecreatePayload` / `CastSaveMetaPayload` / `CastResult` / `CastPreviewPayload` / `CastPreviewResult`**、**`CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload` / `CastDemoResult`** |
 | ⑦ 预览 / 转视频 | 渲染载荷与结果、进度 | `VideoRenderPayload`（渲染档位 `quality?` / `fps?` + **项目属性 `canvas?`**）、`VideoRenderResult`（失败分支含可选 `needPacks?`）、`VideoProgressPayload` |
-| ⑧ 进度推送 | 源码小标题（逐字，第 967–968 行）：「**⑧ 进度推送（5 路 main → renderer；其中 `project:html-progress` 是「一条频道 + 按任务 id 分发」，所以「生成 HTML」与「画角色」可以并行、各拿各的回调，其余 4 路仍是单订阅语义）」** | **通用层**：`AgentStage`（`'connecting' \| 'thinking' \| 'writing' \| 'retry' \| 'done'`）、`AgentProgressPayload`（`stage` / `thinkChars` / `contentChars` / `thinkText`）；**旧名别名**：`HtmlAgentStage = AgentStage`、`HtmlAgentProgress = AgentProgressPayload`；**两个 extends 变体**：`HtmlProgressPayload extends AgentProgressPayload { text: string; taskId: string }`（`taskId` **必填**，本次任务的 id）、`ScriptProgressPayload extends AgentProgressPayload { text: string }`；另有 `WhisperProgressPayload`、`AlignProgressPayload`、`VideoProgressPayload`。**`AgentProgressPayload` 本身未改** |
-| ⑨ `window.*` 契约 | **13** 个命名空间的完整方法签名 | `PreloadApi`（唯一真源；`projectTools` 共 **27** 个成员，含素材三件套 `pickMedia` / `addMaterials` / `saveMaterials`、`setCanvas(name, canvas)`、**`saveCast(name, cast)`**、**`onTaskProgress(taskId, callback)`（返回退订函数）**；`generateHtml` / `modifyHtml` 的第三参是 `Omit<ProjectAgentPayload, 'name' \| 'prompt'>`（**必填**）；**`castTools` 共 12 个成员**：`list()` / `create(brief)` / `recreate(id, request, taskId)` / `saveMeta(patch)` / `remove(id)` / `preview(id, options?)` / **`listActions(castId)` / `saveAction(payload)` / `removeAction(payload)` / `generateAction(payload)` / `demo(id, options?)`（本轮新增的 5 个动作方法）** / `onTaskProgress(taskId, callback)`；**`scriptTools` = `generate(payload)` / `loadChat(name)` / `appendRound(payload)` / `readVersion(name, versionId)` / `setActiveVersion(name, versionId)` / `clearChat(name)` / `onProgress(cb)`（**7 个成员**）**；`updateTools` 含 `status` 与 `openLog`；`settingsTools` 含 `pickRuntimePack()`；`runtimeTools` = `status()` / `prepare(packs?)` / `cancel()` / `onProgress()`；`legacyTools` 对应旧数据处置；`appTools` = `copyText()`） |
+| ⑧ 进度推送 | 源码小标题（逐字，第 967–968 行）：「**⑧ 进度推送（5 路 main → renderer；其中 `project:html-progress` 是「一条频道 + 按任务 id 分发」，所以「生成 HTML」与「画角色」可以并行、各拿各的回调，其余 4 路仍是单订阅语义）」** | **通用层**：`AgentStage`（`'connecting' \| 'thinking' \| 'writing' \| 'retry' \| 'done'`）、`AgentProgressPayload`（`stage` / `thinkChars` / `contentChars` / `thinkText`）；**旧名别名**：`HtmlAgentStage = AgentStage`、`HtmlAgentProgress = AgentProgressPayload`；**两个 extends 变体**：`HtmlProgressPayload extends AgentProgressPayload { text: string; taskId: string }`（`taskId` **必填**）、`ScriptProgressPayload extends AgentProgressPayload { text: string }`；另有 `WhisperProgressPayload`、`AlignProgressPayload`、`VideoProgressPayload` |
+| **账号（可选登录）** | **本轮新增**（源码分隔注释 `// 账号（可选登录，见 docs/account-integration.md）`，三条不变量写在该块头部）：未登录可用 / 令牌不出主进程 / 后端是不会话刷新（不透明令牌，没有 refresh、没有 JWT 解析） | **`AccountUser`（`id` / `email` / `nickname` / `createdAt`）、`AccountSession`（`user` + `expiresAt` 毫秒时间戳，**不含 token**）、`AccountErrorCode`（14 个码，见下）、`AccountFail`（`ok:false` + `code` + `message`）、`AccountResult = { ok:true; session } \| AccountFail`、`AccountSendCodeOk`（`expiresInSeconds` / `resendAfterSeconds` / **`devCode?` 仅开发模式**）、`AccountSendCodeResult`、`AccountRegisterPayload`（`email` / `password` / `code` / `nickname?`）、`AccountLoginPayload`（`email` / `password`）** |
+| ⑨ `window.*` 契约 | **14** 个命名空间的完整方法签名 | `PreloadApi`（唯一真源；`projectTools` 共 **27** 个成员，含素材三件套、`setCanvas(name, canvas)`、`saveCast(name, cast)`、`onTaskProgress(taskId, callback)`；**`accountTools` 共 5 个成员**：`sendCode(email)` / `register(payload)` / `login(payload)` / `me()` / `logout()`；`castTools` 共 12 个成员；`scriptTools` 7 个；`updateTools` 含 `status` / `openLog`；`settingsTools` 含 `pickRuntimePack()`；`runtimeTools` 4 个；`legacyTools` 2 个；`appTools.copyText()`） |
 
 **⑧ 的「5 路」要会读**：它指的是**⑧ 节里定义的 5 个进度载荷类型**（html / script / whisper / align / video）。`UpdateProgressPayload` 在 ③.5、`RuntimeProgressPayload` 在 ③.6，因此**整层进度通道实际是 7 路**（html / script / whisper / align / video / runtime / update）；preload 头注释的「6 个进度推送通道」指其中**有模块级「只绑一次」标志的 6 路**（不含直接 `ipcRenderer.on` 的 video）。三个数字口径不同，别混用。**html 那一路的标志现在只保证监听器绑一次**：回调是 `taskId → 回调` 的 `Map`（见 `HtmlProgressPayload.taskId` 与 ⑨ 节的 `onTaskProgress`），不是单槽。
 
-**本轮动作示范加了 5 条频道**：`src/shared/ipc.ts` 的 `Cast` 组 **6 → 11**、全库 **101 → 106**（分组数 12 不变），其余频道名零改动；`project:html-progress` 的「按 `taskId` 分发」语义不变（「生成 HTML」「画角色」「编动作」三者可以并行）。
+**账号一节的 14 个错误码**（`AccountErrorCode`，与后端业务码同名）：`INVALID_EMAIL` / `WEAK_PASSWORD` / `EMAIL_TAKEN` / `ACCOUNT_NOT_FOUND` / `WRONG_PASSWORD` / `CODE_INVALID` / `CODE_EXPIRED` / `CODE_TOO_MANY` / `CODE_COOLDOWN` / `BAD_REQUEST` / `UNAUTHORIZED` / `NETWORK` / `SERVER` / `STORAGE_FAILED`。前三个由渲染层本地校验产出；`NETWORK` / `SERVER` / `STORAGE_FAILED` 由主进程补（`api.ts` 的兜底码表 14 条一一对应，见 [main/account.md](./files/main/account.md)）。
 
-**⑨ 节头部注释已经落后于实现**：源码那行仍写「**12 个命名空间 ↔ 11 组频道常量**」，而实际是 **13 个命名空间 / 12 个分组**（`PreloadApi` 与 `src/preload/index.ts` 的 `contextBridge` 对象都已含 `castTools`）。核数字时以 `PreloadApi` 与 `contextBridge` 调用为准，不要照抄这条注释。
+**本轮动作示范与账号的计数变化**：`src/shared/ipc.ts` 的 `Cast` 组 **6 → 11**、全库 **101 → 106**（分组数 12 不变）；本轮账号再 **+5 ⇒ 106 → 111、分组 12 → 13**，`PreloadApi` 的命名空间 **13 → 14**。其余频道名零改动；`project:html-progress` 的「按 `taskId` 分发」语义不变（「生成 HTML」「画角色」「编动作」三者可以并行）。
+
+**⑨ 节头部注释已经落后于实现**：源码那行仍写「**12 个命名空间 ↔ 11 组频道常量**」，而实际是 **14 个命名空间 / 13 个分组**（`PreloadApi` 与 `src/preload/index.ts` 的 `contextBridge` 对象都已含 `castTools` 与 `accountTools`）。核数字时以 `PreloadApi` 与 `contextBridge` 调用为准，不要照抄这条注释。
 
 本轮 `Script*` 类型的形状（逐字）：
 
@@ -149,15 +155,67 @@ export interface CastDemoResult {
 }
 ```
 
+账号契约的形状（按源码形状，逐字）：
+
+```ts
+export interface AccountUser {
+  id: number
+  email: string
+  nickname: string
+  /** 注册时间（ISO 本地时间字符串，后端原样给） */
+  createdAt: string
+}
+
+/** 登录态展示数据（不含令牌）。expiresAt 是毫秒时间戳，由主进程按后端 expiresInSeconds 换算 */
+export interface AccountSession {
+  user: AccountUser
+  expiresAt: number
+}
+
+export interface AccountFail {
+  ok: false
+  code: AccountErrorCode
+  /** 可直接显示的文案（主进程已翻成人话；后端给了 message 就优先用它） */
+  message: string
+}
+
+export type AccountResult = { ok: true; session: AccountSession } | AccountFail
+
+/** 发送验证码结果：有效期与冷却以后端返回为准，前端不写死 */
+export interface AccountSendCodeOk {
+  ok: true
+  expiresInSeconds: number
+  resendAfterSeconds: number
+  /** 仅开发模式（未打包的应用）下由主进程透传，便于本地联调；打包版永远没有这个字段 */
+  devCode?: string
+}
+
+export type AccountSendCodeResult = AccountSendCodeOk | AccountFail
+
+export interface AccountRegisterPayload {
+  email: string
+  password: string
+  /** 邮箱验证码（后端要求 4~12 位数字） */
+  code: string
+  nickname?: string
+}
+
+export interface AccountLoginPayload {
+  email: string
+  password: string
+}
+```
+
 - **`name` / `id` 的可选性**：`CastPreviewPayload.id` 与 `CastDemoPayload.id` 是**可选**的，因为 preload 把方法参数合并进来（`{ id, ...(options || {}) }`）；`PreloadApi['castTools'].preview` / `.demo` 的第二参刻意写成 `Omit<CastPreviewPayload, 'id'>` / `Omit<CastDemoPayload, 'id'>`——`id` 已经由方法参数给了，不该再传一遍。
 - **动作的十个类型**：`CastActionKey`（`{ t, o }`）/ `CastActionDef`（`id` / `name` / `duration` / `loop` / `keys?` / `code?` / `from?`）/ `CastActionListResult`（`{ shared, own }`）/ `CastActionScope`（`'shared' \| 'own'`）/ `CastActionSavePayload`（`{ castId?, scope?, action }`）/ `CastActionRemovePayload`（`{ castId?, scope?, actionId }`）/ `CastActionGeneratePayload`（`{ castId, taskId, request, duration?, loop?, name? }`）/ `CastActionResult`（`{ action }`）/ `CastDemoPayload` / `CastDemoResult`。`keys` 与 `code` **二选一**：前者是关键帧表（所有角色通用），后者是 AI 生成的纯函数（只给这个角色）。
+- **账号契约的三条设计取舍**：① **没有 `token` 字段**——`AccountSession` 只有 `user` + `expiresAt`，令牌留在主进程；② **没有 refresh**——后端是不透明会话令牌（30 天滑动续期），客户端只需在 401 时清态；③ **`devCode` 永远可选**——它是开发期调试用的，打包版由主进程剥掉，渲染层只做「有就显示」。
 
 五条关键约定：
 
 1. **载荷格式禁止改动**：线上载荷必须与现行实现逐字段一致；设置文件已落盘在用户 `userData`，改字段名等于丢配置。项目结构新增字段一律**可选**（如 `Project.materials?` / `Project.canvas?`），并由主进程读盘时规范化（`normalizeMaterials()` 把缺失 / 非法值收敛为合法列表），因此老项目不受影响。
 2. **「结构类型再导出」保引用面**：`src/main/projects.ts` 用 `export type { ContentScript, Project, Scene, SubtitleLine } from '../shared/types'` 转发四个项目结构，`src/renderer/src/composables/useAppStore.ts` 用 `export type { ProjectMeta }` 转发列表项类型 —— `projects.Project` / `from './projects'` 等既有引用不需要改，但结构只定义一处（本文件）。
-3. **「本地类型」已清空**：`src/main/` 下不再有任何本地声明的 payload / result / progress 接口，各 IPC handler 的 `payload` 参数一律标注共享层的 `*Payload` 类型（`src/main/agent/script.ts` 的 `payload?: ScriptGeneratePayload`、`src/main/projects/ipc/castActions.ts` 的 `payload?: CastActionGeneratePayload` / `CastActionSavePayload` 同样如此）。
-4. **`message` / `detail` 分两层**：`IpcFail` 有可选 `detail`；`UpdateCheckResult` 的 `message` 是**必填**、`detail` 可选；约定是 **`message` 说人话给终端用户、`detail` 存原始报错给排障**（UI 用「查看详情」折叠展示）。
+3. **「本地类型」已清空**：`src/main/` 下不再有任何本地声明的 payload / result / progress 接口，各 IPC handler 的 `payload` 参数一律标注共享层的 `*Payload` 类型（`src/main/agent/script.ts` 的 `payload?: ScriptGeneratePayload`、`src/main/projects/ipc/castActions.ts` 的 `payload?: CastActionGeneratePayload` / `CastActionSavePayload`、`src/main/account/api.ts` 的 `payload: AccountRegisterPayload` 同样如此）。
+4. **`message` / `detail` 分两层**：`IpcFail` 有可选 `detail`；`UpdateCheckResult` 的 `message` 是**必填**、`detail` 可选；约定是 **`message` 说人话给终端用户、`detail` 存原始报错给排障**（UI 用「查看详情」折叠展示）。**账号域不用这两层**：`AccountFail` 只有 `code` + `message`，错误码本身就是给界面分流用的。
 5. **配置类错误再分一层**：`needConfig` / `title` 由主进程 `src/shared/errors.ts` 的 `friendlyError()` 单点产出。与 `needPacks` 的区别是**它不驱动流程**：`needPacks` 要用户下载完环境再「继续」重发本操作，`needConfig` 只是一个「去哪修」的分流标记。**余额 / 欠费刻意不给 `needConfig`**。这两个字段是**可选**的：preload 是纯转发，因此**加这两个字段不需要改 preload**。
 
 ---
@@ -210,10 +268,10 @@ export interface CastDemoResult {
 
 | 消费方 | 引入方式 | 归属 tsconfig |
 |---|---|---|
-| `src/main/*.ts` | `import { IPC } from '../shared/ipc'`、`import type { … } from '../shared/types'`；`whisper.ts` 另有 `APP_USER_AGENT`；`projects.ts` 另有素材 + 画布常量 + **`estimateSubtitleDur`**；`video.ts` 另有画布常量；**`agent/script.ts` 另有 `EST_CHARS_PER_SEC`（替代原来的本地语速常量 4.5，已删除）**；`errors.ts` 的消费方是 **`agent/chat.ts`** / `agent/html.ts`（经 `agent/chat.ts` 间接）/ `settings.ts` / `voice/api.ts` / `projects.ts` / **`agent/script.ts`（`configTargetOf`）** | `tsconfig.node.json` |
-| `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`（构建时内联）+ `import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, RenderCanvas, RenderOverride, RuntimePackName, RuntimeProgressPayload, **ScriptProgressPayload**, UpdateProgressPayload, VideoRenderPayload, WhisperProgressPayload } from '../shared/types'`；**不 import `errors.ts`**（错误分类只随 IPC 载荷转发）；**动作与预览的载荷类型也不需要 import**——`castTools.preview` / `demo` 的 `options` 参数借用 `PreloadApi['castTools']` 的上下文类型 | `tsconfig.node.json` |
+| `src/main/*.ts` | `import { IPC } from '../shared/ipc'`、`import type { … } from '../shared/types'`；`whisper.ts` 另有 `APP_USER_AGENT`；`projects.ts` 另有素材 + 画布常量 + **`estimateSubtitleDur`**；`video.ts` 另有画布常量；**`agent/script.ts` 另有 `EST_CHARS_PER_SEC`**；**`account/api.ts` / `account/index.ts` 引入 `Account*` 类型与 `IPC.Account`**；`errors.ts` 的消费方是 **`agent/chat.ts`** / `agent/html.ts`（经 `agent/chat.ts` 间接）/ `settings.ts` / `voice/api.ts` / `projects.ts` / **`agent/script.ts`（`configTargetOf`）** | `tsconfig.node.json` |
+| `src/preload/index.ts` | `import { IPC } from '../shared/ipc'`（构建时内联）+ `import type { AlignProgressPayload, HtmlProgressPayload, PreloadApi, RenderCanvas, RenderOverride, RuntimePackName, RuntimeProgressPayload, **ScriptProgressPayload**, UpdateProgressPayload, VideoRenderPayload, WhisperProgressPayload } from '../shared/types'`；**不 import `errors.ts`**（错误分类只随 IPC 载荷转发）；**`accountTools` 也不 import `Account*` 类型**——5 个方法各自借用 `PreloadApi['accountTools']` 的上下文类型推断（与 `castTools.preview` 的 `options` 同一手法），所以新增账号类型时 preload 一行都不用改 | `tsconfig.node.json` |
 | `src/preload/index.d.ts` | `import type { PreloadApi } from '../shared/types'`，再 `interface Window extends PreloadApi {}`（**新增命名空间时它一行都不用改**） | `tsconfig.web.json` |
-| `src/renderer/src/**` | 主要经 `window.*` 类型（由 `index.d.ts` 挂载）；如需共享类型/常量可用别名 `@shared/*`（如 `useAppStore.ts` 的 `ProjectMaterial` / `ProjectMeta`、`MaterialsSection.vue` 的素材常量、**`CastLibraryModal.vue` 的 `CastLibraryMember`**、**`CastCreateModal.vue` 的 `ProjectCastMember`**、`utils/render.ts` 的画布常量、`App.vue` 的 `APP_NAME`、`useConfigPrompt.ts` 的 `ConfigTarget`、**`SubtitlePage/helpers.ts` 的 `estimateSubtitleDur`**、**`SubtitlePage/index.vue` / `ContentPage/AiChatPanel.vue` 的 `EST_CHARS_PER_SEC`**、`ContentPage/helpers.ts` 的 `type Scene` / `type ScriptChatRoundMeta` 与 `AiChatPanel.vue` / `ScriptRoundCard.vue` 的 `type Scene` / `type ScriptChatRoundMeta`） | `tsconfig.web.json` |
+| `src/renderer/src/**` | 主要经 `window.*` 类型（由 `index.d.ts` 挂载）；如需共享类型/常量可用别名 `@shared/*`（如 `useAppStore.ts` 的 `ProjectMaterial` / `ProjectMeta`、`MaterialsSection.vue` 的素材常量、`utils/render.ts` 的画布常量、`App.vue` 的 `APP_NAME`、`useConfigPrompt.ts` 的 `ConfigTarget`、`SubtitlePage/helpers.ts` 的 `estimateSubtitleDur`、`ContentPage/helpers.ts` 的 `type Scene` / `type ScriptChatRoundMeta`、**`composables/useAuth.ts` 的 `type AccountSession`、`utils/localAccount.ts` 的 `AccountErrorCode` / `AccountLoginPayload` / `AccountRegisterPayload` / `AccountResult` / `AccountSendCodeResult`（并再导出其中三个类型）**） | `tsconfig.web.json` |
 | `electron.vite.config.ts` | `import { APP_NAME, APP_NAME_EN, APP_SLOGAN_SHORT } from './src/shared/constants'`（构建配置是**第四个**消费端） | `tsconfig.node.json` |
 
 构建期行为：
@@ -226,14 +284,14 @@ export interface CastDemoResult {
 
 ## 6. 维护约定
 
-1. **新增 / 删除 IPC 都必须三处齐改**：`shared/ipc.ts` 加（删）频道常量 → 主进程对应 `register()` 内 `ipcMain.handle/on` → preload 命名空间加（删）方法，并在 `shared/types.ts` ⑨ 节 `PreloadApi` 同步签名（`index.d.ts` 只做 `extends`，无需再改）。**`script:*` 走完了两遍这条流程**：先加 `Script` 分组（`Generate` / `Progress`）→ `src/main/agent/script.ts` 的 `registerScript(getProjectDir)` 挂 `script:generate` 并 `sender.send('script:progress')` → `src/preload/index.ts` 加 `scriptTools`（含单订阅 `onProgress`）→ ⑨ 节签名 + ⑥ 节两个载荷类型 + ⑧ 节 `ScriptProgressPayload`；**对话记录先加两条**（`script:load-chat` / `script:save-chat`）→ 同一个 `registerScript()` 里补两条 `ipcMain.handle`（读写下沉到 `src/main/agent/chatLog.ts`）→ preload 的 `scriptTools.loadChat` / `saveChat`；**再把它扩成五条 chat handler**（`load-chat` / `append-round` / `read-version` / `set-active-version` / `clear-chat`，`save-chat` 下线）→ preload 的 `scriptTools` 变 7 个方法 → ⑥ 节换成 `ScriptChatRoundMeta` / `ScriptChatIndex` / `ScriptVersionResult` / `ScriptAppendRoundPayload`（`ScriptChatRound` / `ScriptChatResult` 删除）。**频道总数 91 → 94、`Script` 组 4 → 7、分组数仍是 11。** **本轮角色预览同样走完三处齐改**：`ipc.ts` 的 `Project.CastPreview`（`'project:cast-preview'`）→ `src/main/projects.ts` 的 `ipcMain.handle(IPC.Project.CastPreview, …)` → preload 的 `castTools.preview` → ⑨ 节签名 + ⑥ 节 `ProjectCastPreviewPayload` / `ProjectCastPreviewResult`。**全库 100 → 101、`Project` 组 32 → 33、分组数仍是 11。** **而「进度按任务 id 分发」这一轮恰好是这条流程的反例**：只改 `shared/types.ts`（三个载荷加必填 `taskId` + ⑨ 节 `onTaskProgress`）→ `src/main/projects.ts` 三个 handler 从载荷取 `taskId`（缺则回内部错误）→ preload 把单槽换成 `Map` 分发，**`shared/ipc.ts` 一行未改**——没有新频道，变的只是一条频道内的分发方式。（**注**：上面这些角色批次在本轮「角色只有全局一份」的改造里已整体并入/下线——现行是 `Cast` 组 **11** 条 + `project:save-cast`；**本轮动作示范 5 条也走同一条流程**：`ipc.ts` 的 `Cast` 组 +5 → `projects/ipc/castActions.ts` 的 5 个 `ipcMain.handle` → preload 的 `castTools` +5 → ⑨ 节签名 + ⑥ 节十个动作类型，`Cast` 6 → 11、全库 101 → 106）
-2. **往 `IpcFail` 加字段不需要 preload 参与**：preload 只做 `ipcRenderer.invoke` 转发、原样返回主进程对象，因此 `needConfig` / `title` 只在 `shared/types.ts`（声明）、主进程（写入）、渲染层（读取）三处出现。
-3. **不要在本层放业务逻辑**：只放常量、类型与**纯函数**（`errors.ts` 的映射表与 `constants.ts` 的 `estimateSubtitleDur()` 是全层仅有的两处函数实现，都是纯函数、无副作用）；模型调用、脚本解析等实现放在 `src/main/`（`agent/chat.ts` / `agent/script.ts`），本层只给形状。
+1. **新增 / 删除 IPC 都必须三处齐改**：`shared/ipc.ts` 加（删）频道常量 → 主进程对应 `register()` 内 `ipcMain.handle/on` → preload 命名空间加（删）方法，并在 `shared/types.ts` ⑨ 节 `PreloadApi` 同步签名（`index.d.ts` 只做 `extends`，无需再改）。**本轮账号 5 条走的就是这条流程**：`IPC.Account` 分组（`SendCode` / `Register` / `Login` / `Me` / `Logout`）→ `src/main/account/index.ts` 的 `register()` 5 个 handler → preload 第 14 个命名空间 `accountTools` → ⑨ 节 `PreloadApi.accountTools` + 「账号」一节的 9 个类型。计数：分组 **12 → 13**、频道 **106 → 111**、命名空间 **13 → 14**。更早两轮的样板：`script:*` 从「先加一组（Generate / Progress）」到「对话记录扩成五条 chat handler」共走过两遍；角色预览 / 动作示范则把 `Project` 组与 `Cast` 组之间的 6 + 5 条搬了一遍（`Project` 33 → 27、`Cast` 6 → 11、全库 101 → 106）。
+2. **往 `IpcFail` 加字段不需要 preload 参与**：preload 只做 `ipcRenderer.invoke` 转发、原样返回主进程对象，因此 `needConfig` / `title` 只在 `shared/types.ts`（声明）、主进程（写入）、渲染层（读取）三处出现。**账号域连 `IpcFail` 都不用**：它有自己的 `AccountFail`（`code` + `message`），加错误码只改本文件 + `account/api.ts` 的兜底码表。
+3. **不要在本层放业务逻辑**：只放常量、类型与**纯函数**（`errors.ts` 的映射表与 `constants.ts` 的 `estimateSubtitleDur()` 是全层仅有的两处函数实现，都是纯函数、无副作用）；模型调用、脚本解析、HTTP 请求等实现放在 `src/main/`，本层只给形状。
 4. **类型与实现同源**：`PreloadApi`（⑨ 节）是唯一真源 —— `preload/index.ts` 用 `PreloadApi['<命名空间>']` 标注实现、`preload/index.d.ts` 用 `interface Window extends PreloadApi` 交给渲染层；不要再在别处复制一份方法签名。
 5. **载荷类型不再宽松**：语音 / whisper / 项目的复杂入参已从 `Record<string, unknown>` 收敛为具名 `*Payload`；**素材回写载荷是刻意的例外**——`ProjectSaveMaterialsPayload.materials?: unknown`，因为渲染层提交的是完整列表、主进程必须自己规范化后才能信任它。
 6. **品牌文案只有一处来源**：改应用名走 §4 的清单；不要在组件里再写字面量、也不要往 `localStorage` 键名上带品牌名。
 7. **失败结果优先给两层**：新增会失败的 IPC 时，`message` 写用户能读懂的一句话，技术细节放可选 `detail`。**「部分成功」也走 `message`**：`project:add-materials` 在跳过若干文件时仍回 `ok: true`，把「已添加 N 个，跳过 M 个」放在 `message` 里。
-8. **错误文案统一出口是 `errors.ts`**：新的「外部服务 / 本机文件」报错一律经 `friendlyError()` 翻译，不要在各模块里再写一套 `if / else if` 正则链；只有调用方**只剩一句已翻译的中文文案**时才用 `configTargetOf()` 补分类（`agent/script.ts` 就是这种情形）。改这里之前先看 `docs/error-mapping.md`。
+8. **错误文案统一出口是 `errors.ts`**：新的「外部服务 / 本机文件」报错一律经 `friendlyError()` 翻译，不要在各模块里再写一套 `if / else if` 正则链；只有调用方**只剩一句已翻译的中文文案**时才用 `configTargetOf()` 补分类（`agent/script.ts` 就是这种情形）。改这里之前先看 `docs/error-mapping.md`。**账号域是刻意的例外**：它的错误码是后端业务码的镜像（要驱动界面分流），文案由 `account/api.ts` 的 `FALLBACK_MESSAGE` 兜底，不走 `friendlyError()`。
 9. **估时语速只有一处来源**：不要在渲染层或主进程再写 `4` / `4.5` / `0.15` 这类语速系数，也不要给「面板估算时长」「提示词字数预算」各留一份本地常数——三处都 `import` `EST_CHARS_PER_SEC`；字幕页的界面文案同样引用它，不写死数字。
 
 ---
@@ -243,13 +301,15 @@ export interface CastDemoResult {
 - 逐文件说明：[files/shared/](./files/shared/)（`ipc.ts` / `types.ts` / `errors.ts` / `constants.ts` 各一篇）
 - 桥接层：[03-目录架构-src-preload.md](./03-目录架构-src-preload.md)
 - 频道总表（含方向与消费方）：[01-架构总览.md](./01-架构总览.md) 第 3.3 节
+- 账号域：[main/account.md](./files/main/account.md)
 - 品牌注入实现：[root/electron.vite.config.ts.md](./files/root/electron.vite.config.ts.md)
 - 错误映射设计文档：`docs/error-mapping.md`（仓库内，非 wiki）
 
-## 附录 · 角色与动作示范的现状（与上文冲突时以本节为准）
+## 附录 · 角色与账号的现状（与上文冲突时以本节为准）
 
-- **分组 12 个、频道 106 条**：`Cast` 组 **11 条** = 角色本身 6 条（`cast:list` / `cast:create` / `cast:recreate` / `cast:save-meta` / `cast:remove` / `cast:preview`）+ **动作示范 5 条（`cast:action-list` / `cast:action-save` / `cast:action-remove` / `cast:action-generate` / `cast:demo`）**；`Project` 组 **27** 条（角色频道整体搬走后 33 → 27，只剩 `project:save-cast` 与本片相关的那些）。
+- **分组 13 个、频道 111 条**：`Cast` 组 **11 条** = 角色本身 6 条 + **动作示范 5 条**；`Project` 组 **27** 条（角色频道整体搬走后 33 → 27）；**`Account` 组 5 条**（`account:send-code` / `account:register` / `account:login` / `account:me` / `account:logout`）。
 - **动作示范 5 条的职责一句话**：`action-list` 列动作（`{ ok, shared, own }`，`shared` = 内置 14 条 + 用户自建公共动作）、`action-save` 存一条关键帧动作（同 id 覆盖）、`action-remove` 删一条动作、`action-generate` **唯一会调模型**（读角色源码生成一条专属动作，进度按 `taskId` 走 `project:html-progress`，日志 `html-agent/cast-action.jsonl`）、`demo` 拼会动的示范页 `<userData>/cast-preview/<id>.demo.html`。动作数据存 `<userData>/cast-library/actions.json`，**不进 `project.json`**。
 - **`project:save-cast` 载荷**：`{ name, cast: [{ id, selected }] }`（`ProjectSaveCastPayload` 的 `cast` 是 `ProjectCastSelection[]`）。
 - **角色类型面**：`ProjectCastSelection` / `CastCreatePayload` / `CastRecreatePayload` / `CastSaveMetaPayload` / `CastResult` / `CastPreviewPayload` / `CastPreviewResult`；`ProjectNewCastPayload` / `ProjectNewCastResult` / `ProjectCastPreviewPayload` / `ProjectCastPreviewResult` 已删除；`ProjectCastMember` 多一个可选 `style`；`ProjectIndex.cast` 是 `ProjectCastSelection[]`。**动作面新增十个类型**：`CastActionKey` / `CastActionDef` / `CastActionListResult` / `CastActionScope` / `CastActionSavePayload` / `CastActionRemovePayload` / `CastActionGeneratePayload` / `CastActionResult` / `CastDemoPayload`（= `CastPreviewPayload` 的别名）/ `CastDemoResult`。
-- **preload 命名空间 13 个**（含 `castTools` **12** 个方法：角色 6 + 动作 5 + `onTaskProgress`），`PreloadApi` ⑨ 节同步。
+- **账号类型面（9 个）**：`AccountUser` / `AccountSession` / `AccountErrorCode`（14 个码）/ `AccountFail` / `AccountResult` / `AccountSendCodeOk` / `AccountSendCodeResult` / `AccountRegisterPayload` / `AccountLoginPayload`；**没有 `token` 字段、没有 refresh 类型**——令牌只存在主进程（`src/main/account/store.ts` 的 `safeStorage` 加密文件），渲染层只拿展示字段。
+- **preload 命名空间 14 个**（含 `castTools` **12** 个方法、**`accountTools` 5 个方法**），`PreloadApi` ⑨ 节同步。
