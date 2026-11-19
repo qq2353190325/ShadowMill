@@ -111,7 +111,8 @@ export async function renderWithRustKernel(kernel: RustKernel, opts: RustRenderO
       child.on('error', (e) => done(() => reject(new Error('启动 ' + path.basename(exe) + ' 失败：' + e.message))))
       child.on('close', (code) => {
         if (code !== 0) {
-          done(() => reject(new Error(path.basename(exe) + ' 退出码 ' + code + '：' + stderrTail.trim().split(/\r?\n/).slice(-1)[0])))
+          // 不能只取最后一行：CLI 的错误链可能跨多行，根因往往在第二行以后。
+          done(() => reject(new Error(path.basename(exe) + ' 退出码 ' + code + '：\n' + stderrTail.trim())))
           return
         }
         let result: RustResult | null = null
