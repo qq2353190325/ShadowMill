@@ -16,7 +16,9 @@ export async function loadRenderDefaults(): Promise<void> {
   try {
     const s = await window.settingsTools.get();
     Object.assign(renderDefaults, resolveRenderOptions(s && s.render));
-    renderBackend.value = s && s.renderBackend === 'vidrender' ? 'vidrender' : 'hyperframes';
+    renderBackend.value = s && s.renderBackend === 'vidrender-webview' ? 'vidrender-webview'
+      : s && (s.renderBackend === 'vidrender-server' || (s as { renderBackend?: string }).renderBackend === 'vidrender')
+        ? 'vidrender-server' : 'hyperframes';
   } catch (e) { /* 读取失败：沿用内置默认，不打断启动 */ }
 }
 

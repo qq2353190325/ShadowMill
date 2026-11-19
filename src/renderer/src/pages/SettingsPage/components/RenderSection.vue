@@ -1,7 +1,7 @@
 <template>
   <div class="card hgen-panel">
     <div class="panel-title"><span class="dot"></span>视频渲染默认档位</div>
-    <div class="hgen-tip">「HTML生成」页点「转视频」时的默认档位。单个项目可在「HTML生成」页的「渲染档位」单独覆盖质量 / 帧率（项目覆盖优先于这里的默认）。质量 draft 编码最快但文字边缘可能有压缩痕迹，仅用于快速确认内容；降低帧率不会缩短成片时长，只是采样更稀、渲染更快。渲染引擎默认 HyperFrames（稳定）；Rust 小内核是新路径，适合 A/B 对比，复杂合成与长片仍在验证中。</div>
+    <div class="hgen-tip">「HTML生成」页点「转视频」时的默认档位。单个项目可在「HTML生成」页的「渲染档位」单独覆盖质量 / 帧率（项目覆盖优先于这里的默认）。质量 draft 编码最快但文字边缘可能有压缩痕迹，仅用于快速确认内容；降低帧率不会缩短成片时长，只是采样更稀、渲染更快。渲染引擎默认 HyperFrames（稳定）；另可选两个 Rust 大内核——WebView 内核用系统 WebView 抓帧，Chrome 服务器内核与 HyperFrames 共用同一个谷歌内核。两个 Rust 内核目前没有逐帧进度，只在完成时显示耗时。</div>
     <div class="hgen-row">
       <label class="sel-label">质量</label>
       <HfSelect v-model="rQuality" :groups="qualityGroups" />
@@ -45,7 +45,8 @@ const qualityGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: qua
 const fpsGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: fpsOptions.map((o) => ({ value: o.value, label: o.label })) }]);
 const backendGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: [
   { value: 'hyperframes', label: 'HyperFrames（稳定，默认）' },
-  { value: 'vidrender', label: 'Rust 小内核（实验）' }
+  { value: 'vidrender-webview', label: 'Rust · WebView 内核' },
+  { value: 'vidrender-server', label: 'Rust · Chrome 服务器内核' }
 ] }]);
 const rQuality = ref<RenderQuality>(FALLBACK_RENDER.quality);
 const rFps = ref<RenderFps>(FALLBACK_RENDER.fps);
@@ -67,7 +68,9 @@ async function onSaveRender(): Promise<void> {
   const res = await saveRenderDefaults({ quality: rQuality.value, fps: rFps.value }, rBackend.value);
   setRStatus(
     res.ok ? '渲染默认档位已保存：' + renderQualityLabel(rQuality.value) + ' · ' + rFps.value + 'fps · ' +
-      (rBackend.value === 'vidrender' ? 'Rust 小内核' : 'HyperFrames') : (res.message || '保存失败'),
+      (rBackend.value === 'hyperframes' ? 'HyperFrames'
+        : rBackend.value === 'vidrender-webview' ? 'Rust · WebView 内核' : 'Rust · Chrome 服务器内核')
+      : (res.message || '保存失败'),
     res.ok ? 'hf-ok' : 'hf-error'
   );
 }
@@ -79,7 +82,8 @@ onMounted(async () => {
     const r = (s && s.render) || FALLBACK_RENDER;
     if (RENDER_QUALITY_OPTIONS.some((o) => o.value === r.quality)) rQuality.value = r.quality;
     if (RENDER_FPS_OPTIONS.some((o) => o.value === r.fps)) rFps.value = r.fps;
-    if (s && s.renderBackend === 'vidrender') rBackend.value = 'vidrender';
+    if (s && (s.renderBackend === 'vidrender-webview' || s.renderBackend === 'vidrender-server')) rBackend.value = s.renderBackend;
+    else if (s && (s as { renderBackend?: string }).renderBackend === 'vidrender') rBackend.value = 'vidrender-server';
   } catch (e) { /* ignore */ }
 });
 </script>

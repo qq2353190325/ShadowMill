@@ -86,36 +86,6 @@ export function resetRenderProgress(): void {
   stopTicker();
 }
 
-// Rust 小内核进度：它发的是人话文案（不是 HY 的 [Render:trace] JSON），
-// 形如「[小内核] 16/1350 帧 · 已用 1.2s · 剩余约 98s · 13.4 fps」。
-// 解析帧号与已用秒，塞进同一套 renderProgress 状态，界面（PreviewSection 的 statusDisplay）
-// 就能像 HY 一样显示实时进度；不认识的小内核行（抽帧 / 完成）走 msgText 兜底显示。
-function parseVidrender(line: string): void {
-  const at = line.indexOf('[小内核]');
-  if (at < 0) return;
-  const body = line.slice(at + '[小内核]'.length).trim();
-  if (!body) return;
-  const m = body.match(/(\d+)\s*\/\s*(\d+)\s*帧/);
-  if (m) {
-    const done = Number(m[1]), total = Number(m[2]);
-    phaseKey = 'capture_disk';           // 归入「逐帧捕获」，帧号才被 renderText 采信
-    phaseLabel = '逐帧渲染（Rust 小内核）';
-    frames = { done, total };
-    const sec = body.match(/已用\s*([\d.]+)s/);
-    if (sec && !startAtMs) {
-      startAtMs = Date.now() - Number(sec[1]) * 1000;
-      startTicker();
-    }
-    msgText = '';
-    renderText();
-    return;
-  }
-  // 抽帧 / 归一化 / 完成等无帧号行：设为当前消息（ticker 每秒带上），阶段名沿用
-  if (!phaseLabel) phaseLabel = 'Rust 小内核渲染';
-  msgText = body.slice(0, 120);
-  renderText();
-}
-
 let hfLogBuf = '';   // 跨 chunk 的半行缓冲（日志行可能被分块截断）
 
 // 剥掉 ANSI 控制码：CLI 的进度条自带颜色/光标码，不剥会把「Capturing frames N/M」的匹配打断
@@ -169,10 +139,8 @@ function parseTrace(line: string): void {
 export function initRenderProgress(): void {
   window.hfTools.onProgress((data) => {
     const text = String((data && data.text) || '');
-    // 小内核每条 onProgress 是一次独立 send、文本**不带换行**（HY 的 CLI 输出才带 \n）。
-    // 若走下面的按行缓冲，内容会永远卡在 hfLogBuf 等一个不会来的 \n，界面只显示提交占位文案。
-    // 因此小内核文本单独处理，不进按行缓冲。
-    if (text.indexOf('[小内核]') >= 0) { parseVidrender(text); return }
+    // Rust 大内核的 stderr 消息没有逐帧进度，且不带换行；直接丢掉，别卡在按行缓冲里等 \n。
+    if (text.indexOf('[Rust 内核]') >= 0) return
     hfLogBuf += text;
     let nl;
     while ((nl = hfLogBuf.indexOf('\n')) >= 0) {

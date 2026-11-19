@@ -2,6 +2,8 @@
 
 > 记录时间：2026-11-19。范围：把 hyperframes-rs 的 `vidrender` 小内核作为可选渲染后端接入 ShadowMill 产品（「HTML生成」页 · 转视频）过程中遇到的全部问题、根因与修复。
 > 对应的代码改动见 CHANGELOG #124–#142、提交 `1bcdb27` / `4df29bc`；Rust 侧三内核平级重构见 hyperframes-rs 提交 `28e223a`。
+>
+> **后续（CHANGELOG #144）**：小内核已从产品中移除，改为接入两个 Rust 大内核（WebView / Chrome），本文记录的是当时的排查过程，相关文件 `src/main/vidrender.ts` / `vidrenderFrames.ts` / `resources/bin/vidrender-encode.exe` 已删除。
 
 ## 0. 背景
 

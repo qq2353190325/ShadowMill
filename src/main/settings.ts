@@ -104,7 +104,7 @@ const DEFAULT_SETTINGS = (): AppSettings => ({
   voiceProfiles: {}, // 本地音色映射：key 形如 "system:Cherry" / "custom:<voice_id>"，值为 { key, name, voice, targetModel, type }
   whisper: { modelId: '', customModels: [] }, // 语音识别（whisper.cpp）：modelId 为当前使用档位，customModels 为用户自定义模型条目
   render: Object.assign({}, DEFAULT_RENDER), // 视频渲染全局默认档位（项目未覆盖时生效）
-  renderBackend: 'hyperframes', // 新装用户保持老行为；小内核由设置页显式切换
+  renderBackend: 'hyperframes', // 新装用户保持老行为；两个 Rust 内核由设置页显式切换
   // 应用自更新：feedUrl 留空即用打包时 app-update.yml 里的地址；autoCheck 为启动后静默检查
   updater: { feedUrl: '', autoCheck: true, skippedVersion: '' }
 });
@@ -168,8 +168,11 @@ function readSettings(): AppSettings {
       whisper: Object.assign({}, base.whisper, (raw && raw.whisper) || {}),
       // 渲染档位：旧 settings.json（无 render 字段）落回默认；已写入的值经白名单规范化
       render: normalizeRenderOptions(raw && raw.render),
-      // 渲染后端：旧 settings.json 没有该字段 → hyperframes；手改文件的非法值同样落回默认
-      renderBackend: (raw && raw.renderBackend === 'vidrender') ? 'vidrender' : 'hyperframes',
+      // 渲染后端：旧 settings.json 没有该字段 → hyperframes；旧的 'vidrender'（小内核）映射到 Chrome 大内核，
+      // 手改文件的非法值同样落回默认
+      renderBackend: raw && raw.renderBackend === 'vidrender-webview' ? 'vidrender-webview'
+        : raw && (raw.renderBackend === 'vidrender-server' || raw.renderBackend === 'vidrender') ? 'vidrender-server'
+        : 'hyperframes',
       // 更新设置：旧 settings.json（无 updater 字段）落回默认；逐字段做类型收敛
       updater: normalizeUpdaterSettings(raw && raw.updater)
     };
@@ -360,7 +363,7 @@ function register(ctx?: RegisterCtx): void {
   ipcMain.handle(IPC.Settings.SaveRender, (_event, payload?: SettingsSaveRenderPayload) => {
     const cur = readSettings();
     cur.render = normalizeRenderOptions(Object.assign({}, cur.render, (payload && payload.render) || {}));
-    if (payload && (payload.backend === 'hyperframes' || payload.backend === 'vidrender')) cur.renderBackend = payload.backend;
+    if (payload && (payload.backend === 'hyperframes' || payload.backend === 'vidrender-webview' || payload.backend === 'vidrender-server')) cur.renderBackend = payload.backend;
     writeSettings(cur);
     return { ok: true, settings: cur };
   });

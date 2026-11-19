@@ -146,9 +146,9 @@ export interface RenderOptions {
 }
 // 项目级覆盖：字段可缺省，缺省项跟随全局默认（settings.json 的 render）
 export type RenderOverride = Partial<RenderOptions>
-// 渲染后端：默认 hyperframes（老行为），用户可在设置页切到 Rust 小内核做 A/B。
+// 渲染后端：默认 hyperframes（老行为）；两个 Rust 大内核分别是 WebView 内核与 Chrome 服务器内核。
 // 这是**全局**设置，不进项目级 RenderOverride——后端是「用什么渲」，不是「渲成什么档位」。
-export type RenderBackend = 'hyperframes' | 'vidrender'
+export type RenderBackend = 'hyperframes' | 'vidrender-webview' | 'vidrender-server'
 
 // ===== 成片画布方向（**项目属性，不是渲染档位**）=====
 // 取值与尺寸见 shared/constants.ts（RENDER_CANVASES / CANVAS_SIZES / DEFAULT_CANVAS），
@@ -172,7 +172,7 @@ export interface AppSettings {
   whisper: WhisperSettings
   // 视频渲染全局默认档位（项目未覆盖时生效）
   render: RenderOptions
-  // 渲染后端（全局）：缺省按 hyperframes 兼容老用户；vidrender 为小内核实验路径
+  // 渲染后端（全局）：缺省按 hyperframes 兼容老用户；另可选两个 Rust 大内核
   renderBackend: RenderBackend
   // 应用自更新：更新源覆盖 / 启动静默检查 / 已跳过版本
   updater: UpdaterSettings
@@ -241,7 +241,7 @@ export interface UpdateProgressPayload {
 // 运行环境（分包：ffmpeg / hyperframes / vidrender 各自一个 7z，首次用到时下载；whisper 随安装包）
 // ============================================================
 // 为什么分包：ffmpeg(180MB) 被「转录转码」与「渲染」两条线共用、hyperframes(440MB) 只有渲染要、
-// vidrender(<1MB) 是 Rust 编码内核（目前仅独立 demo 使用）、whisper(12.5MB) 缺了转录就完全不能用
+// vidrender(约 3MB) 是两个 Rust 大内核 CLI（vid / vidrender-cli）、whisper(12.5MB) 缺了转录就完全不能用
 // ——四者变化节奏与归属都不同，捆在一起会让每次更新都重下全部。
 // 详见 docs/runtime-pack-split.md。
 // 单个包的状态：ready 已就绪；missing 本机没有（需要下载）；unknown 还没探测过

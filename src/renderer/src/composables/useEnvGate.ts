@@ -39,15 +39,15 @@ let onContinue: (() => void) | null = null
 const LABEL: Record<RuntimePackName, string> = {
   ffmpeg: '音视频处理（ffmpeg）',
   hyperframes: '视频渲染引擎（HyperFrames）',
-  vidrender: 'Rust 编码内核（vidrender-encode）'
+  vidrender: 'Rust 渲染内核（vid / vidrender-cli）'
 }
 
 // 体积按经验值提示（真实值以主进程清单为准，准备过程中会回推）。
 // 两个都是 2026-10-14 的实测值取整到 MiB：ffmpeg 42.6 → 43、hyperframes 103.1 → 103；合计 146.0，
 // 与单包时代的 runtime.7z（147.4 MiB）基本持平（实测合计 145.7 MiB）。**不要改成 105**：界面会报
 // 148.0 MB，比真实下载量多报 2 MiB，与 README / CHANGELOG 的「约 146 MB」自相矛盾。主进程 PACK_DEFS.hint 同此口径。
-// vidrender 约 1MB（只有显式指定时才下载，产品默认不提示）
-const HINT_MB: Record<RuntimePackName, number> = { ffmpeg: 43, hyperframes: 103, vidrender: 1 }
+// vidrender 约 3MB（只有显式指定时才下载，产品默认不提示）
+const HINT_MB: Record<RuntimePackName, number> = { ffmpeg: 43, hyperframes: 103, vidrender: 3 }
 
 export function initEnvGate(): void {
   // 进度来源：**不再自己订阅 runtime:progress**。

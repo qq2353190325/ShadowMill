@@ -12,7 +12,7 @@ import * as coreLib from './coreLib'
 import * as runtime from './runtime'
 import * as settings from './settings'
 import { pickRenderOverride } from './settings'
-import { renderWithVidrender } from './vidrender'
+import { renderWithRustKernel } from './rustKernels'
 import { CANVAS_SIZES, DEFAULT_CANVAS, RENDER_CANVASES } from '../shared/constants'
 import { IPC } from '../shared/ipc'
 import type {
@@ -28,8 +28,8 @@ import type {
 // 渲染档位（质量 / 帧率）也在 VideoRenderPayload 内：只接受白名单内的显式值，缺省不传参数、走 CLI 默认（standard / 30）
 
 // 渲染要哪些运行环境包按后端决定：hyperframes 路径要 CLI + 浏览器壳（103MB 包），
-// vidrender 路径只要 ffmpeg + 小内核（<1MB 包）；缺哪个就提示下载哪个（见 docs/runtime-pack-split.md）。
-// 默认 hyperframes，只有用户在设置页显式切换才走小内核。
+// 两个 Rust 大内核路径只要 ffmpeg + Rust CLI（约 3MB 包）；缺哪个就提示下载哪个。
+// 默认 hyperframes，只有用户在设置页显式切换才走 Rust 内核。
 
 // ===== 成片时长：谁说了算 =====
 // HyperFrames 的规则（cli.js 实测）：**成片时长 = max(根节点声明的时长, 页面里最长媒体的时长)**。
@@ -310,9 +310,9 @@ function register(ctx?: RegisterCtx): void {
     // 这里只做纯校验（不下载、不阻塞）——缺包就把 needPacks 回给界面，由它问用户是否下载（可取消）；
     // 否则会以「未找到 hyperframes CLI」误导用户，或者让这次请求无声地卡在下载上。
     const backend = settings.getRenderBackend();
-    const renderPacks: RuntimePackName[] = backend === 'vidrender'
-      ? ['ffmpeg', 'vidrender']
-      : ['ffmpeg', 'hyperframes'];
+    const renderPacks: RuntimePackName[] = backend === 'hyperframes'
+      ? ['ffmpeg', 'hyperframes']
+      : ['ffmpeg', 'vidrender'];
     const lack = runtime.missingPacks(renderPacks);
     if (lack.length) {
       return {
@@ -366,7 +366,7 @@ function register(ctx?: RegisterCtx): void {
       } as VideoRenderResult;
     }
 
-    // CLI 与 Node 只有 hyperframes 后端要；小内核由 vidrender.ts 直接 spawn 编码二进制。
+    // CLI 与 Node 只有 hyperframes 后端要；两个 Rust 内核直接 spawn 自己的 CLI。
     const hfCli = backend === 'hyperframes' ? hfEnv.findHyperframesCli() : null;
     if (backend === 'hyperframes' && !hfCli) {
       return { ok: false, message: '未找到 hyperframes CLI（hyperframes.mjs）。可设置环境变量 HYPERFRAMES_CLI 指向其路径。' } as VideoRenderResult;
@@ -413,7 +413,7 @@ function register(ctx?: RegisterCtx): void {
     const localized = hfEnv.localizeVendorHtml(raw)
     hfEnv.ensureVendorFiles(projDir, localized)
 
-    // 小内核后端没有 Node 运行时：env 只是给量测/裁剪的子进程用，不带 ELECTRON_RUN_AS_NODE。
+    // Rust 内核后端没有 Node 运行时：env 只是给量测/裁剪的子进程用，不带 ELECTRON_RUN_AS_NODE。
     const env: Record<string, string | undefined> = { ...process.env, ...(nodeRt ? nodeRt.env : {}) };
     const ffBin = hfEnv.findFfmpegBin();
     if (ffBin) env.PATH = ffBin + path.delimiter + (env.PATH || '');
@@ -445,11 +445,12 @@ function register(ctx?: RegisterCtx): void {
       return { ok: false, message: '准备渲染入口失败：' + ((e as Error).message || String(e)) } as VideoRenderResult;
     }
 
-    // ===== 小内核后端：与 hyperframes 共用前面的入口准备，渲染这一段换掉 =====
-    if (backend === 'vidrender') {
+    // ===== Rust 大内核后端：与 hyperframes 共用入口准备，渲染这一段换成一次性 CLI =====
+    if (backend !== 'hyperframes') {
+      const kernel = backend === 'vidrender-webview' ? 'webview' : 'server'
       try {
         const renderOpts = pickRenderOverride(payload);
-        await renderWithVidrender({
+        await renderWithRustKernel(kernel, {
           entryHtml,
           output: outMp4,
           canvas,
@@ -461,10 +462,10 @@ function register(ctx?: RegisterCtx): void {
         });
         try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (e) { /* 被占用则下次渲染前再清 */ }
         if (fs.existsSync(outMp4)) return { ok: true, outputVideo: outMp4, projectDir: projDir, elapsedMs: Date.now() - renderStartedAt };
-        return { ok: false, message: '小内核渲染完成但未找到成片' };
+        return { ok: false, message: 'Rust 内核渲染完成但未找到成片' };
       } catch (e) {
         try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (e2) { /* ignore */ }
-        return { ok: false, message: '小内核渲染失败：' + ((e as Error).message || String(e)) };
+        return { ok: false, message: 'Rust 内核渲染失败：' + ((e as Error).message || String(e)) };
       }
     }
 
