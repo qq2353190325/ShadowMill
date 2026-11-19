@@ -88,6 +88,7 @@ export async function renderWithRustKernel(kernel: RustKernel, opts: RustRenderO
   ]
   if (bgmPath) args.push('--audio', bgmPath)
 
+  if (opts.onProgress) opts.onProgress('[Rust 内核] 正在启动渲染...')
   try {
     return await new Promise<number>((resolve, reject) => {
       const child = spawn(exe, args, { env, windowsHide: true })

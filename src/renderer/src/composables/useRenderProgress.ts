@@ -86,6 +86,31 @@ export function resetRenderProgress(): void {
   stopTicker();
 }
 
+// Rust 大内核（vid / vidrender-cli）的 stderr 进度：管线每 15 帧打一行 `frame N/M`。
+// 它们没有 HY 的 [Render:trace]，所以在这里按帧号行解析，复用同一套阶段 / 帧号 / 秒表文案。
+function parseRustKernel(line: string): void {
+  const at = line.indexOf('[Rust 内核]');
+  if (at < 0) return;
+  const body = line.slice(at + '[Rust 内核]'.length).trim();
+  if (!body) return;
+  const m = body.match(/^frame\s+(\d+)\s*\/\s*(\d+)/i);
+  if (m) {
+    phaseKey = 'capture_disk';   // 归入逐帧捕获，帧号才被 renderText 采信
+    phaseLabel = '逐帧渲染（Rust 内核）';
+    frames = { done: Number(m[1]), total: Number(m[2]) };
+    if (!startAtMs) { startAtMs = Date.now(); startTicker(); }
+    msgText = '';
+    renderText();
+    return;
+  }
+  // 启动行：先给用户一个反馈，别让页面停在「正在准备渲染...」直到第一帧进度到来
+  if (body.indexOf('正在启动') >= 0) {
+    if (!phaseLabel) { phaseLabel = '启动 Rust 内核'; renderText(); }
+    msgText = body.slice(0, 120);
+    renderText();
+  }
+}
+
 let hfLogBuf = '';   // 跨 chunk 的半行缓冲（日志行可能被分块截断）
 
 // 剥掉 ANSI 控制码：CLI 的进度条自带颜色/光标码，不剥会把「Capturing frames N/M」的匹配打断
@@ -139,8 +164,8 @@ function parseTrace(line: string): void {
 export function initRenderProgress(): void {
   window.hfTools.onProgress((data) => {
     const text = String((data && data.text) || '');
-    // Rust 大内核的 stderr 消息没有逐帧进度，且不带换行；直接丢掉，别卡在按行缓冲里等 \n。
-    if (text.indexOf('[Rust 内核]') >= 0) return
+    // Rust 大内核用独立的一行文本推送，不进按行缓冲（它们不带 \n）。
+    if (text.indexOf('[Rust 内核]') >= 0) { parseRustKernel(text); return }
     hfLogBuf += text;
     let nl;
     while ((nl = hfLogBuf.indexOf('\n')) >= 0) {

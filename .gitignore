@@ -3,9 +3,11 @@
 node_modules/
 
 # 打包内置运行时（ffmpeg / node / hyperframes + chrome-headless-shell，体积大不进 git）
-# 例外：resources/bin 只放小内核二进制（<1MB），随仓库提交供 demo 与运行环境包使用
+# 例外：resources/bin 只放两个 Rust 大内核 CLI（约 3MB），随仓库提交供 dev 与运行环境包使用
 resources/*
 !resources/bin/
+# vid.exe 首次运行时生成的 WebView2 用户数据目录，是运行缓存，不是源码/二进制，绝不进 git
+resources/bin/*.WebView2/
 
 # 运行环境包产物（scripts/pack-runtime.mjs 生成：runtime.7z + runtime.json + 7za.exe，体积大不进 git）
 build/
