@@ -6,7 +6,7 @@
 
 - **所在目录**：src/main/
 - **类型**：主进程业务模块（IPC 注册 + 网络下载 + 子进程解包）
-- **规模**：963 行（实测 `[IO.File]::ReadAllLines`）
+- **规模**：971 行（实测 `[IO.File]::ReadAllLines`）
 - **对外导出**：`register`、`ensurePacks`、`prepareInBackground`、`cancelPrepare`、`packsStatus`、`missingPacks`、`packSizeText`、`packRoots`、`runtimeStatus`、`runtimeDir`（另有 `export type PackManifest`、`export type PackStatus`）；本轮新增 `PRODUCT_PACKS` / `PACK_NAMES` 均为**模块内常量、不对外导出**
 
 ## 1. 作用与职责
@@ -19,12 +19,12 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 
 | 能力 | 说明 |
 |------|------|
-| 纯探测 | `packsStatus()` / `missingPacks(needs?)` / `packSizeText(names)` 只查盘上标记与关键文件，**不下载、不阻塞**，供消费点在动手前校验 |
+| 纯探测 | `packsStatus()` / `missingPacks(needs?)` / `packSizeText(names)` 只查盘上标记与关键文件，**不下载、不阻塞**，供消费点在动手前校验；`packsStatus()` 另有 **vidrender 的 dev 兜底**（见 §5），dev 下也把它判成 ready |
 | 下载 + 解包 | `ensurePacks(packs?)` 才真正取清单 / 下载 / 解包（幂等 + 并发安全），带进度与取消；缺省走 `PRODUCT_PACKS`（ffmpeg + hyperframes），显式 `prepare(['vidrender'])` 会按 `PACK_NAMES` 过滤后下载小内核包；产品侧 `video.ts` 与「HTML生成」页的缺包守卫按 `renderBackend` 二选一：vidrender → `['ffmpeg','vidrender']`，hyperframes → `['ffmpeg','hyperframes']`，与主进程同一口径 |
 | 启动探测 | `prepareInBackground()` **只探测、不下载**：缺包时把 phase 置 `idle`、文案「运行环境需要下载（<体积>）」，让横幅与设置页首屏就有话说 |
 | 进度回推 | 检查 / 下载 / 解包每个阶段都经 `runtime:progress` 推给渲染层（唯一出口 `push()`） |
 | 取消 | `cancelPrepare()` 中断 HTTP 请求与 `7za` 子进程，并清掉半成品（**只有取消才删残片**；取清单 20 秒无响应的**超时不算取消**，残片保留）。`checking` 阶段同样可取消（`payload().cancellable` 含 `checking`） |
-| 资源路径交接 | 某包就绪后调 `hfEnv.refreshPack(name, root)`，让 `hfEnv` 按包重算路径缓存 |
+| 资源路径交接 | 某包就绪后调 `hfEnv.refreshPack(name, root)`，让 `hfEnv` 按包重算路径缓存；dev 兜底命中的 vidrender 传空 `root`，`refreshPack` 会删缓存让 `resolvePackRoot` 重新按盘上解析，不会写坏 `packs.json` |
 | 老用户沿用 | 旧版整体包目录（`current.json` + `ok.json` + 两包资源齐备）识别为 `legacy` 继续沿用；两个分包都就位后由 `gc()` 删掉它 |
 
 包与清单由 `scripts/pack-runtime.mjs` 产出为 `build/runtime-pack/<包名>.7z` + `<包名>.json`（`ffmpeg` / `hyperframes` 各一份），上传到更新源（`app-update.yml` 的 `url` 目录）后由应用按需下载；访问不到更新源的机器可以让用户在设置页「从本地文件安装…」（`settings:pick-runtime-pack` → `userData/runtime/local-import/`）或把环境变量 `SHADOWMILL_RUNTIME_PACK` 指向本地包目录。
@@ -39,8 +39,8 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `ensurePacks` | `(packs?: RuntimePackName[]) => Promise<IpcResult>` | 包名先按 `PACK_NAMES` 过滤成合法集（三包都合法）；**缺省 = `PRODUCT_PACKS.slice()`（ffmpeg + hyperframes，不含 vidrender）**；已有 `inFlight` ⇒ 返回 `{ ok:false, message:'正在准备另一个运行环境包，请稍候再试' }`；合法集为空 ⇒ `{ ok:true }`；否则 `inFlight = runOnce(want).catch(e => fail('运行环境准备失败', String(e), want)).then(r => { inFlight = null; return r })`，settle 后清锁 |
 | `prepareInBackground` | `() => void` | `syncStatus(packsStatus())` 取缺包（`miss` 与 `state.packs` 都取 `PRODUCT_PACKS`，不含 vidrender）：无缺 ⇒ `phase='ready'` / `percent=100` / 文案「运行环境已就绪」；有缺 ⇒ `phase='idle'` / `percent=0` / `source=''` / 文案「运行环境需要下载（<`packSizeText(miss)`>）」，然后 `push()` 一次。异常只写 `runtime.log('启动探测失败：…')`。**刻意不下载**：静默下载会把「用户的选择」变成「已经在跑了」 |
 | `cancelPrepare` | `() => IpcResult` | 非忙（`phase` 不在 `downloading` / `extracting` / `checking`）⇒ `{ ok:true, message:'当前没有正在进行的下载' }`；否则置 `cancelRequested`、`activeReq.abort()`、`activeChild.kill()`、写日志，返回 `{ ok:true, message:'已取消下载' }` |
-| `packsStatus` | `() => PackStatus` | 纯探测：逐包判 `installedEntry()` → legacy 满足 → `missing`，返回每包的 `{ state, id, root, files, unpackedBytes, bytes, legacy }` |
-| `missingPacks` | `(needs?: RuntimePackName[]) => RuntimePackName[]` | `packsStatus()` + `syncStatus()` 后，返回 `needs`（**缺省 = `PRODUCT_PACKS`**，即 ffmpeg + hyperframes，不含 vidrender）里 `state !== 'ready'` 的包（按 `PACK_DEFS` 顺序） |
+| `packsStatus` | `() => PackStatus` | 纯探测：逐包判 `installedEntry()` → legacy 满足 → **vidrender 的 dev 兜底** → `missing`，返回每包的 `{ state, id, root, files, unpackedBytes, bytes, legacy }`；兜底命中时该包为 `state:'ready'` / `id:'dev-bin'` / `root:''`（见 §5） |
+| `missingPacks` | `(needs?: RuntimePackName[]) => RuntimePackName[]` | `packsStatus()` + `syncStatus()` 后，返回 `needs`（**缺省 = `PRODUCT_PACKS`**，即 ffmpeg + hyperframes，不含 vidrender）里 `state !== 'ready'` 的包（按 `PACK_DEFS` 顺序）；dev 下 vidrender 由 `packsStatus()` 兜底判 ready，即便显式传 `['ffmpeg','vidrender']` 也不会因它回 `needPacks` |
 | `packSizeText` | `(names: RuntimePackName[]) => string` | 按 `PACK_DEFS.hint`（ffmpeg **43 MiB**、hyperframes **103 MiB**、**vidrender 1 MiB**——前两者都已按 2026-10-14 实测值取整到 MiB：42.6 → 43、103.1 → 103，合计 146.0 MB 与实测 145.7 MiB 一致）求和后 `bytesText()` 成「约 xx MB」，用于确认框与失败文案 |
 | `packRoots` | `() => Partial<Record<RuntimePackName, string>>` | 各包解出来的根目录（未就绪的不出现），供主进程其它模块定位资源 |
 | `runtimeStatus` | `() => RuntimeProgressPayload` | 同步探测后整理状态（缺包口径为 `PRODUCT_PACKS`）：`phase` 不在 `checking` / `downloading` / `extracting` 时按缺包重置成 `idle`（文案「运行环境需要下载（<体积>）」/ `percent=0`）或 `ready`（「运行环境已就绪」/ `percent=100`），返回 `payload()` |
@@ -78,7 +78,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `packReadyAt(name, root)` | 函数 | 就绪判定三件套：`root/ok.json` 存在 **且** `PACK_DEFS` 里该包的关键文件全在，缺一即 false |
 | `legacyRoot()` | 函数 | 旧版整体包目录：优先 `packs.json` 里记的 `legacy.root`；否则读 `current.json` 的 `id` + `ok.json`，并要求「两包资源同时齐备」（去掉包名那一层再找一遍，避免把某个分包目录误认成整体包），命中就补记 `legacy` 并写日志 |
 | `installedEntry(name)` | 函数 | `packs.json` 有该包记录 **且** `packReadyAt(name, packDir(name))` 为真才返回记录，否则 `null` |
-| `syncStatus(status)` | 函数 | 把探测结果写进 `state.status`，并对已就绪的包调 `hfEnv.refreshPack(name, root)`——**探测即顺手校正 `hfEnv` 的解析** |
+| `syncStatus(status)` | 函数 | 把探测结果写进 `state.status`，并对已就绪的包调 `hfEnv.refreshPack(name, root)`——**探测即顺手校正 `hfEnv` 的解析**；dev 兜底的 vidrender `root` 是空串，`refreshPack` 会删掉缓存让 `resolvePackRoot` 重新按盘上解析，不会把不存在的路径写进 `hfEnv` 或 `packs.json` |
 | `feedUrl()` | 函数 | 与 `updater/actions.ts` 的 `applyFeedUrl()` 同优先级：`getUpdaterSettings().feedUrl`（去尾斜杠、把非协议处的重复斜杠压成一个）→ 打包态 `resources/app-update.yml` / dev `dev-app-update.yml` 里的 `url:` 行 → 空串 |
 | `resolveSevenZip()` | 函数 | 解包器：`<resources>/tools/7za.exe`（非 win32 为 `7za`）→ dev 下的 `build/tools/7za(.exe)`；都没有返回 `null` |
 | `localPackDir()` | 函数 | 本地包目录：环境变量 `SHADOWMILL_RUNTIME_PACK`（指向文件则取其目录）→ 存在则用 `userData/runtime/local-import/`（设置页「从本地文件安装…」把 7z 与清单放这里）→ 空串 |
@@ -90,7 +90,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `fetchRemoteManifest(name)` | 函数 | GET `<feed><包名>.json`：`feed` 为空返回 `null`；catch 里**先 `writeLog` 记下真实原因**，再判是否含 `TIMEOUT_TEXT`——是则 `throw new Error('MANIFEST_TIMEOUT')`（**超时 ≠ 清单不存在**，回落成 `null` 会被误报成「更新源上没有清单 / 404」）；其它失败（网络错、`JSON.parse` 失败、清单字段不全）仍 `return null`（对应 `NO_MANIFEST`） |
 | `extractPack(sevenZip, packFile, dest, name)` | 函数 | `spawn(7za, ['x', packFile, '-o' + dest, '-y', '-bsp1'], { windowsHide: true })`：`-bsp1` 让百分比打到 stdout，用「末尾 400 字符窗口 + 末个 `N%`」解析并推「正在准备运行环境 N%（<包名>）」，**同值不重复推**；`close` 时 `cancelRequested` 即 reject「已取消」，退出码非 0 则把 tail 最后一行带进错误 |
 | `cleanupHalfDone(name, file, dest)` | 函数 | 取消后清半成品：解包目录（recursive）、`<file>.part`、`<file>`——**只在取消时删**，网络失败 / 超时要留残片续传 |
-| `isCancelError(e)` | 函数 | 开头先排超时：信息含 `TIMEOUT_TEXT` ⇒ 返回 `false`（**超时不是用户取消**，`.part` 残片要留着续传，不能被 `cleanupHalfDone()` 当取消清掉）；其余为 `cancelRequested` 为真、或错误信息含 `已取消下载`、或匹配 `/aborted|ERR_ABORTED/i` |
+| `isCancelError(e)` | 函数 | 开头先排超时：信息含 `TIMEOUT_TEXT` ⇒ 返回 `false`（**超时不是用户取消**，`.part` 残片要留着续传，不能被 `cleanupHalfDone()` 当取消清掉）；其余为 `cancelRequested` 为真、或错误信息含 `已取消下载`、或匹配 `/aborted\|ERR_ABORTED/i` |
 | `installOne(sevenZip, name)` | 函数 | 单包安装四段，见 §3.2 |
 | `gc()` | 函数 | **产品两包**（`PRODUCT_PACKS` = ffmpeg + hyperframes）都就位后删 legacy 目录与 `current.json` 并从 `packs.json` 删除 `legacy` 字段（vidrender 不参与该判据——默认产品口径只含 ffmpeg + hyperframes）；`downloads/` 只保留当前各包 `<包名>-<id>.7z`。任何失败只忽略（占用中下次再清） |
 | `runOnce(packs)` | 函数 | 一轮准备主流程，见 §3.1 |
@@ -109,7 +109,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 ### 3.2 `installOne()` —— 单包四段
 
 | 段 | 行为 |
-|---|---|
+|---|------|
 | ① 清单 | `readLocalManifest(localPackDir(), name)` 命中 ⇒ `source='local'` 且用本地 7z；否则 `setPhase('checking', '正在获取运行环境信息（<title>）…')` 再 `fetchRemoteManifest(name)`，拿不到抛 `NO_MANIFEST`（取清单 20 秒无响应则抛 `MANIFEST_TIMEOUT`）。随后把清单的 `bytes` / `unpackedBytes` / `files` 写进 `state` |
 | ② 下载 | 本地包直接跳过；否则看 `downloads/<包名>-<id>.7z`：**已存在且 sha512 相符就复用**（不重下）；否则 `setPhase('downloading', '正在下载运行环境（<title>，<体积>）…')` 并 `downloadToFile()`，边下边推「正在下载 <title> <已下> / <总量>（N%）」。下完复核 sha512：不符 ⇒ 删 `.part` 与正式名并抛 `BADSHA`；相符才 `renameSync(.part → cached)`（**内容不完整的一律不叫「已下载」**）并写日志（含续传起点与用时） |
 | ③ 解包 | 先 `rmSync(dest, { recursive: true, force: true })` 清掉上次残留（否则半成品会被当成完整包），`setPhase('extracting', '正在准备运行环境（<title>）0%')`，再 `extractPack()` |
@@ -139,7 +139,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 
 ### 3.7 与 `hfEnv` 的资源路径交接
 
-本模块是 `packs.json` 与 `<包名>/ok.json` 的**唯一写入方**，也是 `current.json` 的**唯一读取方**（只读，不再写）。路径交接有两条：① `syncStatus()` / `missingPacks()` / `packsStatus()` 探测到某包就绪时 `hfEnv.refreshPack(name, root)`；② 解包完成时再 `refreshPack(name, dest)`。于是 `hfEnv.BUILTIN_RESOURCES` 的 `ffmpeg` / `ffprobe` / `hfCli` / `chromeShell` 等 getter 指向真正可用的包目录。
+本模块是 `packs.json` 与 `<包名>/ok.json` 的**唯一写入方**，也是 `current.json` 的**唯一读取方**（只读，不再写）。路径交接有两条：① `syncStatus()` / `missingPacks()` / `packsStatus()` 探测到某包就绪时 `hfEnv.refreshPack(name, root)`（dev 兜底的 vidrender `root:''` ⇒ `refreshPack` 清缓存、让 `resolvePackRoot` 重新按盘上解析，**不写 `packs.json`**）；② 解包完成时再 `refreshPack(name, dest)`。于是 `hfEnv.BUILTIN_RESOURCES` 的 `ffmpeg` / `ffprobe` / `hfCli` / `chromeShell` 等 getter 指向真正可用的包目录。
 
 ## 4. 依赖与协作
 
@@ -155,7 +155,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | `node:child_process` | `spawn`、`type ChildProcess` | 启动 `7za` 解包子进程（`activeChild` 供取消时 `kill()`） |
 | `../shared/ipc` | `IPC` | 频道常量 |
 | `../shared/types` | `type IpcResult`、`type RegisterCtx`、`type RuntimePackName`、`type RuntimePackState`、`type RuntimeProgressPayload` | 回执、注册上下文、包名与推送 / 回执载荷类型（③.6 节） |
-| `./hfEnv` | `* as hfEnv` | `refreshPack()`（按包交接资源根）——不再主要依赖 `refreshBuiltinResources()` |
+| `./hfEnv` | `* as hfEnv` | `refreshPack()`（按包交接资源根）——不再主要依赖 `refreshBuiltinResources()`；`BUILTIN_RESOURCES.vidrenderEncode` 用于 dev 兜底的可用性判断 |
 | `./settings` | `getUpdaterSettings` | 读 `feedUrl` 作为运行环境包的下载源（与 `updater/actions.ts` 的 `applyFeedUrl()` 同优先级） |
 
 > 本文件**不 import `dialog` / `shell`**：它不弹任何界面，失败信息经 `runtime:progress` / `runtime:prepare` 交给渲染层展示。
@@ -165,11 +165,11 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 | 使用方 | 用法 |
 |--------|------|
 | `src/main/index.ts` | `runtime.register(ctx)`——装配顺序里**最后一个**（注释：启动只探测；排最后只保证 handler 先挂上） |
-| `src/main/video.ts` | `video:render` 先按 `settings.getRenderBackend()` 选包：vidrender → `['ffmpeg','vidrender']`，hyperframes → `['ffmpeg','hyperframes']`；`runtime.missingPacks(renderPacks)` 缺包即返回 `{ ok:false, needPacks, message }` |
+| `src/main/video.ts` | `video:render` 先按 `settings.getRenderBackend()` 选包：vidrender → `['ffmpeg','vidrender']`，hyperframes → `['ffmpeg','hyperframes']`；`runtime.missingPacks(renderPacks)` 缺包即返回 `{ ok:false, needPacks, message }`（dev 下 vidrender 走本模块的 dev 兜底，不因它回 `needPacks`） |
 | `src/main/projects.ts` | `project:extract-video-audio` 先 `runtime.missingPacks(['ffmpeg'])`，缺包即返回 `needPacks` |
 | `src/main/voice/ttsAlign.ts` | `voice:synth-aligned` 先 `runtime.missingPacks(['ffmpeg'])`，缺包即返回 `needPacks` |
 | `src/main/whisper.ts` | 只在「非 wav/flac/mp3/ogg 要转码」且缺 ffmpeg 时用 `runtime.packSizeText(['ffmpeg'])` 组文案，并回 `needPacks:['ffmpeg']` |
-| `src/main/hfEnv.ts` | 交接对端：接收 `refreshPack(name, root)`，据此重算该包根与 `cachedChrome` / `cachedNode` |
+| `src/main/hfEnv.ts` | 交接对端：接收 `refreshPack(name, root)`，据此重算该包根与 `cachedChrome` / `cachedNode`；也提供 `BUILTIN_RESOURCES.vidrenderEncode` 供 dev 兜底判断 |
 | `src/preload/index.ts` | `runtimeTools` 命名空间：`status` / `prepare(packs?)` / `cancel` / `onProgress`（单订阅）分别转发上述四个频道 |
 | `src/renderer/src/composables/useRuntime.ts` | 模块级状态单例：`initRuntime()` 订阅 `runtime:progress` + 查一次 `runtime:status`，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()`。**它交给 `prepare()` 的包名数组必须是普通数组**（`toRaw(list).slice()`——Vue 响应式 `Proxy` 过不了结构化克隆），且非 ok 回执 / `invoke` 抛错会写进 `runtime` 状态（不再静默），见 [renderer/src/common.md](../renderer/src/common.md) §4.1 |
 | `src/renderer/src/composables/useEnvGate.ts` | 「需要下载运行环境」确认框：`guard(need, actionName, onContinue)` → `confirmDownload()`（内部 `rt.prepare(packs)`）/ `cancelDownload()` / `continueAction()`（**不自动续做**）。进度**不自己订阅** `runtime:progress`，而是 `watch(() => useRuntime().runtime.value, applyProgress, { deep: true })`——见 §5 的单订阅说明 |
@@ -192,6 +192,7 @@ NSIS 的更新方式是「整体卸载旧版 → 解压复制新包」，而这 
 - **启动不再静默下载**：`prepareInBackground()` 只探测并推一次「运行环境需要下载（<体积>）」，是否下载由用户在某处确认（两包合计 145.7 MB：ffmpeg 42.6 + hyperframes 103.1）；`ensurePacks()` 忙碌期重复调用只返回一句提示，不排队。
 - **`PRODUCT_PACKS` 是「默认产品口径」而非全部包**：第三包 `vidrender` 进 `PACK_DEFS` / `PACK_NAMES`，可显式 `prepare(['vidrender'])` 下载；`runtimeStatus()` / `prepareInBackground()` 的 `missing`、`ensurePacks()` 缺省的「下载全部」、`gc()` 的 `allReady` 仍只看 `PRODUCT_PACKS`（ffmpeg + hyperframes）。**但产品渲染链路已支持双后端**：`video.ts` 与「HTML生成」页都按 `renderBackend` 选包（hyperframes → `['ffmpeg','hyperframes']`，vidrender → `['ffmpeg','vidrender']`），默认仍是 hyperframes；**没有新增 IPC 频道**（CHANGELOG #124 / #125）。
 - **缺包守卫与后端保持一致（CHANGELOG #125 修复点）**：用户切到 vidrender 后不再被要求下载 103MB 的 hyperframes 包——「HTML生成」页「转视频」的 `envGate.guard()` 与 `video.ts` 一样按 `renderBackend` 选包。本模块仍只负责「按传入的包名纯探测 / 下载 / 解包」，后端选择由消费方给出。
+- **vidrender 的 dev 兜底（本次修复点）**：`packsStatus()` 在 `installedEntry()` 与 legacy 两条判定都没命中后，若 `def.name === 'vidrender' && !app.isPackaged && hfEnv.BUILTIN_RESOURCES.vidrenderEncode` 非空，就把它记为 `state:'ready'` / `id:'dev-bin'` / `root:''` / `files:0` / `unpackedBytes:0` / `bytes:0` / `legacy:false`，然后 `continue`。原因：dev 下仓库 `resources/bin/vidrender-encode.exe`（#135 重编后约 944 KB，支持 `--audio`；旧版约 929 KB 不支持）已在，`hfEnv.vidrenderEncode` 的 candidates 也认这条路径（dev 分支取 `devResourceRoot()/bin/vidrender-encode.exe`，见 `hfEnv.ts` 149–156 行）；缺包守卫必须与实际查找同口径，否则 dev 下明明能渲染，却被要求下载一个更新源上根本没有的包（`https://chaoming-zhaoling.oss-cn-beijing.aliyuncs.com/shadowmill/vidrender.json` 实测 HTTP 404 / NoSuchKey）。兜底**只在未打包时生效**，`root` 故意留空，`syncStatus()` 把它传给 `hfEnv.refreshPack(name, '')` 只会删缓存、让 `resolvePackRoot` 重新按盘上解析（见 `hfEnv.ts` 74–80 行），**不会写坏 `packs.json`**。于是 `missingPacks(['ffmpeg','vidrender'])` 在 dev 下不再因 vidrender 回 `needPacks`，小内核转视频不再误弹「下载运行环境」框。**运行环境包里的编码二进制（`<userData>/runtime/vidrender/bin/vidrender-encode.exe`）同样必须支持 `--audio`**：旧版收到 `--audio` 会立即退出、写 stdin 永久挂起（#135）；本机该运行环境包目录不存在，本次未替换，只重编并替换了仓库 `resources/bin/` 的二进制。
 - **旧包与下载目录会自清**：两包都就位后 `gc()` 删 legacy 目录（632 MB）与 `current.json`，并只保留当前各包 id 的下载缓存；被占用的下次再清。
 - **`userData/runtime.log`**：与 `updater.log` / `startup.log` 同一套排障口子（超过 64KB 自动清一次），记录「启动探测失败」「取消」「远端清单不可用（含超时的真实原因）」「下载完成 + 续传起点 + 用时」「解包完成 + 用时 + 来源」「识别到旧版整体目录」等关键节点。
 - **`register` 只注册三个 `handle` + 一路 `send`**：查询 / 准备 / 取消都是「问一次答一次」，没有主 → 渲染的独立命令通道；进度完全由 `runtime:progress` 单路推送。

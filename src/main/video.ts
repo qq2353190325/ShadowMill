@@ -305,6 +305,7 @@ function register(ctx?: RegisterCtx): void {
   });
 
   ipcMain.handle(IPC.Video.Render, async (event, payload?: VideoRenderPayload) => {
+    const renderStartedAt = Date.now()
     // 分包之后运行环境**不再随安装包**：按所选后端要不同的包。
     // 这里只做纯校验（不下载、不阻塞）——缺包就把 needPacks 回给界面，由它问用户是否下载（可取消）；
     // 否则会以「未找到 hyperframes CLI」误导用户，或者让这次请求无声地卡在下载上。
@@ -454,10 +455,12 @@ function register(ctx?: RegisterCtx): void {
           canvas,
           fps: renderOpts.fps || 30,
           quality: renderOpts.quality || 'standard',
-          onProgress: (text) => event.sender.send(IPC.Video.Progress, { text })
+          onProgress: (text) => {
+            event.sender.send(IPC.Video.Progress, { text })
+          }
         });
         try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (e) { /* 被占用则下次渲染前再清 */ }
-        if (fs.existsSync(outMp4)) return { ok: true, outputVideo: outMp4, projectDir: projDir };
+        if (fs.existsSync(outMp4)) return { ok: true, outputVideo: outMp4, projectDir: projDir, elapsedMs: Date.now() - renderStartedAt };
         return { ok: false, message: '小内核渲染完成但未找到成片' };
       } catch (e) {
         try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (e2) { /* ignore */ }
@@ -500,7 +503,7 @@ function register(ctx?: RegisterCtx): void {
         // 成品的清理不需要做——它就直接长在 video/output.mp4，不存在"从工作目录搬回来"这一步。
         try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (e) { /* 被占用则留着，下次渲染前会先删 */ }
         if (code === 0 && fs.existsSync(outMp4)) {
-          done({ ok: true, outputVideo: outMp4, projectDir: projDir });
+          done({ ok: true, outputVideo: outMp4, projectDir: projDir, elapsedMs: Date.now() - renderStartedAt });
         } else {
           done({ ok: false, message: '渲染失败（exit=' + code + '）' });
         }

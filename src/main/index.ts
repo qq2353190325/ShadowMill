@@ -545,6 +545,25 @@ app.on('window-all-closed', () => {
   // 更新安装：updater.installNow() 已调用 quitAndInstall（由 electron-updater 自己重启应用），
   // 此处再 app.quit() 会与安装器抢退出流程，故直接返回
   if (updater.quitForUpdate()) return
+  // dev 模式（electron-vite dev）：node dev server 是父进程，它 spawn 了本 Electron。
+  // Electron 退出后 dev server 仍长驻（HTTP 服务），终端不回到提示符。关窗时连带父进程一起退。
+  // 严格校验：仅未打包、且父进程命令行确实是 electron-vite ... dev 才 kill，绝不误杀 IDE 终端。
+  if (!app.isPackaged && process.platform === 'win32') {
+    try {
+      const ppid = process.ppid
+      if (ppid && ppid !== process.pid) {
+        const out = require('node:child_process').execFileSync(
+          'powershell.exe',
+          ['-NoProfile', '-Command',
+            `(Get-CimInstance Win32_Process -Filter "ProcessId=${ppid}").CommandLine`],
+          { encoding: 'utf8', timeout: 2000, windowsHide: true },
+        ) || ''
+        if (/electron-vite[\\/].*dev|electron-vite\.js["'\s]+dev/i.test(out)) {
+          process.kill(ppid, 'SIGTERM')
+        }
+      }
+    } catch (e) { /* 父进程已退 / 查询失败：忽略，不影响自身退出 */ }
+  }
   if (process.platform !== 'darwin') {
     app.quit()
   }

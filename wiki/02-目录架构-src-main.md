@@ -6,14 +6,14 @@
 
 ## 0. 本次同步范围与已知漂移
 
-本页这一次除**账号（可选登录）**（`src/main/account/`、第 13 组 `Account`、`account ← index.ts`、§4.15）外，同步**小内核接入产品（双后端可切换）**：新增单文件 `src/main/vidrender.ts`（**192 行**，产品侧小内核渲染后端，不注册 IPC）；`hfEnv.ts` 新增 `BUILTIN_RESOURCES.vidrenderEncode` getter；`settings.ts` 新增全局 `renderBackend` 与 `getRenderBackend()`；`video.ts` 按 `settings.getRenderBackend()` 分流选包。**默认仍是 hyperframes、没有新增 IPC 频道**；`runtime.ts` 的 `PRODUCT_PACKS` 语义未变。
+本页这一次除**账号（可选登录）**（`src/main/account/`、第 13 组 `Account`、`account ← index.ts`、§4.15）外，同步**小内核接入产品（双后端可切换）**：新增单文件 `src/main/vidrender.ts`（**220 行**，产品侧小内核渲染后端，不注册 IPC）与 `src/main/vidrenderFrames.ts`（**277 行**，渲染模式抽帧 / 量盒子 / 注入 / seek；#131 起 `extractVideoFrames` 按成片时长 `maxDuration` 限制 ffmpeg `-t`、`runFfmpeg` 加 5 分钟超时 kill，由 211 行增至 231 行；#132 抽帧格式 PNG→JPG（`-q:v 3`）、#133 新增 `VideoBox` / `measureVideoBoxes` / 按显示尺寸抽帧后由 231 行增至 **277 行**；与前者强耦合，**合在 [files/main/vidrender.ts.md](./files/main/vidrender.ts.md) 一篇说明，不单开页**）；`hfEnv.ts` 新增 `BUILTIN_RESOURCES.vidrenderEncode` getter；`settings.ts` 新增全局 `renderBackend` 与 `getRenderBackend()`；`video.ts` 按 `settings.getRenderBackend()` 分流选包。**默认仍是 hyperframes、没有新增 IPC 频道**；`runtime.ts` 的 `PRODUCT_PACKS` 语义未变。**#135 再修 `reply was never sent` 的真正根因**：编码器二进制旧版不支持 `--audio`、第 0 帧写 stdin 永久挂起；已重编至 944,128 B（含 `--audio`）并给 `writeAll()` 加 10 秒超时 + close 兜底，typecheck 三工程全绿（详见 [files/main/vidrender.ts.md](./files/main/vidrender.ts.md)）。本次再同步 `runtime.ts` 的 **vidrender dev 兜底**（`packsStatus()` 增约 9 行），`runtime.ts` 实测行数由 963 更新为 **971**。**#137 再给小内核进度补「已用 / 剩余 / fps」显示**（`renderStart` / `extractStart` 计时 + 抽帧用时 / 每 15 帧 / 结束三条文案），速度对比方案见 `docs/speed-compare-hy-vs-rust.md`。
 
 > **⚠ 其余条目仍可能落后于当前源码**（本页只对「总数口径依赖到的」几处做了实测修正）：
 > - `agent/` 已按实测改成 **8 个文件**（另有 `constants.ts` 368 行，提示词常量从 `html.ts` 拆出）：`chat.ts` 265 / `chatLog.ts` 155 / `html.ts` **229** / `constants.ts` 368 / `htmlEdit.ts` 52 / `script.ts` **342** / `castAction.ts` **44** / `index.ts` 21——§1、§4.4 与附录用的是这一组新数字。
-> - `src/main/index.ts` 实测 **551** 行（含账号注册段），§1 表已按实测值写。
-> - `src/main/runtime.ts` 实测 **963** 行、`src/main/hfEnv.ts` **409** 行（`hfEnv` 本版 +11 行：新增 `vidrenderEncode` getter）（`[IO.File]::ReadAllLines`）；§1 表与 §4.2 / §4.10 已按当前源码写。
-> - `projects/`（16 文件）、`cast/`（9 文件）、`voice/`（10 文件）与 `whisper.ts` / `runtime.ts` 的逐文件行数**未逐一复核**（`hfEnv.ts` 409 / `settings.ts` 479 / `video.ts` 514 / `vidrender.ts` 192 已实测），需要时以 `[IO.File]::ReadAllLines($f).Count` 现测为准。
-> - 计数口径不受影响：`src/main` 下 `.ts` 文件实测 **60 个** = 根目录 10（含新增 `vidrender.ts`）+ `account/` 3 + `cast/` 9 + `voice/` 10 + `projects/` 16 + `agent/` 8 + `updater/` 4（旧记 55 = 少了 account 3 + `agent/constants.ts` 1）。
+> - `src/main/index.ts` 实测 **573** 行（含账号注册段；本轮新增 dev 关窗清理父进程逻辑后再次实测），§1 表已按实测值写。
+> - `src/main/runtime.ts` 实测 **971** 行、`src/main/hfEnv.ts` **409** 行（`hfEnv` 本版 +11 行：新增 `vidrenderEncode` getter）（`[IO.File]::ReadAllLines`）；§1 表与 §4.2 / §4.10 已按当前源码写。
+> - `projects/`（16 文件）、`cast/`（9 文件）、`voice/`（10 文件）与 `whisper.ts` 的逐文件行数**未逐一复核**（`hfEnv.ts` 409 / `settings.ts` 479 / `video.ts` 514 / `vidrender.ts` **220** / `vidrenderFrames.ts` **277** / `runtime.ts` **971** 已实测），需要时以 `[IO.File]::ReadAllLines($f).Count` 现测为准。
+> - 计数口径按本版实测修正：`src/main` 下 `.ts` 文件实测 **61 个** = 根目录 **11**（含新增 `vidrender.ts` 与 `vidrenderFrames.ts`）+ `account/` 3 + `cast/` 9 + `voice/` 10 + `projects/` 16 + `agent/` 8 + `updater/` 4（旧记 55 = 少了 account 3 + `agent/constants.ts` 1 + `vidrender.ts` / `vidrenderFrames.ts` 2）。**文件数 +1 但说明文档篇数不变**（两个文件合一篇）。
 
 ---
 
@@ -21,7 +21,7 @@
 
 | 文件 | 行数 | 角色 | 注册的 IPC 域 |
 |---|---|---|---|
-| [index.ts](./files/main/index.ts.md) | 551 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议（**两条路由**：`p/<项目名>/…` 项目内文件、`user/<相对路径>?user=1` 项目外语音产物且只读白名单 `USER_PREVIEW_DIRS = ['tts-output','voice','cast-preview']`；路径解析抽成 `resolveHgPreviewPath(rawUrl)`；`rangeResponse()` 支持 `Range` 字节范围取 → `206` / `416`，响应体走文件流）、窗口控制与剪贴板 IPC、各域 `register()` 顺序（**含 `agent.registerScript(projects.projectDir)`**——把项目目录解析函数注入给 agent；**含 `account.register(ctx)`**——5 条账号频道，排在 `settings` 之后、`projects` 之前）、启动时序打点 `startup.log` | `window:*`、`app:copy-text`、`legacy:*` |
+| [index.ts](./files/main/index.ts.md) | 573 | **入口装配器**：历史数据目录的归属证明（`isOurs` / `hasOurIdentity`，`.shadowmill-data` 按内容认）与**用户确认式处置**（`legacyInfo()` 扫一次即缓存 → `legacy:status` 交给渲染层；`resolveLegacy()` 执行 `migrate` / `delete` / `later`）、生命周期、窗口（含主题底色 `backgroundColor`）、`hgpreview://` 协议（**两条路由**：`p/<项目名>/…` 项目内文件、`user/<相对路径>?user=1` 项目外语音产物且只读白名单 `USER_PREVIEW_DIRS = ['tts-output','voice','cast-preview']`；路径解析抽成 `resolveHgPreviewPath(rawUrl)`；`rangeResponse()` 支持 `Range` 字节范围取 → `206` / `416`，响应体走文件流）、窗口控制与剪贴板 IPC、各域 `register()` 顺序（**含 `agent.registerScript(projects.projectDir)`**——把项目目录解析函数注入给 agent；**含 `account.register(ctx)`**——5 条账号频道，排在 `settings` 之后、`projects` 之前）、启动时序打点 `startup.log`；`window-all-closed` 在更新安装让路后、`app.quit()` 前于 dev（win32 且未打包）严格校验并结束父 electron-vite dev server（见 §4.1） | `window:*`、`app:copy-text`、`legacy:*` |
 | [hfEnv.ts](./files/main/hfEnv.ts.md) | 409 | 环境探测与**按包解析**的内置资源定位（`resolvePackRoot()` / `refreshPack()` / `packReady()`，`root` 只作旧布局与 dev 的兜底；包目录名类型 `RuntimePackDirName` 与 `PACK_DIRS` 已扩为 **ffmpeg / hyperframes / vidrender** 三值，并新增 **`BUILTIN_RESOURCES.vidrenderEncode` getter**（运行环境包 `vidrender` 根 → extraResources `bin` → dev `resources/bin`；找不到返回空串））+ 随包前端库本地化（GSAP / p5 / p5.brush，`VENDOR_LIBS` 一张表驱动）/ 导出外部化 / 渲染入口抬级（不注册 IPC）；`findChromeShell()` **只缓存「找到的」结果**（找不到返回 `null` 但不写缓存，避免「解包完成前被问过一次」把 `chrome=无` 永久钉住）；`coreSource()`：`vendor/shadowmill/core.js` 的真源定位（与 `vendorSource()` 同一套两级路径），**不进 `VENDOR_LIBS`**（自家文件、没有 CDN 形态，导出时内联） | — |
 | [settings.ts](./files/main/settings.ts.md) | 479 | 设置存储（`userData/settings.json`，含 `customModel`（**含 `reasoningEffort` 思考强度，默认 `high`，`settings:save` 与 `readSettings` 共用 `normalizeCustomModel` 白名单**）、`voice` 按厂家配置（**只有 apiKey**、**`renderBackend`（渲染后端，默认 `hyperframes`）**与视频渲染默认档位）+ 新增导出 `getRenderBackend()`（供 `video.ts` 读取）+ OpenAI SDK 懒加载入口 `loadOpenAI` + 「出厂状态」判定 `isPristineSettings`（供 index.ts 的 `migrateFrom()` 迁移老数据时决定能否覆盖 settings.json）+ 运行环境「从本地文件安装…」`settings:pick-runtime-pack`（选 `ffmpeg.7z` / `hyperframes.7z` 导入 `userData/runtime/local-import/`） | `settings:*`（6） |
 | [**account/**](./files/main/account.md)（**目录级一篇，3 个文件**：`api.ts` **221** / `store.ts` **96** / `index.ts` **76**，**合计 393 行 / 最长 221 行**） | 221 / 96 / 76 | **账号（可选登录）**（同名目录 + `index.ts` 出口，依赖单向 `index → api / store`）：`api.ts` 账号后端 HTTP 客户端（`apiBaseUrl()` 读 `SHADOWMILL_API_BASE`、缺省 `http://127.0.0.1:8080`；`fail()`；`sendCode()` / `register()` / `login()` / `me()` / `logout()`；内部 `FALLBACK_MESSAGE` 14 条错误码文案、`SERVER_CODE_MAP` 7 条业务码直通、`request()` = `fetch` + `AbortSignal.timeout(10_000)` + `X-Device-Name` 头）；`store.ts` 令牌持久化（`safeStorage.encryptString` 写 `userData/account.bin`；safeStorage 不可用时**只存内存、不降级明文**；`load()` / `save()` / `clear()`）；`index.ts` 装配 5 条 `account:*` 频道 + `currentToken()` + `devCode` 仅未打包时透出 + `remember()` 落盘 + `currentSession()`（401 才清令牌）+ `logout()`（先撤销服务端再清本地）。**不 gate 任何本机功能；令牌不出主进程** | `account:*`（**5 handle**：`account:send-code` / `register` / `login` / `me` / `logout`） |
@@ -33,17 +33,17 @@
 | [coreLib.ts](./files/main/coreLib.ts.md) | 71 | **共享绘制助手 `core.js` 的版本同步**：`CORE_FILE = 'core.js'` / `CORE_VERSION_FILE = '.core-version'` + `syncCoreTo(dir, srcPath)`（**按 `CORE_VERSION` 覆盖**，版本一致 + 文件在就什么都不做） + `readProjectCore(dir)`（导出内联用）；真源路径由调用方给（`hfEnv.coreSource()`）；**不 import electron、不读写业务数据、不注册 IPC** | — |
 | [voice/](./files/main/voice.md)（**目录级一篇，10 个文件**） | 104 / 62 / 241 / 71 / 122 / 338 / 306 / 186 / 12 / 50（**合计 1492，最长 338**） | **语音域**（同名目录 + `index.ts` 统一出口，依赖单向：`catalog` / `api` 在上游、`ipc/*` 在下游）：厂家目录 + 48 条内置系统音色 + 接口层（`resolveVoiceModel` 三级解析 / `fetchClonedVoices` / `synthOne`）+ 克隆参考音频裁剪 + 能量 VAD + 字幕逐句对齐（模式 A/B）+ 两组 `voice:*` IPC；`register.ts` 只装配；**不调模型、不碰渲染层** | `voice:*`（**19 条**：17 handle + 1 on + 1 推送） |
 | [video.ts](./files/main/video.ts.md) | 514 | 按 `settings.getRenderBackend()` 分流（默认 hyperframes 原路径保留，用户显式切换才走小内核）；转视频，**就地渲染**：渲染根 = HTML 所在的项目目录，成品直写 `<项目目录>/video/output.mp4`；**渲染前先过一道无限循环静态守卫**（命中 `repeat: -1` / `repeat: Infinity` 就当场拒绝）；**渲染前按版本同步 `./core.js`**；**裁定成片时长**（声明 → 无头 Chromium 量时间轴 → CLI 兜底）并写进舞台 `data-duration`；按裁定值 `ffmpeg -c copy` 把超长媒体**裁成副本**；入口写 `.render-tmp/entry.html`（含舞台 `data-width`/`data-height` 与 `<html data-resolution>`）、渲完即删；音轨来自页面内的 `<audio id="myv-bgm">`；`video:render` 按后端选包：hyperframes → `['ffmpeg','hyperframes']`，vidrender → `['ffmpeg','vidrender']`，缺包即返回 `needPacks`；CLI/Node 校验只在 hyperframes 分支，小内核分支 `await renderWithVidrender(...)` | `dialog:open-html`、`video:*`（3 handle + 1 推送） |
-| **[vidrender.ts](./files/main/vidrender.ts.md)**（本版新增） | **192** | **产品侧 Rust 小内核渲染后端**：导出 `renderWithVidrender(opts)`（opts = `entryHtml` / `output` / `canvas` / `fps` / `quality?` / `audio?` / `onProgress?`）；`resolveLocalRefs()` 把入口 HTML 里「`.render-tmp` 下不存在、项目根存在」的 src/href 回退成 `../xxx`，并从 `<audio id="myv-bgm">` 解析 BGM 绝对路径；隐藏 offscreen BrowserWindow 加载改写后的 `entry.vidrender.html`，等所有 `<video>` loadeddata，逐帧 seek（`__timelines.time(t)` + `video.currentTime` 的 `seeked` 确认 + 双 rAF）→ `capturePage()` → `crop(画布宽高)` → `toBitmap()` → 写 `vidrender-encode` stdin；质量 draft/standard/high → crf 26/20/18，stderr JSON 进度转 `[小内核] …` 调 `onProgress`，失败清理子进程与窗口；**不注册 IPC，由 video.ts 调用** | — |
+| **[vidrender.ts](./files/main/vidrender.ts.md)**（本版新增；`vidrenderFrames.ts` 合在同一篇） | **220**（配套 `vidrenderFrames.ts` **277**） | **产品侧 Rust 小内核渲染后端**：导出 `renderWithVidrender(opts)`（opts = `entryHtml` / `output` / `canvas` / `fps` / `quality?` / `audio?` / `onProgress?`）；`resolveLocalRefs()` 把入口 HTML 里「`.render-tmp` 下不存在、项目根存在」的 src/href 回退成 `../xxx`，并从 `<audio id="myv-bgm">` 解析 BGM 绝对路径；隐藏 offscreen BrowserWindow 加载改写后的 `entry.vidrender.html` 后按序 `measureVideoBoxes()` 量显示盒子 → `extractVideoFrames()` 按显示尺寸抽 JPG 帧 → `injectionScript(tables)` 注入隐藏 `<img>` 兄弟 → `spawn('vidrender-encode')`，逐帧 `seekScript(f / fps)` 换 `img.src` + 等 `decode()`（**不再逐帧 seek `<video>`**）→ `capturePage()` → `crop(画布宽高)` → `toBitmap()` → 写 stdin；质量 draft/standard/high → crf 26/20/18，stderr JSON 进度转 `[小内核] …` 调 `onProgress`，`finally` 清理子进程 / 窗口并 `rmSync(framesDir(...))` 删临时帧目录；**不注册 IPC，由 video.ts 调用**。抽帧 / 量盒子 / 注入 / seek 实现见合篇的 [`vidrenderFrames.ts`](./files/main/vidrender.ts.md)（`FrameTable` / `VideoBox` 两个接口 + `extractVideoFrames` / `measureVideoBoxes` / `framesDir` / `injectionScript` / `seekScript` 五个函数；#131 起 `extractVideoFrames` 多接第 4 参 `maxDuration` 限制 ffmpeg `-t`、`runFfmpeg` 加 5 分钟超时 kill + `settled`/`finish` 收口，#132 改抽 JPG，#133 新增 boxes 第 5 参与按显示尺寸抽帧） | — |
 | [whisper.ts](./files/main/whisper.ts.md) | 729 | whisper.cpp 转录 + 识别模型下载/管理；`resolveCliPath()` **优先** `process.resourcesPath/whisper/`（whisper 随安装包），只在「非 wav/flac/mp3/ogg 要转码」且缺 ffmpeg 时以 `FfmpegNeededError` 回 `needPacks:['ffmpeg']` | `whisper:*`（11 handle + 1 推送） |
 | [updater/index.ts](./files/main/updater.md) | 108 | 应用自更新（electron-updater generic provider，**懒加载**）与 3 秒启动静默检查的**统一出口**：`register(ctx)` 装配 8 个 `update:*` 频道，各子文件的具名导出原样挂在 index 上 | `update:*`（7 handle + 1 `on`/`sendSync` + 1 推送） |
 | [updater/base.ts](./files/main/updater.md)（同篇） | 285 | 底座（依赖最上游，不 import 同目录任何模块）：`updater` / `flags` / `state` 运行态单例、日志与小工具、**随包 `CHANGELOG.md` 的定位与读取**、`humanError()` 文案分层、进度 `payload()` / `send()`、6 个事件绑定 `bindEvents()`、懒加载 `ensureUpdater()` | — |
 | [updater/actions.ts](./files/main/updater.md)（同篇） | 139 | 对外动作：检查 / 下载 / 取消、更新源覆盖 `applyFeedUrl()`、两条「无事件不许报成功」的守卫 | — |
 | [updater/install.ts](./files/main/updater.md)（同篇） | 145 | 退出并安装（`quitAndInstall`）、下载缓存清理、忙碌态判定（`bindBusyTracking()`：`project:html-progress` 按活动 `taskId` 集合判忙） | — |
-| [runtime.ts](./files/main/runtime.ts.md) | 963 | 运行环境（**分包**）：`PACK_DEFS` 包注册表（`ffmpeg` / `hyperframes` / **`vidrender`** 各成一个 7z，whisper 不进包；`vidrender` 是第三项 `{ name: 'vidrender', title: 'Rust 编码内核（vidrender-encode）', hint: 1MB, files: ['bin/vidrender-encode.exe'] }`）→ 取清单 + 包 → sha512 校验（`Range` 断点续传）→ `7za` 解到 `userData/runtime/<包名>/`，就绪后按包调 `hfEnv.refreshPack()`；`packsStatus()` 纯探测、`ensurePacks()` 才下载解包（可取消）；**`PRODUCT_PACKS = PACK_NAMES.filter(n => n !== 'vidrender')` 用于缺省 `missingPacks()`、`gc()` 的 allReady、`ensurePacks()` 缺省、`prepareInBackground()`、`runtimeStatus()`——vidrender 不进产品默认缺包提示与「下载全部」，仍可 `prepare(['vidrender'])` 显式下载**；取远端清单有 **20 秒硬超时** | `runtime:*`（3 handle + 1 推送） |
+| [runtime.ts](./files/main/runtime.ts.md) | 971 | 运行环境（**分包**）：`PACK_DEFS` 包注册表（`ffmpeg` / `hyperframes` / **`vidrender`** 各成一个 7z，whisper 不进包；`vidrender` 是第三项 `{ name: 'vidrender', title: 'Rust 编码内核（vidrender-encode）', hint: 1MB, files: ['bin/vidrender-encode.exe'] }`）→ 取清单 + 包 → sha512 校验（`Range` 断点续传）→ `7za` 解到 `userData/runtime/<包名>/`，就绪后按包调 `hfEnv.refreshPack()`；`packsStatus()` 纯探测、`ensurePacks()` 才下载解包（可取消），**`packsStatus()` 另有 vidrender 的 dev 兜底**（`id:'dev-bin'` / `root:''`、只在不打包时生效、与 `hfEnv.BUILTIN_RESOURCES.vidrenderEncode` 查找同口径）；**`PRODUCT_PACKS = PACK_NAMES.filter(n => n !== 'vidrender')` 用于缺省 `missingPacks()`、`gc()` 的 allReady、`ensurePacks()` 缺省、`prepareInBackground()`、`runtimeStatus()`——vidrender 不进产品默认缺包提示与「下载全部」，仍可 `prepare(['vidrender'])` 显式下载**；取远端清单有 **20 秒硬超时** | `runtime:*`（3 handle + 1 推送） |
 
-> 行数取自工作区源码实测（`[IO.File]::ReadAllLines` 与编辑器行号一致）。目录下共 **59** 个 `.ts` 文件 = **9 个根目录单文件 + `account/` 目录 3 个文件 + `cast/` 目录 9 个文件 + `voice/` 目录 10 个文件 + `projects/` 目录 16 个文件 + `agent/` 目录 8 个文件 + `updater/` 目录 4 个文件**（`Get-ChildItem src\main -Recurse -File -Filter *.ts` 实测；旧记 55，差在 account 3 与 `agent/constants.ts` 1）；上表**已全部收录**（`account/` / `cast/` / `voice/` / `projects/` / `agent/` / `updater/` 各合成**目录级一篇**：[files/main/account.md](./files/main/account.md)、[files/main/cast.md](./files/main/cast.md)、[files/main/voice.md](./files/main/voice.md)、[files/main/projects.md](./files/main/projects.md)、[files/main/agent.md](./files/main/agent.md)、[files/main/updater.md](./files/main/updater.md)，旧名 [files/main/updater.ts.md](./files/main/updater.ts.md) 只留过渡指针）。
+> 行数取自工作区源码实测（`[IO.File]::ReadAllLines` 与编辑器行号一致）。目录下共 **61** 个 `.ts` 文件 = **11 个根目录单文件（含 `vidrender.ts` 与 `vidrenderFrames.ts`，后者并入前者那一篇说明）+ `account/` 目录 3 个文件 + `cast/` 目录 9 个文件 + `voice/` 目录 10 个文件 + `projects/` 目录 16 个文件 + `agent/` 目录 8 个文件 + `updater/` 目录 4 个文件**（`Get-ChildItem src\main -Recurse -File -Filter *.ts` 实测；旧记 55，差在 account 3、`agent/constants.ts` 1 与 `vidrender.ts` / `vidrenderFrames.ts` 2）；上表**已全部收录**（`account/` / `cast/` / `voice/` / `projects/` / `agent/` / `updater/` 各合成**目录级一篇**：[files/main/account.md](./files/main/account.md)、[files/main/cast.md](./files/main/cast.md)、[files/main/voice.md](./files/main/voice.md)、[files/main/projects.md](./files/main/projects.md)、[files/main/agent.md](./files/main/agent.md)、[files/main/updater.md](./files/main/updater.md)，旧名 [files/main/updater.ts.md](./files/main/updater.ts.md) 只留过渡指针）。
 >
-> 目录 / 文件组织约定见根 `AGENTS.md` 关键约定 9：**300 行考虑拆、500 行是硬上限**；模块拆分的形态固定为「**同名目录 + `index.ts` 统一出口**、具名导出原样挂在 `index.ts` 上、依赖方向单向、跨文件共享的 `let` 收进 `state` / `flags` 对象或改取值函数（不许按值导出）」，另有 4 类可不拆的例外。`cast/`、`updater/`、`agent/`、`projects/`、`account/` 就是这条约定的样板（`account/` 只有 3 个文件、每份都能单独读懂）。
+> 目录 / 文件组织约定见根 `AGENTS.md` 关键约定 9：**300 行考虑拆、500 行是硬上限**；模块拆分的形态固定为「**同名目录 + `index.ts` 统一出口**、具名导出原样挂在 `index.ts` 上、依赖方向单向、跨文件共享的 `let` 收进 `state` / `flags` 对象或改取值函数（不许按值导出）」，另有 4 类可不拆的例外。`cast/`、`updater/`、`agent/`、`projects/`、`account/` 就是这条约定的样板（`account/` 只有 3 个文件、每份都能单独读懂）。**强耦合的少量单文件（如 `vidrender.ts` + `vidrenderFrames.ts`）按 README 粒度约定合一篇说明，不因多一个文件就多写一页。**
 
 ### 1.1 `projects/` 的 16 个文件（合计 2371 行，最长 369 行）
 
@@ -109,9 +109,9 @@ runtime.register(ctx)                          // 运行环境包，最后一步
 
 ```
 settings ──→ agent(chat ← html / script；script → chatLog) ──→ projects/ ──→ voice/（内部 catalog ← api ← ipc/*）
-                     │
-                     └─ script 只造 JSON、不碰文件工具；对话记录读写下沉到 chatLog；index.ts 只再导出（对外仍是 './agent'）
-                                      ↗
+                       │
+                       └─ script 只造 JSON、不碰文件工具；对话记录读写下沉到 chatLog；index.ts 只再导出（对外仍是 './agent')
+                                        ↗
 hfEnv ──→ projects/ / voice / whisper / video / runtime
 voice/vad ──→ whisper
 voice/catalog ← voice/systemVoices（目录内部）
@@ -149,9 +149,10 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 | `index → settings` | 用户选「迁移过来」后，`migrateFrom()` 调 `settings.isPristineSettings(dst)` 判断新 `settings.json` 是否仍是「出厂状态」 |
 | `projects/ → runtime` | `project:extract-video-audio` 先 `runtime.missingPacks(['ffmpeg'])` 纯校验，缺包直接返回 `{ ok:false, needPacks, message }`；`video.ts` / `voice/ttsAlign.ts` / `whisper.ts` 同构 |
 | `projects/ipc/media.ts → settings` | `pickRenderOverride` 过滤项目级渲染档位（`project:set-render`）；`settings.ts` 不 import `projects/` |
-| `runtime → hfEnv` | 探测到某包就绪与解包完成时调 `hfEnv.refreshPack(name, root)`，把该包目录交给 `hfEnv` 重算包缓存 |
+| `runtime → hfEnv` | 探测到某包就绪与解包完成时调 `hfEnv.refreshPack(name, root)`，把该包目录交给 `hfEnv` 重算包缓存；dev 兜底的 vidrender 传空 `root`，只清缓存、按盘上重解析 |
 | `runtime → settings` | `getUpdaterSettings().feedUrl` 作为运行环境包的下载源 |
 | `updater → settings` | 读 `updater.feedUrl` / `autoCheck` / `skippedVersion`；下载「跳过版本」时清掉该标记 |
+| **`vidrender.ts → vidrenderFrames.ts`**（本次新增） | 主流程从 `./vidrenderFrames` 导入 `extractVideoFrames` / `framesDir` / `injectionScript` / `measureVideoBoxes` / `seekScript` 与 `type VideoBox`；抽帧用的 ffmpeg 也走 `hfEnv.BUILTIN_RESOURCES.ffmpeg` / `ffmpegBin`。**单向**：`vidrenderFrames.ts` 不 import `vidrender.ts`，两者都不注册 IPC，由 `video.ts` 调用 `vidrender.ts` |
 
 `src/main/index.ts` 顶部的注释即为这份依赖图的权威描述（`settings ← agent(chat ← html/script) ← projects/ ← voice`；`hfEnv ← projects/, voice, whisper, video, runtime`；`updater ← settings`；`account ← index.ts`；无环）。
 
@@ -176,6 +177,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 - **路由解析抽成 `resolveHgPreviewPath(rawUrl)`**：返回 `{ full, why }` 或 `null`；判定按「段 + 查询标记」、不看 host；路径**按段 decode**，与渲染层 `utils/url.ts` 的逐段 encode 对应。响应由 `rangeResponse()` 构造（`Range` → 206 / 416），MIME 由 `previewMime()` 显式给。
 - **窗口**：单窗口 `1200×800`（最小 `800×600`）、`titleBarStyle: 'hidden'`、`backgroundColor: '#0B1220'`、`Menu.setApplicationMenu(null)`、`contextIsolation: true` / `nodeIntegration: false`、preload 指向 `../preload/index.js`。
 - **IPC**：`window:minimize` / `window:toggle-maximize` / `window:close`（`on`），`app:copy-text`（`handle`），最大化状态经 `window:maximized-change` 回推；旧数据处置为 `legacy:status` / `legacy:resolve`（都是 `handle`，**没有主 → 渲染的推送**）。
+- **window-all-closed 与 dev 父进程清理（CHANGELOG #136）**：先 `if (updater.quitForUpdate()) return` 给更新安装让路；再仅 `!app.isPackaged && process.platform === 'win32'` 时取 `process.ppid`（非 0 且非 `process.pid`），用 `execFileSync('powershell.exe', ['-NoProfile','-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${ppid}").CommandLine`], { encoding:'utf8', timeout:2000, windowsHide:true })` 读命令行，正则 `/electron-vite[\\/].*dev|electron-vite\.js["'\s]+dev/i` 命中才 `process.kill(ppid, 'SIGTERM')`；整段 `try/catch` 忽略异常，不影响自身 `app.quit()`，**打包版完全不受影响**。背景：dev 进程链 `node.exe(electron-vite dev)` → spawn `electron.exe`，只退 Electron 会让父 dev server（HTTP 长驻）不退、终端不回提示符。源码与契约见 [files/main/index.ts.md](./files/main/index.ts.md) §3.6。
 
 ### 4.2 `hfEnv.ts` —— 环境探测与资源定位
 
@@ -200,7 +202,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 一个模块、八个文件：**一个传输层 + 四个业务薄封装 + 一份提示词常量 + 一份对话记录读写 + 一个统一出口**，形态是「同名目录 + `index.ts`」。**`chat.ts` 不认识任何业务**；`chatLog.ts` 不认识业务、也不认项目名；`html.ts` / `htmlEdit.ts` / `castAction.ts` 与 `script.ts` 各自只保留「业务专属」的东西；`constants.ts` 放提示词常量；`index.ts` 只做再导出（**不含 `chatLog`**）。目录级说明见 [files/main/agent.md](./files/main/agent.md)。
 
 | 文件 | 行数 | 一句话 |
-|------|------|--------|
+|------|--------|--------|
 | `chat.ts` | 265 | 通用对话层：多轮 `messages` + 流式（SDK / fetch SSE，**两条路径都带 `reasoning_effort`**）+ `max_tokens` 升档重试（`MAX_TOKEN_TRIES = [131072, 262144]`）+ jsonl 过程记录 + 人话错误 |
 | `chatLog.ts` | 155 | 对话记录读写：`<项目目录>/chat/index.json`（索引，不含 scenes）+ `versions/<id>.json`（每版副本），`MAX_CHAT_ROUNDS = 100`、写索引后清理孤儿副本、清空删整个 `chat/`（**内部模块，不挂 `index.ts`**） |
 | `html.ts` | **229** | HTML 薄封装：`extractHtmlFromReply` + `chatWithCustomModel` + 章节 / 角色 / 路由五份提示词与五个包装（**提示词常量本体在 `constants.ts`**） |
@@ -237,7 +239,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 ### 4.7 `video.ts` —— 转视频
 
 - 频道：`dialog:open-html`、`video:show-in-folder`、`video:render`，以及推送 `video:progress`。唯一导出 `register`。
-- **后端分流（本版新增）**：`settings.getRenderBackend()` 决定 `renderPacks`——hyperframes → `['ffmpeg','hyperframes']`，vidrender → `['ffmpeg','vidrender']`；CLI/Node 校验只在 hyperframes 分支执行，`env` 只在有 Node 运行时才合并；**hyperframes 的 `new Promise` 路径完全保留**，`hfCli!` / `nodeRt!` 仅用于该分支。
+- **后端分流（本版新增）**：`settings.getRenderBackend()` 决定 `renderPacks`——hyperframes → `['ffmpeg','hyperframes']`，vidrender → `['ffmpeg','vidrender']`；CLI/Node 校验只在 hyperframes 分支执行，`env` 只在有 Node 运行时才合并；**hyperframes 的 `new Promise` 路径完全保留**，`hfCli!` / `nodeRt!` 仅用于该分支。dev 下 vidrender 的缺包判断走 `runtime.ts` 的 dev 兜底（见 §4.10），不再误弹下载框。
 - **小内核分支**：入口写好后 `await renderWithVidrender({ entryHtml, output, canvas, fps, quality, onProgress })`，**成功与失败都清理 `.render-tmp/`**，失败以「小内核渲染失败：…」返回，进度经 `video:progress` 回推。
 - **准备阶段**：缺包纯校验 → 入口存在性 → `isHyperframesComposition()` → **无限循环静态守卫**（命中 `repeat: -1` 即拒绝，不进 CLI、不建 `.render-tmp`）→ 定位 CLI / Node → 就地确定渲染根 → **按版本同步 `./core.js`** → 建 `.render-tmp` → 本地化随包库 → 注入环境 → 取画布 → `prepareEntry()`（写两处画布、裁定时长并写两处、裁超长媒体副本、写渲染入口）。
 - **渲染阶段**：`spawn(node, [hfCli, 'render', '-c', '.render-tmp/entry.html', '-o', output.mp4])`，stdout/stderr 经 `video:progress` 回推，`close` 时先删 `.render-tmp/`（无论成败）再判成功。
@@ -246,6 +248,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 - **量时间轴的 `file:///` 是唯一例外**：喂给 Chromium `--dump-dom`，不在页面里、不受同源策略约束。
 - 产物回写由渲染层经 `project:save-video` 完成（主进程 `video.ts` 不写 `project.json`）。
 - **`hf-projects/` 已下线**：渲染中间产物只有项目内的 `.render-tmp/`，且渲完即删。
+- **小内核渲染实现分工（本版新增）**：`vidrender.ts`（220 行）负责入口准备 / 编码进程 / 窗口编排 / 抓帧写 stdin；新增的 **`vidrenderFrames.ts`（277 行）** 负责渲染模式抽帧换图——`measureVideoBoxes()` 量每个 `<video>` 的显示盒子、`extractVideoFrames()` 用 FFmpeg 按 fps 与显示尺寸把本地 `<video>` 抽成 **JPG**（`-q:v 3`；帧目录 `.vidrender-frames-<pid>`；#131 起第 4 参 `maxDuration` 限制抽帧时长、ffmpeg `-t` 只抽成片范围内的帧，`runFfmpeg` 加 5 分钟超时 kill；#133 起第 5 参 `boxes` 按 cover/contain/fill 加 scale/crop/pad 滤镜）、`injectionScript()` 插入继承样式的隐藏 `<img>` 兄弟、`seekScript()` 逐帧换 `img.src` + 等 `decode()`（**不再逐帧 seek `<video>`**）。两者强耦合，合在 [files/main/vidrender.ts.md](./files/main/vidrender.ts.md) 一篇说明。本机实测同素材 1350 帧：全画布 PNG 1733MB → 全画布 JPG 260MB（−85%）→ 按显示尺寸 490×600 JPG 58.2MB（−96.6%）。
 
 ### 4.8 `whisper.ts` —— 本地转录与模型管理
 
@@ -267,6 +270,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 
 - **动机**：安装包只带代码 + whisper（另投 `resources/bin` 小内核二进制）；ffmpeg / hyperframes / vidrender 各成一个 7z，首次用到时由用户确认后下载（提示体积、可取消）。
 - **三包与 `PRODUCT_PACKS`（本轮新增）**：`PACK_DEFS` 第三项是 vidrender（title「Rust 编码内核（vidrender-encode）」、hint 1 MiB、关键文件 `bin/vidrender-encode.exe`）；`PACK_NAMES` 是三项的 name 列表，`PRODUCT_PACKS = PACK_NAMES.filter(n => n !== 'vidrender')` 才是**产品口径**——缺省 `missingPacks()` / `ensurePacks()`、`prepareInBackground()`、`runtimeStatus()` 与 `gc()` 的 allReady 都用它，所以 vidrender 不进默认缺包提示、不进「下载全部」；`ensurePacks` 的显式入参仍按 `PACK_NAMES` 过滤，`prepare(['vidrender'])` 可下载。
+- **vidrender 的 dev 兜底（本次修复点）**：`packsStatus()` 在 `installedEntry()` 与 legacy 两条判定都没命中后，若 `def.name === 'vidrender' && !app.isPackaged && hfEnv.BUILTIN_RESOURCES.vidrenderEncode` 非空，就记为 `state:'ready'` / `id:'dev-bin'` / `root:''` / `files:0` / `unpackedBytes:0` / `bytes:0` / `legacy:false` 然后 `continue`。dev 下仓库 `resources/bin/vidrender-encode.exe`（#135 重编后约 944 KB，支持 `--audio`；旧版约 929 KB 不支持）已在，`hfEnv.vidrenderEncode` 的 candidates 也认这条路径（dev 分支取 `devResourceRoot()/bin/vidrender-encode.exe`，`hfEnv.ts` 149–156 行）；缺包守卫必须与实际查找同口径，否则会要求下载一个更新源上根本没有的包（`vidrender.json` 实测 HTTP 404 / NoSuchKey）。兜底**只在未打包时生效**，`root` 故意留空，`syncStatus()` 把它传给 `hfEnv.refreshPack(name, '')` 只会删缓存、让 `resolvePackRoot` 重新按盘上解析（`hfEnv.ts` 74–80 行），**不会写坏 `packs.json`**。于是 `missingPacks(['ffmpeg','vidrender'])` 在 dev 下不再因 vidrender 回 `needPacks`，小内核转视频不再误弹「下载运行环境」框。
 - **频道**：`runtime:status` / `runtime:prepare` / `runtime:cancel` / 推送 `runtime:progress`。
 - **三个 API 的分工**：`packsStatus()` / `missingPacks()` / `packSizeText()` 纯探测，`ensurePacks()` 才下载 + 解包，`prepareInBackground()` 启动只探测。
 - **主流程**：探测缺包 → 定位 `7za` → 逐包安装（清单本地优先，否则远端 + `Range` 续传 + sha512 复核）→ 解包 → 先写 `ok.json` 再写 `packs.json` → `hfEnv.refreshPack()`。
@@ -319,7 +323,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 ## 5. 目录内的通用实现约定
 
 1. **spawn 样板统一**：`child_process.spawn` + `windowsHide: true` + Promise 包装，参数以数组传递、不经 shell。
-2. **外部依赖只从「安装包资源 + 运行环境包」取**：`whisper-cli.exe` 与 `7za.exe` 来自安装包，`resources/bin/vidrender-encode.exe`（小内核）经 extraResources 随包（用户切到 vidrender 后端时由 `src/main/vidrender.ts` 使用），ffmpeg / hyperframes / vidrender 来自运行环境包解出的 `<userData>/runtime/<包名>/`。
+2. **外部依赖只从「安装包资源 + 运行环境包」取**：`whisper-cli.exe` 与 `7za.exe` 来自安装包，`resources/bin/vidrender-encode.exe`（小内核）经 extraResources 随包（用户切到 vidrender 后端时由 `src/main/vidrender.ts` 使用），ffmpeg / hyperframes / vidrender 来自运行环境包解出的 `<userData>/runtime/<包名>/`（抽帧用的 FFmpeg 由 `src/main/vidrenderFrames.ts` 经 `hfEnv.BUILTIN_RESOURCES.ffmpeg` 定位）。dev 下 vidrender 另走 `runtime.ts` 的 dev 兜底（§4.10），不因包未解包就要求下载。
 3. **返回约定**：业务接口统一 `{ ok: true, ... }` / `{ ok: false, message, canceled? }`；查询类可返回数组或 `null`（`project:pick-media` 返回裸字符串数组，取消时为空数组）。**账号域用 `{ ok, code, message }`**（见 §4.15），不套 `IpcFail`。
 4. **进度回推节流**：下载与转录的高频进度按时间/百分比节流后再 `webContents.send`。
 5. **路径安全**：所有项目内路径由 `projectDir()` 派生并做前缀校验；素材的 `file` 另由 `normalizeMaterials()` 校验必须落在本项目素材目录下且不含 `..`；`hgpreview` 的项目外路由顶层目录必须落在 `USER_PREVIEW_DIRS` 白名单内，否则 403。
@@ -336,7 +340,7 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 
 ## 6. 相关文档
 
-- 逐文件说明：[files/main/](./files/main/)（小内核后端单列一篇：[files/main/vidrender.ts.md](./files/main/vidrender.ts.md)）
+- 逐文件说明：[files/main/](./files/main/)（小内核后端单列一篇：[files/main/vidrender.ts.md](./files/main/vidrender.ts.md)，含 `vidrenderFrames.ts`（277 行）的契约与实现要点）
 - 账号域（目录级一篇）：[files/main/account.md](./files/main/account.md)
 - 桥接层：[03-目录架构-src-preload.md](./03-目录架构-src-preload.md)
 - IPC 契约全貌：[01-架构总览.md](./01-架构总览.md) 第 3 节
@@ -347,5 +351,5 @@ shared/{ipc,types,errors,constants} ──→ 全部模块（常量、跨进程�
 - **`cast/` 目录（9 个文件，合计 1409 行）**：`library.ts` **241**（全局角色库 + 删角色连带清专属动作）、`table.ts` 158、`preview.ts` 151、`inject.ts` 54、`edit.ts` 48、**`presets.ts` 172**（内置 14 条公共动作）、**`actions.ts` 256**（动作库）、**`demo.ts` 263**（示范页）、`index.ts` **66**（**37** 个具名导出）。
 - **`projects/`（16 个文件，合计 2371 行）**：`store.ts` **239**、`prompts.ts` **369**、`ipc/cast.ts` **224**、**`ipc/castActions.ts` 162**（5 条动作频道）、`ipc/html.ts` **249**、`htmlWrite.ts` 127、`chaptersFlow.ts` 192、`paths.ts` 57、`register.ts` **19**（装配五个域）。角色频道在 `Cast` 组（11 条），`Project` 组仍是 27 条。
 - **`agent/`（8 个文件）**：`chat.ts` 265 / `chatLog.ts` 155 / `html.ts` **229** / **`constants.ts` 368** / `htmlEdit.ts` 52 / `script.ts` **342** / **`castAction.ts` 44** / `index.ts` 21。
-- **渲染后端（本版新增）**：`src/main/vidrender.ts`（**192 行**）是小内核渲染后端，不注册 IPC；`video.ts`（**514 行**）按 `settings.getRenderBackend()` 选包，默认 hyperframes 原路径保留；`settings.ts`（**479 行**）持久化全局 `renderBackend` 并导出 `getRenderBackend()`；`hfEnv.ts`（**409 行**）新增 `vidrenderEncode` getter。**没有新增 IPC 频道。**
-- **`main/index.ts`（实测 551 行）**：`USER_PREVIEW_DIRS = ['tts-output','voice','cast-preview']`；`hgpreview` 的 userData 路由除 `?tts=1` 外也认 **`?user=1`**；注册顺序 **settings → account → projects → agent(registerScript) → voice → video → whisper → updater → runtime**。
+- **渲染后端（本版新增）**：`src/main/vidrender.ts`（**220 行**）是小内核渲染后端，不注册 IPC；新增的 `src/main/vidrenderFrames.ts`（**277 行**）提供 `extractVideoFrames` / `framesDir` / `injectionScript` / `measureVideoBoxes` / `seekScript`（`FrameTable` / `VideoBox` 两个接口；#131 起 `extractVideoFrames` 第 4 参 `maxDuration` 限制抽帧时长、`runFfmpeg` 加 5 分钟超时 kill，#132 起抽 JPG、#133 起第 5 参 `boxes` 按显示尺寸抽帧），与前者合在 [files/main/vidrender.ts.md](./files/main/vidrender.ts.md) 一篇说明；`video.ts`（**514 行**）按 `settings.getRenderBackend()` 选包，默认 hyperframes 原路径保留；`settings.ts`（**479 行**）持久化全局 `renderBackend` 并导出 `getRenderBackend()`；`hfEnv.ts`（**409 行**）新增 `vidrenderEncode` getter。**没有新增 IPC 频道；#132 / #133 落地后 typecheck 三工程全绿。**
+- **`main/index.ts`（实测 573 行）**：`USER_PREVIEW_DIRS = ['tts-output','voice','cast-preview']`；`hgpreview` 的 userData 路由除 `?tts=1` 外也认 **`?user=1`**；注册顺序 **settings → account → projects → agent(registerScript) → voice → video → whisper → updater → runtime**；`window-all-closed` 另在 dev（win32、未打包）连带结束父 electron-vite dev server（CHANGELOG #136，见 §4.1）。

@@ -12,6 +12,10 @@ import { CANVAS_SIZES } from '../shared/constants'
 import type { RenderCanvas, RenderQuality } from '../shared/types'
 import { BGM_TAG_ID } from './projects/bgm'
 import * as hfEnv from './hfEnv'
+import {
+  extractVideoFrames, framesDir, injectionScript, measureVideoBoxes, seekScript,
+  type VideoBox,
+} from './vidrenderFrames'
 
 export interface VidrenderOptions {
   /** 产品在 .render-tmp/ 下写好的入口 HTML（绝对路径） */
@@ -58,58 +62,26 @@ function resolveLocalRefs(entryHtml: string): { htmlPath: string; bgmPath: strin
   return { htmlPath, bgmPath }
 }
 
-// 第 t 秒的 seek：GSAP 式时间轴 + <video>.currentTime（seeked 确认）+ 双 rAF。
-// 与 demo 一致；片中视频不 seek 会一直停首帧。
-function seekScript(t: number): string {
-  return `(async () => {
-    const t = ${t};
-    const timelines = window.__timelines || {};
-    for (const key of Object.keys(timelines)) {
-      const tl = timelines[key];
-      if (!tl) continue;
-      if (typeof tl.pause === 'function') tl.pause();
-      if (typeof tl.time === 'function') tl.time(t);
-      else if (typeof tl.seek === 'function') tl.seek(t, false);
-    }
-    for (const v of Array.from(document.querySelectorAll('video'))) {
-      v.pause();
-      const dur = Number.isFinite(v.duration) ? v.duration : Infinity;
-      const target = Math.max(0, Math.min(t, dur > 0.01 ? dur - 0.001 : t));
-      if (Math.abs(v.currentTime - target) > 0.01) {
-        await new Promise((resolve) => {
-          let settled = false;
-          const done = () => { if (!settled) { settled = true; resolve(); } };
-          v.addEventListener('seeked', done, { once: true });
-          try { v.currentTime = target; } catch (e) { done(); }
-          setTimeout(done, 2000);
-        });
-      }
-    }
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    return true;
-  })()`
-}
-
-// 等页面里的 <video> 拿到首帧（产品 composition 没有 demo 的 __videoReady 钩子）。
-const VIDEO_READY_SCRIPT = `new Promise((resolve) => {
-  const vids = Array.from(document.querySelectorAll('video'));
-  if (!vids.length) { resolve(true); return; }
-  let left = vids.length;
-  const done = () => { if (--left <= 0) resolve(true); };
-  for (const v of vids) {
-    if (v.readyState >= 2) { done(); continue; }
-    v.addEventListener('loadeddata', done, { once: true });
-    v.addEventListener('error', done, { once: true });
-    setTimeout(done, 5000);
-  }
-})`
-
 function writeAll(stream: NodeJS.WritableStream, buf: Buffer): Promise<void> {
   return new Promise((resolve, reject) => {
-    const cleanup = () => { stream.off('drain', onDrain); stream.off('error', onError) }
-    const onDrain = () => { cleanup(); resolve() }
-    const onError = (e: Error) => { cleanup(); reject(e) }
-    if (stream.write(buf)) { resolve(); return }
+    let settled = false
+    const cleanup = () => {
+      stream.off('drain', onDrain); stream.off('error', onError); stream.off('close', onClose); clearTimeout(timer)
+    }
+    const onDrain = () => { if (settled) return; settled = true; cleanup(); resolve() }
+    const onError = (e: Error) => { if (settled) return; settled = true; cleanup(); reject(e) }
+    // 编码器提前退出（参数错误 / 崩溃）时 drain 永远不来，await 会永久挂起，
+    // IPC handler 不返回 → 渲染层只收到 "reply was never sent"（实测踩过）。
+    // 加 10s 超时把它变成明确错误，且 close 时也兜底 reject。
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(new Error('写入编码器 stdin 超时（10s）：编码器可能已提前退出（参数不兼容？）'))
+    }, 10000)
+    const onClose = () => onError(new Error('编码器在写入期间退出'))
+    stream.once('close', onClose)
+    if (stream.write(buf)) { onDrain(); return }
     stream.once('drain', onDrain)
     stream.once('error', onError)
   })
@@ -140,6 +112,10 @@ export async function renderWithVidrender(opts: VidrenderOptions): Promise<strin
 
   const win = new BrowserWindow({
     width: size.width, height: size.height, show: false,
+    // 去掉窗口外框（标题栏约 17px + 边框 3px）：无边框窗口的内容视口严格等于
+    // width×height，capturePage() 才抓得到完整画布。实测 useContentSize:true
+    // 在本机 offscreen 窗口上无效（截图反而是 1923×1063），故改走 frame:false。
+    frame: false,
     webPreferences: {
       offscreen: true,
       autoplayPolicy: 'no-user-gesture-required',
@@ -148,9 +124,21 @@ export async function renderWithVidrender(opts: VidrenderOptions): Promise<strin
     }
   })
   let child: ChildProcess | null = null
+  const renderStart = Date.now()
   try {
     await win.loadFile(htmlPath)
-    await win.webContents.executeJavaScript(VIDEO_READY_SCRIPT)
+    // 渲染模式：先把本地 <video> 按 fps 抽成 PNG，再注入隐藏 <img> 兄弟。
+    // 逐帧只换 img.src，不再逐帧 seek <video>（后者会把渲染循环饿死到 ~5s/帧）。
+    const tmpDir = path.dirname(htmlPath)
+    // 先量每个 <video> 的显示盒子，抽帧只按显示尺寸（cover 精确模拟），
+    // 不再一律按画布全尺寸 —— 视频只占画布 1/4 时体积再降约 75%。
+    const boxes = await win.webContents.executeJavaScript(measureVideoBoxes()) as VideoBox[]
+    const extractStart = Date.now()
+    const tables = await extractVideoFrames(htmlPath, tmpDir, opts.fps, duration, boxes, opts.onProgress)
+    if (tables.length) {
+      opts.onProgress?.(`[小内核] 抽帧 ${tables.length} 路，用时 ${((Date.now() - extractStart) / 1000).toFixed(1)}s`)
+    }
+    if (tables.length) await win.webContents.executeJavaScript(injectionScript(tables))
     child = spawn(exe, args, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
 
     let stderrTail = ''
@@ -169,24 +157,50 @@ export async function renderWithVidrender(opts: VidrenderOptions): Promise<strin
     let spawnError: Error | null = null
     child.on('error', (e) => { spawnError = e })
     const exited = new Promise<number>((resolve) => child!.on('close', (code) => resolve(code ?? 1)))
+    let warned = false
 
     for (let f = 0; f < total; f++) {
       await win.webContents.executeJavaScript(seekScript(f / opts.fps), true)
       const image = await win.webContents.capturePage()
-      const buf = image.crop({ x: 0, y: 0, width: size.width, height: size.height }).toBitmap()
+      const shot = image.getSize()
+      // Windows offscreen 窗口的 capturePage 实得尺寸会因外框 / DPI 抖动（实测 1920×1063、
+      // 1923×1063），frame:false / useContentSize 在本机都不稳定。不再依赖窗口尺寸：
+      // 先把截图裁到目标宽高（多余边框切掉），尺寸不足时再缩放补齐，保证每帧字节数恒定。
+      let normalized = image.crop({ x: 0, y: 0, width: Math.min(shot.width, size.width), height: Math.min(shot.height, size.height) })
+      if (shot.width !== size.width || shot.height !== size.height) {
+        normalized = normalized.resize({ width: size.width, height: size.height, quality: 'good' })
+        if (!warned) {
+          warned = true
+          opts.onProgress?.(`[小内核] 截图 ${shot.width}×${shot.height}，已归一化到 ${size.width}×${size.height}`)
+        }
+      }
+      const buf = normalized.toBitmap()
       if (buf.length !== frameSize) {
-        throw new Error('抓帧尺寸不符：' + buf.length + ' 字节，期望 ' + frameSize)
+        throw new Error(
+          '抓帧尺寸不符：截图 ' + shot.width + '×' + shot.height +
+          '，归一化后 ' + buf.length + ' 字节，期望 ' + size.width + '×' + size.height + '（' + frameSize + ' 字节）'
+        )
       }
       await writeAll(child.stdin!, buf)
-      if (f % 15 === 0) opts.onProgress?.('[小内核] seek ' + f + '/' + total)
+      if (f % 15 === 0) {
+        const elapsed = (Date.now() - renderStart) / 1000
+        const fps = elapsed > 0.05 ? (f + 1) / elapsed : 0
+        const remain = fps > 0 ? (total - f - 1) / fps : 0
+        opts.onProgress?.(
+          `[小内核] ${f + 1}/${total} 帧 · 已用 ${elapsed.toFixed(1)}s · 剩余约 ${remain.toFixed(0)}s · ${fps.toFixed(1)} fps`
+        )
+      }
     }
     child.stdin!.end()
     const code = await exited
     if (spawnError) throw spawnError
     if (code !== 0) throw new Error('vidrender-encode 退出码 ' + code + '；stderr 尾部：\n' + stderrTail)
+    const totalSec = (Date.now() - renderStart) / 1000
+    opts.onProgress?.(`[小内核] 渲染完成：${total} 帧 / ${totalSec.toFixed(1)}s（平均 ${(total / totalSec).toFixed(1)} fps）`)
     return opts.output
   } finally {
     try { child && child.exitCode === null && child.kill() } catch (e) { /* ignore */ }
     try { win.close() } catch (e) { /* ignore */ }
+    try { fs.rmSync(framesDir(path.dirname(htmlPath)), { recursive: true, force: true }) } catch (e) { /* ignore */ }
   }
 }

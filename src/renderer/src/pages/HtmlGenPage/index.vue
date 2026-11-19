@@ -418,14 +418,15 @@ async function onRenderVideo(skipEnvGuard = false): Promise<void> {
     const g = await envGate.guard(packs, '转成视频', () => { void onRenderVideo(true); });
     if (!g.ok) return;
   }
-  status.value = '已提交渲染（' + renderOptionsText(options) + ' · ' + canvasLabel(options.canvas) + '，约 30 秒）...';
+  status.value = '正在准备渲染...';
   statusClass.value = '';
   rendering.value = true;
   try {
     const res = await window.hfTools.renderVideo(htmlPath, options);
     resetRenderProgress(); // 本地完成/失败文案覆盖全局 trace 残留
     if (res.ok) {
-      status.value = '视频已生成（' + renderOptionsText(options) + ' · ' + canvasLabel(options.canvas) + '）：' + res.outputVideo;
+      const secs = res.elapsedMs ? (res.elapsedMs / 1000).toFixed(1) + 's' : '—';
+      status.value = '视频已生成（耗时 ' + secs + ' · ' + renderOptionsText(options) + '）：' + res.outputVideo;
       statusClass.value = 'hf-ok';
       // 回写视频产物到当前项目（「视频预览」页据此自动加载）
       await window.projectTools.saveVideo(appState.currentName, res.outputVideo);

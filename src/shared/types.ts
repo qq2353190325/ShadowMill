@@ -1081,7 +1081,7 @@ export interface VideoRenderPayload extends RenderOverride {
 // 渲染结果：失败分支的 compatible=false 表示 HTML 未通过 HyperFrames 合规校验；
 // needPacks 非空表示本机缺运行环境包（界面据此弹下载确认框，见 docs/runtime-pack-split.md §5.2）
 export type VideoRenderResult =
-  | { ok: true; outputVideo: string; projectDir: string }
+  | { ok: true; outputVideo: string; projectDir: string; elapsedMs?: number }
   | { ok: false; message: string; compatible?: boolean; needPacks?: RuntimePackName[] }
 
 // ============================================================

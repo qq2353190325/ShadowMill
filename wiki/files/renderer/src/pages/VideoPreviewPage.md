@@ -102,7 +102,7 @@ function toHgPreviewUrl(projectName: string, absPath: string): string {
 | `videoVisible` | `ref(false)` | 是否显示播放器区（有成品为真；无成品时为假，只留引导文案） |
 | `localStatus` | `ref('')` | 本页本地状态文案（已加载 / 两条引导） |
 | `statusClass` | `ref('')` | 状态条样式类，取值 `''` / `'hf-ok'` |
-| `statusText` | `computed<string>` | `renderProgress.text \|\| localStatus.value`：渲染期间全局 trace 文案优先接管 |
+| `statusText` | `computed<string>` | `renderProgress.text \|\| localStatus.value`：渲染期间全局进度文案优先接管 |
 | `tipText` | `computed<string>` | 固定文案：「视频由「HTML生成」页的「转视频」按钮（及那里的质量 / 帧率档位）渲染；渲染完成后回到本页即可预览最新成品。下拉里只列出已经有视频成品的项目，选它只换本页播放的内容，不会切换工作项目。」 |
 | `previewGroups` | `computed<HfSelectGroup[]>` | 「预览项目」下拉的选项，见 2.1 |
 
@@ -156,7 +156,7 @@ function toHgPreviewUrl(projectName: string, absPath: string): string {
 
 ### 5.5 状态文案的合并显示
 
-- 渲染期间：全局 `renderProgress.text` 由 `useRenderProgress.ts` 里 `App.vue` 挂载时注册的 `hfTools.onProgress` 回调持续写入（如「渲染中 · 逐帧捕获（已用 45s · 帧 320/900）」），`statusText` 因此优先显示它。只有 CLI 长阶段的 trace 才会写入；普通日志行与内部微阶段不写，此时状态条保持上一条文案。渲染由「HTML生成」页发起，本页只是同屏复用同一份全局进度文案。
+- 渲染期间：全局 `renderProgress.text` 由 `useRenderProgress.ts` 里 `App.vue` 挂载时注册的 `hfTools.onProgress` 回调持续写入（如 HY 的「渲染中 · 逐帧捕获（已用 45s · 帧 320/900）」、小内核的「渲染中 · 逐帧渲染（Rust 小内核）（已用 12s · 帧 360/1350）」），`statusText` 因此优先显示它。**两条后端都会写入**：HyperFrames 的 `[Render:trace]` 行由 `parseTrace()` 解析，Rust 小内核的 `[小内核]` 纯文本行由 #138 新增的 `parseVidrender()` 解析（详见 [common.md](../../common.md) §3）——#138 之前小内核进度被全部过滤、状态条一直停在提交占位文案「已提交渲染（…，约 30 秒）...」，现在能实时走字。普通日志行与内部微阶段不写，此时状态条保持上一条文案。渲染由「HTML生成」页发起，本页只是同屏复用同一份全局进度文案。
 - 非渲染期间 / trace 已被清空时：`renderProgress.text === ''`，回退显示 `localStatus`（如「已加载「某项目」的视频成品」或两条引导文案）。
 - 本页用 `statusClass` 这个 ref（而非再派生一个 computed）：状态类始终跟着本页分支走，与 trace 文案是否接管无关。
 - 挂载时调的是 `resetRenderProgress()`（清文案 + 清半行缓冲），而不是只把 `renderProgress.text` 置空。
@@ -199,7 +199,7 @@ function toHgPreviewUrl(projectName: string, absPath: string): string {
 5. **切预览 ≠ 切工作项目**：`selectedName` 只服务本页播放；`appState.currentName` 不受影响。引导文案因此都写着「把它切为工作项目」。
 6. **下拉只列有成品（+ 当前项目）**：其余项目一律要求 `m.hasVideo`；当前项目即使没有成品也保留在首项，并用「（无视频成品）」后缀说明。
 7. **状态类名三态**：`''`（初始 / 无成品引导）、`'hf-ok'`（已载入）、`'hf-error'`（保留取值，本页当前分支不写入），模板只做 `:class="statusClass"` 绑定。
-8. **`statusText` 的优先级顺序**：全局 trace 优先于本地文案；挂载时调 `resetRenderProgress()` 是为了不让上一轮渲染的残留 trace 抢占首屏文案。
+8. **`statusText` 的优先级顺序**：全局进度文案优先于本地文案（HY trace 与小内核 `[小内核]` 行都写同一份 `renderProgress.text`）；挂载时调 `resetRenderProgress()` 是为了不让上一轮渲染的残留抢占首屏文案。
 9. **无成品不等于报错**：`hasVideo` 为假时只写引导文案、不写 `hf-error`，状态条保持中性；工具栏的「在文件夹中显示」用 `:disabled="!videoPath"` 拦下，「重新加载」则**始终可用**。
 10. **「重新加载」兼顾清单刷新与回落**：它先 `refreshProject()` 再判「所选项目是否还在清单里」，不在就回落到当前工作项目——所选项目被删除 / 改名后不会停在一个不存在的项目上。
 11. **上游动作在「HTML生成」页**：正式渲染与档位选择见 [`HtmlGenPage.md`](./HtmlGenPage.md)；产物落盘为项目内相对路径（`project.json` 的 `videoPath`），经 `refreshProject()` / `project:load` 换算成绝对路径后进入本页，再被 `toHgPreviewUrl()` → `previewUrl()` 变成可播 URL。渲染链路本身见 [`main/video.ts.md`](../../../main/video.ts.md)。

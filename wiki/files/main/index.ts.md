@@ -4,13 +4,13 @@
 > - 预览白名单常量改名并加一项目录：**`USER_PREVIEW_DIRS = ['tts-output', 'voice', 'cast-preview']`**（原 `TTS_PREVIEW_DIRS = ['tts-output','voice']`）。
 > - hgpreview 的 userData 路由**除 `?tts=1` 外也认 `?user=1`**（`isUserData = searchParams.get('user') === '1' || searchParams.get('tts') === '1' || segs[0] === 'tts'`）；角色预览 URL 的写法是 `hgpreview://user/cast-preview/<id>.html?user=1`（渲染层 `utils/url.ts` 的 `userFileUrl` 拼）。
 > - 角色预览页由 `main/cast/preview.ts` 拼、`projects/ipc/cast.ts` 的 `cast:preview` 写到 `<userData>/cast-preview/<id>.html`；`main/index.ts` 只负责放行这一个目录，本身不读角色库。
-> - 文件现为 **548 行**。
+> - 文件现为 **573 行**。
 
 > ShadowMill（影坊）主进程入口：历史数据目录的归属证明与旧数据处置契约（`legacy:*`）、装配窗口、预览协议（含字节范围请求）与各业务域 IPC
 
 - **所在目录**：src/main/
 - **类型**：主进程入口（装配器，副作用型模块）
-- **规模**：**545 行**（`[IO.File]::ReadAllLines` 实测）。历史沿革：品牌改名事故修复后由 265 行增长；把「原生三按钮对话框 + 1.5s 延迟」改为「主进程只提供 `legacy:*` 两个 handler、界面交给渲染层」后由 481 行缩短；为 `hgpreview://` 加上 `rangeResponse()`（`Range` 支持、响应体改流式）到 494 行；增开 `tts/<相对路径>` 路由与 `USER_PREVIEW_DIRS` 白名单到 516 行；dev 专属 F12 开关 DevTools 到 525 行；`hgpreview` 路由收口（`resolveHgPreviewPath()` + `?tts=1`）到 542 行；「内容脚本 Agent」新增 `import * as agent from './agent'` 与 `agent.registerScript()` 一行后到 545 行（目录化重构前，这两行是对主进程顶层旧文件的聚合导入与它的旧入口函数名；只改名字与目录，**行数不变**）；**对话记录那次把注册参数改成 `agent.registerScript(projects.projectDir)`，行数 545 → 546**；**对话记录改成「索引 + 每版副本」那轮没有触及本文件（参数与行数都不变，仍 546 行）**；**本轮把语音域 5 个文件收进 `voice/`：删掉 `import * as ttsAlign from './ttsAlign'`、`ttsAlign.register(ctx)` 换成 `voice.registerAlign(ctx)`，行数 546 → 545**。
+- **规模**：**573 行**（`[IO.File]::ReadAllLines` 实测）。历史沿革：品牌改名事故修复后由 265 行增长；把「原生三按钮对话框 + 1.5s 延迟」改为「主进程只提供 `legacy:*` 两个 handler、界面交给渲染层」后由 481 行缩短；为 `hgpreview://` 加上 `rangeResponse()`（`Range` 支持、响应体改流式）到 494 行；增开 `tts/<相对路径>` 路由与 `USER_PREVIEW_DIRS` 白名单到 516 行；dev 专属 F12 开关 DevTools 到 525 行；`hgpreview` 路由收口（`resolveHgPreviewPath()` + `?tts=1`）到 542 行；「内容脚本 Agent」新增 `import * as agent from './agent'` 与 `agent.registerScript()` 一行后到 545 行（目录化重构前，这两行是对主进程顶层旧文件的聚合导入与它的旧入口函数名；只改名字与目录，**行数不变**）；**对话记录那次把注册参数改成 `agent.registerScript(projects.projectDir)`，行数 545 → 546**；**对话记录改成「索引 + 每版副本」那轮没有触及本文件（参数与行数都不变，仍 546 行）**；**本轮把语音域 5 个文件收进 `voice/`：删掉 `import * as ttsAlign from './ttsAlign'`、`ttsAlign.register(ctx)` 换成 `voice.registerAlign(ctx)`，行数 546 → 545**；**本轮（CHANGELOG #136）为 dev 模式关窗连带结束父 electron-vite dev server 新增清理逻辑（Windows 且未打包），行数 554 → 573**。
 - **对外导出**：无 `export`（模块加载即执行归属标记写入、协议特权声明与 IPC 监听；`app.whenReady()` 后完成装配并注册 `legacy:*` 两个 handler）；内部包含 `LEGACY_DIR_NAMES` / `OWN_DATA_ENTRIES` / `USER_DATA_DIR` / `DATA_MARKER` / `APP_ID` / `STARTUP_LOG` / `BOOT_AT` / `USER_PREVIEW_DIRS` 等模块级常量、`type MergeStat`、模块级可变状态 `legacyScanned` / `legacyFound`，函数 `hasOurIdentity()` / `isOurs()` / `writeIdentity()` / `mergeTree()` / `pruneEmptyDirs()` / `migrateFrom()` / `findLegacyData()` / `legacyInfo()` / `resolveLegacy(action)` / `previewMime(p)` / `rangeResponse(full, request)` / `createWindow()` / `getWindow()` / `bootLog(stage)`，以及模块级 `let mainWindow`。**随 `script:*` 进来的只有两行 `import * as agent from './agent'` 与 `agent.registerScript(projects.projectDir)`：没有新增模块级符号、没有新增 / 修改任何 IPC 频道（频道是 agent 自己注册的）。**
 
 ## 1. 作用与职责
@@ -19,7 +19,7 @@
 - **userData 位置保持 Electron 默认**：`const USER_DATA_DIR = app.getPath('userData')`，即 `%APPDATA%\<package.json 的 name>`（现为 `%APPDATA%\shadowmill`）。**刻意不做 `app.setPath('userData', …)`**——目录名继续跟随 `name`，保持 Electron 的默认语义；本文件不做任何位置钉死。
 - **归属证明（`isOurs`）**：`my-app` 这种名字太通用，`%APPDATA%` 下完全可能有别的应用也叫这个。所以扫到同名目录之后**必须先证明它是我们的**：① 目录里**任意一个点开头的标记文件（名字不限）**内容里的 `appId` 与 `APP_ID` 一致；② 否则看结构特征 `<目录>\projects\<项目名>\project.json` 是否存在（专为「标记机制上线之前」的历史目录准备，比如 `my-app`）。两条都不满足 ⇒ 不提示、不迁移（重名应用挡在这里）。**读取只按内容认、不猜文件名**（`hasOurIdentity()`）。见 §3.1②。
 - **历史数据目录：主进程只回答「有没有 / 是什么」并执行选择，不做任何界面展示**：品牌改名（`my-app` → `shadowmill`）会让 userData 目录名随之改变，老用户打开应用会看到「项目全没了」（数据其实还在 `%APPDATA%\my-app` 里）。本文件扫 `LEGACY_DIR_NAMES`，通过归属证明且**确有应用数据**时把结论缓存起来，经 `legacy:status` 交给渲染层；界面由渲染层的应用内弹窗 `LegacyDataDialog.vue`（沿用 `.hf-modal` 体系）负责，用户选完再把 `migrate` / `delete` / `later` 经 `legacy:resolve` 回传，由 `resolveLegacy()` 执行。**不做静默自动迁移**：静默挪动上 GB 的数据出问题极难追查，而弹窗本身就把「数据在哪、有多少、要怎么办」讲清楚了。见 §3.1。
-- **窗口与生命周期**：创建 `BrowserWindow`（1200×800，最小 800×600，`titleBarStyle: 'hidden'`，`backgroundColor: '#0B1220'`），处理 `activate` / `window-all-closed`；**dev 下（`!app.isPackaged`）额外注册 F12 开关 DevTools**（打包版不注册，用默认形态 `toggleDevTools()`，见 §3.4）。
+- **窗口与生命周期**：创建 `BrowserWindow`（1200×800，最小 800×600，`titleBarStyle: 'hidden'`，`backgroundColor: '#0B1220'`），处理 `activate` / `window-all-closed`；**dev 下（`!app.isPackaged`）额外注册 F12 开关 DevTools**（打包版不注册，用默认形态 `toggleDevTools()`，见 §3.4）；`window-all-closed` 还在更新安装让路之后、`app.quit()` 之前清理 dev 模式的 electron-vite 父 dev server（仅 win32 且未打包，见 §3.6）。
 - **首屏时序打点**：`bootLog()` 把「模块加载 → app ready → 建窗 → 页面开始加载 → DOM ready → 加载完成 → 首帧」写进 `userData/startup.log`，用于排查首屏慢（每次启动几行，超 64KB 自动清空）；迁移/删除/「稍后再说」的结果也写同一文件。
 - **预览协议宿主**：声明并实现自定义协议 `hgpreview`，让渲染层的**预览 iframe / 素材缩略图 / 成品视频 / 音频试听**能读取「项目目录内」与「userData 下白名单目录内」的文件；dev 阶段渲染层来自 `http://localhost`，Chromium 会拦截 `file://`（iframe 报 `Not allowed to load local resource`，`<audio src="file://…">` / `<video src="file://…">` 同样被拒），因此必须走该协议。处理器有**两条分支**：`p/<项目名>/<相对路径>`（`projects.projectDir(name)` 内）与 **`user/<相对路径>?user=1`（本轮新增，`app.getPath('userData')` 下、只允许顶层目录落在 `USER_PREVIEW_DIRS = ['tts-output', 'voice', 'cast-preview']` 里，非白名单一律 403）**；路径解析已抽成 `resolveHgPreviewPath(rawUrl)`（见 §3.3）。响应统一由 `rangeResponse()` 构造：**支持 `Range` 字节范围（206 / 416）**，响应体用 `fs.createReadStream` 流式返回，供预览页与音频试听的媒体跳转（见 §3.3）。
 - **基础 IPC**：窗口控制（最小化 / 最大化切换 / 关闭）与剪贴板写入。
@@ -70,6 +70,7 @@
 | `protocol.handle('hgpreview', handler)` | `app.whenReady()` 内调用 | 处理器本体只剩四步：`resolveHgPreviewPath(request.url)` → `null` 记 404 / `!full` 记 403（带 `why`）/ 文件不存在记 404 / 否则 `rangeResponse(hit.full, request)` |
 | `ctx: RegisterCtx` | 对象 `{ getWindow }` | 由 `src/shared/types.ts` 定义，仅含 `getWindow` 一个字段 |
 | `agent.registerScript(projects.projectDir)` | 调用 `src/main/agent/script.ts` 的 `registerScript(getProjectDir)` | 传 `projects.projectDir`（`src/main/projects.ts` 的导出）作为「项目名 → 项目目录」的解析函数：注册 `script:generate` / `script:load-chat` / `script:append-round` / `script:read-version` / `script:set-active-version` / `script:clear-chat`（内容脚本 Agent + 对话记录的 5 个 chat handler）+ 用 `event.sender.send` 推 `script:progress`（**`Script` 组共 7 条**）。**不传 `ctx`**：它不弹对话框、不需要主窗口引用，推送目标是发起调用的那个窗口。**为什么传函数而不是让 agent import projects**：`projects.ts` 已经 `from './agent'` 取 `chatWithCustomModel`，反向 import 会成环。位置在 `projects.register(ctx)` 之后、`voice.register(ctx)` 之前 |
+| `app.on('window-all-closed', …)` 中的 dev 父进程清理段（本轮新增，CHANGELOG #136） | 回调内新增逻辑（不引入模块级符号 / 不新增 IPC 频道） | `updater.quitForUpdate()` 之后、`app.quit()` 之前：仅 `!app.isPackaged && process.platform === 'win32'` 时取 `process.ppid`（非 0 且非自身），`execFileSync('powershell.exe', ['-NoProfile','-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${ppid}").CommandLine`], { encoding:'utf8', timeout:2000, windowsHide:true })` 读命令行，正则 `/electron-vite[\\/].*dev|electron-vite\.js["'\s]+dev/i` 命中才 `process.kill(ppid, 'SIGTERM')`；`try/catch` 忽略异常，打包版不受影响。见 §3.6 |
 
 > **已作废的历史方案（文档与代码里都不再存在，勿再引用）**：`USER_DATA_DIR_NAME`、`app.setPath('userData', …)`、目录位置钉死、启动时「身份标记自动认领」（`readMarkerAppId()` / `adoptExistingData()`）、`README_NAME` / `README_TEXT`（`README-请勿删除.txt`），以及备份名 `.before-adopt.bak`。
 > 注意区分：`DATA_MARKER` / `APP_ID` / `writeIdentity()` **在**（本轮重新引入，用途变了，见 §3.1②）；被删掉的是旧方案里那套「按标记自动把老目录并过来」的启动逻辑。
@@ -362,7 +363,51 @@ whenReady
 
 顺序即数据依赖顺序；源码注释给出的依赖图：`settings ← agent(chat ← html/script) ← projects ← voice`（`voice/catalog ← voice/api ← voice/ipc/*`），`hfEnv ← projects, voice, whisper, video, runtime`，`updater ← settings`，全图**无环**。`hfEnv.ts` 不注册 IPC，因此不在此列表中；`agent/chat.ts` 同理（它是传输层，只被 `agent/html.ts` / `agent/script.ts` 调用）。
 
-生命周期收尾：`app.on('activate')` 时若 `BrowserWindow.getAllWindows().length === 0` 则重新 `createWindow()`；`app.on('window-all-closed')` 时先看 `updater.quitForUpdate()`——正在退出安装则直接返回（让 electron-updater 的安装器接管退出流程），否则非 `darwin` 平台调用 `app.quit()`。
+生命周期收尾：`app.on('activate')` 时若 `BrowserWindow.getAllWindows().length === 0` 则重新 `createWindow()`；`app.on('window-all-closed')` 时先看 `updater.quitForUpdate()`——正在退出安装则直接返回（让 electron-updater 的安装器接管退出流程），否则非 `darwin` 平台调用 `app.quit()`；`app.quit()` 之前，dev 模式（`!app.isPackaged && process.platform === 'win32'`）还会严格校验并结束父 electron-vite dev server（见 §3.6）。
+
+### 3.6 `window-all-closed`：dev 模式连带关闭 electron-vite 父进程（CHANGELOG #136）
+
+**背景**：electron-vite dev 的进程链是 `node.exe(electron-vite dev)` → spawn `electron.exe`。关掉所有窗口只让 Electron 退出，父 node dev server（HTTP 长驻服务）不会退，终端不回到提示符。因此在 `app.on('window-all-closed', …)` 里，更新安装让路之后、`app.quit()` 之前增加一段 dev 专属的父进程清理。
+
+**触发条件**：严格限定 `!app.isPackaged && process.platform === 'win32'`，即仅 Windows 上的非打包 dev 模式；打包安装版完全不受影响。取 `const ppid = process.ppid`，只有 `ppid` 非 0 且 `ppid !== process.pid` 才继续。
+
+**查父进程命令行**：`require('node:child_process').execFileSync('powershell.exe', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${ppid}").CommandLine`], { encoding: 'utf8', timeout: 2000, windowsHide: true })`（结果 `|| ''`），读回父进程的 CommandLine 判断它到底是谁。
+
+**匹配与结束**：仅当命令行匹配正则 `/electron-vite[\\/].*dev|electron-vite\.js["'\s]+dev/i` 才 `process.kill(ppid, 'SIGTERM')`。**严格校验父进程命令行的目的就是避免误杀 IDE 终端**；整段包在 `try/catch` 里，父进程已退 / 查询失败一律忽略，不影响自身的 `app.quit()`。
+
+源码原文（与 `src/main/index.ts` 第 547-573 行逐行一致，可整段贴回比对；2 空格缩进层级原样保留）：
+
+```ts
+app.on('window-all-closed', () => {
+  // 更新安装：updater.installNow() 已调用 quitAndInstall（由 electron-updater 自己重启应用），
+  // 此处再 app.quit() 会与安装器抢退出流程，故直接返回
+  if (updater.quitForUpdate()) return
+  // dev 模式（electron-vite dev）：node dev server 是父进程，它 spawn 了本 Electron。
+  // Electron 退出后 dev server 仍长驻（HTTP 服务），终端不回到提示符。关窗时连带父进程一起退。
+  // 严格校验：仅未打包、且父进程命令行确实是 electron-vite ... dev 才 kill，绝不误杀 IDE 终端。
+  if (!app.isPackaged && process.platform === 'win32') {
+    try {
+      const ppid = process.ppid
+      if (ppid && ppid !== process.pid) {
+        const out = require('node:child_process').execFileSync(
+          'powershell.exe',
+          ['-NoProfile', '-Command',
+            `(Get-CimInstance Win32_Process -Filter "ProcessId=${ppid}").CommandLine`],
+          { encoding: 'utf8', timeout: 2000, windowsHide: true },
+        ) || ''
+        if (/electron-vite[\\/].*dev|electron-vite\.js["'\s]+dev/i.test(out)) {
+          process.kill(ppid, 'SIGTERM')
+        }
+      }
+    } catch (e) { /* 父进程已退 / 查询失败：忽略，不影响自身退出 */ }
+  }
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+})
+```
+
+**未验证**：只跑过 `npm run typecheck`（退出码 0，三工程），**未实际运行 `npm run dev` 做关窗手测**；父进程退出的实际效果尚未运行时验证。
 
 ## 4. 依赖与协作
 
@@ -418,10 +463,10 @@ whenReady
 - **排障入口**：预览异常时看 `userData/preview-protocol.log`；**首屏慢 / 启动卡顿看 `userData/startup.log`**（每行带「距进程启动毫秒数」，可直接判断时间花在模块加载、建窗还是页面加载），历史数据迁移/删除/「稍后」那几行也在同一文件里（见 §3.1⑤）。
 - **两种 IPC 语义不能混用**：窗口控制是 `ipcMain.on`（渲染层 `send`，单向、无返回值），剪贴板与 `legacy:*` 都是 `ipcMain.handle`（渲染层 `invoke`，返回 Promise）。`IPC.Window.MaximizedChange` 是主进程 → 渲染层的推送频道；`legacy:*` 没有主 → 渲染的推送，**完全由渲染层拉取**。
 - **`register` 顺序有约束**：必须在 `createWindow()` 之后、且按 `settings → projects → **agent** → voice（`register` + `registerAlign`）→ video → whisper → updater → runtime` 注册，避免跨域依赖缺位（`runtime` 放最后只是保证它的 handler 先挂上：它现在**启动只做一次探测、不下载**，同步部分只有几个 `existsSync` / `statSync` 探测，是否下载由用户在界面上确认（`ffmpeg` 实测 42.6 MB、`hyperframes` 实测 103.1 MB，两包合计 145.7 MB））；`legacy:*` 两个 handler 也在这个位置注册，顺序上写在 `ctx` 之前。**`agent.registerScript(projects.projectDir)` 是唯一的例外：不带 `ctx`**——它不弹对话框、不需要主窗口引用，`script:progress` 走 `event.sender`；唯一的参数是 `projects.projectDir`，把「项目名 → 项目目录」交给 agent（对话记录拼 `chat/index.json` 与 `chat/versions/<versionId>.json` 的路径），**这样 agent 不必 import projects，依赖图仍然无环**。
-- **`window-all-closed` 要给更新安装让路**：`updater.quitForUpdate()` 为真时直接返回，否则 `app.quit()` 会与 electron-updater 调起的 NSIS 安装器抢退出流程（表现为「点了重启安装但没装上」）。
+- **`window-all-closed` 要给更新安装让路**：`updater.quitForUpdate()` 为真时直接返回，否则 `app.quit()` 会与 electron-updater 调起的 NSIS 安装器抢退出流程（表现为「点了重启安装但没装上」）。**dev 模式下还在 `app.quit()` 之前连带结束 electron-vite 父 dev server**（仅 win32 且未打包，严格校验父进程命令行、`try/catch` 忽略异常，打包版不受影响，见 §3.6）。
 - **窗口引用失效**：`closed` 后 `mainWindow = null`，所有 IPC 回调都先做空值判断，`maximize`/`unmaximize` 回调使用 `mainWindow?.` 可选链。`legacy:*` 两个 handler 不使用窗口引用（不弹原生框、不需要父窗口），因此**与窗口生命周期完全解耦**。**本轮新增的 F12 处理同理用 `mainWindow?.` 可选链**（`before-input-event` 回调可能在窗口销毁的瞬间才被派发）。
 - **dev 专属的 F12 开关 DevTools（F12 那次改动新增，写在 `createWindow()` 内，源码第 427-434 行）**：仅 `!app.isPackaged` 时注册 `mainWindow.webContents.on('before-input-event', …)`——`npm run dev` 与「未打包直接跑」生效，**打包安装版完全不注册**（终端用户用不到，也免误触）；打开形态是 `toggleDevTools()` 默认值（**吸附窗口右侧**），不是 `openDevTools({ mode: 'detach' })`。**为什么必须由主进程显式接管**：`createWindow()` 开头就 `Menu.setApplicationMenu(null)` 把应用菜单整个移除，Chromium 默认菜单上的 F12 加速键随之无人接管。**API 注意点**：`before-input-event` 的第一个参数是 Electron 的 `Event` 对象，**只有 `preventDefault` / `defaultPrevented`、没有 `sender`**——写 `event.sender` 会 `TS2339`；所以实现写成 `(_event, input)`，改按模块级 `mainWindow` 取窗口引用。**本次未新增 / 未修改任何 IPC 频道**（就这次 F12 改动而言，`src/shared/ipc.ts`、`src/preload/index.ts`、`src/renderer/**` 一行未动；后来那两处文件被另一轮并行改动改过，见 §5 末两条），界面无任何变化。**未验证**：只跑过 `npm run typecheck`（退出码 0，三工程），**未运行 `npm run dev`**，F12 的实际开关效果与「打包版按 F12 无反应」均**尚未运行时验证**。
 - **输出布局**：主进程 `out/main/index.js`、preload `out/preload/index.js`、渲染层 `out/renderer/`；`__dirname` 相对定位依赖这一布局。
-- **本文档的行数口径**：以 `[IO.File]::ReadAllLines('src/main/index.ts').Count` 为准，当前 **545 行**。文中「源码第 xxx 行」这类具体行号来自 F12 / 协议收口那几次改动时的快照（F12 段在 `createWindow()` 内、代码逐字一致），文件后续再有增删会整体位移——**核对时以代码内容而不是行号为准**。
+- **本文档的行数口径**：以 `[IO.File]::ReadAllLines('src/main/index.ts').Count` 为准，当前 **573 行**；§3.6 的 `window-all-closed` 代码块取自当前源码第 547-573 行。文中「源码第 xxx 行」这类具体行号来自 F12 / 协议收口那几次改动时的快照（F12 段在 `createWindow()` 内、代码逐字一致），文件后续再有增删会整体位移——**核对时以代码内容而不是行号为准**。
 - **目录化重构在本文件的改动**：① 「内容脚本 Agent」的聚合导入改为 **`import * as agent from './agent'`**（位置仍在 `./projects` 之后、`./voice` 之前，重构前它指向主进程顶层的旧文件）；② 注册段那行改为 **`agent.registerScript()`**（`projects.register(ctx)` 之后、`voice.register(ctx)` 之前，且**不传 `ctx`**；当时还是无参形态，**下一轮对话记录落地时改成 `agent.registerScript(projects.projectDir)`**）；③ 头部模块清单把 HTML Agent 那一行并进 `agent/` 行，依赖图改为 `settings ← agent(chat ← html/script) ← projects ← voice ← ttsAlign`。`legacy:*`、`hgpreview://`、F12、迁移逻辑、频道常量一概未动，**当时行数仍 545**。
-- **对话记录那次的改动（+1 行）**：注册段改成 **`agent.registerScript(projects.projectDir)`**——把 `projects.projectDir` 作为参数注入，agent 侧据此拼 `projects/<项目名>/chat/index.json` 与 `chat/versions/<versionId>.json`（读写、索引清理与 100 轮上限全在 `src/main/agent/chatLog.ts`），**agent 仍不 import projects**。本文件除这一处参数外一行未动；频道由 agent 自己注册（本文件没有新增 `ipcMain.handle`）。**注意**：头部模块清单的 `agent/` 那一行注释**已同步为 5 个文件**（`chat.ts` / `chatLog.ts` / `html.ts` / `script.ts` / `index.ts`），`src/main/agent/index.ts` 的文件头注释也写明 `chatLog.ts` 是「`projects/<名>/chat/` 下的索引与版本副本」并注明它**属内部模块、不由 `index.ts` 再导出**——注释与目录一致；**行数与文件数仍以目录实测为准**（`src/main` 共 50 个 `.ts`，`src/main/index.ts` 545 行）。
+- **对话记录那次的改动（+1 行）**：注册段改成 **`agent.registerScript(projects.projectDir)`**——把 `projects.projectDir` 作为参数注入，agent 侧据此拼 `projects/<项目名>/chat/index.json` 与 `chat/versions/<versionId>.json`（读写、索引清理与 100 轮上限全在 `src/main/agent/chatLog.ts`），**agent 仍不 import projects**。本文件除这一处参数外一行未动；频道由 agent 自己注册（本文件没有新增 `ipcMain.handle`）。**注意**：头部模块清单的 `agent/` 那一行注释**已同步为 5 个文件**（`chat.ts` / `chatLog.ts` / `html.ts` / `script.ts` / `index.ts`），`src/main/agent/index.ts` 的文件头注释也写明 `chatLog.ts` 是「`projects/<名>/chat/` 下的索引与版本副本」并注明它**属内部模块、不由 `index.ts` 再导出**——注释与目录一致；**行数与文件数仍以目录实测为准**（`src/main` 共 50 个 `.ts`，`src/main/index.ts` 573 行）。

@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | `src/renderer/src/composables/useAppStore.ts` | 112 | 全局项目状态（模块级 `reactive` 单例）+ 5 个链路 `computed` + 项目上下文读写（键名取 `constants.ts`）；`ProjectState` 含项目级渲染档位覆盖与**成片画布 `canvas`**（本次新增） |
 | `src/renderer/src/composables/useToast.ts` | 22 | 全局轻提示队列（自增 id + 2800ms 自动移除） |
-| `src/renderer/src/composables/useRenderProgress.ts` | 92 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行并生成中文进度文案（只上屏用户看得懂的阶段） |
+| `src/renderer/src/composables/useRenderProgress.ts` | 194 | 解析 HyperFrames 渲染日志 `[Render:trace]` 行生成中文进度文案（只上屏用户看得懂的阶段），并以**独立直通道解析小内核 `[小内核]` 无换行文本**（#139）；本地秒表每秒走字，trace / 秒表 / stdout 进度条三路拼出实时进度 |
 | `src/renderer/src/composables/useRuntime.ts` | 91 | 运行环境（**分包** ffmpeg / hyperframes / **vidrender**，首次用到时下载；vidrender 供用户显式切换的小内核后端使用，缺包守卫按 `renderBackend` 选包）状态单例：`runtime:progress` 订阅 + `runtime:status` 首帧补齐，派生 `busy` / `failed` / `missing` / `hasMissing` / `ready` / `cancelable` / `missingText` 与 `prepare(packs?)` / `cancel()`；**交给 IPC 的包名数组必须走 `toRaw(list).slice()`**（Vue 响应式代理过不了结构化克隆，`invoke` 会抛 `DataCloneError` 且主进程 handler 不执行），`prepare()` 的非 ok 回执 / 抛错会写进 `runtime`（不再静默）；初始 `status` 加 `vidrender: 'unknown'`，`PACK_LABEL` 的 vidrender 文案为「Rust 编码内核（vidrender-encode）」 |
 | `src/renderer/src/composables/useEnvGate.ts` | 162 | 全局唯一的「需要下载运行环境」确认框单例：`guard(need, actionName, cont?)` → `confirmDownload()` / `cancelDownload()` / `continueAction()` / `close()`，三态 `confirm \| downloading \| ready`（装好后按钮变「继续」、**不自动续做**）；进度**不自己订阅** `runtime:progress`，而是 `watch` 消费 `useRuntime` 的状态（全渲染层只有 `useRuntime.ts` 一处 onProgress 注册）；`LABEL` 同三包文案，`HINT_MB = { ffmpeg: 43, hyperframes: 103, vidrender: 1 }`（vidrender 约 1 MB；源码注释仍写「只有显式指定时才下载，产品默认不提示」，但切到小内核后端后即按后端选包） |
 | `src/renderer/src/composables/useConfigPrompt.ts` | 86 | **配置类错误弹窗单例**（2026-10 新增）：`open(msg, target, jump?, title?)` / `fromResult(res, jump?)` / `go()` / `close()`，只有 `[去设置]` / `[取消]` 两个按钮；分类由主进程 `needConfig` 单点判定，渲染层不做正则猜测；**余额 / 欠费不弹窗**（走内嵌状态行） |
@@ -127,11 +127,11 @@
 
 **注意事项**：**模块级单例**使所有页面共享同一队列，因此同一时刻可能叠多条提示（宿主用固定定位 + `TransitionGroup` 依次排布）；**2800ms 是硬编码常量**，没有配置项，如需按类型区分时长需要先扩展 `ToastItem`；**无去重**，连续调用 `toast('保存成功')` 会得到两条独立计时、独立消失的提示；**计时器不随组件卸载取消**，定时器闭包只捕获 `id`，页面切换后仍会执行过滤，但过滤是幂等的（id 已不存在时结果不变）故不会出错；`id` 用普通变量而非响应式，因为它只作为 DOM key 使用、不需要参与响应式追踪；`useToasts()` 返回 `typeof toasts` 即 `Ref<ToastItem[]>`，调用方在模板中写 `v-for="t in toasts"` 时由 Vue 自动解包，若在脚本中使用需要 `.value`；**不适用于需要用户确认的消息**——本模块是“一闪而过”的轻提示，阻塞式确认应使用对话框类能力，而不是在此扩展。
 
-## 3. 渲染进度：composables/useRenderProgress.ts
+## 3. 渲染进度：composables/useRenderProgress.ts（194 行）
 
-HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进程经 `video:progress` 频道回推到渲染层。这些日志里混着两类内容：**结构化事件行** `[Render:trace] {"phase":...,"status":...,"elapsedMs":...,"message":...}` 与**普通日志 / 进度条行**（各种人类可读输出，没有固定结构）。本文件的职责是把这条嘈杂的文本流压成一句人话，写入全局 `renderProgress.text`，由「HTML生成」页的预览卡片（`pages/HtmlGenPage/PreviewSection.vue`——**当前这页已拆成 3 个文件**，发起渲染的按钮仍在同目录的 `index.vue`）与「视频预览」页（`pages/VideoPreviewPage/index.vue`，预览侧）共同展示，例如 `渲染中 · 逐帧捕获（已用 45s · 帧 320/900）：快速捕获未通过校验，改用逐帧截图（会慢一些）`。
+渲染进度是渲染层唯一的全局进度单例（`renderProgress`），数据来自主进程 `video:progress` 频道 → `window.hfTools.onProgress` 回调。回调文本里混着三类内容：**HY（HyperFrames）的结构化 trace 事件行** `[Render:trace] {"phase":...,"status":...,"elapsedMs":...,"message":...}`、**HY 的普通日志 / stdout 进度条行**（`[initSession:…]`、`[Browser:…]`、`Capturing frames N/M (6 workers)` 等），以及**小内核（vidrender）的人话文案** `[小内核] N/total 帧 · 已用 Xs · 剩余约 Ys · Z fps`。本文件把这条嘈杂的文本流压成一句人话写入 `renderProgress.text`，由「HTML生成」页的预览卡片（`pages/HtmlGenPage/PreviewSection.vue`——**当前这页已拆成 3 个文件**，发起渲染的按钮仍在同目录的 `index.vue`）与「视频预览」页（`pages/VideoPreviewPage/index.vue`，预览侧）共同展示，例如 `渲染中 · 逐帧捕获（已用 45s · 帧 320/900）：快速捕获未通过校验，改用逐帧截图（会慢一些）`。
 
-**设计原则：宁可不刷新，也不显示用户看不懂的内容。** 推来的日志分三类，只有第一类能上屏：
+**设计原则：宁可不刷新，也不显示用户看不懂的内容。** HY 的日志分三类，只有第一类能上屏（小内核文本走下面的独立直通道，不参与 HY 的三类判定）：
 
 | 类别 | 例子 | 处理 |
 | --- | --- | --- |
@@ -141,15 +141,15 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 未登记的新阶段同样不上屏：宁可状态条不动，也不把英文术语丢给用户（CLI 升级新增阶段时需补 `HF_PHASE_LABELS`，见注意事项）。首次渲染的空白期由页面自己的占位文案兜着（如「已提交渲染（标准 · 30fps，约 30 秒）...」）。
 
-关键设计是**跨 chunk 半行缓冲**：主进程推送的 `data.text` 可能把一行日志从中间截断，解析必须以“完整行”为单位。
+**实时性由三路拼出来**（源码注释称之为「看起来卡死」的修复）：① **trace 事件**——捕获阶段每 ~15–30 秒一条带 `elapsedMs` / `framesCompleted` 的心跳，其余阶段在边界上各一条；② **本地秒表**——`startTicker()` 起一个 1000ms 的 `setInterval` 反复调 `renderText()`，每秒重算「已用 Ns」，与 trace 是否到达无关（实测捕获阶段 203 秒里只有 3 条 trace，不靠秒表用户会看到「卡很久然后突然跳到 70s」）；③ **stdout 进度条**——每 30 帧一行 `Capturing frames N/M`，作为帧号兜底，trace 不带帧号时也能走。最终文案形如 `渲染中 · 逐帧捕获（已用 45s · 帧 1360/6764）：快速捕获未通过校验…`。
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `renderProgress` | `reactive({ text: string })` | 全局进度文案单例，初值 `text: ''` |
-| `resetRenderProgress` | `() => void` | 页面挂载时复位：`text` 与 `hfLogBuf` 清空 |
-| `initRenderProgress` | `() => void` | 订阅 `window.hfTools.onProgress`，每次收到 chunk 就解析并更新 `renderProgress.text` |
+| `resetRenderProgress` | `() => void` | 页面挂载时复位：文案、`hfLogBuf` 与全部进度状态（`startAtMs` / `phaseLabel` / `phaseKey` / `frames` / `msgText`）清空并停表 |
+| `initRenderProgress` | `() => void` | 订阅 `window.hfTools.onProgress`，每次收到 chunk 按「小内核直通道 / HY 按行缓冲」两条路径解析并更新 `renderProgress.text` |
 
-**模块级私有状态**：`HF_PHASE_LABELS`（`Record<string, string>`，12 条：阶段英文名 → 中文名）；`HF_CAPTURE_PHASES`（`string[]`，3 条真正的逐帧捕获阶段名，只有它们才展示帧进度）；`HF_MESSAGE_LABELS`（`Record<string, string>`，2 条值得告诉用户的 trace 消息中文名）；`hfLogBuf`（`let hfLogBuf = ''`，跨 chunk 的半行缓冲，未以 `\n` 结束的残片留在这里等下一块拼上）。旧版的 `hfLastLine`（原文兜底素材）已随「不回显原始日志」一并删除。
+**模块级私有状态**：`HF_PHASE_LABELS`（`Record<string, string>`，12 条：阶段英文名 → 中文名）；`HF_CAPTURE_PHASES`（`string[]`，3 条真正的逐帧捕获阶段名，只有它们才展示帧进度）；`HF_MESSAGE_LABELS`（`Record<string, string>`，2 条值得告诉用户的 trace 消息中文名）；`hfLogBuf`（`let hfLogBuf = ''`，跨 chunk 的**HY 半行缓冲**，未以 `\n` 结束的残片留在这里等下一块拼上；小内核文本不进这里）；另有进度状态 `startAtMs` / `phaseLabel` / `phaseKey` / `frames` / `msgText` 与秒表句柄 `ticker`。旧版的 `hfLastLine`（原文兜底素材）已随「不回显原始日志」一并删除。
 
 **`HF_PHASE_LABELS` 全量映射（12 条）**
 
@@ -172,27 +172,46 @@ HyperFrames CLI 在转视频时会向主进程持续推送日志文本，主进�
 
 **有意不上屏的内部阶段**：`pipeline`（流水线起止标记）、`file_server`（起本地文件服务器）、`worker_resolution`（决定并行 worker 数）、`capture_strategy`（选捕获策略）、`hdr_detection`（HDR 检测）——都是 CLI 内部决策，耗时极短且只有英文名，显示出来只会让状态条闪动并冒出看不懂的词。表里查不到的新阶段同理不显示。
 
-**`HF_MESSAGE_LABELS` 白名单（2 条）**：`drawElement self-verify failed; retrying with forceScreenshot` → 快速捕获未通过校验，改用逐帧截图（会慢一些）；`spawn failed; falling back to disk` → 并行捕获启动失败，改用磁盘模式。其余 trace 消息（心跳 `stage still running`、内部 `resolved` / `started` / `frames resolved` 等）一律不显示；唯一例外是 `status === 'error'` 的失败原因，照实显示（见下）。
+**`HF_MESSAGE_LABELS` 白名单（2 条）**：`drawElement self-verify failed; retrying with forceScreenshot` → 快速捕获未通过校验，改用逐帧截图（会慢一些）；`spawn failed; falling back to disk` → 并行捕获启动失败，改用磁盘模式。其余 trace 消息（心跳 `stage still running`、内部 `resolved` / `started` / `frames resolved` 等）一律不显示；唯一例外是 `status === 'error'` 的失败原因，原样截断 120 字展示（见下）。
 
-**`initRenderProgress()`**
+**`initRenderProgress()`（#139 后的两条路径）**
 
 1. 调用 `window.hfTools.onProgress(callback)` 注册进度回调。preload 层对进度类频道实施**单订阅语义**（模块级保存回调、只注册一次 `ipcRenderer.on`），因此重复调用只会替换回调，不会叠加监听器；实际调用点是 `App.vue` 的 `onMounted`，全局只执行一次。
-2. **拼接缓冲**：`hfLogBuf += String((data && data.text) || '')`——对 `data` 与 `data.text` 双重兜底，非字符串值先 `String()` 化。
-3. **按行切分并只挑 trace**：`while ((nl = hfLogBuf.indexOf('\n')) >= 0)` 取出 `hfLogBuf.slice(0, nl)` 并 `trim()`；**只有含 `[Render:trace]` 的行**会覆盖式写入本次回调的局部变量 `trace`（因此一个 chunk 里有多行时取**最后一条 trace**），其余行（`[initSession:…]`、`[Browser:…]`、进度条）直接丢弃，空行忽略。循环结束时 `hfLogBuf` 里只剩**最后一个不完整行**，留给下一 chunk 继续拼——这就是半行缓冲的全部实现。旧版只认“最后一行”，若最后一行恰是噪音就会把前面真正的 trace 丢掉；改为“最后一条 trace 行”后不再漏更新。
-4. **无 trace 直接返回**：`if (!trace) return`——普通日志一律不上屏，`renderProgress.text` 保持上一条（首次渲染时保持空串，屏幕上是页面自己的占位文案）。
-5. **解析 JSON**：`JSON.parse(trace.slice(trace.lastIndexOf('[Render:trace]') + 14).trim())`——`14` 正是 `'[Render:trace]'` 的长度，即跳过标记本身；用 `lastIndexOf` 以便同一行里出现多次时取最后一段；整段放在 `try` 里，抛错就 `return`（**不再把原始日志显示给用户**）。
-6. **阶段闸门**：`key = String(ev.phase || '')` → 查 `HF_PHASE_LABELS[key]`；映射不到（内部微阶段、CLI 新增的未登记阶段）直接 `return`，不上屏。
-7. **消息闸门**：`msg` 先查 `HF_MESSAGE_LABELS[rawMsg]` 取中文名；`ev.status === 'error'` 是唯一例外——失败原因 `rawMsg.slice(0, 120)` 原样展示，便于定位（其余英文消息，如心跳 `stage still running`、内部 `resolved` / `started` / `frames resolved`，一律丢弃）。
-8. **元信息与拼装**：`secs = isFinite(Number(ev.elapsedMs)) ? Math.round(Number(ev.elapsedMs) / 1000) : 0`（毫秒转**整秒**，非法值视为 0；`elapsedMs` 是**自渲染流水线开始的总耗时**，不是本阶段耗时）；仅当阶段属于 `HF_CAPTURE_PHASES` 且 `totalFrames > 0`、`framesCompleted >= 0` 时再追加 `帧 a/b`。最终文案 `'渲染中 · ' + phase + （已用 Xs · 帧 a/b）+ （：msg）`：括号内两段用 ` · ` 连接，两段都缺时整段括号省略，`msg` 为空时冒号段省略，本次回调结束。
+2. `const text = String((data && data.text) || '')`——对 `data` 与 `data.text` 双重兜底，非字符串值先 `String()` 化。
+3. **小内核直通道（#139 核心）**：`if (text.indexOf('[小内核]') >= 0) { parseVidrender(text); return }`——凡含 `[小内核]` 的文本**直接交给 `parseVidrender` 并立即 return，不进 `hfLogBuf` 按行缓冲**。
+4. HY 文本才 `hfLogBuf += text`，进入按行缓冲。
+5. **按行切分**：`while ((nl = hfLogBuf.indexOf('\n')) >= 0)` 取出 `hfLogBuf.slice(0, nl)`，经 `stripAnsi()` 剥掉 ANSI 控制码后 `trim()`，并把 `hfLogBuf` 前移到下一行；空行忽略。循环结束时 `hfLogBuf` 里只剩**最后一个不完整行**，留给下一 chunk 继续拼——这就是半行缓冲的全部实现。`stripAnsi()` 用 `/\x1b\[[0-9;?]*[A-Za-z]/g` 剥掉 CLI 进度条自带的颜色 / 光标码（管道模式下每行行尾还有一段 reset 码，不剥会打断 `Capturing frames N/M` 的匹配）。
+6. **每行分两路**：含 `[Render:trace]` 的交 `parseTrace(line)`（下详）；否则尝试 stdout 兜底正则 `(\d+)\s*\/\s*(\d+)\s*\(\s*\d+\s*worker`（大小写不敏感，匹配 `Capturing frames N/M (6 workers)`），**仅当 `phaseLabel` 已有值时**才写 `frames = { done, total }` 并 `renderText()`——阶段名还没到就什么都不做，否则 `renderText()` 会把文案清空、连页面自己的占位文案一起擦掉。其余日志行（`[initSession:…]`、`[Browser:…]`、lint 提示）直接丢弃。
 
-**`resetRenderProgress()` 与调用时机**：`renderProgress.text = ''` 清空展示 → `hfLogBuf = ''` **丢弃未挂载期间缓冲的半行残片**。语义对应旧版 `initHfPage` 清空 `#hf-status`：不清 `hfLogBuf` 的话，上一轮渲染遗留的半行残片会被拼到新一轮第一行前面，解析出一条畸形 JSON（新实现下的表现是“首条进度丢失”，而不是“显示乱码”）。调用时机：`initRenderProgress()` 在 `App.vue` 的 `onMounted` 全局只执行一次（订阅）；`resetRenderProgress()` 在**两个视频相关页面**挂载时执行——发起渲染的 `pages/HtmlGenPage/index.vue`（`onMounted` 清残留、`onRenderVideo` 结束覆盖 trace）与预览侧的 `pages/VideoPreviewPage/index.vue`（`onMounted` 里调用一次）。
+**`parseTrace(line)`（HY trace 解析）**
+
+1. `line.indexOf('[Render:trace]')`，找不到直接返回。
+2. `try { ev = JSON.parse(line.slice(line.lastIndexOf('[Render:trace]') + 14).trim()) } catch { return }`——`14` 正是 `'[Render:trace]'.length`；用 `lastIndexOf` 容忍同一行里多次出现该前缀；整段在 `try` 里，半截 JSON 只「放弃本条」，绝不把原始日志显示给用户（`catch` 为空块，不打印错误避免刷屏）。
+3. **阶段闸门**：`key = String(ev.phase || '')` → 查 `HF_PHASE_LABELS[key]`；映射不到（内部微阶段、CLI 新增的未登记阶段）直接返回，不上屏。
+4. **起点**：`elapsedMs = Number(ev.elapsedMs)`，仅当 `isFinite(elapsedMs) && elapsedMs > 0 && !startAtMs` 时 `startAtMs = Date.now() - elapsedMs` 并 `startTicker()`——`elapsedMs` 是**自渲染流水线开始的总耗时**（CLI 另有 `durationMs` 表示本阶段耗时，本模块不使用），用它反推挂钟起点，本地秒表就能给出与 CLI 口径一致的「已用 Ns」。
+5. **帧号**：`inCapture = HF_CAPTURE_PHASES.indexOf(key) >= 0`；只有捕获阶段且 `totalFrames > 0`、`framesCompleted >= 0` 才写 `frames = { done, total }`——心跳 checkpoint 也带 `framesCompleted`，照收；切到非捕获阶段（编码 / 合成）则 `frames = null`，避免界面挂着「帧 6764/6764」这种与当前阶段无关的数。
+6. **消息闸门**：`rawMsg = String(ev.message || '').trim()`；`msgText = (ev.status === 'error' && rawMsg) ? rawMsg.slice(0, 120) : (HF_MESSAGE_LABELS[rawMsg] || '')`——失败原因是唯一原样展示的出口（截断 120 字，便于定位），其余英文消息一律丢弃；存进 `msgText` 而不是一次性拼串，是因为秒表每秒重画文案，一次性拼接会被下一次 tick 抹掉。
+7. `renderText()` 输出本次文案。
+
+**`renderText()`**：`phaseLabel` 为空时直接把 `renderProgress.text` 清成空串（交给页面占位文案）；否则 `meta` 依次追加 `已用 Ns = Math.max(0, Math.round((Date.now() - startAtMs) / 1000))`（`startAtMs` 非零才追加）与 `帧 a/b`（仅当 `frames` 存在且 `phaseKey` 属于 `HF_CAPTURE_PHASES`——校准阶段的 `framesCompleted` 恒为 0，报帧数会误导）；最终 `renderProgress.text = '渲染中 · ' + phaseLabel + （meta 非空时用 ' · ' 连接并加括号）+ (msgText ? '：' + msgText : '')`。
+
+**`parseVidrender(line)` 与「小内核进度上屏」的 #138 → #139**
+
+小内核发的不是 HY 的 `[Render:trace]` JSON，而是人话文案，形如 `[小内核] 16/1350 帧 · 已用 1.2s · 剩余约 98s · 13.4 fps`。解析器先找 `[小内核]` 前缀（`indexOf`，找不到返回），取其后正文并 `trim()`：
+
+- **帧号行**：正则 `(\d+)\s*\/\s*(\d+)\s*帧` 取 `done` / `total` → `phaseKey = 'capture_disk'`（归入「逐帧捕获」，`renderText()` 才采信帧号）、`phaseLabel = '逐帧渲染（Rust 小内核）'`、`frames = { done, total }`；`已用\s*([\d.]+)s` 取已用秒，**只在 `startAtMs` 还是 0 时**反推起点（`Date.now() - Number(sec[1]) * 1000`）并 `startTicker()`；清 `msgText` 后 `renderText()`。
+- **无帧号行**（抽帧 / 归一化 / 完成等）：`if (!phaseLabel) phaseLabel = 'Rust 小内核渲染'`，`msgText = body.slice(0, 120)` 后 `renderText()`——阶段名沿用，消息交给秒表每秒带上。
+
+**根因与两次修复（为什么 #138 还不够）**：#138 加入了 `parseVidrender()`，把 `[小内核]` 帧号行解析进同一套 `phaseLabel` / `frames` / `startAtMs` / 秒表机制，但当时它只是按行缓冲 while 循环里的一个分支（`if (line.indexOf('[小内核]') >= 0) { parseVidrender(line); continue }`）。根因在于**HY CLI 输出天然带 `\n`，而小内核每条 `onProgress` 是一次独立 send、文本不带换行**：文本被追加进 `hfLogBuf` 后，永远等一个不会来的 `\n`，`parseVidrender` 根本不会被调用，用户只看到提交占位文案「已提交渲染（标准 · 30fps · 横屏，约 30 秒）...」。#139 的修法是把小内核文本改成**独立直通道**：收到 text 先判 `text.indexOf('[小内核]') >= 0`，是则 `parseVidrender(text); return`，**不进 `hfLogBuf` 按行缓冲**；同时删掉 while 循环里那条冗余的 `[小内核]` 分支。佐证：主进程 `debug-render.log` 确认该次渲染 **1350 帧 / 51s / 编码器退出码 0 / 出片成功**——进度确实在推送，只是上不了屏。改动落在 `src/renderer/src/composables/useRenderProgress.ts`（#138 后 190 行 → #139 后 **194 行**）。
+
+**`resetRenderProgress()` 与调用时机**：`renderProgress.text = ''` 清空展示 → `hfLogBuf = ''` **丢弃未挂载期间缓冲的半行残片** → `startAtMs` / `phaseLabel` / `phaseKey` / `frames` / `msgText` 全部复位 → `stopTicker()` 停表。语义对应旧版 `initHfPage` 清空 `#hf-status`：不清 `hfLogBuf` 的话，上一轮渲染遗留的半行残片会被拼到新一轮第一行前面，解析出一条畸形 JSON（新实现下的表现是“首条进度丢失”，而不是“显示乱码”）。调用时机：`initRenderProgress()` 在 `App.vue` 的 `onMounted` 全局只执行一次（订阅）；`resetRenderProgress()` 在**两个视频相关页面**挂载时执行——发起渲染的 `pages/HtmlGenPage/index.vue`（`onMounted` 清残留、`onRenderVideo` 结束覆盖 trace）与预览侧的 `pages/VideoPreviewPage/index.vue`（`onMounted` 里调用一次）。
 
 **展示侧有两处，语义不同**：
 
-- `pages/HtmlGenPage/PreviewSection.vue`：`statusDisplay = computed(() => ((props.rendering && renderProgress.text) ? renderProgress.text : props.status))` + `statusDisplayClass`（trace 接管时样式类返回 `''`）——**只有渲染中**才让全局 trace 顶掉状态文案；`rendering` 由父页 `index.vue` 以 prop 传入（**`status` / `thinkText` 的写入仍在 `index.vue`**——在 `runAgent` 的 `onTaskProgress` 回调里，只是展示随预览卡片搬到了本组件）。
-- `pages/VideoPreviewPage/index.vue`：`statusText = computed(() => renderProgress.text || localStatus.value)`，模板 `:class="statusClass"`——不做 `rendering` 判定，全局 trace 非空即优先显示（本页**不发起渲染**，所以只在用户从「HTML生成」页发起渲染、又切回本页时才会命中 trace）。
+- `pages/HtmlGenPage/PreviewSection.vue`：`statusDisplay = computed(() => ((props.rendering && renderProgress.text) ? renderProgress.text : props.status))` + `statusDisplayClass`（trace 接管时样式类返回 `''`）——**只有渲染中**才让全局 trace 顶掉状态文案；`rendering` 由父页 `index.vue` 以 prop 传入（**`status` / `thinkText` 的写入仍在 `index.vue`**——在 `runAgent` 的 `onTaskProgress` 回调里，只是展示随预览卡片搬到了本组件）。小内核文案经直通道写入同一个 `renderProgress.text`，因此走的是同一条展示路径。
+- `pages/VideoPreviewPage/index.vue`：`statusText = computed(() => renderProgress.text || localStatus.value)`，模板 `:class="statusClass"`——不做 `rendering` 判定，全局文案非空即优先显示（本页**不发起渲染**，所以只在用户从「HTML生成」页发起渲染、又切回本页时才会命中）。
 
-**注意事项**：**必须以完整行为单位解析**（`[Render:trace]` 行可能被 IPC 分块从任意位置截断，直接对每次 chunk 做 `JSON.parse` 会频繁失败）；**半行只在“收到换行”后才被消费**，若 CLI 的最后一行没有以 `\n` 结尾（进程结束时常见），它不会被本次解析计入——这是刻意取舍，避免解析半截 JSON；**“宁可不刷新”的代价**：若 CLI 一条 trace 都不发（例如人为调高日志级别）、或长时间停在未登记阶段，状态区会一直停在上一条文案（整场都无 trace 时停在本页占位文案），这是为“不显示术语”付的代价，判断为可接受；**唯一显示英文的出口是 `status === 'error'` 的失败原因**（截断 120 字），属刻意保留的诊断信息；**`slice(tIdx + 14)` 的魔法数**与 `'[Render:trace]'.length` 绑定，若日志标记改名，必须同步改 `indexOf` 判定与偏移量两处；**`elapsedMs` 是自流水线开始的总耗时**（CLI 另有 `durationMs` 表示本阶段耗时，本模块不使用），`Math.round` 四舍五入，因此 1499ms 显示 `已用 1s`、1500ms 显示 `已用 2s`；**帧进度只对三个 `capture_*` 显示**，`capture_calibration` 写的是探针帧、`framesCompleted` 恒为 0，报帧数会误导；**映射缺失既不吞也不显示**——查不到 `HF_PHASE_LABELS` 就整条不上屏，所以 HyperFrames 升级后若新增/改名阶段，界面上会“少一段进度”，需要补表（CLI 内部的 `pipeline` / `file_server` / `worker_resolution` / `capture_strategy` / `hdr_detection` 属有意不补）；**`catch (e)` 为空块**，解析异常只用于“放弃本条”，不打印错误避免刷屏，代价是排查解析问题需自行打断点；**单例与订阅次数**——`renderProgress` 是模块级 `reactive`，多个页面读同一份文本，但 `initRenderProgress()` 若被多处调用，最终生效的是**最后一次**传入的回调（preload 单订阅语义），不会重复处理同一 chunk。
+**注意事项**：**HY 日志必须以完整行为单位解析**（`[Render:trace]` 行可能被 IPC 分块从任意位置截断，直接对每次 chunk 做 `JSON.parse` 会频繁失败）；**HY 半行只在“收到换行”后才被消费**，若 CLI 的最后一行没有以 `\n` 结尾（进程结束时常见），它不会被本次解析计入——这是刻意取舍，避免解析半截 JSON；**小内核文本是例外，不走按行缓冲**，每条独立 send 直接交 `parseVidrender`（这是 #139 修复的核心，不能把它退回 while 循环里等 `\n`）；**本地秒表独立于 trace**——即使一条 trace 都没有，`startAtMs` 一旦被设定（来自 trace 的 `elapsedMs` 或小内核帧号行的「已用 Xs」），「已用 Ns」每秒走字；**“宁可不刷新”的代价**：若 HY 一条 trace 都不发（例如人为调高日志级别）、或长时间停在未登记阶段，状态区会一直停在上一条文案（整场都无 trace 时停在本页占位文案），这是为“不显示术语”付的代价，判断为可接受；**唯一显示英文的出口是 `status === 'error'` 的失败原因**（截断 120 字），属刻意保留的诊断信息；**`slice(tIdx + 14)` 的魔法数**与 `'[Render:trace]'.length` 绑定，若日志标记改名，必须同步改 `indexOf` 判定与偏移量两处；**`elapsedMs` 是自流水线开始的总耗时**，`Math.round` 四舍五入，因此 1499ms 显示 `已用 1s`、1500ms 显示 `已用 2s`；**帧进度只对三个 `capture_*` 显示**，小内核帧号行通过把 `phaseKey` 设为 `capture_disk` 借道同一判定；**映射缺失既不吞也不显示**——查不到 `HF_PHASE_LABELS` 就整条不上屏，所以 HyperFrames 升级后若新增/改名阶段，界面上会“少一段进度”，需要补表（CLI 内部的 `pipeline` / `file_server` / `worker_resolution` / `capture_strategy` / `hdr_detection` 属有意不补）；**`catch (e)` 为空块**，解析异常只用于“放弃本条”，不打印错误避免刷屏，代价是排查解析问题需自行打断点；**单例与订阅次数**——`renderProgress` 是模块级 `reactive`，多个页面读同一份文本，但 `initRenderProgress()` 若被多处调用，最终生效的是**最后一次**传入的回调（preload 单订阅语义），不会重复处理同一 chunk。
 
 ## 4. 运行环境：composables/useRuntime.ts 与 composables/useEnvGate.ts
 
@@ -511,7 +530,7 @@ export async function goPage(key: PageKey): Promise<void> {
 
 **与侧栏菜单的关系**：`App.vue` 的 `menuItems` 登记 **8 项**（`home`、`content`、`text-tts`、`subtitle`、`html-gen`、`video-preview`、`about`、`settings`），与本注册表的 8 个 key **一一对应、无多无少**。原先注册表里多出的 `sound-copy`（音色管理）已随页面并入配音页第三个 Tab 而删除，因此不再存在「菜单里点不到但注册表里有」的页面键。
 
-**注意事项**：**key 必须同时覆盖 8 个页面**，`pages` 用 `Record<PageKey, Component>` 声明，新增 `PageKey` 时 TypeScript 会强制补齐映射，避免出现“菜单能点但没有组件”的空页；**`currentPage` 用 `shallowRef` 而非 `ref`**——源码注释明确：组件对象**不应**被 Vue 深度代理，用 `ref` 会把组件定义包进响应式代理，可能引发组件实例/性能问题（Vue 对组件对象也有额外校验警告），`shallowRef` 只追踪 `.value` 的替换，正好匹配“切换即整体替换”的使用方式；**`pageNavKey` 递增会销毁并重建页面**，这是刻意行为，代价是每次导航都丢失页面内部状态（表单草稿、预览滚动位置等），若某页面需要保留状态，需要评估是否改用 `keep-alive` 或把状态提升到 `appState`；**导航是异步的且无并发保护**，两次快速点击会让两个 `refreshProject()` 并行，最终以最后完成的一次为准，页面切换也可能短暂落后于菜单高亮（当前通过“菜单高亮先更新”保证点击手感，未做取消/序号校验）；**`refreshProject()` 的异常已被 `goPage` 接住**（源码注释：旧写法「先 `await refreshProject()` 再切页」一旦抛错就永远停在「侧栏菜单亮了、页面没换」的半截状态，而未处理的 Promise 拒绝只进 devtools、界面上毫无提示），现在失败照切页并把原因 `toast` + `console.error` 说出来；但 `switchProject()` 等**其它调用方仍直接 `await refreshProject()`**，异常照旧向上冒泡；**滚动复位不在本文件**，`goPage` 不再操作 DOM（旧版有 `scrollTop = 0`），改由 `App.vue` 的 `watch(currentPage)` 承担，因为 `currentPage` 是 `shallowRef`，只有真正切换组件时才会触发该 watch；**注册表 8 项 = 侧栏菜单 8 项**，原 `sound-copy`（音色管理）已并入配音页 Tab，不再有“菜单里没有的页面键”这种例外。
+**注意事项**：**key 必须同时覆盖 8 个页面**，`pages` 用 `Record<PageKey, Component>` 声明，新增 `PageKey` 时 TypeScript 会强制补齐映射，避免出现“菜单能点但没有组件”的空页；**`currentPage` 用 `shallowRef` 而非 `ref`**——源码注释明确：组件对象**不应**被 Vue 深度代理，用 `ref` 会把组件定义包进响应式代理，可能引发组件实例/性能问题（Vue 对组件对象也有额外校验警告），`shallowRef` 只追踪 `.value` 的替换，正好匹配“切换即整体替换”的使用方式；**`pageNavKey` 递增会销毁并重建页面**，这是刻意行为，代价是每次导航都丢失页面内部状态（表单草稿、预览滚动位置等），若某页面需要保留状态，需要评估是否改用 `keep-alive` 或把状态提升到 `appState`；**导航是异步的且无并发保护**，两次快速点击会让两个 `refreshProject()` 并行，最终以最后完成的一次为准，页面切换也可能短暂落后于菜单高亮（当前通过“菜单高亮先更新”保证点击手感，未做取消/序号校验）；**`refreshProject()` 的异常已被 `goPage` 接住**（源码注释：旧写法「先 `await refreshProject()` 再切页」一旦抛错就永远停在「菜单亮了、页面没换」的半截状态，而未处理的 Promise 拒绝只进 devtools、界面上毫无提示），现在失败照切页并把原因 `toast` + `console.error` 说出来；但 `switchProject()` 等**其它调用方仍直接 `await refreshProject()`**，异常照旧向上冒泡；**滚动复位不在本文件**，`goPage` 不再操作 DOM（旧版有 `scrollTop = 0`），改由 `App.vue` 的 `watch(currentPage)` 承担，因为 `currentPage` 是 `shallowRef`，只有真正切换组件时才会触发该 watch；**注册表 8 项 = 侧栏菜单 8 项**，原 `sound-copy`（音色管理）已并入配音页 Tab，不再有“菜单里没有的页面键”这种例外。
 
 ## 9. 视频渲染档位：composables/useRenderOptions.ts 与 utils/render.ts
 

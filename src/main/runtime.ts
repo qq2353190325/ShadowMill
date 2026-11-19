@@ -273,6 +273,14 @@ function packsStatus(): PackStatus {
       out[def.name] = { state: 'ready', id: '', root: legacy, files: 0, unpackedBytes: 0, bytes: 0, legacy: true }
       continue
     }
+    // dev 兜底：仓库 resources/bin/ 里带着 vidrender-encode.exe（仓库内唯一的小二进制），
+    // hfEnv 的实际查找也认这条路径。缺包守卫必须与实际查找同一口径，否则 dev 下明明能渲染，
+    // 却被 missingPacks 拦下来要求下载一个更新源上根本没有的包（实测 vidrender.json 404）。
+    // 只在未打包时生效，root 留空以免 syncStatus 把不存在的路径刷进 hfEnv。
+    if (def.name === 'vidrender' && !app.isPackaged && hfEnv.BUILTIN_RESOURCES.vidrenderEncode) {
+      out[def.name] = { state: 'ready', id: 'dev-bin', root: '', files: 0, unpackedBytes: 0, bytes: 0, legacy: false }
+      continue
+    }
     out[def.name] = { state: 'missing', id: '', root: '', files: 0, unpackedBytes: 0, bytes: 0, legacy: false }
   }
   return out
