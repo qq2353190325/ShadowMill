@@ -145,10 +145,11 @@ const BUILTIN_RESOURCES: {
   get hfCli() { const r = resolvePackRoot('hyperframes'); return r ? path.join(r, 'hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs') : ''; },
   get hivePlayer() { const r = resolvePackRoot('hyperframes'); return r ? path.join(r, 'hyperframes', 'node_modules', 'hyperframes', 'dist', 'hyperframes-player.global.js') : ''; },
   get chromeShell() { const r = resolvePackRoot('hyperframes'); return r ? findChromeShell(r) : null; },
-  // 两个 Rust 大内核 CLI：运行环境包 > 安装包 extraResources > dev 仓库 resources/bin。
-  // 与 hfCli 不同，找不到时返回空串（由调用方给「缺包」提示）。
-  get vidCli() { return resolveRustCli('vid.exe'); },
-  get vidrenderCli() { return resolveRustCli('vidrender-cli.exe'); }
+  // 统一 Rust CLI（vidrender.exe，内部用 --backend webview|chrome 选内核）：
+  // 运行环境包 > 安装包 extraResources > dev 仓库 resources/bin。
+  // 两个 getter 都指向同一个新二进制，保留旧名字以兼容调用方；缺包时返回空串。
+  get vidCli() { return resolveRustCli('vidrender.exe'); },
+  get vidrenderCli() { return resolveRustCli('vidrender.exe'); }
 };
 
 function resolveRustCli(file: string): string {

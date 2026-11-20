@@ -36,7 +36,7 @@ export function initRuntime(): void {
 const PACK_LABEL: Record<RuntimePackName, string> = {
   ffmpeg: '音视频处理（ffmpeg）',
   hyperframes: '视频渲染引擎（HyperFrames）',
-  vidrender: 'Rust 渲染内核（vid / vidrender-cli）'
+  vidrender: 'Rust 渲染内核（vidrender.exe）'
 }
 
 export function useRuntime() {

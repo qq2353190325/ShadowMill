@@ -241,7 +241,7 @@ export interface UpdateProgressPayload {
 // 运行环境（分包：ffmpeg / hyperframes / vidrender 各自一个 7z，首次用到时下载；whisper 随安装包）
 // ============================================================
 // 为什么分包：ffmpeg(180MB) 被「转录转码」与「渲染」两条线共用、hyperframes(440MB) 只有渲染要、
-// vidrender(约 3MB) 是两个 Rust 大内核 CLI（vid / vidrender-cli）、whisper(12.5MB) 缺了转录就完全不能用
+// vidrender(约 2MB) 是统一 Rust CLI（vidrender.exe，--backend 选内核）、whisper(12.5MB) 缺了转录就完全不能用
 // ——四者变化节奏与归属都不同，捆在一起会让每次更新都重下全部。
 // 详见 docs/runtime-pack-split.md。
 // 单个包的状态：ready 已就绪；missing 本机没有（需要下载）；unknown 还没探测过

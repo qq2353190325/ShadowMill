@@ -8,7 +8,7 @@
 // 分包规则（2026-10 定的，详见 docs/runtime-pack-split.md）：
 //   ffmpeg       —— 被「转录转码」与「HyperFrames 渲染」两条线共用，独立成包，两边都不为对方的升级买单
 //   hyperframes  —— 只有渲染要（内含 chrome-headless-shell 268MB，所以这一包最大）
-//   vidrender    —— 两个 Rust 大内核 CLI（vid / vidrender-cli，约 3MB），与 hyperframes 并存
+//   vidrender    —— 统一 Rust CLI（vidrender.exe，约 2MB，内部 --backend webview|chrome 选内核），与 hyperframes 并存
 //   whisper      —— **不进任何包**：只 12.5MB（gzip 后 4.4MB），但「文字转字幕」缺它就完全不能用，
 //                   因此改为随安装包（package.json 的 extraResources），换来「装完即离线可用」
 //   node         —— 已整条移除（findNode() 复用 Electron 内嵌 Node；历史与回退后路见 src/main/hfEnv.ts）

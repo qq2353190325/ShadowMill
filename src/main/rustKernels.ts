@@ -1,18 +1,17 @@
 // src/main/rustKernels.ts —— 两个 Rust 大内核（WebView / Chrome）的产品接入
 //
-// 两者都是一次性 CLI，进程内直接调 vidrender-common 的渲染管线：
-//   vid            —— WebView 内核（Windows WebView2 / macOS WKWebView）
-//   vidrender-cli  —— Chrome 内核（CDP + chrome-headless-shell，与 HY 共用同一个内核 exe）
-// HTTP 服务（vidrender-server）只给服务端用，产品侧不走它。
+// 两者共用同一个一次性 CLI `vidrender.exe`，通过 --backend 选内核：
+//   --backend webview —— WebView 内核（Windows WebView2 / macOS WKWebView）
+//   --backend chrome  —— Chrome 内核（CDP + chrome-headless-shell，与 HY 共用同一个内核 exe）
+// HTTP 服务（vidrender-http）只给服务端用，产品侧不走它。
 //
-// 不注册任何新 IPC：由 video.ts 按设置分流调用。两个 CLI 的 stdout 是 JSON 结果，
-// stderr 是消息；都不推逐帧进度（内核的 on_progress 目前为 None），渲染期间由页面占位文案兜底。
+// 不注册任何新 IPC：由 video.ts 按设置分流调用。CLI 的 stdout 是 JSON 结果，
+// stderr 是消息；不推逐帧进度（内核的 on_progress 目前为 None），渲染期间由页面占位文案兜底。
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { CANVAS_SIZES } from '../shared/constants'
 import type { RenderCanvas, RenderQuality } from '../shared/types'
-import { BGM_TAG_ID } from './projects/bgm'
 import * as hfEnv from './hfEnv'
 
 export type RustKernel = 'webview' | 'server'
@@ -38,38 +37,33 @@ const CRF: Record<RenderQuality, number> = { draft: 26, standard: 20, high: 18 }
 // Rust 管线把入口 HTML 的**父目录**作为 loopback 静态根（见 vidrender-common/pipeline.rs）。
 // 产品入口写在 <项目>/.render-tmp/，素材引用是 ../xxx，会跑出静态根之外。
 // 因此这里把 ../ 去掉、把入口重写到项目根，让所有引用都落在静态根内。
-function prepareRustEntry(entryHtml: string): { htmlPath: string; bgmPath: string } {
+// 音频由内核直接读 <audio> 元素（多轨混音），所以这里只负责路径改写，不提取音频路径。
+function prepareRustEntry(entryHtml: string): string {
   const tmpDir = path.dirname(entryHtml)
   const projDir = path.dirname(tmpDir)
   const html = fs.readFileSync(entryHtml, 'utf8')
-  const rewritten = html.replace(/\b(src|href)\s*=\s*(["'])\.\.\/([^"']+)\2/gi,
+  let rewritten = html.replace(/\b(src|href)\s*=\s*(["'])\.\.\/([^"']+)\2/gi,
     (_whole, attr: string, quote: string, ref: string) => `${attr}=${quote}${ref}${quote}`)
-
-  let bgmPath = ''
-  const bgmRe = new RegExp('<audio\\b[^>]*\\bid=["\']' + BGM_TAG_ID + '["\'][^>]*\\bsrc=["\']([^"\']+)["\']', 'i')
-  const m = rewritten.match(bgmRe)
-  if (m) {
-    const candidate = path.resolve(projDir, m[1])
-    if (fs.existsSync(candidate)) bgmPath = candidate
-  }
-
+  // 超长媒体被 prepareEntry 裁到 .render-tmp/media/，src 写成 ./media/xxx（相对 tmpDir）。
+  // 入口搬到项目根后，这个相对路径会失效——改成相对项目根的 .render-tmp/media/xxx。
+  rewritten = rewritten.replace(/\b(src|href)\s*=\s*(["'])\.\/media\//gi,
+    (_whole, attr: string, quote: string) => `${attr}=${quote}.render-tmp/media/`)
   const htmlPath = path.join(projDir, 'entry.rust.html')
   fs.writeFileSync(htmlPath, rewritten, 'utf8')
-  return { htmlPath, bgmPath }
+  return htmlPath
 }
 
 /** 用指定的 Rust 内核渲染一次，返回 CLI 自报的耗时（毫秒）。 */
 export async function renderWithRustKernel(kernel: RustKernel, opts: RustRenderOptions): Promise<number> {
+  // 两个 getter 现在都指向同一个 vidrender.exe；用 --backend 区分内核。
   const exe = kernel === 'webview'
     ? hfEnv.BUILTIN_RESOURCES.vidCli
     : hfEnv.BUILTIN_RESOURCES.vidrenderCli
   if (!exe) {
-    throw new Error(kernel === 'webview'
-      ? '未找到 vid（WebView 内核）：请在设置里下载 Rust 渲染内核运行环境包'
-      : '未找到 vidrender-cli（Chrome 内核）：请在设置里下载 Rust 渲染内核运行环境包')
+    throw new Error('未找到 vidrender.exe（Rust 渲染内核）：请在设置里下载运行环境包，或检查 resources/bin')
   }
 
-  const { htmlPath, bgmPath } = prepareRustEntry(opts.entryHtml)
+  const htmlPath = prepareRustEntry(opts.entryHtml)
   const size = CANVAS_SIZES[opts.canvas]
   const env: NodeJS.ProcessEnv = { ...process.env }
   const ffmpegBin = hfEnv.BUILTIN_RESOURCES.ffmpegBin
@@ -80,13 +74,13 @@ export async function renderWithRustKernel(kernel: RustKernel, opts: RustRenderO
 
   const args = [
     'render', htmlPath,
+    '--backend', kernel === 'webview' ? 'webview' : 'chrome',
     '--output', opts.output,
     '--width', String(size.width),
     '--height', String(size.height),
     '--fps', String(opts.fps),
     '--crf', String(CRF[opts.quality || 'standard'])
   ]
-  if (bgmPath) args.push('--audio', bgmPath)
 
   if (opts.onProgress) opts.onProgress('[Rust 内核] 正在启动渲染...')
   try {

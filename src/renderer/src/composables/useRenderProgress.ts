@@ -86,7 +86,7 @@ export function resetRenderProgress(): void {
   stopTicker();
 }
 
-// Rust 大内核（vid / vidrender-cli）的 stderr 进度：管线每 15 帧打一行 `frame N/M`。
+// Rust 大内核（vidrender.exe）的 stderr 进度：管线每 15 帧打一行 `frame N/M`。
 // 它们没有 HY 的 [Render:trace]，所以在这里按帧号行解析，复用同一套阶段 / 帧号 / 秒表文案。
 function parseRustKernel(line: string): void {
   const at = line.indexOf('[Rust 内核]');

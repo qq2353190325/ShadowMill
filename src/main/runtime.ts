@@ -45,10 +45,10 @@ import { getUpdaterSettings } from './settings'
 const PACK_DEFS: { name: RuntimePackName; title: string; hint: number; files: string[] }[] = [
   { name: 'ffmpeg', title: '音视频处理（ffmpeg）', hint: 43 * 1024 * 1024, files: [path.join('ffmpeg', 'bin', 'ffmpeg.exe'), path.join('ffmpeg', 'bin', 'ffprobe.exe')] },
   { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 103 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] },
-  { name: 'vidrender', title: 'Rust 渲染内核（vid / vidrender-cli）', hint: 3 * 1024 * 1024, files: [path.join('bin', 'vid.exe'), path.join('bin', 'vidrender-cli.exe')] }
+  { name: 'vidrender', title: 'Rust 渲染内核（vidrender.exe）', hint: 3 * 1024 * 1024, files: [path.join('bin', 'vidrender.exe')] }
 ]
 const PACK_NAMES: RuntimePackName[] = PACK_DEFS.map((d) => d.name)
-// vidrender 包装的是两个 Rust 大内核 CLI：只有用户显式选了对应引擎才需要，
+// vidrender 包装的是统一 Rust CLI（vidrender.exe）：只有用户显式选了对应引擎才需要，
 // 不进产品的默认缺包提示与「下载全部」（默认仍是 hyperframes）
 const PRODUCT_PACKS: RuntimePackName[] = PACK_NAMES.filter((n) => n !== 'vidrender')
 
@@ -273,7 +273,7 @@ function packsStatus(): PackStatus {
       out[def.name] = { state: 'ready', id: '', root: legacy, files: 0, unpackedBytes: 0, bytes: 0, legacy: true }
       continue
     }
-    // dev 兜底：仓库 resources/bin/ 里带着两个 Rust CLI，hfEnv 的实际查找也认这条路径。
+    // dev 兜底：仓库 resources/bin/ 里带着统一的 vidrender.exe，hfEnv 的实际查找也认这条路径。
     // 缺包守卫必须与实际查找同一口径，否则 dev 下明明能渲染，却被 missingPacks 拦下来要求下载
     // 一个更新源上根本没有的包（实测 vidrender.json 404）。只在未打包时生效，root 留空。
     if (def.name === 'vidrender' && !app.isPackaged &&
