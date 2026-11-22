@@ -141,7 +141,7 @@ function stageTo(dir) {
   lines.push('目标目录：' + (publishUrl || '(package.json 里未配置 build.publish.url)'))
   lines.push('')
   lines.push('用法：把本目录下的九个文件**按下面顺序**原样传到上面那个目录（名字一个字都不要改）。')
-  lines.push('      大文件先传、三个清单最后传：客户端靠清单判断「要不要更新 / 要不要下运行环境包」，')
+  lines.push('      大文件先传、四个清单最后传：客户端靠清单判断「要不要更新 / 要不要下运行环境包」，')
   lines.push('      顺序反了会出现「清单说更新、文件还没传完」的窗口。')
   lines.push('      传完可用 `npm run release -- --verify-only` 匿名自检。')
   lines.push('')

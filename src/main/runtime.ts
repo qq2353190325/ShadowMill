@@ -35,17 +35,16 @@ import * as hfEnv from './hfEnv'
 import { getUpdaterSettings } from './settings'
 
 // ===== 包定义（scripts/pack-runtime.mjs 的 PACKS 必须与之对应）=====
-// hint：界面在用户确认下载前给出的体积提示，取整到 MiB。
-//   ffmpeg 42.6 MiB（build/runtime-pack/ffmpeg.json 的 bytes = 44,698,068）⇒ 43（实测）
-//   hyperframes 原 103.1 MiB 含 chrome；拆包后按未压缩体积占比估算 ⇒ 40（估，待产出后校准）
-//   chrome 268.7 MiB 未压缩、7z 体积未实测，按同一压缩率估算 ⇒ 63（估，待产出后校准）
-// ⚠ 后两个是估算值：等你跑 npm run runtime:pack 后，按 chrome.json / hyperframes.json 的 bytes 回填。
+// hint：界面在用户确认下载前给出的体积提示，取整到 MiB；均为 runtime:pack 产出清单的实测值。
+//   ffmpeg 42.6 MiB（ffmpeg.json bytes = 44,698,068）⇒ 43
+//   hyperframes 33.0 MiB（hyperframes.json bytes = 34,655,034，已不含 chrome）⇒ 33
+//   chrome 70.4 MiB（chrome.json bytes = 73,818,541，未压缩 268.7 MiB）⇒ 70
 // 准备过程中会用清单里的真实字节覆盖这个提示值。
 // files：判定「解包完整」的关键文件（相对包目录），缺一即视为未就绪并触发重下。
 const PACK_DEFS: { name: RuntimePackName; title: string; hint: number; files: string[] }[] = [
   { name: 'ffmpeg', title: '音视频处理（ffmpeg）', hint: 43 * 1024 * 1024, files: [path.join('ffmpeg', 'bin', 'ffmpeg.exe'), path.join('ffmpeg', 'bin', 'ffprobe.exe')] },
-  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 40 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] },
-  { name: 'chrome', title: '谷歌内核（headless-shell）', hint: 63 * 1024 * 1024, files: [path.join('chrome', 'chrome-headless-shell')] }
+  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 33 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] },
+  { name: 'chrome', title: '谷歌内核（headless-shell）', hint: 70 * 1024 * 1024, files: [path.join('chrome', 'chrome-headless-shell')] }
 ]
 const PACK_NAMES: RuntimePackName[] = PACK_DEFS.map((d) => d.name)
 // vidrender.exe 随安装包内置，不在运行包体系里；三个包都进默认缺包提示与「下载全部」，

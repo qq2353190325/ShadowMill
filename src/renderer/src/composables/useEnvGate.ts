@@ -42,10 +42,10 @@ const LABEL: Record<RuntimePackName, string> = {
   chrome: '谷歌内核（headless-shell）'
 }
 
-// 体积提示（真实值以主进程清单为准，准备过程中会回推）：ffmpeg 43 MiB 为实测，
-// hyperframes 40 / chrome 63 为拆包后的估算，待 npm run runtime:pack 产出后校准。
-// 主进程 PACK_DEFS.hint 同此口径。vidrender.exe 随安装包内置，不再是运行包。
-const HINT_MB: Record<RuntimePackName, number> = { ffmpeg: 43, hyperframes: 40, chrome: 63 }
+// 体积提示（真实值以主进程清单为准，准备过程中会回推）：三个都是 runtime:pack 产出清单的实测值取整到 MiB，
+// ffmpeg 43（42.6）、hyperframes 33（33.0）、chrome 70（70.4）。主进程 PACK_DEFS.hint 同此口径。
+// vidrender.exe 随安装包内置，不再是运行包。
+const HINT_MB: Record<RuntimePackName, number> = { ffmpeg: 43, hyperframes: 33, chrome: 70 }
 
 // 确认框逐包一行的说明文案：hyperframes 的前置依赖、chrome 的适用范围。
 const PACK_NOTE: Partial<Record<RuntimePackName, string>> = {
