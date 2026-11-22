@@ -54,7 +54,7 @@
 // 与原生 <select> 对齐的语义：v-model、disabled、title、空值占位、optgroup 分组、@change 仅在用户选择时触发
 // （程序化改值不触发，等价于原生 v-model 赋值不发 change —— SynthSection 的「自定义目录…」取消回退依赖这一点）。
 // 宽度/布局交给父组件：默认 flex:1 撑满行内剩余空间（同原 .hgen-select 的 style="flex:1"），
-// 需要固定宽度就传 style（如 StepBar 的项目切换器 style="width:210px;flex:none"）。
+// 需要固定宽度就传 style（如侧栏「工作项目」区的切换器用 class 定宽 100%）。
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 export interface HfSelectOption {

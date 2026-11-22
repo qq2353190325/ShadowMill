@@ -1,107 +1,95 @@
 <template>
-  <div>
-    <StepBar :page="'html-gen'" />
-    <div class="card hgen-panel">
-      <div class="panel-title"><span class="dot"></span>HTML · Agent {{ hasHtml ? '修改' : '生成' }}
-        <!-- 「用法」原本是 .proj-meta 里的第 4 个状态格——它是操作说明、不是项目数据，会把状态条撑得很难扫，
-             现改为标题右侧的行内帮助。两点必须写死：① letter-spacing 归零——.panel-title 带 2px，
-             不清掉气泡正文会整段变宽；② 气泡改**向下**展开（.hg-help-pop 默认向上），因为标题就在卡片最顶端，
-             向上会顶出滚动容器 .content 的 overflow 被整块裁掉。 -->
-        <span class="hg-help" style="letter-spacing:0" @click.stop>
-          <span class="hg-help-icon">?</span>
-          <span class="hg-help-pop" style="top:calc(100% + 8px);bottom:auto">{{ usageHint }}</span>
-        </span>
-      </div>
-      <!-- 项目状态（原 renderMeta 的 #hg-meta）：只放「这个项目现在有什么」这类数据，说明类文案一律不进这里 -->
-      <div class="proj-meta">
-        <div class="proj-stat" :class="{ on: meta.hasH }"><b>HTML</b>{{ meta.hasH ? '已生成' : '尚未生成' }}</div>
-        <div class="proj-stat" :class="{ on: meta.sceneN > 0 }"><b>内容脚本</b>{{ meta.sceneN ? meta.sceneN + ' 个场景（生成时自动附带）' : (meta.missVisual ? '有旁白但都没填「画面分镜」' : '无（可先到「内容脚本」页编写）') }}</div>
-        <div class="proj-stat" :class="{ on: meta.matN > 0 || meta.subCount > 0 }"><b>素材</b>{{ meta.matText }}</div>
-      </div>
-      <!-- 生成前提（字幕 + 画布）并成一行：这两块原先各有一行小标题，两个控件挤一行后「哪个标题管哪个控件」
-           会歧义，故这两条标题去掉、名称交给行内标签（「全局视觉风格」仍保留自己的标题）。
-           画布那句「预览与成片都按…」连同「换画布不会自动重排」一起收进 ? 气泡（行内不再显示）；
-           字幕「留空则跳过」由下拉第一项「不使用字幕」本身表达，不再单独写提示。 -->
-      <div class="hgen-block">
-        <div class="hgen-row" style="margin-bottom:0">
-          <span class="sel-label" style="flex:none;width:40px">字幕</span>
-          <HfSelect v-model="subSel" :groups="subSelGroups" style="width:260px;flex:none" title="按所选字幕逐条设计动画" />
-          <label class="sel-label" style="flex:none;width:40px">画布</label>
-          <!-- 画布：**项目属性**（不是渲染档位，不进设置页那套"全局默认/项目覆盖"）。它是生成前的版式前提：
-               模型要按这块画布排版式，预览与成片也都用它，所以放在生成这一侧；
-               「改完要重新生成」那句统一在动作行上方说一次，这里不重复。 -->
-          <HfSelect v-model="canvas" :groups="canvasGroups" :disabled="rendering" style="width:188px;flex:none" @change="onCanvasChange" />
+  <!-- HTML生成页工作台：一屏三区 —— 左主区（预览 + 对话）、右侧配置栏。
+       项目状态条（HTML/脚本/素材三格）按用户要求删掉；工作项目切换已挪到侧栏「工作项目」区。 -->
+  <div class="hgen-workbench" :class="{ 'is-collapsed': sideCollapsed }">
+    <div class="hgen-main">
+      <!-- 预览卡：只放画面本体（状态 / 思考 / 播放条）；标题与两个产物动作都在右侧栏常驻「预览」分组 -->
+      <section class="card hgen-preview-card">
+        <PreviewSection
+          ref="previewRef"
+          :status="status"
+          :status-class="statusClass"
+          :think-text="thinkText"
+          :rendering="rendering"
+          :running="agentRunning"
+        />
+      </section>
+
+      <!-- 对话区：仍是原来的「需求描述 + 生成/修改」，只换成输入框 + 按钮的样子，逻辑零改动 -->
+      <section class="card hgen-chat-card">
+        <div class="hgen-chat-head">
+          <div class="panel-title-sm" style="margin:0">需求描述（提示词）</div>
           <span class="hg-help" style="letter-spacing:0" @click.stop>
             <span class="hg-help-icon">?</span>
-            <!-- 气泡向下展开：这一行常被滚到视口顶端，向上会被 .content 的 overflow 裁掉（.hg-help-pop 默认向上）。
-                 正文两段：canvasNote 随画布变（这块画布管什么）+ canvasHint 固定（换画布要付出什么代价）。 -->
-            <span class="hg-help-pop" style="top:calc(100% + 8px);bottom:auto">{{ canvasNote }} {{ canvasHint }}</span>
+            <span class="hg-help-pop" style="top:calc(100% + 8px);bottom:auto">{{ usageHint }}</span>
           </span>
         </div>
-      </div>
-      <!-- 全局视觉风格：**项目属性**（存 project.json 的 content.style），与上面的「画布」同属生成前的整片级前提，
-           所以编辑入口放在生成这一侧。它只进 HTML 生成提示词（projects.ts 的 buildStyleBlock 写成
-           「【全局视觉风格】…」一块，无条件注入，与有没有内容脚本无关），
-           配音与字幕只读场景的旁白 / 时长提示、不读这个字段。 -->
-      <div class="hgen-block">
-        <div class="panel-title-sm">全局视觉风格（整片视觉基调）</div>
+        <textarea v-model="prompt" class="hgen-subtitle hgen-chat-input" spellcheck="false" :placeholder="promptPlaceholder"></textarea>
+        <div class="hgen-chat-foot">
+          <!-- 第一行：主动作（生成 / 修改） -->
+          <div class="hgen-chat-actions">
+            <button class="hf-btn hf-btn-primary" :disabled="rendering" @click="onGenerate">
+              生成 HTML
+              <span class="hg-help" @click.stop>
+                <span class="hg-help-icon">?</span>
+                <span class="hg-help-pop">不参考现有页面，从零做一版新的。点一次即开始并覆盖当前页面，想留底稿可先「下载 HTML」。</span>
+              </span>
+            </button>
+            <button class="hf-btn" :disabled="!hasHtml || rendering" @click="onModify">
+              按需求修改
+              <span class="hg-help" @click.stop>
+                <span class="hg-help-icon">?</span>
+                <span class="hg-help-pop">在当前页面的基础上，按你描述的改一版——换配色、调节奏、改文案都用它。还没生成过 HTML 时不可用。</span>
+              </span>
+            </button>
+          </div>
+          <!-- 第二行：产物动作（下载 HTML / 转视频），就在输入框下面，不用去右侧栏找 -->
+          <div class="hgen-chat-actions hgen-chat-actions-sub">
+            <button class="hf-btn" title="下载当前项目 HTML 到本地" @click="onDownload">下载 HTML</button>
+            <button class="hf-btn hf-btn-primary" :disabled="!hasHtml || rendering" title="把当前 HTML 渲染成 MP4（约 30 秒）" @click="openRenderModal">转视频</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 右侧栏：竖排 5 个手风琴块（一次只展开一个）+ 整条栏可收起 -->
+    <WorkbenchSide v-model:collapsed="sideCollapsed">
+      <template #other>
+        <div class="hgen-side-sub">预览设置</div>
+        <PreviewControls part="view" />
+        <div class="hgen-side-sub">生成设置</div>
         <div class="hgen-row" style="margin-bottom:0">
-          <label class="sel-label" style="flex:none;width:40px">风格</label>
+          <span class="sel-label" style="flex:none;width:40px">字幕</span>
+          <HfSelect v-model="subSel" :groups="subSelGroups" style="flex:1;min-width:0" title="按所选字幕逐条设计动画" />
+        </div>
+        <div class="hgen-row" style="margin-bottom:0">
+          <label class="sel-label" style="flex:none;width:40px">画布</label>
+          <HfSelect v-model="canvas" :groups="canvasGroups" :disabled="rendering" style="flex:1;min-width:0" @change="onCanvasChange" />
+          <!-- 气泡向上 + 向左展开并限宽：右侧栏手风琴里这行不在视口顶端，向上不会顶出滚动区；
+               向左才不会超出 300px 栏宽被裁 -->
+          <span class="hg-help" style="letter-spacing:0" @click.stop>
+            <span class="hg-help-icon">?</span>
+            <span class="hg-help-pop" style="right:0;left:auto;max-width:240px">{{ canvasNote }} {{ canvasHint }}</span>
+          </span>
+        </div>
+        <div class="hgen-block">
+          <div class="panel-title-sm">全局视觉风格（整片视觉基调）</div>
           <input
             v-model="styleText"
             class="hgen-input"
-            style="flex:1"
-            placeholder="整支片子的视觉基调，如：深空科技 Cyber 风、霓虹紫渐变、粒子背景（只影响「生成 HTML」）"
+            style="width:100%"
+            placeholder="整支片子的视觉基调，如：深空科技 Cyber 风、霓虹紫渐变（只影响「生成 HTML」）"
             @change="onStyleChange"
           />
+          <div class="hgen-tip">留空 = 未指定，模型按需求描述自行拟定；改完失焦即保存到项目。</div>
         </div>
-        <div class="hgen-tip">留空 = 未指定，模型按需求描述自行拟定；改完失焦即保存到项目。</div>
-      </div>
-      <!-- 项目素材库（图片 / 视频）：增删与勾选都在子组件里完成，落盘后刷新全局项目状态 -->
-      <MaterialsSection />
-      <!-- 角色：**只勾选**（角色只有全局一份，新建 / 改画法都在「角色」页）。
-           勾上 = 本片用到它：生成时应用把那份共享绘制代码复制进项目并注入页面 -->
-      <CastSection />
-      <!-- 章节列表（仅章节化产物才有）：只读列表，点「改这一章」把范围写回下面的需求描述 -->
-      <ChapterSection v-model:prompt="prompt" />
-      <div class="hgen-block">
-        <div class="panel-title-sm">需求描述（提示词）</div>
-        <textarea v-model="prompt" class="hgen-subtitle" spellcheck="false" :placeholder="promptPlaceholder"></textarea>
-      </div>
-      <!-- 画布与视觉风格的共同前提（原先在两处 tip 里各说一遍）：改完不会自动生效，要重新生成 -->
-      <div class="hgen-tip">画布与视觉风格都是生成前提：改完要重新「生成 HTML」或「按需求修改」才会体现在页面上。</div>
-      <div class="hgen-actions">
-        <!-- 两个动作并列：生成（从零做一版） / 按需求修改（在现有页面上改）；
-             每个按钮里各带一个 ? 图标，鼠标悬浮出现该动作自己的说明（.hg-help-pop；点击 ? 不会触发按钮） -->
-        <button class="hf-btn hf-btn-primary" :disabled="rendering" @click="onGenerate">
-          生成 HTML
-          <span class="hg-help" @click.stop>
-            <span class="hg-help-icon">?</span>
-            <span class="hg-help-pop">不参考现有页面，从零做一版新的。点一次即开始并覆盖当前页面，想留底稿可先「下载 HTML」。</span>
-          </span>
-        </button>
-        <button class="hf-btn" :disabled="!hasHtml || rendering" @click="onModify">
-          按需求修改
-          <span class="hg-help" @click.stop>
-            <span class="hg-help-icon">?</span>
-            <span class="hg-help-pop">在当前页面的基础上，按你描述的改一版——换配色、调节奏、改文案都用它。还没生成过 HTML 时不可用。</span>
-          </span>
-        </button>
-        <button class="hf-btn" title="下载当前项目 HTML 到本地" @click="onDownload">下载 HTML</button>
-        <!-- 转视频只剩这一个按钮：点它先开「渲染档位」弹窗，确认后才开始渲染（成品到「视频预览」页看） -->
-        <button class="hf-btn hf-btn-primary" :disabled="!hasHtml || rendering" title="把当前 HTML 渲染成 MP4（约 30 秒）" @click="openRenderModal">转视频</button>
-      </div>
-    </div>
-
-    <!-- 预览卡片：iframe 预览副本 + 播放控制条 + AI 思考过程 + 背景音频（子组件，状态由本页传入） -->
-    <PreviewSection
-      ref="previewRef"
-      :status="status"
-      :status-class="statusClass"
-      :think-text="thinkText"
-      :rendering="rendering"
-      :running="agentRunning"
-    />
+        <div class="hgen-tip">画布与视觉风格都是生成前提：改完要重新「生成 HTML」或「按需求修改」才会体现在页面上。</div>
+        <template v-if="chapterCount > 0">
+          <div class="hgen-side-sub">章节（{{ chapterCount }} 章）</div>
+          <ChapterSection v-model:prompt="prompt" />
+        </template>
+      </template>
+    </WorkbenchSide>
 
     <!-- 转视频弹窗：把「渲染档位」摆在这里确认一遍再开始（档位文案随「设置页默认 / 本项目覆盖」实时变化） -->
     <div class="hf-modal-mask" v-show="renderModalVisible" @click.self="closeRenderModal">
@@ -137,8 +125,8 @@
 
 <script setup lang="ts">
 // pages/HtmlGenPage/index.vue —— HTML 生成/修改页（页面键 html-gen）
-// 本页只留「生成/修改 + 渲染」这条主动作链：素材库在 MaterialsSection.vue、预览与背景音频在 PreviewSection.vue。
-// 拆分的理由是按「一个文件一件事」切：素材的增删勾选与本页的生成流程互不依赖，预览那套 iframe/seek/音频试听也自成一块。
+// 本页只留「生成/修改 + 渲染」这条主动作链：右侧栏在 WorkbenchSide.vue、预览画面在 PreviewSection.vue。
+// 布局为工作台：预览 + 对话常驻主区，素材/角色/音频/设置收进右侧竖排手风琴；逻辑与原版逐字一致。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { RenderCanvas, RenderFps, RenderQuality, RuntimePackName } from '@shared/types'
 import { appState, hasHtml, refreshProject } from '@renderer/composables/useAppStore'
@@ -159,12 +147,15 @@ import {
 import { effectiveRenderOptions, renderBackend, renderDefaults, saveProjectRenderOverride } from '@renderer/composables/useRenderOptions'
 import { useProjectMeta } from '@renderer/composables/useProjectMeta'
 import { newTaskId } from '@renderer/utils/taskId'
-import StepBar from '@renderer/components/StepBar.vue'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
-import MaterialsSection from './MaterialsSection.vue'
 import ChapterSection from './ChapterSection.vue'
-import CastSection from './CastSection.vue'
 import PreviewSection from './PreviewSection.vue'
+import PreviewControls from './PreviewControls.vue'
+import WorkbenchSide from './WorkbenchSide.vue'
+
+// ===== 右侧栏：竖排手风琴 + 整条栏收起态（状态只在本页，不落盘，重进页面默认展开） =====
+const sideCollapsed = ref(false);
+const chapterCount = computed(() => ((appState.project && appState.project.chapters) || []).length);
 
 // ===== 生成/修改 =====
 const envGate = useEnvGate();
@@ -173,7 +164,7 @@ const configPrompt = useConfigPrompt();
 const prompt = ref('');
 const subSel = ref('');
 
-// ===== 字幕素材下拉选项（HfSelect；原为 <option v-if>/<option v-for>） =====
+// ===== 字幕素材下拉选项 =====
 const subSelGroups = computed<HfSelectGroup[]>(() => [{
   label: '',
   options: [
@@ -191,19 +182,15 @@ const statusClass = ref('');
 const thinkText = ref('');
 
 // ===== 画布（成片尺寸）——**项目属性，不是渲染档位** =====
-// 只在这一处选，同一个值决定三件事：① 生成提示词里给模型的版式尺寸（projects.ts 的【画布】块）
-// ② 预览 iframe 的画布（PreviewSection 直接读 appState.project.canvas）③ 渲染入口注入的 data-resolution。
-// 存 project.json 的 canvas（缺省 = 横屏 1920x1080）；没有"设置页默认 → 项目覆盖"那种层级。
+// 同一个值决定三件事：① 生成提示词里给模型的版式尺寸 ② 预览 iframe 的画布 ③ 渲染入口注入的 data-resolution。
 const canvas = ref<RenderCanvas>(normalizeCanvas(appState.project && appState.project.canvas));
 const canvasGroups = computed<HfSelectGroup[]>(() => [{
   label: '',
   options: RENDER_CANVAS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
 }]);
-// 画布 ? 气泡的**前半句**（随当前画布变）：这块画布管什么
+// 画布 ? 气泡：前半句随画布变，后半句固定（「改完要重新生成」那句在右侧设置分组里统一说一次）
 const canvasNote = computed(() => '预览与成片都按「' + canvasLabel(canvas.value) + '」这块画布。');
-// 画布 ? 气泡的**后半句**（固定文案）：换画布要付出什么代价（「改完要重新生成」那句统一在动作行上方说一次，这里不重复）
 const canvasHint = '换画布不会自动重排已有页面：版式是生成时按画布排的，模型若按横屏排过版，切到竖屏 / 方形会留下黑边或裁切。';
-// 项目切换 / 刷新后同步显示值（脏数据落回默认横屏）
 function syncCanvas(): void {
   canvas.value = normalizeCanvas(appState.project && appState.project.canvas);
 }
@@ -220,51 +207,44 @@ async function onCanvasChange(): Promise<void> {
 }
 
 // ===== 全局视觉风格（项目属性 content.style）=====
-// 只影响 HTML 生成：主进程 buildStyleBlock() 把它写成提示词里的【全局视觉风格】块（无条件注入）。
-// 配音（SynthSection「载入脚本旁白」）与字幕（「由脚本旁白生成」）只读场景的旁白 / 时长提示，不读它，
-// 所以这个输入框放在生成侧（与「画布」同级），不再放「内容脚本」页。
+// 只影响 HTML 生成：主进程 buildStyleBlock() 无条件注入提示词；配音与字幕不读它。
 const styleText = ref('');
 function syncStyle(): void {
   styleText.value = (appState.project && appState.project.content && appState.project.content.style) || '';
 }
-// 失焦即落盘（与「画布」@change 同一节奏）：project:save-content 是整份 content 覆盖，
-// 所以必须把现有 scenes 原样带回——只提交 style 会把场景清空。
+// 失焦即落盘：project:save-content 是整份 content 覆盖，所以必须把现有 scenes 原样带回
 async function onStyleChange(): Promise<void> {
   const cur = appState.project && appState.project.content;
   const scenes = (cur && Array.isArray(cur.scenes)) ? cur.scenes : [];
   const res = await window.projectTools.saveContent(appState.currentName, { style: styleText.value.trim(), scenes });
   if (!res || !res.ok) {
     toast((res as { message?: string })?.message || '保存视觉风格失败');
-    syncStyle();   // 落盘失败：把输入框退回项目里的旧值，避免界面显示一个并没保存的值
+    syncStyle();
     return;
   }
   await refreshProject();
   syncStyle();
 }
 
-// 提示词占位文案随状态变：没 HTML 时讲"要什么样的页面"，已有 HTML 时讲"这次改什么"
 const promptPlaceholder = computed(() => (hasHtml.value
   ? '描述这次要改什么，例如：\n· 换成紫色霓虹配色，并把标题放大\n· 字幕出现得太快，节奏放慢一些'
   : '描述你想要的 HTML 效果，例如：\n· 深空科技风格的标题动画页，标题为“我的作品集”\n· 每条字幕间隔两秒，依次从下方上浮淡入'));
 
-// 项目状态条 + 标题右侧的「用法」气泡：纯派生逻辑在 composables/useProjectMeta.ts
-// （口径与主进程 buildContentBlock 一致：画面分镜非空才算一场；拆出去也是为了本页守住 500 行上限）
+// meta 仍被 runAgent 用来判断附带的内容脚本场景数；usageHint 收进对话区标题右侧的 ? 气泡
 const { meta, usageHint } = useProjectMeta();
 
 // 预览子组件的对外契约只有 reload()（Agent 成功后按新的 HTML 重载预览副本）
 const previewRef = ref<{ reload: () => void } | null>(null);
 
 // ===== 生成 / 修改 =====
-// 用 ref 而不是普通 let：预览卡的思考区要按它决定「自动展开 / 自动收起」（下传给 PreviewSection 的 running）
 const agentRunning = ref(false);
 async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
   if (agentRunning.value) { toast('上一个请求还在处理中，请稍候'); return; }
   if (rendering.value) { toast('正在渲染视频，请等它结束再提交需求'); return; }
   const p = prompt.value.trim();
-  if (!p) { toast('请先填写需求描述（上方提示词输入框）'); return; }
+  if (!p) { toast('请先填写需求描述（下方提示词输入框）'); return; }
   agentRunning.value = true;
-  // 任务 id：本页的进度只认它（见 preload 的 onTaskProgress 与 shared/types 的 HtmlProgressPayload）。
-  // 「角色」页画角色时用它自己的 id，两条流可以并行、状态与思考各归各的（同一条频道 + 按 id 分发）。
+  // 任务 id：本页的进度只认它（见 preload 的 onTaskProgress 与 shared/types 的 HtmlProgressPayload）
   const taskId = newTaskId('html');
   thinkText.value = '';
   const off = window.projectTools.onTaskProgress(taskId, (info) => {
@@ -276,21 +256,16 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
     thinkText.value = String(info.thinkText || '');
   });
   const sceneN = meta.value.sceneN;
-  // 方案B：生成/修改前提示将附带当前项目内容脚本（脚本为 HTML 的整体内容源）。
-  // 附带门槛是「画面分镜非空」，所以「有旁白但都没填画面」要单独说一句，否则会显示成"无内容脚本"，
-  // 让人以为自己的脚本白写了（这正是用户最初以为「AI 生成跟自己脚本无关」的观感来源之一）。
   status.value = sceneN
     ? '将附带当前项目内容脚本（' + sceneN + ' 个场景），已提交给 Agent，处理中...'
     : (meta.value.missVisual
       ? '当前项目的内容脚本都缺「画面分镜」，附带不到提示词里，将仅按需求描述生成。已提交给 Agent，处理中...'
       : '当前项目无内容脚本，将仅按需求描述生成。已提交给 Agent，处理中...');
   statusClass.value = '';
-  // 本次生成/修改所选素材：字幕 + 素材库里**勾选**的图片/视频（顺序 = 列表顺序，提示词按此顺序列路径）。
-  // 音轨不在其中：主进程在 HTML 落盘后按 project.audioFile 注入 <audio id="myv-bgm">。
+  // 本次生成/修改所选素材：字幕 + 素材库里**勾选**的图片/视频（顺序 = 列表顺序）
   const materials = {
     subtitleProject: subSel.value,
     materialIds: ((appState.project && appState.project.materials) || []).filter((m) => m.selected).map((m) => m.id),
-    // 进度按它路由（必填）：主进程每条进度都带回这个 id
     taskId
   };
   try {
@@ -301,7 +276,6 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
     if (res && res.ok) {
       await refreshProject();
       previewRef.value?.reload();
-      // 状态行直接用主进程回的消息（章节模式下会带回「已生成 N 章」这类信息）
       status.value = (res.message || 'Agent 已更新 HTML') + (res.htmlPath ? '：' + res.htmlPath : '');
       statusClass.value = 'hf-ok';
       toast(mode === 'generate' ? 'HTML 已生成' : 'HTML 已修改');
@@ -309,79 +283,59 @@ async function runAgent(mode: 'generate' | 'modify'): Promise<void> {
       const msg = (res && res.message) || '提交失败';
       status.value = msg;
       statusClass.value = 'hf-error';
-      // 配置类（Key 无效 / 未启用 / 配置不完整 / Base URL 填错…）：主进程判好的分类 → 弹「去设置」
-      // 状态行照样留着（框关掉后还能看见原因），但不叠 toast——弹窗已经把信息讲全了
-      // 余额 / 欠费不在其中（主进程不会给它 needConfig）：改设置修不好余额，走内嵌状态行
       if (res && res.needConfig) {
         configPrompt.open(msg, res.needConfig, false, res.title);
       } else {
         toast(msg);
       }
-      // 生成失败且项目原本就无 HTML：让预览回到「未生成」展示，避免误显示为已生成
       if (!appState.project?.htmlExists) previewRef.value?.reload();
     }
   } finally {
-    off();               // 任务结束就退订：不留后台回调，也不影响其它 taskId（「角色」页那一路）
+    off();
     agentRunning.value = false;
   }
 }
-// 「生成 HTML」：不参考现有页面，从零做一版新的（覆盖 index.html）。
-// 点一次即执行，**没有二次确认**（覆盖前不会拦截；想先备份可用「下载 HTML」）。
 function onGenerate(): void {
   if (rendering.value) { toast('正在渲染视频，请等它结束再提交需求'); return; }
   void runAgent('generate');
 }
-
-// 「按需求修改」：把当前 index.html 全文连同需求交给模型改一版（按钮在无 HTML 时禁用，这里是兜底守卫）
 function onModify(): void {
   if (!appState.project?.htmlExists) { toast('还没有 HTML，先点「生成 HTML」'); return; }
   runAgent('modify');
 }
 
 // ===== 转视频（整个视频环节就这一个按钮，成品到「视频预览」页看）=====
-// 成品 MP4 由主进程**就地**渲染到 <项目目录>/video/output.mp4，并把 videoPath 记成项目内相对路径，
-// 之后到「视频预览」页查看（不再有 hf-projects 那种渲染临时目录）。
 const rendering = ref(false);
 const qualityOptions = RENDER_QUALITY_OPTIONS;
 const fpsOptions = RENDER_FPS_OPTIONS;
 const quality = ref<RenderQuality>(FALLBACK_RENDER.quality);
 const fps = ref<RenderFps>(FALLBACK_RENDER.fps);
-// HfSelect 选项（原为 <option v-for>）
 const qualityGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: qualityOptions.map((o) => ({ value: o.value, label: o.label })) }]);
 const fpsGroups = computed<HfSelectGroup[]>(() => [{ label: '', options: fpsOptions.map((o) => ({ value: o.value, label: o.label })) }]);
 
-// 当前项目的覆盖值
 const projectOverride = computed(() => ((appState.project && appState.project.render) || null));
 const overridden = computed(() => isRenderOverridden(renderDefaults, projectOverride.value));
 const optionNote = computed(() => (overridden.value ? '本项目自定义档位' : '跟随设置页默认：' + renderOptionsText(renderDefaults)));
-// 当前所选质量的说明（选「快速预览」时明确提示画质代价）
 const qualityHint = computed(() => {
   const hit = RENDER_QUALITY_OPTIONS.find((o) => o.value === quality.value);
   return hit ? hit.hint + '；' : '';
 });
 
-// 用「项目覆盖 > 全局默认」的有效档位刷新下拉显示
 function syncFromEffective(): void {
   const eff = effectiveRenderOptions();
   quality.value = eff.quality;
   fps.value = eff.fps;
 }
-
-// 下拉改动 → 写入当前项目的覆盖
 async function onOptionChange(): Promise<void> {
   const res = await saveProjectRenderOverride({ quality: quality.value, fps: fps.value });
   if (!res.ok && res.message) toast(res.message);
 }
-
-// 恢复默认档位：清除项目覆盖，回到跟随设置页默认
 async function onResetOptions(): Promise<void> {
   const res = await saveProjectRenderOverride(null);
   if (res.ok) syncFromEffective();
   else if (res.message) toast(res.message);
 }
 
-// 「转视频」弹窗：把渲染档位（质量 / 帧率 / 档位来源 / 画质说明）摆出来确认一遍再开始。
-// 先做与渲染同样的守卫，避免出现「弹窗刚打开又被拒」的观感。
 const renderModalVisible = ref(false);
 function openRenderModal(): void {
   if (rendering.value) return;
@@ -393,12 +347,10 @@ function openRenderModal(): void {
 function closeRenderModal(): void {
   renderModalVisible.value = false;
 }
-// 确认：先关弹窗，再走原有渲染流程（进度显示在预览卡片的状态区，「视频预览」页看成品）
 function confirmRenderVideo(): void {
   renderModalVisible.value = false;
   void onRenderVideo();
 }
-// ESC 关闭弹窗（与「从音频生成字幕」弹窗一致）
 function onModalKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && renderModalVisible.value) closeRenderModal();
 }
@@ -423,17 +375,15 @@ async function onRenderVideo(skipEnvGuard = false): Promise<void> {
   rendering.value = true;
   try {
     const res = await window.hfTools.renderVideo(htmlPath, options);
-    resetRenderProgress(); // 本地完成/失败文案覆盖全局 trace 残留
+    resetRenderProgress();
     if (res.ok) {
       const secs = res.elapsedMs ? (res.elapsedMs / 1000).toFixed(1) + 's' : '—';
       status.value = '视频已生成（耗时 ' + secs + ' · ' + renderOptionsText(options) + '）：' + res.outputVideo;
       statusClass.value = 'hf-ok';
-      // 回写视频产物到当前项目（「视频预览」页据此自动加载）
       await window.projectTools.saveVideo(appState.currentName, res.outputVideo);
       await refreshProject();
       toast('视频已生成，可到「视频预览」页查看');
     } else if (res.needPacks && res.needPacks.length) {
-      // 主进程校验发现缺包（例如并发期间被清理）：弹同一个框，确认后重来
       status.value = res.message || '需要先下载运行环境';
       statusClass.value = 'hf-error';
       void envGate.guard(res.needPacks, '转成视频', () => { void onRenderVideo(true); });
@@ -443,7 +393,6 @@ async function onRenderVideo(skipEnvGuard = false): Promise<void> {
       toast(status.value);
     }
   } catch (e) {
-    // IPC 层异常（主进程不可用等）：不静默吞掉，也不让 trace 残留继续占着状态区
     resetRenderProgress();
     status.value = '渲染失败：' + (((e as Error) && (e as Error).message) || String(e));
     statusClass.value = 'hf-error';
@@ -466,13 +415,11 @@ onMounted(() => {
   status.value = '';
   statusClass.value = '';
   thinkText.value = '';
-  resetRenderProgress();   // 清掉上一次渲染的 trace 残留（渲染中若再次进入本页，随后仍会被新 trace 覆盖）
-  syncFromEffective();     // 渲染档位显示：项目覆盖 > 设置页全局默认
-  syncCanvas();            // 画布显示：项目属性（缺省横屏）
-  syncStyle();             // 全局视觉风格显示：项目属性（content.style）
-  // 进度订阅不在这里做：进度按任务 id 分发（见 preload 的 onTaskProgress），
-  // 谁发起任务谁在发起处订阅、结束时退订（runAgent 里），这样「角色」页画角色那一路不会影响本页的状态行。
-  document.addEventListener('keydown', onModalKeydown);   // 「转视频」弹窗的 ESC 关闭
+  resetRenderProgress();
+  syncFromEffective();
+  syncCanvas();
+  syncStyle();
+  document.addEventListener('keydown', onModalKeydown);
 });
 
 onBeforeUnmount(() => {

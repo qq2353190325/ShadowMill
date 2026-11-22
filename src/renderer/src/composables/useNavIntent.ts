@@ -8,8 +8,8 @@
 import { ref } from 'vue'
 
 // 设置页分类：唯一来源。SettingsPage 的左侧导航与这里共用同一份枚举，避免两处漂移。
-export type SettingsSectionKey = 'model' | 'voice' | 'render' | 'update' | 'whisper'
-export const SETTINGS_SECTIONS: SettingsSectionKey[] = ['model', 'voice', 'render', 'update', 'whisper']
+export type SettingsSectionKey = 'model' | 'voice' | 'render' | 'update' | 'whisper' | 'about'
+export const SETTINGS_SECTIONS: SettingsSectionKey[] = ['model', 'voice', 'render', 'update', 'whisper', 'about']
 
 const settingsSectionRequest = ref<SettingsSectionKey | null>(null)
 

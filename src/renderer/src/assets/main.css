@@ -27,7 +27,7 @@
   --glow-card:       0 0 20px rgba(0,212,255,0.15);
 
   /* 布局 */
-  --sidebar-width: 220px;
+  --sidebar-width: 240px;
   --radius-card: 12px;
   --radius-btn: 8px;
   /* 间距刻度（4px 基准）：
@@ -212,26 +212,140 @@ body {
   overflow-y: auto;
 }
 
+/* ===== 侧栏三模块：合并菜单 / 项目区 / 登录区 =====
+   .menu 仍是 flex:1 + overflow-y:auto，项目区与登录区 flex:none 固定；
+   三块之间用 1px 分隔线 + 小标题分层，窗口再矮登录区也不会被顶出视口。 */
+/* 菜单行：图标 + 序号 + 名称 + 完成点。左侧 3px 透明描边占位——选中时才上色，避免高亮时文字整体右移 */
 .menu-item {
-  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+  border-left: 3px solid transparent;
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease, text-shadow 0.2s ease;
   user-select: none;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13px;
 }
-
-.menu-item:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
-}
-
+.menu-item:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
 .menu-item.active {
   color: var(--text-primary);
   font-weight: 600;
-  border-left: 3px solid var(--color-primary);
+  border-left-color: var(--color-primary);
   background: linear-gradient(90deg, rgba(0, 212, 255, 0.25) 0%, rgba(0, 212, 255, 0) 100%);
   text-shadow: var(--glow-primary);
+}
+.menu-icon { flex: none; width: 15px; height: 15px; opacity: 0.7; }
+.menu-item:hover .menu-icon, .menu-item.active .menu-icon { opacity: 1; color: var(--color-primary); }
+.menu-idx {
+  flex: none;
+  width: 18px;
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.menu-item.active .menu-idx { color: var(--color-primary); }
+.menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 完成点：默认空心描边，链路已产出时填数据绿 + 辉光（只有创作五节点带这一枚） */
+.menu-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid rgba(138, 155, 181, 0.5);
+  background: transparent;
+}
+.menu-dot.on {
+  border-color: var(--color-success);
+  background: var(--color-success);
+  box-shadow: 0 0 6px rgba(0, 229, 160, 0.6);
+}
+
+.side-section-title {
+  padding: 10px 20px 6px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+/* 项目区：DeepSeek 客户端式——顶部新建常驻，下面项目列表自己滚；整块高度封顶，不会把登录顶出视口 */
+.project-area {
+  flex: none;
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(0, 212, 255, 0.15);
+}
+/* 「项目」标题行：文字在左，＋ 新建按钮贴在右侧（DeepSeek 式，列表上方不再单占一行） */
+.project-area .side-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 6px;
+}
+.project-add {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--color-primary);
+  background: rgba(0, 212, 255, 0.08);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.project-add:hover { background: rgba(0, 212, 255, 0.2); box-shadow: var(--glow-primary); }
+.project-list {
+  max-height: min(28vh, 230px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.project-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.project-item:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-primary); }
+.project-item.active {
+  color: var(--text-primary);
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.22) 0%, rgba(0, 212, 255, 0) 100%);
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+.project-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 打开目录：只在当前项右侧露出的小方形按钮，默认透明、hover 显形，不抢项目名的视觉 */
+.project-open {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.project-open svg { width: 100%; height: 100%; display: block; }
+.project-open:hover { color: var(--color-primary); background: rgba(0, 212, 255, 0.14); }
+.project-empty { padding: 8px; font-size: 12px; color: var(--text-secondary); }
+
+/* 登录区：未登录时那一枚「登录 / 注册」按钮占满整行 */
+.user-login-btn {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
 }
 
 /* ===== 侧栏左下角用户区（头像 + 姓名 + 向上弹出的浮窗菜单） =====
@@ -2699,3 +2813,207 @@ body {
   cursor: pointer;
 }
 .cast-act-del:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ===== HTML生成页工作台：一屏三区（预览 + 对话 | 右侧配置栏） =====
+   高度 = 视口 − 自绘标题栏(40px) − .content 上下 padding(32×2)，整页不滚；只有右侧配置栏自己内部滚。
+   全部以 .hgen-workbench 限定，不改 .content 的全局规则、也不影响其它页面。 */
+.hgen-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
+  height: calc(100vh - 104px);
+  min-height: 0;
+}
+/* 右侧栏整体收起：右列只剩 28px 竖条，主区预览自动占满 */
+.hgen-workbench.is-collapsed { grid-template-columns: minmax(0, 1fr) 28px; }
+.hgen-workbench .card { padding: 16px; }
+
+.hgen-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+.hgen-preview-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 预览卡的标题行已下线：标题与「下载 HTML / 转视频」都挪到右侧栏常驻「预览」分组，主区只留画面 */
+.hgen-preview-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 预览「屏幕」区吃掉剩余高度：frame-wrap 按高度撑满、宽度由视角比例算，居中显示 */
+.hgen-preview-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hgen-workbench .hgen-frame-wrap {
+  flex: none;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* 对话区：固定高度，输入框 + 按钮行 —— 外观像聊天输入框，功能仍是「生成 / 修改」 */
+.hgen-chat-card { flex: none; }
+.hgen-chat-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.hgen-chat-input { height: 88px; resize: none; font-size: 13px; }
+/* 输入框下方两行动作：第一行生成/修改，第二行下载/转视频（产物动作，离输入框最近） */
+.hgen-chat-foot { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin-top: 10px; }
+.hgen-chat-actions { display: flex; gap: 12px; }
+.hgen-chat-actions-sub { padding-top: 8px; border-top: 1px solid rgba(0, 212, 255, 0.12); width: 100%; justify-content: flex-end; }
+
+/* 右侧栏：顶部一条 + 竖排手风琴；滚动交给 .hgen-side-groups，主区一屏不滚 */
+.hgen-side {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hgen-side-group {
+  flex: none;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(17, 26, 44, 0.72);
+  overflow: visible; /* ? 气泡要能浮出边界 */
+}
+/* 前四块的手风琴头：可点、展开时下描边；箭头指示开合 */
+.hgen-side-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.hgen-side-head:hover { background: rgba(0, 212, 255, 0.08); }
+.hgen-side-group.open > .hgen-side-head { border-bottom: 1px solid rgba(0, 212, 255, 0.12); }
+.hgen-side-arrow { flex: none; width: 12px; font-size: 11px; color: var(--color-primary); }
+/* 「其他」是静态小标题：内容常驻可见，不参与手风琴 */
+.hgen-side-head-static {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(0, 212, 255, 0.05);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.12);
+}
+.hgen-side-body { padding: 8px 12px 12px; }
+/* 子组件根 .hgen-block 自带 margin-top，收进栏里归零（不改子组件文件） */
+.hgen-side-body .hgen-block { margin-top: 10px; }
+/* 300px 窄栏：素材 / 角色卡片墙降为两列 */
+.hgen-side-body .mat-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+/* 章节行原是 6 列 grid，窄栏会把标题挤没：改成折行 flex，信息一条不丢 */
+.hgen-side-body .ch-row { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.hgen-side-body .ch-title { flex: 1; min-width: 0; }
+.hgen-side-body .ch-pick { margin-left: auto; }
+
+/* ===== 右侧栏：竖排手风琴 + 整条栏收起 ===== */
+/* 收起态：只留一条 28px 竖条，文字竖排 */
+.hgen-side.is-collapsed { gap: 0; }
+.hgen-side-rail {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-primary);
+  background: rgba(17, 26, 44, 0.72);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.hgen-side-rail:hover { background: rgba(0, 212, 255, 0.1); box-shadow: var(--glow-card); }
+.hgen-side-rail-text { writing-mode: vertical-rl; letter-spacing: 2px; font-size: 12px; color: var(--text-secondary); }
+
+/* 展开态：顶部「面板 + 收起」，下面竖排 5 个手风琴块（一次只开一个） */
+.hgen-side-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 6px;
+}
+.hgen-side-top-label { font-size: 12px; letter-spacing: 1px; color: var(--text-secondary); }
+.hgen-side-collapse { padding: 3px 10px; font-size: 13px; line-height: 1; }
+.hgen-side-groups {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+/* ===== 背景音频自绘试听条 ===== */
+.ap-wrap {
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(10, 17, 32, 0.7);
+}
+.ap-main { display: flex; align-items: center; gap: 10px; }
+.ap-play {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 5px;
+  color: var(--color-primary);
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.ap-play:hover { background: rgba(0, 212, 255, 0.22); box-shadow: var(--glow-primary); }
+.ap-play svg { width: 100%; height: 100%; display: block; }
+.ap-bar { flex: 1; min-width: 0; padding: 8px 0; cursor: pointer; touch-action: none; }
+.ap-track { height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+.ap-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #00D4FF 0%, #8B5CF6 100%); box-shadow: var(--glow-primary); }
+.ap-time { flex: none; font-family: "JetBrains Mono", "Consolas", monospace; font-size: 11px; color: var(--text-secondary); }
+/* 语速单独一行，与播放器行明显分开 */
+.ap-rate {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 212, 255, 0.1);
+}
+.ap-rate-input { width: 48px; text-align: center; padding: 4px 6px; font-family: "JetBrains Mono", "Consolas", monospace; }
+.ap-rate-unit { font-size: 12px; color: var(--text-secondary); }
+/* 生成前提里的平铺小标题：不做「折叠里套折叠」 */
+.hgen-side-sub {
+  margin: 14px 0 2px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+}
+.hgen-side-body > .hgen-side-sub:first-child { margin-top: 2px; }
+/* 控件行在 300px 窄栏里收紧间距 */
+.hgen-preview-controls .hgen-row { margin: 8px 0; gap: 8px; }

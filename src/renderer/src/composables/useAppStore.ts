@@ -11,8 +11,8 @@ import { normalizeCanvas, pickRenderOverride } from '@renderer/utils/render'
 // 「角色」（cast）是**全局角色库**的管理页，与项目无关（没有当前项目也能用）。
 // 原「音色管理」独立页（sound-copy）已并入「配音」页的第三个 Tab，页面键随之下线。
 // 注意 settings 已不再对应页面（改为模态弹窗，见 components/SettingsDialog.vue）：这个键保留在这里，
-// 是因为「设置」仍是侧栏菜单的一项、各处「去设置」也仍调 goPage('settings')——goPage 见它即开弹窗。
-export type PageKey = 'home' | 'about' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'cast' | 'video-preview' | 'settings'
+// 是因为用户浮窗「设置」与各处「去设置」都仍调 goPage('settings')——goPage 见它即开弹窗。
+export type PageKey = 'home' | 'content' | 'text-tts' | 'subtitle' | 'html-gen' | 'cast' | 'video-preview' | 'settings'
 
 // ===== 项目状态结构（与主进程 project.json 字段对应） =====
 export interface ProjectState {

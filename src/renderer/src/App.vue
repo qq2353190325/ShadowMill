@@ -42,24 +42,29 @@
   </div>
 
   <div class="layout">
-    <!-- 左侧菜单（文字菜单） -->
+    <!-- 左侧栏三模块：① 菜单（首页置顶 + 五节点 + 角色）② 滚动项目列表 ③ 登录。
+         .menu 是 flex:1 吃掉剩余高度并自己滚，另两块 flex:none 固定，窗口再矮也不会把登录顶出视口。 -->
     <aside class="sidebar">
       <nav class="menu" id="menu">
-        <!-- 「设置」不再是页面：点它只打开设置弹窗（goPage 里拦下），
-             所以它的高亮跟随弹窗开关，而不是跟随 activeMenu（弹窗关掉就灭，页面仍是原页） -->
+        <!-- 一个合并的菜单块：首页在最上，接着五节点（01–05 序号 + 完成点），角色跟在 05 后面。
+             「设置」不是页面、也不在菜单里：入口在左下角用户浮窗；goPage('settings') 仍供各处「去设置」调用。 -->
         <div
           v-for="item in menuItems"
           :key="item.key"
           class="menu-item"
-          :class="{ active: item.key === 'settings' ? settingsOpen : activeMenu === item.key }"
+          :class="{ active: activeMenu === item.key }"
           :data-page="item.key"
           :title="item.title"
           @click="goPage(item.key)"
-        >{{ item.label }}</div>
+        >
+          <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path :d="item.icon" /></svg>
+          <span v-if="item.idx" class="menu-idx">{{ item.idx }}</span>
+          <span class="menu-label">{{ item.label }}</span>
+          <span v-if="item.pipeline" class="menu-dot" :class="{ on: doneMap[item.key] }"></span>
+        </div>
       </nav>
 
-      <!-- 左下角用户区（头像 + 姓名）：点击向上弹浮窗，「设置」项打开设置弹窗。
-           .menu 是 flex:1 撑满，用户区 flex:none 自然压在底部，菜单变多也不会把它挤走 -->
+      <ProjectArea />
       <UserArea />
     </aside>
 
@@ -72,7 +77,7 @@
   <!-- 历史数据目录（品牌/目录改名留下的老数据）：有就由这个应用内弹窗问「迁移 / 删除 / 稍后」 -->
   <LegacyDataDialog />
 
-  <!-- 设置弹窗（全局单例）：设置已从独立页面改为模态弹窗，侧栏「设置」与各处「去设置」都开它 -->
+  <!-- 设置弹窗（全局单例）：设置是模态弹窗，入口在左下角用户浮窗，各处「去设置」也都开它 -->
   <SettingsDialog />
 
   <!-- 登录 / 注册弹窗（全局单例）：左下角用户浮窗的「登录」打开它 -->
@@ -161,7 +166,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { APP_NAME } from '@shared/constants'
 import { STORAGE_KEY_PROJECT_CTX } from '@renderer/constants'
-import { activeMenu, appState, refreshProject, type PageKey } from './composables/useAppStore'
+import { activeMenu, appState, hasAudio, hasContent, hasHtml, hasSubtitle, hasVideo, refreshProject, type PageKey } from './composables/useAppStore'
 import { currentPage, goPage, pageNavKey } from './pages'
 import { useToasts } from './composables/useToast'
 import { initRenderProgress } from './composables/useRenderProgress'
@@ -171,11 +176,11 @@ import { initEnvGate, useEnvGate } from './composables/useEnvGate'
 import { useConfigPrompt } from './composables/useConfigPrompt'
 import { initLegacyData } from './composables/useLegacyData'
 import { restore } from './composables/useAuth'
-import { useSettingsDialog } from './composables/useSettingsDialog'
 import LegacyDataDialog from './components/LegacyDataDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import AuthDialog from './components/AuthDialog.vue'
 import UserArea from './components/UserArea.vue'
+import ProjectArea from './components/ProjectArea.vue'
 
 const toasts = useToasts();
 const contentEl = ref<HTMLElement | null>(null);
@@ -190,21 +195,29 @@ const runtimeVisible = computed(() => runtimeBusy.value || runtimeFailed.value |
 const gate = useEnvGate();
 // 配置类错误的统一弹窗（各功能页拿到主进程 res.needConfig 后经 configPrompt.open 触发）
 const configPrompt = useConfigPrompt();
-// 设置弹窗开关（菜单「设置」的高亮跟随它：设置是模态弹窗，不再是页面）
-const { visible: settingsOpen } = useSettingsDialog();
 function retryRuntime(): void { void prepareRuntime(); }
 function downloadRuntime(): void { void prepareRuntime(); }
-const menuItems: { key: PageKey; label: string; title: string }[] = [
-  { key: 'home', label: '首页', title: '首页' },
-  { key: 'content', label: '内容脚本', title: '内容脚本' },
-  { key: 'text-tts', label: '配音', title: '配音（文字生音频）' },
-  { key: 'subtitle', label: '字幕生成', title: '字幕生成' },
-  { key: 'html-gen', label: 'HTML生成', title: 'HTML生成' },
-  { key: 'cast', label: '角色', title: '角色（全局角色库：新建 / 修改，与项目无关）' },
-  { key: 'video-preview', label: '视频预览', title: '视频预览（转视频入口在 HTML生成页）' },
-  { key: 'about', label: '关于', title: '关于' },
-  { key: 'settings', label: '设置', title: '设置' }
+type MenuItem = { key: PageKey; label: string; title: string; icon: string; idx?: string; pipeline?: boolean };
+// 一个合并的菜单块：首页置顶，接着 5 项创作流水线（序号 + 完成小圆点），角色跟在 05 后面。
+// icon 是 24×24 viewBox 的 SVG path，直接内联渲染，不引图标库；
+// 「关于」已收进设置弹窗，「设置」入口在用户浮窗（goPage('settings') 仍供各处「去设置」调用），两者都不在菜单里。
+const menuItems: MenuItem[] = [
+  { key: 'home', label: '首页', title: '首页', icon: 'M3 11l9-8 9 8 M5 10v10h14V10 M10 20v-6h4v6' },
+  { key: 'content', idx: '01', label: '内容脚本', title: '内容脚本', icon: 'M7 3h7l5 5v13H7z M14 3v5h5 M10 12h7 M10 16h5', pipeline: true },
+  { key: 'text-tts', idx: '02', label: '配音', title: '配音（文字生音频）', icon: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z M5 11a7 7 0 0 0 14 0 M12 18v3 M9 21h6', pipeline: true },
+  { key: 'subtitle', idx: '03', label: '字幕生成', title: '字幕生成', icon: 'M3 5h18v14H3z M7 10h4 M7 14h10', pipeline: true },
+  { key: 'html-gen', idx: '04', label: 'HTML生成', title: 'HTML生成', icon: 'M9 8l-4 4 4 4 M15 8l4 4-4 4 M13 5l-2 14', pipeline: true },
+  { key: 'video-preview', idx: '05', label: '视频预览', title: '视频预览（转视频入口在 HTML生成页）', icon: 'M3 5h18v14H3z M10 9l5 3-5 3z', pipeline: true },
+  { key: 'cast', label: '角色', title: '角色（全局角色库：新建 / 修改，创作时勾选本片用哪几个）', icon: 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M4 21a8 8 0 0 1 16 0' }
 ];
+// 完成态只在这里解析成布尔：模板里顶层 computed 会自动 unwrap，索引访问拿到的是值而不是 ComputedRef
+const doneMap = computed<Record<string, boolean>>(() => ({
+  content: hasContent.value,
+  'text-tts': hasAudio.value,
+  subtitle: hasSubtitle.value,
+  'html-gen': hasHtml.value,
+  'video-preview': hasVideo.value
+}));
 
 // 页面切换后滚动复位（对应原 goPage 的 content.scrollTop = 0）
 watch(currentPage, () => {

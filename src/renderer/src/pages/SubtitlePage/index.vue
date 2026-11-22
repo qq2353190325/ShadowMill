@@ -1,6 +1,5 @@
 <template>
   <div>
-    <StepBar :page="'subtitle'" />
     <div class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>字幕编辑器</div>
       <div class="hgen-tip">逐条编辑字幕：序号 / 起始时间 / 结束时间 / 文本，可删除与新增；也可切「SRT」模式用单个文本域按标准 SRT 格式编辑（序号 / 时间轴 / 文本）。还可由音频自动识别，或由内容脚本旁白生成初稿。字幕时间轴以下方的「起始时间」为准。</div>
@@ -73,7 +72,6 @@ import {
   estDur, fillEnds, fmtTimeTrim, itemsToSrt, parseSrtText, parseSubtitleText,
   parseTime, plainText, serializeItems, type SubtitleItem
 } from './helpers'
-import StepBar from '@renderer/components/StepBar.vue'
 import TranscribeSection from './TranscribeSection.vue'
 
 // ===== 条目状态 =====

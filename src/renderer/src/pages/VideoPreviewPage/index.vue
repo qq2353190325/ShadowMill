@@ -1,7 +1,6 @@
 <template>
   <div>
-    <StepBar :page="'video-preview'" />
-    <div class="card hgen-panel" style="margin-top:16px">
+    <div class="card hgen-panel">
       <div class="panel-title"><span class="dot"></span>视频预览</div>
 
       <div class="hf-toolbar">
@@ -47,7 +46,6 @@ import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { renderProgress, resetRenderProgress } from '@renderer/composables/useRenderProgress'
 import { previewUrl } from '@renderer/utils/url'
-import StepBar from '@renderer/components/StepBar.vue'
 import HfSelect, { type HfSelectGroup } from '@renderer/components/HfSelect.vue'
 
 const selectedName = ref(appState.currentName); // 本页预览哪个项目（默认 = 当前工作项目）

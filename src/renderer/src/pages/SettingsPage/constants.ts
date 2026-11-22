@@ -25,7 +25,8 @@ export const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
   { key: 'voice', label: '语音服务' },
   { key: 'render', label: '渲染档位' },
   { key: 'whisper', label: '语音识别模型' },
-  { key: 'update', label: '应用更新' }
+  { key: 'update', label: '应用更新' },
+  { key: 'about', label: '关于' }
 ]
 
 // 分类 key 次序的唯一数组（页面在「上次分类 / 导航意图是否合法」两处校验都用它）
