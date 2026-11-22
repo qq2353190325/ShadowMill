@@ -1,6 +1,6 @@
 <template>
   <div class="hgen-block">
-    <div class="panel-head">
+    <div class="panel-head" v-if="!props.kind">
       <div class="panel-title-sm" style="margin:0">
         项目素材
         <span class="mat-count">勾选的会随需求一起交给 Agent</span>
@@ -10,6 +10,8 @@
       </div>
     </div>
 
+    <!-- kind 指定时只渲染对应一组：右侧栏把「图片」「视频」拆成两个竖排块，各自渲染一份本组件 -->
+    <template v-if="!props.kind || props.kind === 'image'">
     <!-- 图片组：缩略图网格，勾选框与移除键叠在卡片两角 -->
     <div class="panel-title" style="margin:0;letter-spacing:1px"><span class="dot dot-img"></span>图片 · {{ images.length }} 张</div>
     <div class="mat-grid">
@@ -31,7 +33,9 @@
       <button class="mat-add" :disabled="busy" title="选择本地图片导入项目（可多选）" @click="onAdd('image')"><i>＋</i>添加图片…</button>
     </div>
 
+    </template>
     <!-- 视频组 -->
+    <template v-if="!props.kind || props.kind === 'video'">
     <div class="panel-title" style="margin:16px 0 0;letter-spacing:1px"><span class="dot"></span>视频 · {{ videos.length }} 个</div>
     <div class="mat-grid">
       <div v-for="m in videos" :key="m.id" class="mat-card" :class="{ off: !m.selected }">
@@ -54,6 +58,7 @@
            历史字段 project.videoMaterial 且一行未改）。恢复时把下面这行按钮放进本组的 .panel-head-actions：
            <button class="hf-btn" :disabled="!videos.length" title="把视频里的声音提取出来，作为背景音频" @click="onExtractAudio()">{{ extractText }}</button> -->
     </div>
+    </template>
 
     <div class="hgen-tip">
       勾选的素材会随需求一起交给 Agent：图片按 <code>images/文件名</code>、视频按 <code>video/文件名</code> 的相对路径写进页面。
@@ -73,6 +78,10 @@ import type { ProjectMaterial, ProjectMaterialKind } from '@shared/types'
 import { appState, refreshProject } from '@renderer/composables/useAppStore'
 import { toast } from '@renderer/composables/useToast'
 import { previewUrl } from '@renderer/utils/url'
+
+// 右侧栏把素材拆成「图片」「视频」两个竖排块：kind 指定时只渲染对应一组、并隐藏重复的「项目素材」头行。
+// 不传 = 老行为（图片 + 视频一起显示），其它调用方不受影响。
+const props = defineProps<{ kind?: ProjectMaterialKind }>();
 
 // 一轮写操作未结束时禁用全部按钮：避免并发「读-改-写」把列表互相冲掉
 const busy = ref(false);

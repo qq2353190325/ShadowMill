@@ -49,6 +49,7 @@ import VoiceSection from './components/VoiceSection.vue'
 import RenderSection from './components/RenderSection.vue'
 import WhisperSection from './components/WhisperSection.vue'
 import UpdateSection from './components/UpdateSection.vue'
+import AboutSection from './components/AboutSection.vue'
 
 // 分类 key → 区块组件（`whisper` 不在表里：它由本页模板里那层卡片外壳包着挂载）。
 // 用普通对象（编译器按静态属性直接解析，不会把组件定义 reactive 化）
@@ -56,7 +57,8 @@ const SECTION_COMPONENTS = {
   model: ModelSection,
   voice: VoiceSection,
   render: RenderSection,
-  update: UpdateSection
+  update: UpdateSection,
+  about: AboutSection
 } as const
 
 // 分类记忆在 localStorage（键名见 ./constants），下次进设置页回到上次的分类

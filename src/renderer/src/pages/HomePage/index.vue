@@ -42,7 +42,7 @@
           <div class="proj-card-time">{{ p.updatedAt ? '更新于 ' + fmtTime(p.updatedAt) : '' }}</div>
         </div>
       </div>
-      <div v-else class="empty-hint">暂无项目。点顶部「工作项目」栏的「新建项目」创建一个。</div>
+      <div v-else class="empty-hint">暂无项目。到左侧栏「工作项目」区点「新建项目」创建一个。</div>
     </div>
   </div>
 </template>
@@ -50,7 +50,7 @@
 <script setup lang="ts">
 // pages/HomePage/index.vue —— 首页（hero + 动态流水线 + 我的项目入口）
 // 原 JS 版 home 模块 {template,index}.js 移植；原 init 的 DOM 注入改为响应式 v-for。
-// 内置示例项目已下线（含其快捷入口块）；新建项目入口统一收在顶部 StepBar 的弹窗，首页只选择/打开项目。
+// 内置示例项目已下线（含其快捷入口块）；新建项目入口统一收在侧栏「工作项目」区，首页只选择/打开项目。
 import { computed } from 'vue'
 import { APP_NAME, APP_NAME_EN, APP_SLOGAN } from '@shared/constants'
 import {
