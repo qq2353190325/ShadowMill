@@ -89,7 +89,12 @@
         <div class="env-gate-line">
           「{{ gate.title.value }}」需要以下运行环境（不随安装包发布，只在用到时下载）：
         </div>
-        <div class="env-gate-packs">{{ gate.sizeText.value }}</div>
+        <div class="env-gate-packs">
+          <div v-for="p in gate.packLines.value" :key="p.name" class="env-gate-pack">
+            <div class="env-gate-pack-line">{{ p.label }}</div>
+            <div v-if="p.note" class="env-gate-pack-note">{{ p.note }}</div>
+          </div>
+        </div>
 
         <template v-if="gate.phase.value === 'downloading'">
           <div class="runtime-banner-bar" style="width:100%"><i :style="{ width: gate.percent.value + '%' }"></i></div>
@@ -297,7 +302,7 @@ onMounted(() => {
   box-shadow: var(--glow-primary);
 }
 
-/* 「需要下载运行环境」确认框里的两行说明（体积清单是重点，单独一行加主色） */
+/* 「需要下载运行环境」确认框：包清单逐行（13px 主色）+ 每包说明（12px 雾蓝） */
 .env-gate-line {
   font-size: 13px;
   color: var(--text-primary);
@@ -305,9 +310,20 @@ onMounted(() => {
 }
 .env-gate-packs {
   margin: 8px 0 4px;
+}
+.env-gate-pack + .env-gate-pack {
+  margin-top: 8px;
+}
+.env-gate-pack-line {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-primary);
+  line-height: 1.4;
+}
+.env-gate-pack-note {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
   line-height: 1.7;
 }
 

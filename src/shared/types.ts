@@ -10,7 +10,7 @@ import type { BrowserWindow } from 'electron'
 // 失败分支：多数频道必带 message；唯 voice:pick-dir 的「用户取消」分支只回
 // { ok:false, canceled:true }（无 message），故 message 为可选、canceled 用于区分取消与真失败。
 // 运行环境分包名（定义放最前：IpcFail.needPacks 与 ⑧ 的进度载荷都要用；详细说明见本文件「运行环境」一节）
-export type RuntimePackName = 'ffmpeg' | 'hyperframes' | 'vidrender'
+export type RuntimePackName = 'ffmpeg' | 'hyperframes' | 'chrome'
 
 // 「配置类」错误的目标设置分类：这类错误用户去设置页改一下配置就能解决，
 // 界面据此把它从内嵌状态行升级成弹窗（[去设置] / [取消]）。
@@ -238,11 +238,11 @@ export interface UpdateProgressPayload {
 // ============================================================
 // ③.6 运行环境包（src/main/runtime.ts）
 // ============================================================
-// 运行环境（分包：ffmpeg / hyperframes / vidrender 各自一个 7z，首次用到时下载；whisper 随安装包）
+// 运行环境（分包：ffmpeg / hyperframes / chrome 各自一个 7z，首次用到时下载；whisper 与 vidrender.exe 随安装包）
 // ============================================================
-// 为什么分包：ffmpeg(180MB) 被「转录转码」与「渲染」两条线共用、hyperframes(440MB) 只有渲染要、
-// vidrender(约 2MB) 是统一 Rust CLI（vidrender.exe，--backend 选内核）、whisper(12.5MB) 缺了转录就完全不能用
-// ——四者变化节奏与归属都不同，捆在一起会让每次更新都重下全部。
+// 为什么分包：ffmpeg 被「转录转码」与「渲染」两条线共用、hyperframes 只有 HY 渲染要、
+// chrome（chrome-headless-shell）被 HY 与 Rust · Chrome 内核共用、vidrender.exe 随包内置
+// ——变化节奏与归属都不同，捆在一起会让每次更新都重下全部。
 // 详见 docs/runtime-pack-split.md。
 // 单个包的状态：ready 已就绪；missing 本机没有（需要下载）；unknown 还没探测过
 export type RuntimePackState = 'ready' | 'missing' | 'unknown'
@@ -1293,7 +1293,7 @@ export interface PreloadApi {
     changelog(): Promise<IpcResult<{ text: string }>>
     onProgress(callback: (data: UpdateProgressPayload) => void): void
   }
-  // 运行环境（分包）：ffmpeg / hyperframes / vidrender 各自一个 7z、首次用到时下载；whisper 随安装包。
+  // 运行环境（分包）：ffmpeg / hyperframes / chrome 各自一个 7z、首次用到时下载；whisper 与 vidrender.exe 随安装包。
   // 页面据此显示「正在下载运行环境 x%」，以及缺失时的「需要下载 xx MB」与取消入口
   runtimeTools: {
     status(): Promise<RuntimeProgressPayload>

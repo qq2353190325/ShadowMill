@@ -60,7 +60,7 @@ export async function renderWithRustKernel(kernel: RustKernel, opts: RustRenderO
     ? hfEnv.BUILTIN_RESOURCES.vidCli
     : hfEnv.BUILTIN_RESOURCES.vidrenderCli
   if (!exe) {
-    throw new Error('未找到 vidrender.exe（Rust 渲染内核）：请在设置里下载运行环境包，或检查 resources/bin')
+    throw new Error('未找到 vidrender.exe（Rust 渲染内核）：它随安装包内置，请检查 <安装目录>/resources/bin 或重新安装')
   }
 
   const htmlPath = prepareRustEntry(opts.entryHtml)
@@ -68,7 +68,7 @@ export async function renderWithRustKernel(kernel: RustKernel, opts: RustRenderO
   const env: NodeJS.ProcessEnv = { ...process.env }
   const ffmpegBin = hfEnv.BUILTIN_RESOURCES.ffmpegBin
   if (ffmpegBin) env.PATH = ffmpegBin + path.delimiter + (env.PATH || '')
-  // Chrome 内核与 HY 共用同一个谷歌内核：直接把 HY 环境包里的 chrome-headless-shell 交给它，
+  // Chrome 内核与 HY 共用同一个谷歌内核：把独立 chrome 运行包里的 chrome-headless-shell 交给它，
   // 不再让它自己去 ~/.cache 下载（Rust 侧读 HF_BROWSER_PATH，优先级高于缓存与系统浏览器）。
   if (hfEnv.BUILTIN_RESOURCES.chromeShell) env.HF_BROWSER_PATH = hfEnv.BUILTIN_RESOURCES.chromeShell
 

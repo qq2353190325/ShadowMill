@@ -20,8 +20,8 @@ import { app } from 'electron'
 // 实现上刻意用 getter 而不是快照：userData 目录迁移（my-app → shadowmill）与本模块的 import 顺序不确定，
 // 解包又是运行时才完成，快照会把路径永久钉在旧值上；getter 每次按当前状态算，结果按包缓存，
 // 解包完成后由 refreshPack() 失效。
-export type RuntimePackDirName = 'ffmpeg' | 'hyperframes' | 'vidrender';
-const PACK_DIRS: RuntimePackDirName[] = ['ffmpeg', 'hyperframes', 'vidrender'];
+export type RuntimePackDirName = 'ffmpeg' | 'hyperframes' | 'chrome';
+const PACK_DIRS: RuntimePackDirName[] = ['ffmpeg', 'hyperframes', 'chrome'];
 // 包根缓存：undefined=还没查过；''=查过但没有；非空=已就绪的目录
 const cachedPackRoots: Partial<Record<RuntimePackDirName, string>> = {};
 let cachedChrome: string | null | undefined;
@@ -97,9 +97,9 @@ function resolveRoot(): string {
   return app.isPackaged ? (process.resourcesPath || '') : devResourceRoot();
 }
 
-// chrome-headless-shell 可执行：<hfRoot>\chrome\chrome-headless-shell\**\chrome-headless-shell.exe
-// （hfRoot 是 hyperframes 包解出来的目录，其下第一层就是 hyperframes/；目录层级随 hyperframes 版本
-//   变化，按文件名递归找）
+// chrome-headless-shell 可执行：<packRoot>\chrome\chrome-headless-shell\**\chrome-headless-shell.exe
+// packRoot 优先取独立 chrome 包（其下第一层是 chrome/），回退旧 hyperframes 包（兼容已下载用户），
+// dev / 安装版兜底取资源根。目录层级随壳版本变化，故按文件名递归找。
 // ⚠️ 只缓存**找到的**结果：找不到时返回 null 而**不写缓存**。原先把 null 也缓存了
 // （`if (cachedChrome !== undefined) return cachedChrome`），于是只要在运行环境包解包完成之前被问过一次
 // （启动探测 / 准备阶段都可能），就会把"没有"这个结论永久钉住 ⇒ 后续拿到的永远是 null，
@@ -144,21 +144,23 @@ const BUILTIN_RESOURCES: {
   get ffprobe() { const r = resolvePackRoot('ffmpeg'); return r ? path.join(r, 'ffmpeg', 'bin', 'ffprobe.exe') : ''; },
   get hfCli() { const r = resolvePackRoot('hyperframes'); return r ? path.join(r, 'hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs') : ''; },
   get hivePlayer() { const r = resolvePackRoot('hyperframes'); return r ? path.join(r, 'hyperframes', 'node_modules', 'hyperframes', 'dist', 'hyperframes-player.global.js') : ''; },
-  get chromeShell() { const r = resolvePackRoot('hyperframes'); return r ? findChromeShell(r) : null; },
-  // 统一 Rust CLI（vidrender.exe，内部用 --backend webview|chrome 选内核）：
-  // 运行环境包 > 安装包 extraResources > dev 仓库 resources/bin。
-  // 两个 getter 都指向同一个新二进制，保留旧名字以兼容调用方；缺包时返回空串。
+  // 独立 chrome 包优先；旧 hyperframes 包（内含 chrome/）回退，避免老用户重下。
+  get chromeShell() {
+    const r = resolvePackRoot('chrome') || resolvePackRoot('hyperframes');
+    return r ? findChromeShell(r) : null;
+  },
+  // 统一 Rust CLI（vidrender.exe，内部用 --backend webview|chrome 选内核）：随安装包内置，
+  // 安装版取 <resources>/bin，dev 取仓库 resources/bin；不再有单独的运行环境包。
+  // 两个 getter 都指向同一个二进制，保留旧名字以兼容调用方；找不到时返回空串。
   get vidCli() { return resolveRustCli('vidrender.exe'); },
   get vidrenderCli() { return resolveRustCli('vidrender.exe'); }
 };
 
 function resolveRustCli(file: string): string {
-  const packed = resolvePackRoot('vidrender');
-  const candidates = [
-    packed ? path.join(packed, 'bin', file) : '',
-    app.isPackaged ? path.join(process.resourcesPath || '', 'bin', file) : path.join(devResourceRoot(), 'bin', file)
-  ];
-  return candidates.find((p) => p && fs.existsSync(p)) || '';
+  const p = app.isPackaged
+    ? path.join(process.resourcesPath || '', 'bin', file)
+    : path.join(devResourceRoot(), 'bin', file);
+  return fs.existsSync(p) ? p : '';
 }
 
 // 某包是否已就绪（纯查询，不触发下载）：供消费点在动手前校验

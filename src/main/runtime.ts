@@ -35,22 +35,22 @@ import * as hfEnv from './hfEnv'
 import { getUpdaterSettings } from './settings'
 
 // ===== 包定义（scripts/pack-runtime.mjs 的 PACKS 必须与之对应）=====
-// hint：界面在用户确认下载前给出的体积提示。两个都已按 2026-10-14 的实测回填，并**取整到 MiB**：
-//   ffmpeg 42.6 MiB（build/runtime-pack/ffmpeg.json 的 bytes = 44,698,068）⇒ 43
-//   hyperframes 103.1 MiB（bytes = 108,076,664，内含 chrome-headless-shell 268 MB 的未压缩体量）⇒ 103
-// 取整值之和（43 + 103 = 146.0）与实测合计 145.7 MiB 一致；**不要回退成向上取整**（105 那版界面会报
-// 148.0 MB，比真实下载量多报 2 MiB，与 README / CHANGELOG 的「约 146 MB」自相矛盾）。
+// hint：界面在用户确认下载前给出的体积提示，取整到 MiB。
+//   ffmpeg 42.6 MiB（build/runtime-pack/ffmpeg.json 的 bytes = 44,698,068）⇒ 43（实测）
+//   hyperframes 原 103.1 MiB 含 chrome；拆包后按未压缩体积占比估算 ⇒ 40（估，待产出后校准）
+//   chrome 268.7 MiB 未压缩、7z 体积未实测，按同一压缩率估算 ⇒ 63（估，待产出后校准）
+// ⚠ 后两个是估算值：等你跑 npm run runtime:pack 后，按 chrome.json / hyperframes.json 的 bytes 回填。
 // 准备过程中会用清单里的真实字节覆盖这个提示值。
 // files：判定「解包完整」的关键文件（相对包目录），缺一即视为未就绪并触发重下。
 const PACK_DEFS: { name: RuntimePackName; title: string; hint: number; files: string[] }[] = [
   { name: 'ffmpeg', title: '音视频处理（ffmpeg）', hint: 43 * 1024 * 1024, files: [path.join('ffmpeg', 'bin', 'ffmpeg.exe'), path.join('ffmpeg', 'bin', 'ffprobe.exe')] },
-  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 103 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] },
-  { name: 'vidrender', title: 'Rust 渲染内核（vidrender.exe）', hint: 3 * 1024 * 1024, files: [path.join('bin', 'vidrender.exe')] }
+  { name: 'hyperframes', title: '视频渲染引擎（HyperFrames）', hint: 40 * 1024 * 1024, files: [path.join('hyperframes', 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs')] },
+  { name: 'chrome', title: '谷歌内核（headless-shell）', hint: 63 * 1024 * 1024, files: [path.join('chrome', 'chrome-headless-shell')] }
 ]
 const PACK_NAMES: RuntimePackName[] = PACK_DEFS.map((d) => d.name)
-// vidrender 包装的是统一 Rust CLI（vidrender.exe）：只有用户显式选了对应引擎才需要，
-// 不进产品的默认缺包提示与「下载全部」（默认仍是 hyperframes）
-const PRODUCT_PACKS: RuntimePackName[] = PACK_NAMES.filter((n) => n !== 'vidrender')
+// vidrender.exe 随安装包内置，不在运行包体系里；三个包都进默认缺包提示与「下载全部」，
+// 点「转视频」时再由 video.ts 的 renderPacks 按后端只校验真正需要的包。
+const PRODUCT_PACKS: RuntimePackName[] = PACK_NAMES.slice()
 
 // ===== 清单（scripts/pack-runtime.mjs 产出，字段必须与脚本一致）=====
 interface PackManifest {
@@ -273,14 +273,6 @@ function packsStatus(): PackStatus {
       out[def.name] = { state: 'ready', id: '', root: legacy, files: 0, unpackedBytes: 0, bytes: 0, legacy: true }
       continue
     }
-    // dev 兜底：仓库 resources/bin/ 里带着统一的 vidrender.exe，hfEnv 的实际查找也认这条路径。
-    // 缺包守卫必须与实际查找同一口径，否则 dev 下明明能渲染，却被 missingPacks 拦下来要求下载
-    // 一个更新源上根本没有的包（实测 vidrender.json 404）。只在未打包时生效，root 留空。
-    if (def.name === 'vidrender' && !app.isPackaged &&
-        (hfEnv.BUILTIN_RESOURCES.vidCli || hfEnv.BUILTIN_RESOURCES.vidrenderCli)) {
-      out[def.name] = { state: 'ready', id: 'dev-bin', root: '', files: 0, unpackedBytes: 0, bytes: 0, legacy: false }
-      continue
-    }
     out[def.name] = { state: 'missing', id: '', root: '', files: 0, unpackedBytes: 0, bytes: 0, legacy: false }
   }
   return out
@@ -296,9 +288,15 @@ function syncStatus(status: PackStatus): PackStatus {
   return status
 }
 
+// hyperframes 前置依赖 chrome：凡要 hyperframes 就必须带上 chrome，且 chrome 排最前先下载。
+function withPrereqs(packs: RuntimePackName[]): RuntimePackName[] {
+  if (packs.indexOf('hyperframes') < 0) return packs
+  return ['chrome', ...packs.filter((n) => n !== 'chrome')]
+}
+
 // 缺哪些包（供消费点校验；缺的按 PACK_DEFS 顺序返回）
 function missingPacks(needs?: RuntimePackName[]): RuntimePackName[] {
-  const want = needs && needs.length ? needs : PRODUCT_PACKS
+  const want = withPrereqs(needs && needs.length ? needs : PRODUCT_PACKS)
   const status = packsStatus()
   syncStatus(status)
   return want.filter((n) => status[n].state !== 'ready')
@@ -885,7 +883,9 @@ async function runOnce(packs: RuntimePackName[]): Promise<IpcResult> {
 
 // 幂等 + 并发安全：同一时刻只允许一次准备；忙碌期内的重复调用返回提示（界面按进度渲染）
 function ensurePacks(packs?: RuntimePackName[]): Promise<IpcResult> {
-  const want = packs && packs.length ? packs.filter((n) => PACK_NAMES.indexOf(n) >= 0) : PRODUCT_PACKS.slice()
+  const want = withPrereqs(packs && packs.length
+    ? packs.filter((n) => PACK_NAMES.indexOf(n) >= 0)
+    : PRODUCT_PACKS.slice())
   if (inFlight) {
     return Promise.resolve({ ok: false, message: '正在准备另一个运行环境包，请稍候再试' })
   }

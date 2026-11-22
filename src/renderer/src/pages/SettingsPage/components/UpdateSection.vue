@@ -32,7 +32,7 @@
     <div v-else-if="updateStage === 'skipped'" class="hgen-actions" style="margin-top:8px">
       <button class="hf-btn" @click="onSkipVersion(false)">恢复提示版本 {{ updateNewVersion }}</button>
     </div>
-    <!-- 运行环境（分包）：ffmpeg / hyperframes 不随安装包，用到时下载（whisper 随包，无需下载）。
+    <!-- 运行环境（分包）：ffmpeg / hyperframes / chrome 不随安装包，用到时下载（whisper 与 vidrender.exe 随包）。
          只在「下载中 / 缺包 / 失败」时占一行；就绪是常态，不显示（外壳顶部横幅同此口径） -->
     <div v-if="runtimeBusy || runtimeFailed || runtimeHasMissing" class="hf-status" :class="runtimeStatusClass">{{ runtimeStatusText }}</div>
     <div v-if="runtimeFailed || runtimeHasMissing" class="hgen-actions" style="margin-top:0">
@@ -122,7 +122,7 @@ const autoCheckDraft = ref(true);
 // 「更新日志」弹窗开关（内容与解析都在子组件里，这里只管显隐）
 const changelogVisible = ref(false);
 
-// ===== 运行环境（分包 ffmpeg / hyperframes；whisper 随安装包）=====
+// ===== 运行环境（分包 ffmpeg / hyperframes / chrome；whisper 与 vidrender.exe 随安装包）=====
 // 模块级单例，外壳横幅与本组件读同一份（见 composables/useRuntime.ts、docs/runtime-pack-split.md）
 const {
   runtime: runtimeState, busy: runtimeBusy, failed: runtimeFailed, hasMissing: runtimeHasMissing,

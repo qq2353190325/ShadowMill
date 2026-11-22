@@ -7,7 +7,7 @@
 //   ③ latest.yml                             版本清单（客户端只认它）
 //   ④ ffmpeg.7z / ffmpeg.json                运行环境包（分包，见 docs/runtime-pack-split.md）
 //   ⑤ hyperframes.7z / hyperframes.json
-//   ⑥ vidrender.7z / vidrender.json           Rust 渲染内核运行包
+//   ⑥ chrome.7z / chrome.json                  谷歌内核（headless-shell）运行包
 // OSS 侧要求：bucket 公共读（generic provider 匿名 GET）+ **支持 Range**（断点续传与差量下载都依赖它）。
 //
 // 用法：
@@ -72,7 +72,7 @@ function collect() {
   add(setup, '安装包（差量更新的基线）')
   add(setup + '.blockmap', '差量下载元数据（漏传 ⇒ 客户端每次全量下）')
   add(path.join(DIST, 'latest.yml'), '版本清单（客户端只认它）')
-  for (const name of ['ffmpeg', 'hyperframes', 'vidrender']) {
+  for (const name of ['ffmpeg', 'hyperframes', 'chrome']) {
     add(path.join(PACK_DIR, name + '.7z'), '运行环境包：' + name)
     add(path.join(PACK_DIR, name + '.json'), '运行环境包清单：' + name)
   }
@@ -99,7 +99,7 @@ async function verify() {
   }
   const base = publishUrl.replace(/\/+$/, '/')
   log('远端自检（匿名 GET + Range）：' + base)
-  const targets = ['latest.yml', 'ffmpeg.json', 'hyperframes.json', 'vidrender.json']
+  const targets = ['latest.yml', 'ffmpeg.json', 'hyperframes.json', 'chrome.json']
   let bad = 0
   for (const t of targets) {
     const r = await head(base + t)

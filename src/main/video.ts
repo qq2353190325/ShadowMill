@@ -310,9 +310,11 @@ function register(ctx?: RegisterCtx): void {
     // 这里只做纯校验（不下载、不阻塞）——缺包就把 needPacks 回给界面，由它问用户是否下载（可取消）；
     // 否则会以「未找到 hyperframes CLI」误导用户，或者让这次请求无声地卡在下载上。
     const backend = settings.getRenderBackend();
+    // 按后端声明依赖：chrome 是 hyperframes 的前置（必须先下载），
+    // vidrender.exe 随安装包内置、不算运行包；WebView 内核用系统 WebView2，不需要 chrome。
     const renderPacks: RuntimePackName[] = backend === 'hyperframes'
-      ? ['ffmpeg', 'hyperframes']
-      : ['ffmpeg', 'vidrender'];
+      ? ['ffmpeg', 'chrome', 'hyperframes']
+      : backend === 'vidrender-server' ? ['ffmpeg', 'chrome'] : ['ffmpeg'];
     const lack = runtime.missingPacks(renderPacks);
     if (lack.length) {
       return {

@@ -23,6 +23,7 @@
 
 | # | 日期 | 修改 | 影响范围 | 验证 |
 |---|---|---|---|---|
+| 1 | 2026-11-23 | `[工程]` **运行环境包改为 ffmpeg / hyperframes / chrome 三包，vidrender.exe 随安装包内置**。① `resources/hyperframes/chrome` 挪到 `resources/chrome`，`pack-runtime.mjs` 单独打成 `chrome.7z/.json`，hyperframes 包不再含谷歌内核；② `RuntimePackName` / `PACK_DEFS` / `hfEnv` 同步改为三包，`chromeShell` 优先取 chrome 包、回退旧 hyperframes 包；③ 按后端声明依赖：HY → ffmpeg+chrome+hyperframes（chrome 为前置）、Chrome 内核 → ffmpeg+chrome、WebView 内核 → ffmpeg，`withPrereqs()` 保证凡要 hyperframes 必带 chrome 且先下载；④ 缺包确认框改为逐包一行，hyperframes 行写「前置：必须先下载 Chrome 内核包」、chrome 行写「HyperFrames 与 Rust · Chrome 内核需要，WebView 内核不需要」；⑤ `release.mjs` 清单换成 chrome 包（仍九个文件）。 | `resources/chrome/`（目录移动）、`scripts/{pack-runtime,release}.mjs`、`src/shared/types.ts`、`src/main/{runtime,hfEnv,video,settings,rustKernels}.ts`、`src/renderer/src/{App.vue,composables/useEnvGate.ts,composables/useRuntime.ts,pages/HtmlGenPage/index.vue,pages/SettingsPage/components/UpdateSection.vue}`、`CHANGELOG.md` | `npm run typecheck` 退出码 0（node/web/agent 三工程）；`npm run release -- --checklist` 正确列出九个文件；目录移动后 292 文件 / 281,719,670 B 与移动前一致。**未验证**：`npm run runtime:pack` 产出三个包、`npm run ship`、上传与 `--verify-only`、三后端实机各转一次视频（HY / Chrome 内核要确认两个环境变量都指向新包里的壳）；hyperframes/chrome 的 hint 体积为估算值，待产出后按 json 的 bytes 校准。 |
 
 ---
 

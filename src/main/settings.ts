@@ -309,17 +309,19 @@ function register(ctx?: RegisterCtx): void {
   ipcMain.handle(IPC.Settings.PickRuntimePack, async () => {
     const win = ctx && ctx.getWindow ? ctx.getWindow() : null;
     const r = await dialog.showOpenDialog(win as never, {
-      title: '选择运行环境包（ffmpeg.7z / hyperframes.7z）',
+      title: '选择运行环境包（ffmpeg.7z / hyperframes.7z / chrome.7z）',
       filters: [{ name: '运行环境包', extensions: ['7z'] }],
       properties: ['openFile']
     });
     if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true, message: '已取消' };
     const src = r.filePaths[0];
     const base = path.basename(src).toLowerCase();
-    const name: 'ffmpeg' | 'hyperframes' | null =
-      base.indexOf('ffmpeg') >= 0 ? 'ffmpeg' : (base.indexOf('hyperframe') >= 0 ? 'hyperframes' : null);
+    const name: 'ffmpeg' | 'hyperframes' | 'chrome' | null =
+      base.indexOf('ffmpeg') >= 0 ? 'ffmpeg'
+        : base.indexOf('hyperframe') >= 0 ? 'hyperframes'
+          : base.indexOf('chrome') >= 0 ? 'chrome' : null;
     if (!name) {
-      return { ok: false, message: '这个文件名看不出是哪个包：请选择 ffmpeg.7z 或 hyperframes.7z（文件名里要含包名）' };
+      return { ok: false, message: '这个文件名看不出是哪个包：请选择 ffmpeg.7z / hyperframes.7z / chrome.7z（文件名里要含包名）' };
     }
     try {
       const dir = path.join(app.getPath('userData'), 'runtime', 'local-import');

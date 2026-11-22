@@ -409,12 +409,12 @@ async function onRenderVideo(skipEnvGuard = false): Promise<void> {
   const htmlPath = appState.project && appState.project.htmlPath;
   if (!htmlPath || !(appState.project && appState.project.htmlExists)) { toast('还没有 HTML，请先「生成 HTML」'); return; }
   const options = { quality: quality.value, fps: fps.value, canvas: canvas.value };
-  // 缺包守卫要跟主进程选的后端一致：两个 Rust 内核路径不需要 103MB 的 hyperframes 包。
+  // 缺包守卫要跟主进程选的后端一致：chrome 是 hyperframes 的前置；WebView 内核不需要 chrome。
   // 用户在框里点「继续」时回到这里（skipEnvGuard=true），不再重复弹框
   if (!skipEnvGuard) {
     const packs: RuntimePackName[] = renderBackend.value === 'hyperframes'
-      ? ['ffmpeg', 'hyperframes']
-      : ['ffmpeg', 'vidrender'];
+      ? ['ffmpeg', 'chrome', 'hyperframes']
+      : renderBackend.value === 'vidrender-server' ? ['ffmpeg', 'chrome'] : ['ffmpeg'];
     const g = await envGate.guard(packs, '转成视频', () => { void onRenderVideo(true); });
     if (!g.ok) return;
   }

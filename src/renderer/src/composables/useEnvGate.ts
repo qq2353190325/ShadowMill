@@ -1,6 +1,6 @@
 // composables/useEnvGate.ts —— 运行环境缺包时的统一「确认下载 → 进度 → 继续」弹窗
 //
-// 为什么要它：ffmpeg / hyperframes 已从安装包移出（见 docs/runtime-pack-split.md）。任何用到它们的功能
+// 为什么要它：ffmpeg / hyperframes / chrome 已从安装包移出（见 docs/runtime-pack-split.md）。任何用到它们的功能
 // 在动手前先校验，缺包时**不下载、不阻塞**，而是把 needPacks 交给这里弹一个确认框：
 //   [下载运行环境] [取消]
 //     ├─ 取消 ⇒ 不产生任何下载，发起该操作的那次动作也就此作废（什么都不发生）
@@ -39,15 +39,19 @@ let onContinue: (() => void) | null = null
 const LABEL: Record<RuntimePackName, string> = {
   ffmpeg: '音视频处理（ffmpeg）',
   hyperframes: '视频渲染引擎（HyperFrames）',
-  vidrender: 'Rust 渲染内核（vidrender.exe）'
+  chrome: '谷歌内核（headless-shell）'
 }
 
-// 体积按经验值提示（真实值以主进程清单为准，准备过程中会回推）。
-// 两个都是 2026-10-14 的实测值取整到 MiB：ffmpeg 42.6 → 43、hyperframes 103.1 → 103；合计 146.0，
-// 与单包时代的 runtime.7z（147.4 MiB）基本持平（实测合计 145.7 MiB）。**不要改成 105**：界面会报
-// 148.0 MB，比真实下载量多报 2 MiB，与 README / CHANGELOG 的「约 146 MB」自相矛盾。主进程 PACK_DEFS.hint 同此口径。
-// vidrender 约 3MB（只有显式指定时才下载，产品默认不提示）
-const HINT_MB: Record<RuntimePackName, number> = { ffmpeg: 43, hyperframes: 103, vidrender: 3 }
+// 体积提示（真实值以主进程清单为准，准备过程中会回推）：ffmpeg 43 MiB 为实测，
+// hyperframes 40 / chrome 63 为拆包后的估算，待 npm run runtime:pack 产出后校准。
+// 主进程 PACK_DEFS.hint 同此口径。vidrender.exe 随安装包内置，不再是运行包。
+const HINT_MB: Record<RuntimePackName, number> = { ffmpeg: 43, hyperframes: 40, chrome: 63 }
+
+// 确认框逐包一行的说明文案：hyperframes 的前置依赖、chrome 的适用范围。
+const PACK_NOTE: Partial<Record<RuntimePackName, string>> = {
+  hyperframes: '前置：必须先下载 Chrome 内核包',
+  chrome: 'HyperFrames 与 Rust · Chrome 内核需要，WebView 内核不需要'
+}
 
 export function initEnvGate(): void {
   // 进度来源：**不再自己订阅 runtime:progress**。
@@ -97,6 +101,12 @@ function labelText(list: RuntimePackName[]): string {
   return list.map((n) => LABEL[n] + '（约 ' + HINT_MB[n] + ' MB）').join('、')
 }
 const sizeText = computed(() => labelText(packs.value))
+// 确认框里每个包单独一行（含说明），供 App.vue 逐行渲染
+const packLines = computed(() => packs.value.map((n) => ({
+  name: n,
+  label: LABEL[n] + '（约 ' + HINT_MB[n] + ' MB）',
+  note: PACK_NOTE[n]
+})))
 
 export function useEnvGate() {
   const rt = useRuntime()
@@ -108,7 +118,7 @@ export function useEnvGate() {
    * @param cont       用户点「继续」时要重发的动作；不传则只装环境、不续做
    */
   async function guard(need: RuntimePackName[], actionName: string, cont?: () => void): Promise<EnvGateResult> {
-    const want = need && need.length ? need : ['ffmpeg', 'hyperframes']
+    const want = need && need.length ? need : ['ffmpeg', 'hyperframes', 'chrome']
     const lack = rt.missing.value.filter((n) => want.indexOf(n) >= 0)
     if (!lack.length) return { ok: true, pending: false }
     packs.value = lack
@@ -156,7 +166,7 @@ export function useEnvGate() {
 
   return {
     visible, packs, title, phase, percent, readyNow, message, detail,
-    sizeText, labelText,
+    sizeText, labelText, packLines,
     guard, confirmDownload, cancelDownload, continueAction, close
   }
 }

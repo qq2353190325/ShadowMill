@@ -8,7 +8,8 @@
 // 分包规则（2026-10 定的，详见 docs/runtime-pack-split.md）：
 //   ffmpeg       —— 被「转录转码」与「HyperFrames 渲染」两条线共用，独立成包，两边都不为对方的升级买单
 //   hyperframes  —— 只有渲染要（内含 chrome-headless-shell 268MB，所以这一包最大）
-//   vidrender    —— 统一 Rust CLI（vidrender.exe，约 2MB，内部 --backend webview|chrome 选内核），与 hyperframes 并存
+//   chrome       —— 谷歌内核（chrome-headless-shell），HY 与 Rust · Chrome 内核共用
+//   （vidrender.exe 随安装包内置，不再单独成包）
 //   whisper      —— **不进任何包**：只 12.5MB（gzip 后 4.4MB），但「文字转字幕」缺它就完全不能用，
 //                   因此改为随安装包（package.json 的 extraResources），换来「装完即离线可用」
 //   node         —— 已整条移除（findNode() 复用 Electron 内嵌 Node；历史与回退后路见 src/main/hfEnv.ts）
@@ -16,6 +17,7 @@
 // 产物（都在 build/ 下，不进 git）：
 //   build/runtime-pack/ffmpeg.7z      + ffmpeg.json
 //   build/runtime-pack/hyperframes.7z + hyperframes.json
+//   build/runtime-pack/chrome.7z      + chrome.json
 //   build/tools/7za.exe               解包器（随包发布，主进程用它解 7z）
 //   清单字段：name / id(内容 sha512 前 12 位) / file / sha512 / bytes / files / unpackedBytes / sourceKey / appVersion / createdAt
 //
@@ -41,9 +43,9 @@ const TOOLS_DIR = path.join(ROOT, 'build', 'tools')
 const PACKS = [
   { name: 'ffmpeg', roots: ['ffmpeg'] },
   { name: 'hyperframes', roots: ['hyperframes'] },
-  // 两个 Rust 大内核 CLI 单独成包（约 3MB）：换内核时不必重下 103MB 的谷歌内核包。
-  // 默认渲染仍走 hyperframes，两包并存。
-  { name: 'vidrender', roots: ['bin'] }
+  // 谷歌内核（chrome-headless-shell）单独成包：HY 与 Rust · Chrome 内核共用，
+  // 不必为它下载整个 hyperframes 包。vidrender.exe 随安装包内置，不再单独成包。
+  { name: 'chrome', roots: ['chrome'] }
 ]
 
 // 不进任何包的顶层条目（它们要么随安装包、要么已删除）：

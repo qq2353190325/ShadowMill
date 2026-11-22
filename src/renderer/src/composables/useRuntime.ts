@@ -1,6 +1,6 @@
-// composables/useRuntime.ts —— 运行环境（分包 ffmpeg / hyperframes）状态 → 外壳横幅 + 设置页
-// 背景：ffmpeg(180MB) 与 hyperframes(440MB) 已从安装包移出、各自成一个包，**用到相关功能时按需下载**
-// （whisper 随安装包，不需要下载）。所以这里要能表达三件事：正在下 / 缺哪些包 / 失败原因。
+// composables/useRuntime.ts —— 运行环境（分包 ffmpeg / hyperframes / chrome）状态 → 外壳横幅 + 设置页
+// 背景：ffmpeg / hyperframes / 谷歌内核 chrome 已从安装包移出、各自成一个包，**用到相关功能时按需下载**
+// （whisper 与 vidrender.exe 随安装包，不需要下载）。所以这里要能表达三件事：正在下 / 缺哪些包 / 失败原因。
 // 状态由主进程 runtime:progress 推送 + 首次用 runtime:status 补齐（见 src/main/runtime.ts、
 // 方案见 docs/runtime-pack-split.md）。
 import { computed, ref, toRaw } from 'vue'
@@ -13,7 +13,7 @@ const runtime = ref<RuntimeProgressPayload>({
   percent: 0,
   packs: [],
   missing: [],
-  status: { ffmpeg: 'unknown', hyperframes: 'unknown', vidrender: 'unknown' },
+  status: { ffmpeg: 'unknown', hyperframes: 'unknown', chrome: 'unknown' },
   message: '',
   source: '',
   bytes: 0,
@@ -36,7 +36,7 @@ export function initRuntime(): void {
 const PACK_LABEL: Record<RuntimePackName, string> = {
   ffmpeg: '音视频处理（ffmpeg）',
   hyperframes: '视频渲染引擎（HyperFrames）',
-  vidrender: 'Rust 渲染内核（vidrender.exe）'
+  chrome: '谷歌内核（headless-shell）'
 }
 
 export function useRuntime() {
