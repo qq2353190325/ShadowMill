@@ -1,6 +1,5 @@
 <template>
   <div>
-    <StepBar :page="'text-tts'" />
     <div class="hf-tabs">
       <button type="button" class="hf-tab" :class="{ active: activeTtsTab === 'synth' }" data-tab="synth" @click="activeTtsTab = 'synth'">文字生音频（TTS 合成）</button>
       <button type="button" class="hf-tab" :class="{ active: activeTtsTab === 'align' }" data-tab="align" @click="activeTtsTab = 'align'">字幕配音（逐句对齐）</button>
@@ -20,7 +19,6 @@
 // 因此这里不再需要 watch 信号 → 落 Tab 的那套机制。
 import { onMounted } from 'vue'
 import { activeTtsTab, ttsResultShown } from './helpers'
-import StepBar from '@renderer/components/StepBar.vue'
 import SynthSection from './SynthSection.vue'
 import AlignSection from './AlignSection.vue'
 import VoiceSection from './VoiceSection.vue'

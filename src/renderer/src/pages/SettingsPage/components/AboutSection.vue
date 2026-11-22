@@ -1,5 +1,7 @@
 <template>
-  <div class="card hgen-panel" style="max-width:720px">
+  <!-- pages/SettingsPage/components/AboutSection.vue —— 设置弹窗第 6 类「关于」
+       内容原样搬自已下线的 pages/AboutPage/index.vue（简介 / 问题反馈 / 项目数据三段），逻辑为零。 -->
+  <div class="card hgen-panel">
     <div class="panel-title"><span class="dot"></span>关于</div>
     <div class="hgen-tip">一站式音视频创作流水线：以「项目」为单位贯通 内容脚本 → 配音 → 字幕 → HTML → 视频 五个创作节点，在本地完成从脚本到成片的完整流程。</div>
     <div class="hgen-row">
@@ -14,5 +16,5 @@
 </template>
 
 <script setup lang="ts">
-// pages/AboutPage/index.vue —— 关于页（原 JS 版 home 模块 template.js 的 about 模板，无逻辑）
+// 无逻辑：原 AboutPage 的内容整体并入设置弹窗，侧栏不再有独立「关于」入口。
 </script>

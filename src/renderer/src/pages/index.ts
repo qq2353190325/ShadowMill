@@ -6,7 +6,6 @@ import { activeMenu, refreshProject, type PageKey } from '@renderer/composables/
 import { toast } from '@renderer/composables/useToast'
 import { closeSettings, openSettings } from '@renderer/composables/useSettingsDialog'
 import HomePage from './HomePage/index.vue'
-import AboutPage from './AboutPage/index.vue'
 import ContentPage from './ContentPage/index.vue'
 import TextTtsPage from './TextTtsPage/index.vue'
 import SubtitlePage from './SubtitlePage/index.vue'
@@ -22,7 +21,6 @@ export type PageComponentKey = Exclude<PageKey, 'settings'>;
 
 export const pages: Record<PageComponentKey, Component> = {
   home: HomePage,
-  about: AboutPage,
   content: ContentPage,
   'text-tts': TextTtsPage,
   subtitle: SubtitlePage,

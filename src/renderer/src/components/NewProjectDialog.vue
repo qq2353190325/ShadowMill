@@ -1,5 +1,5 @@
 <template>
-  <!-- components/NewProjectDialog.vue —— 「新建项目」弹窗（StepBar 与其它入口共用） -->
+  <!-- components/NewProjectDialog.vue —— 「新建项目」弹窗（侧栏「工作项目」区用） -->
   <div class="hf-modal-mask" v-show="visible" @click.self="close">
     <div class="hf-modal" style="width:min(460px,92vw)">
       <div class="hf-modal-head">

@@ -1,6 +1,5 @@
 <template>
   <div>
-    <StepBar :page="'content'" />
     <!-- 两个 Tab 常驻可见：默认「场景编辑」（= 原来的页面），「AI 创作」是对话式生成/修改 -->
     <div class="hf-tabs">
       <button class="hf-tab" :class="{ active: tab === 'edit' }" @click="tab = 'edit'">场景编辑</button>
@@ -17,10 +16,9 @@
 </template>
 
 <script setup lang="ts">
-// pages/ContentPage/index.vue —— 内容脚本页外壳：StepBar + 两个 Tab（场景编辑 / AI 创作）。
+// pages/ContentPage/index.vue —— 内容脚本页外壳：两个 Tab（场景编辑 / AI 创作）。
 // 场景状态与保存逻辑在 ./helpers（模块级单例，两个 Tab 共享同一份 scenes）；本文件只是外壳。
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import StepBar from '@renderer/components/StepBar.vue'
 import { loadScenes, flushPending } from './helpers'
 import SceneEditor from './SceneEditor.vue'
 import AiChatPanel from './AiChatPanel.vue'
