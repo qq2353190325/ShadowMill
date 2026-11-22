@@ -7,10 +7,11 @@
 //   ③ latest.yml                             版本清单（客户端只认它）
 //   ④ ffmpeg.7z / ffmpeg.json                运行环境包（分包，见 docs/runtime-pack-split.md）
 //   ⑤ hyperframes.7z / hyperframes.json
+//   ⑥ vidrender.7z / vidrender.json           Rust 渲染内核运行包
 // OSS 侧要求：bucket 公共读（generic provider 匿名 GET）+ **支持 Range**（断点续传与差量下载都依赖它）。
 //
 // 用法：
-//   npm run ship                     ★ 一条命令：出安装包（dist 全流程）+ 把七个文件集中到 release-output/
+//   npm run ship                     ★ 一条命令：出安装包（dist 全流程）+ 把九个文件集中到 release-output/
 //   node scripts/release.mjs --stage [--dir <目录>]      只集中已产出的文件（默认 release-output/），附 UPLOAD.txt
 //   node scripts/release.mjs --dry-run                   只检查本地文件齐不齐、要传哪些（不上传）
 //   node scripts/release.mjs --verify-only               只做远端自检（匿名 GET + Range 206）
@@ -18,7 +19,7 @@
 //   node scripts/release.mjs --checklist                 打印手工上传清单（不想用脚本时照它做）
 //
 // 出包方式（任选，都不需要额外依赖）：
-//   --stage [--dir <dir>]   把七个文件集中到一个目录 + 写 UPLOAD.txt（手动上传的主路径；--copy 是它的别名）
+//   --stage [--dir <dir>]   把九个文件集中到一个目录 + 写 UPLOAD.txt（手动上传的主路径；--copy 是它的别名）
 //   --oss --bucket <name>   阿里云 OSS：调 ossutil（需已安装并配置好 AK，或用上面的环境变量）
 //   --rclone <remote:path>  任何 rclone 支持的远端（S3 / WebDAV / 网盘…）
 //   --copy <dir>            同 --stage（保留旧名字，语义一致）
@@ -71,7 +72,7 @@ function collect() {
   add(setup, '安装包（差量更新的基线）')
   add(setup + '.blockmap', '差量下载元数据（漏传 ⇒ 客户端每次全量下）')
   add(path.join(DIST, 'latest.yml'), '版本清单（客户端只认它）')
-  for (const name of ['ffmpeg', 'hyperframes']) {
+  for (const name of ['ffmpeg', 'hyperframes', 'vidrender']) {
     add(path.join(PACK_DIR, name + '.7z'), '运行环境包：' + name)
     add(path.join(PACK_DIR, name + '.json'), '运行环境包清单：' + name)
   }
@@ -98,7 +99,7 @@ async function verify() {
   }
   const base = publishUrl.replace(/\/+$/, '/')
   log('远端自检（匿名 GET + Range）：' + base)
-  const targets = ['latest.yml', 'ffmpeg.json', 'hyperframes.json']
+  const targets = ['latest.yml', 'ffmpeg.json', 'hyperframes.json', 'vidrender.json']
   let bad = 0
   for (const t of targets) {
     const r = await head(base + t)
@@ -112,17 +113,17 @@ async function verify() {
 }
 
 // ===== 4. 上传后端 =====
-// 七个文件按上传顺序排列：**先传大的、最后传三个小的开关文件**（latest.yml 与两份 pack.json）。
-// 原因是客户端靠那三个小文件判断「要不要更新 / 要不要下运行环境包」——先把大文件摆好，
+// 九个文件按上传顺序排列：**先传大的、最后传四个小的开关文件**（latest.yml 与三份 pack.json）。
+// 原因是客户端靠那四个小文件判断「要不要更新 / 要不要下运行环境包」——先把大文件摆好，
 // 最后再翻开开关，就不会出现「清单说更新、文件还没传完」的窗口（对象存储没有事务）。
-// 顺序：0 安装包本体 → 1 差量元数据 → 2 运行环境包正文 → 9 三个清单（list 里 required=true 的按此序）
+// 顺序：0 安装包本体 → 1 差量元数据 → 2 运行环境包正文 → 9 四个清单（list 里 required=true 的按此序）
 const STAGE_MANIFEST = 'UPLOAD.txt'
 
 function uploadOrder(f) {
   if (/Setup .*\.exe$/.test(f.name)) return 0
   if (f.name.endsWith('.blockmap')) return 1
   if (f.name.endsWith('.7z')) return 2
-  return 9 // latest.yml 与两份 *.json：最后传
+  return 9 // latest.yml 与三份 *.json：最后传
 }
 
 function orderHint(f) {
@@ -130,7 +131,7 @@ function orderHint(f) {
   return o === 0 ? '① 安装包本体' : o === 1 ? '② 差量元数据' : o === 2 ? '③ 运行环境包正文' : '④ 清单（最后传）'
 }
 
-/** 把七个文件集中到一个目录，并写一份 UPLOAD.txt（含 OSS 路径 + 上传顺序 + 校验值） */
+/** 把九个文件集中到一个目录，并写一份 UPLOAD.txt（含 OSS 路径 + 上传顺序 + 校验值） */
 function stageTo(dir) {
   fs.mkdirSync(dir, { recursive: true })
   const sorted = files.slice().sort((a, b) => (uploadOrder(a) - uploadOrder(b)) || a.name.localeCompare(b.name))
@@ -139,7 +140,7 @@ function stageTo(dir) {
   lines.push('生成时间：' + new Date().toISOString())
   lines.push('目标目录：' + (publishUrl || '(package.json 里未配置 build.publish.url)'))
   lines.push('')
-  lines.push('用法：把本目录下的七个文件**按下面顺序**原样传到上面那个目录（名字一个字都不要改）。')
+  lines.push('用法：把本目录下的九个文件**按下面顺序**原样传到上面那个目录（名字一个字都不要改）。')
   lines.push('      大文件先传、三个清单最后传：客户端靠清单判断「要不要更新 / 要不要下运行环境包」，')
   lines.push('      顺序反了会出现「清单说更新、文件还没传完」的窗口。')
   lines.push('      传完可用 `npm run release -- --verify-only` 匿名自检。')
@@ -164,7 +165,7 @@ function stageTo(dir) {
   }
   lines.push('注：.exe 与同名 .blockmap 必须成对存在；.json 与同名 .7z 必须成对存在。')
   fs.writeFileSync(path.join(dir, STAGE_MANIFEST), lines.join('\n'), 'utf8')
-  log('七个文件已集中到：' + dir + '（附 ' + STAGE_MANIFEST + '）')
+  log('九个文件已集中到：' + dir + '（附 ' + STAGE_MANIFEST + '）')
   log('按里面的顺序传到 ' + (publishUrl || '(更新源)') + ' 即可；传完跑 npm run release -- --verify-only 自检')
 }
 
@@ -224,7 +225,7 @@ async function main() {
 
   if (VERIFY_ONLY) { await verify(); return }
 
-  // --stage [--dir <目录>]：把七个文件集中到一个目录（默认 release-output/）+ 写 UPLOAD.txt。
+  // --stage [--dir <目录>]：把九个文件集中到一个目录（默认 release-output/）+ 写 UPLOAD.txt。
   // 这是「手动上传」的主路径，也等价于 --copy <目录>。
   if (has('--stage')) {
     stageTo(path.resolve(opt('--dir') || path.join(ROOT, 'release-output')))
